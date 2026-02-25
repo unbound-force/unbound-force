@@ -247,6 +247,8 @@ This repo is primarily specifications and governance documents. Follow these con
 ## Active Technologies
 - Markdown (constitution document) + OpenCode agent configuration (Markdown agent files) + OpenCode (agent runtime), speckit (pipeline integration) (001-org-constitution)
 - Filesystem only -- constitution at `.specify/memory/constitution.md`, agent files in `.opencode/agents/` and `.opencode/command/` (001-org-constitution)
+- Markdown (contract document) + JSON Schema draft 2020-12 + Bash (validation script) + OpenCode (agent runtime), speckit (pipeline integration) (002-hero-interface-contract)
+- Filesystem only — contract document in `specs/002-hero-interface-contract/`, hero manifest schema in `schemas/hero-manifest/`, validation script in `scripts/` (002-hero-interface-contract)
 
 - Markdown (specifications, governance)
 - Bash (speckit scripts)

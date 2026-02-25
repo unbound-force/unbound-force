@@ -105,25 +105,25 @@ Each hero repository publishes metadata that enables discovery and composition. 
 
 - **FR-001**: The contract MUST define a minimum required directory structure for every hero repository: `.specify/memory/constitution.md`, `.specify/templates/`, `.specify/scripts/`, `.opencode/`, `specs/`, `AGENTS.md`, `LICENSE`, `README.md`.
 - **FR-002**: The contract MUST define a hero manifest file (`.unbound-force/hero.json`) that describes the hero's role, capabilities, and integration points.
-- **FR-003**: The contract MUST define the artifact envelope format: a JSON object with `hero`, `version`, `timestamp`, `artifact_type`, `schema_version`, and `payload` fields.
-- **FR-004**: The contract MUST define a registry of standard artifact types with JSON schemas: `quality-report`, `review-verdict`, `backlog-item`, `metrics-snapshot`, `coaching-record`, `test-report`.
+- **FR-003**: The contract MUST define the artifact envelope format conceptually: a JSON object with `hero`, `version`, `timestamp`, `artifact_type`, `schema_version`, `context`, and `payload` fields. The formal JSON Schema for the envelope is deferred to Spec 009 (Shared Data Model).
+- **FR-004**: The contract MUST define a registry of standard artifact types: `quality-report`, `review-verdict`, `backlog-item`, `acceptance-decision`, `metrics-snapshot`, `coaching-record`, `workflow-record`. JSON Schemas for each type are deferred to Spec 009.
 - **FR-005**: The contract MUST define OpenCode agent naming conventions: `{hero-name}-{agent-function}` (e.g., `gaze-reporter`, `divisor-guard`).
 - **FR-006**: The contract MUST define OpenCode command naming conventions: `/{hero-name}` for the primary command, `/{hero-name}-{subfunction}` for secondary commands.
-- **FR-007**: The contract MUST define a speckit distribution mechanism that eliminates cross-repo copy-paste drift.
-- **FR-008**: The contract MUST define a validation process (script or checklist) that verifies a repository conforms to the Hero Interface Contract.
+- **FR-007**: The contract MUST require that hero repositories install speckit from the canonical source defined by Spec 003 (Speckit Framework). The distribution mechanism itself is defined by Spec 003.
+- **FR-008**: The contract MUST define a validation process — a bash script that verifies a repository conforms to the Hero Interface Contract by checking directory structure, required files, constitution presence, and manifest validity.
 - **FR-009**: The contract MUST require that hero constitutions include a `parent_constitution` field referencing the org constitution version they align with.
 - **FR-010**: The contract MUST require that heroes producing machine-parseable output support at minimum JSON format, with human-readable format as a SHOULD.
 - **FR-011**: The contract MUST define a hero lifecycle: bootstrap -> constitution -> specify -> implement -> deploy -> maintain.
 - **FR-012**: The contract SHOULD define an `init` command convention: `{hero-name} init` scaffolds the hero's OpenCode integration files into the target project.
 - **FR-013**: The contract MUST define how heroes handle version incompatibilities when consuming artifacts from other heroes (graceful degradation, not hard failure).
-- **FR-014**: The contract MUST define the MCP server interface requirements for heroes that expose capabilities via MCP (optional, but standardized when used).
+- **FR-014**: The contract SHOULD define minimal MCP server naming conventions for heroes that expose capabilities via MCP: `{hero-name}-mcp` for the server name, standardized tool naming with hero prefix. Full MCP interface requirements are deferred to hero-specific architecture specs.
 - **FR-015**: The contract SHOULD define a hero README template that includes: hero name, role, installation, quick start, integration with other heroes, and link to the org README.
 
 ### Key Entities
 
 - **Hero Manifest**: Machine-readable description of a hero's capabilities and integration points. Attributes: name, role, version, description, artifacts_produced[], artifacts_consumed[], opencode_agents[], opencode_commands[], dependencies[], parent_constitution_version.
-- **Artifact Envelope**: Standard wrapper for all inter-hero artifacts. Attributes: hero (string), version (semver string), timestamp (ISO 8601), artifact_type (registered type), schema_version (semver string), payload (type-specific JSON object).
-- **Artifact Type Registration**: Entry in the shared artifact type registry. Attributes: type_id (string), description, json_schema (JSON Schema draft 2020-12), producing_heroes[], consuming_heroes[].
+- **Artifact Envelope**: Standard wrapper for all inter-hero artifacts. Attributes: hero (string), version (semver string), timestamp (ISO 8601), artifact_type (registered type), schema_version (semver string), context (object with branch, backlog_item_id, correlation_id), payload (type-specific JSON object). Conceptual definition in this spec; JSON Schema in Spec 009.
+- **Artifact Type Registration**: Entry in the shared artifact type registry. Attributes: type_id (string), description, producing_heroes[], consuming_heroes[]. JSON Schemas for each type defined in Spec 009.
 - **Validation Result**: Output of a contract compliance check. Attributes: hero_name, contract_version, required_checks[], optional_checks[], findings[], overall_status (pass/fail).
 
 ## Success Criteria *(mandatory)*
@@ -133,7 +133,7 @@ Each hero repository publishes metadata that enables discovery and composition. 
 - **SC-001**: The contract document defines the complete minimum required directory structure and a validation script can check any repository against it.
 - **SC-002**: The existing Gaze repository passes the contract validation with zero missing required elements (or a clear remediation list is produced).
 - **SC-003**: The existing Website repository passes the contract validation with zero missing required elements (or a clear remediation list is produced).
-- **SC-004**: A sample artifact produced by Gaze (quality report JSON) validates against the artifact envelope schema defined by the contract.
+- **SC-004**: A sample artifact produced by Gaze (quality report JSON) validates against the artifact envelope format defined by the contract.
 - **SC-005**: Agent and command naming conventions are documented and the existing Gaze agents comply (or deviations are identified).
 - **SC-006**: The hero manifest schema is defined as a JSON Schema and a sample manifest for Gaze validates against it.
 - **SC-007**: The speckit distribution mechanism is defined and eliminates the known drift between Gaze and unbound-force `speckit.specify.md` files.
@@ -146,6 +146,7 @@ Each hero repository publishes metadata that enables discovery and composition. 
 
 ### Downstream Dependents
 
+- **Spec 003** (Speckit Framework): Implements the speckit distribution mechanism referenced by FR-007.
 - **Specs 004-007** (Hero Architectures): Each hero architecture must conform to the contract.
 - **Spec 008** (Swarm Orchestration): Uses the artifact protocol and discovery mechanism.
 - **Spec 009** (Shared Data Model): Defines the JSON schemas referenced by the artifact type registry.
