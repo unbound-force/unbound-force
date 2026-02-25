@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-org-constitution`
 **Created**: 2026-02-24
-**Status**: Draft
+**Status**: Complete
 **Input**: User description: "Establish the overarching constitution for the Unbound Force organization that governs all hero repositories. Define the three core principles (Autonomous Collaboration, Composability First, Observable Quality) and the governance model that individual hero constitutions must align with."
 
 ## Clarifications

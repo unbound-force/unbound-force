@@ -99,11 +99,11 @@ This feature produces governance documents and OpenCode agent configurations, no
 
 ### Implementation for User Story 3
 
-- [ ] T027 [US3] Validate design question 1: "Should Muti-Mind require Gaze to be installed?" -- verify Principle II (Composability First) provides a clear MUST rule answering this (heroes MUST be usable standalone) in `.specify/memory/constitution.md`
-- [ ] T028 [US3] Validate design question 2: "What output format should a new hero use?" -- verify Principle III (Observable Quality) provides MUST rules about machine-parseable output (JSON minimum) and provenance metadata in `.specify/memory/constitution.md`
-- [ ] T029 [US3] Validate design question 3: "How should two heroes communicate?" -- verify Principle I (Autonomous Collaboration) provides MUST rules about artifact-based communication (no runtime coupling) in `.specify/memory/constitution.md`
-- [ ] T030 [US3] Update `AGENTS.md` "Constitution Check" section to reference the `/constitution-check` command as the recommended alignment verification tool
-- [ ] T031 [US3] Verify that the `AGENTS.md` "Constitution (Highest Authority)" section accurately summarizes all three principles and references the constitution file path
+- [x] T027 [US3] Validate design question 1: "Should Muti-Mind require Gaze to be installed?" -- verify Principle II (Composability First) provides a clear MUST rule answering this (heroes MUST be usable standalone) in `.specify/memory/constitution.md`
+- [x] T028 [US3] Validate design question 2: "What output format should a new hero use?" -- verify Principle III (Observable Quality) provides MUST rules about machine-parseable output (JSON minimum) and provenance metadata in `.specify/memory/constitution.md`
+- [x] T029 [US3] Validate design question 3: "How should two heroes communicate?" -- verify Principle I (Autonomous Collaboration) provides MUST rules about artifact-based communication (no runtime coupling) in `.specify/memory/constitution.md`
+- [x] T030 [US3] Update `AGENTS.md` "Constitution Check" section to reference the `/constitution-check` command as the recommended alignment verification tool
+- [x] T031 [US3] Verify that the `AGENTS.md` "Constitution (Highest Authority)" section accurately summarizes all three principles and references the constitution file path
 
 **Checkpoint**: All three user stories complete. SC-005 satisfied. The constitution is citable, enforceable, and agent-validated.
 
@@ -113,10 +113,10 @@ This feature produces governance documents and OpenCode agent configurations, no
 
 **Purpose**: Final documentation alignment and validation
 
-- [ ] T032 Verify `AGENTS.md` is consistent with the ratified constitution -- all principle names, rule counts, and governance details match
-- [ ] T033 Verify `specs/001-org-constitution/spec.md` status can be updated from Draft to Complete (all FRs and SCs satisfied)
-- [ ] T034 Run quickstart.md validation: follow the quickstart guide steps and verify each step produces the expected outcome
-- [ ] T035 Verify no orphaned or contradictory documentation exists across `AGENTS.md`, `README.md`, `unbound-force.md`, and `.specify/memory/constitution.md`
+- [x] T032 Verify `AGENTS.md` is consistent with the ratified constitution -- all principle names, rule counts, and governance details match
+- [x] T033 Verify `specs/001-org-constitution/spec.md` status can be updated from Draft to Complete (all FRs and SCs satisfied)
+- [x] T034 Run quickstart.md validation: follow the quickstart guide steps and verify each step produces the expected outcome
+- [x] T035 Verify no orphaned or contradictory documentation exists across `AGENTS.md`, `README.md`, `unbound-force.md`, and `.specify/memory/constitution.md`
 
 ---
 
