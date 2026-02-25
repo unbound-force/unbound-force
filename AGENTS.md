@@ -240,6 +240,8 @@ This repo is primarily specifications and governance documents. Follow these con
 - **Semantic versioning**: For releases and constitution amendments.
 
 ## Active Technologies
+- Markdown (constitution document) + OpenCode agent configuration (Markdown agent files) + OpenCode (agent runtime), speckit (pipeline integration) (001-org-constitution)
+- Filesystem only -- constitution at `.specify/memory/constitution.md`, agent files in `.opencode/agents/` and `.opencode/command/` (001-org-constitution)
 
 - Markdown (specifications, governance)
 - Bash (speckit scripts)
