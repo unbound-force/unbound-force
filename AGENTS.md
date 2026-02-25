@@ -65,7 +65,9 @@ unbound-force/
 │       ├── create-new-feature.sh
 │       └── update-agent-context.sh
 ├── .opencode/
-│   └── command/                     # Speckit pipeline commands (9 files)
+│   ├── agents/
+│   │   └── constitution-check.md    # Alignment checking agent (subagent)
+│   └── command/                     # Speckit pipeline commands + utilities
 │       ├── speckit.constitution.md
 │       ├── speckit.specify.md
 │       ├── speckit.clarify.md
@@ -74,7 +76,8 @@ unbound-force/
 │       ├── speckit.analyze.md
 │       ├── speckit.checklist.md
 │       ├── speckit.implement.md
-│       └── speckit.taskstoissues.md
+│       ├── speckit.taskstoissues.md
+│       └── constitution-check.md    # /constitution-check command
 ├── specs/                           # Architectural specifications
 │   ├── 001-org-constitution/        # Org constitution ratification
 │   ├── 002-hero-interface-contract/ # Standard hero repo structure & protocols
@@ -220,6 +223,8 @@ All spec artifacts (`spec.md`, `plan.md`, `tasks.md`, and any other files under 
 
 A mandatory gate at the planning phase. The constitution's three core principles -- Autonomous Collaboration, Composability First, and Observable Quality -- must each receive a PASS before proceeding. Constitution violations are automatically CRITICAL severity and non-negotiable.
 
+For hero constitution alignment validation, use the `/constitution-check` command. This invokes a dedicated OpenCode agent that compares a hero constitution against the org constitution and produces a structured alignment report with per-principle findings and an overall ALIGNED/NON-ALIGNED verdict. See `.opencode/agents/constitution-check.md` and `.opencode/command/constitution-check.md` for implementation details.
+
 ## Writing Style for Specs
 
 This repo is primarily specifications and governance documents. Follow these conventions:
@@ -250,5 +255,6 @@ This repo is primarily specifications and governance documents. Follow these con
 
 ## Recent Changes
 
+- 001-org-constitution: Completed spec implementation -- constitution ratified v1.0.0, alignment agent and `/constitution-check` command created, all FRs and SCs validated, spec status set to Complete
 - 001-org-constitution: Ratified org constitution v1.0.0 with three principles (Autonomous Collaboration, Composability First, Observable Quality)
 - Specs 001-009: Added architectural design specs for all heroes (Muti-Mind, The Divisor, Cobalt-Crush, Mx F), infrastructure (org constitution, hero interface contract, speckit framework), and cross-cutting concerns (swarm orchestration, shared data model)
