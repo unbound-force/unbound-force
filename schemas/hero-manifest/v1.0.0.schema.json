@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/unbound-force/unbound-force/schemas/hero-manifest/v1.0.0.schema.json",
+  "title": "Hero Manifest",
+  "description": "Machine-readable description of an Unbound Force hero's identity, capabilities, and integration points. Located at .unbound-force/hero.json in every hero repository.",
+  "type": "object",
+  "required": [
+    "name",
+    "display_name",
+    "role",
+    "version",
+    "description",
+    "repository",
+    "parent_constitution_version",
+    "artifacts_produced",
+    "artifacts_consumed",
+    "opencode_agents",
+    "opencode_commands",
+    "dependencies"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Hero name in lowercase kebab-case (e.g., 'gaze', 'the-divisor')",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "display_name": {
+      "type": "string",
+      "description": "Human-readable name (e.g., 'Gaze', 'The Divisor')",
+      "minLength": 1
+    },
+    "role": {
+      "type": "string",
+      "description": "Hero role in the swarm",
+      "enum": ["tester", "developer", "reviewer", "product-owner", "manager"]
+    },
+    "version": {
+      "type": "string",
+      "description": "Current hero version (semantic versioning)",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$"
+    },
+    "description": {
+      "type": "string",
+      "description": "One-line description of the hero's purpose",
+      "minLength": 1
+    },
+    "repository": {
+      "type": "string",
+      "description": "GitHub repository URL",
+      "format": "uri"
+    },
+    "parent_constitution_version": {
+      "type": "string",
+      "description": "Org constitution version this hero aligns with",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "artifacts_produced": {
+      "type": "array",
+      "description": "Artifact types this hero produces (may be empty)",
+      "items": { "$ref": "#/$defs/artifact_reference" }
+    },
+    "artifacts_consumed": {
+      "type": "array",
+      "description": "Artifact types this hero consumes (may be empty)",
+      "items": { "$ref": "#/$defs/artifact_reference" }
+    },
+    "opencode_agents": {
+      "type": "array",
+      "description": "OpenCode agents this hero provides (may be empty)",
+      "items": { "$ref": "#/$defs/agent_reference" }
+    },
+    "opencode_commands": {
+      "type": "array",
+      "description": "OpenCode commands this hero provides (may be empty)",
+      "items": { "$ref": "#/$defs/command_reference" }
+    },
+    "dependencies": {
+      "type": "array",
+      "description": "Other heroes this hero can integrate with (all optional per Principle II)",
+      "items": { "$ref": "#/$defs/dependency" }
+    },
+    "mcp_server": {
+      "$ref": "#/$defs/mcp_reference",
+      "description": "MCP server metadata if the hero exposes MCP capabilities"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "artifact_reference": {
+      "type": "object",
+      "description": "Reference to an artifact type produced or consumed",
+      "required": ["type_id", "schema_version"],
+      "properties": {
+        "type_id": {
+          "type": "string",
+          "description": "Artifact type identifier (e.g., 'quality-report')"
+        },
+        "schema_version": {
+          "type": "string",
+          "description": "Schema version supported",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "description": {
+          "type": "string",
+          "description": "Brief description of what this artifact contains"
+        }
+      },
+      "additionalProperties": false
+    },
+    "agent_reference": {
+      "type": "object",
+      "description": "Reference to an OpenCode agent provided by this hero",
+      "required": ["name", "description", "mode", "tools"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Agent file name without .md extension"
+        },
+        "description": {
+          "type": "string",
+          "description": "What the agent does"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Agent execution mode",
+          "enum": ["agent", "subagent"]
+        },
+        "tools": {
+          "type": "array",
+          "description": "Tool permissions",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "command_reference": {
+      "type": "object",
+      "description": "Reference to an OpenCode command provided by this hero",
+      "required": ["name", "description"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Command trigger (e.g., '/gaze')"
+        },
+        "description": {
+          "type": "string",
+          "description": "What the command does"
+        },
+        "agent": {
+          "type": "string",
+          "description": "Agent the command delegates to"
+        }
+      },
+      "additionalProperties": false
+    },
+    "dependency": {
+      "type": "object",
+      "description": "Declaration that this hero can integrate with another hero (all optional per Principle II)",
+      "required": ["hero_name", "integration_type"],
+      "properties": {
+        "hero_name": {
+          "type": "string",
+          "description": "Name of the hero this integrates with"
+        },
+        "integration_type": {
+          "type": "string",
+          "description": "Type of integration",
+          "enum": ["artifact_consumer", "artifact_producer", "peer"]
+        },
+        "artifact_types": {
+          "type": "array",
+          "description": "Which artifact types are exchanged",
+          "items": { "type": "string" }
+        },
+        "description": {
+          "type": "string",
+          "description": "How the integration works"
+        }
+      },
+      "additionalProperties": false
+    },
+    "mcp_reference": {
+      "type": "object",
+      "description": "MCP server metadata",
+      "required": ["server_name", "version", "tools"],
+      "properties": {
+        "server_name": {
+          "type": "string",
+          "description": "MCP server name (convention: {hero-name}-mcp)"
+        },
+        "version": {
+          "type": "string",
+          "description": "MCP server version",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "tools": {
+          "type": "array",
+          "description": "List of MCP tool names exposed",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

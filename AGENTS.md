@@ -88,6 +88,15 @@ unbound-force/
 │   ├── 007-mx-f-architecture/       # Manager hero design
 │   ├── 008-swarm-orchestration/     # End-to-end workflow & Swarm plugin
 │   └── 009-shared-data-model/       # JSON schemas for inter-hero artifacts
+├── schemas/                         # JSON Schemas for validation
+│   ├── hero-manifest/
+│   │   ├── v1.0.0.schema.json       # Hero manifest JSON Schema
+│   │   └── samples/
+│   │       └── gaze-hero.json       # Sample Gaze hero manifest
+│   └── samples/
+│       └── sample-quality-report-envelope.json  # Sample artifact envelope
+├── scripts/
+│   └── validate-hero-contract.sh    # Contract compliance validation
 ├── unbound-force.md                 # Hero descriptions and team vision
 ├── AGENTS.md                        # This file
 ├── README.md
@@ -252,11 +261,12 @@ This repo is primarily specifications and governance documents. Follow these con
 
 - Markdown (specifications, governance)
 - Bash (speckit scripts)
-- JSON Schema draft 2020-12 (planned, for shared data model)
+- JSON Schema draft 2020-12 (hero manifest schema, sample artifact envelope)
 - OpenCode + Speckit (development workflow)
 
 ## Recent Changes
 
+- 002-hero-interface-contract: Completed spec implementation -- Hero Interface Contract v1.0.0 ratified, hero manifest JSON Schema created and validated, contract compliance validation script created and tested against Gaze and Website repos, sample artifact envelope and Gaze manifest produced, all FRs (001-015) and SCs (001-007) validated, spec status set to Complete
 - 001-org-constitution: Completed spec implementation -- constitution ratified v1.0.0, alignment agent and `/constitution-check` command created, all FRs and SCs validated, spec status set to Complete
 - 001-org-constitution: Ratified org constitution v1.0.0 with three principles (Autonomous Collaboration, Composability First, Observable Quality)
 - Specs 001-009: Added architectural design specs for all heroes (Muti-Mind, The Divisor, Cobalt-Crush, Mx F), infrastructure (org constitution, hero interface contract, speckit framework), and cross-cutting concerns (swarm orchestration, shared data model)

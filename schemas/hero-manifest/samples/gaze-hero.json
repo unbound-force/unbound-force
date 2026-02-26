@@ -1,0 +1,71 @@
+{
+  "name": "gaze",
+  "display_name": "Gaze",
+  "role": "tester",
+  "version": "1.2.0",
+  "description": "Static analysis tool for Go that detects observable side effects and computes CRAP scores",
+  "repository": "https://github.com/unbound-force/gaze",
+  "parent_constitution_version": "1.0.0",
+  "artifacts_produced": [
+    {
+      "type_id": "quality-report",
+      "schema_version": "1.0.0",
+      "description": "Code quality analysis with coverage, complexity, and contract coverage metrics"
+    },
+    {
+      "type_id": "analysis-report",
+      "schema_version": "1.0.0",
+      "description": "Side-effect detection results with classification and tier assignment"
+    }
+  ],
+  "artifacts_consumed": [],
+  "opencode_agents": [
+    {
+      "name": "gaze-reporter",
+      "description": "Generates and interprets Gaze quality reports",
+      "mode": "agent",
+      "tools": ["read", "bash"]
+    },
+    {
+      "name": "doc-classifier",
+      "description": "Classifies documentation files for analysis",
+      "mode": "subagent",
+      "tools": ["read", "glob"]
+    },
+    {
+      "name": "reviewer-adversary",
+      "description": "The Divisor Adversary persona for PR reviews",
+      "mode": "subagent",
+      "tools": ["read", "glob", "grep"]
+    },
+    {
+      "name": "reviewer-architect",
+      "description": "The Divisor Architect persona for PR reviews",
+      "mode": "subagent",
+      "tools": ["read", "glob", "grep"]
+    },
+    {
+      "name": "reviewer-guard",
+      "description": "The Divisor Guard persona for PR reviews",
+      "mode": "subagent",
+      "tools": ["read", "glob", "grep"]
+    }
+  ],
+  "opencode_commands": [
+    {
+      "name": "/gaze",
+      "description": "Run Gaze analysis on the current project",
+      "agent": "gaze-reporter"
+    },
+    {
+      "name": "/classify-docs",
+      "description": "Classify documentation files",
+      "agent": "doc-classifier"
+    },
+    {
+      "name": "/review-council",
+      "description": "Run The Divisor three-persona review council"
+    }
+  ],
+  "dependencies": []
+}
