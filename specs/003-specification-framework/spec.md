@@ -482,20 +482,25 @@ preserving any local configuration.
   templates, scripts, OpenCode commands, and the custom
   OpenSpec `unbound-force` schema.
 - **FR-002**: The canonical source MUST include a versioning
-  mechanism (semantic versioning) tracked in a manifest file.
-- **FR-003**: The framework MUST provide an installation
-  mechanism that places Speckit files into the correct
+  mechanism (semantic versioning) injected at build time via
+  ldflags and visible in scaffolded file markers.
+- **FR-003**: The framework MUST provide a Go binary
+  (`unbound`) that scaffolds files into the correct
   directories (`.specify/templates/`,
-  `.specify/scripts/bash/`, `.opencode/command/`) and OpenSpec
-  schema files into `openspec/schemas/unbound-force/`.
-- **FR-004**: The framework MUST provide an upgrade mechanism
-  that updates canonical files while preserving local
-  modifications to previously installed files.
-- **FR-005**: The upgrade mechanism MUST detect local
-  modifications via content checksum comparison and skip
-  modified files with a warning.
-- **FR-006**: The framework MUST record the installed version
-  in `.specify/speckit.version` after installation or upgrade.
+  `.specify/scripts/bash/`, `.opencode/command/`,
+  `.opencode/agents/`) and OpenSpec schema files into
+  `openspec/schemas/unbound-force/`, using Go's `embed.FS`
+  to compile all distributable files into the binary.
+- **FR-004**: The framework MUST classify scaffolded files as
+  user-owned or tool-owned. On re-run, user-owned files that
+  already exist MUST be skipped. Tool-owned files MUST be
+  updated if their content has changed.
+- **FR-005**: The framework MUST support a `--force` flag
+  that overrides the user-owned skip behavior and overwrites
+  all files.
+- **FR-006**: Each scaffolded file MUST include a version
+  marker comment identifying the unbound version that
+  created it.
 - **FR-007**: The framework MUST support project-specific
   configuration via `.specify/config.yaml` with at minimum:
   `language`, `framework`, `build_command`, `test_command`,
@@ -518,16 +523,16 @@ preserving any local configuration.
   contracts.
 - **FR-012**: The framework MUST work in any Git repository,
   not only Unbound Force hero repositories.
-- **FR-013**: The framework SHOULD provide a `speckit init`
-  command (or equivalent) that initializes a fresh repository
-  with the correct directory structure for both tiers and
-  optionally runs the constitution phase.
+- **FR-013**: The framework MUST provide an `unbound init`
+  command that initializes a fresh repository with the
+  correct directory structure for both tiers.
 - **FR-014**: The framework MUST include a drift detection
-  mechanism that compares installed files against the
-  canonical versions and reports differences.
-- **FR-015**: The canonical source MUST include automated
-  tests that verify all templates are syntactically valid
-  and all scripts execute without errors on macOS and Linux.
+  test that verifies embedded asset copies are byte-identical
+  to the canonical source files in the repository.
+- **FR-015**: The framework MUST be distributed via Homebrew
+  cask (`unbound-force/tap/unbound`) and `go install`, using
+  GoReleaser for cross-platform builds (darwin/amd64,
+  darwin/arm64, linux/amd64, linux/arm64).
 
 #### OpenSpec (Tactical Tier)
 
@@ -542,9 +547,9 @@ preserving any local configuration.
   MUST reference `.specify/memory/constitution.md` in its
   context field so that the constitution content is available
   to agents generating proposals.
-- **FR-019**: The Speckit installation mechanism MUST also
-  install and upgrade the custom OpenSpec schema and
-  provide a default `openspec/config.yaml` template.
+- **FR-019**: The `unbound init` command MUST also scaffold
+  the custom OpenSpec schema and provide a default
+  `openspec/config.yaml` template.
 
 #### Governance and Boundaries
 
@@ -563,14 +568,13 @@ preserving any local configuration.
 
 ### Key Entities
 
-- **Speckit Manifest**: Metadata about the canonical framework
-  distribution. Attributes: version (semver), files[] (list of
-  files with paths and checksums), minimum_compatible_version,
-  changelog_url.
-- **Speckit Installation Record**: Per-repository tracking of
-  installed framework version. Attributes: speckit_version,
-  installed_at (ISO 8601), files_installed[], files_skipped[],
-  canonical_checksums{}.
+- **Scaffold Options**: Configuration for the scaffold run.
+  Attributes: TargetDir (path), Version (semver string),
+  Force (boolean).
+- **Scaffold Result**: Outcome of a scaffold run. Attributes:
+  Created[] (new files), Skipped[] (existing user-owned),
+  Overwritten[] (force-replaced), Updated[] (tool-owned
+  content changes).
 - **Speckit Project Configuration**: Per-repository Speckit
   customization. Attributes: language, framework,
   build_command, test_command, integration_patterns,
@@ -599,16 +603,17 @@ preserving any local configuration.
 - **SC-001**: This repository contains exactly 6 Speckit
   templates, 5 scripts, 9 OpenCode commands, and 1 custom
   OpenSpec schema with at least 4 template files.
-- **SC-002**: The installation mechanism places all framework
-  files (both Speckit and OpenSpec) into a fresh repository
-  in under 30 seconds with zero errors.
-- **SC-003**: The upgrade mechanism correctly detects and
-  skips locally modified files for both Speckit and OpenSpec
-  artifacts (verified by modifying a template, running
-  upgrade, and confirming the modified file is preserved).
-- **SC-004**: The drift detection mechanism identifies all
-  known differences between the Gaze, Website, and
-  unbound-force copies of both Speckit and OpenSpec files.
+- **SC-002**: The `unbound init` command scaffolds all
+  framework files into a fresh repository in under 5 seconds
+  with zero errors.
+- **SC-003**: Re-running `unbound init` correctly skips
+  user-owned files that already exist and updates tool-owned
+  files with changed content (verified by modifying a
+  template, running init, and confirming the modified file
+  is preserved while tool-owned files are updated).
+- **SC-004**: The drift detection test identifies when
+  embedded asset copies differ from canonical source files
+  in the repository.
 - **SC-005**: A project-specific `.specify/config.yaml` with
   `language: go` produces the same output from `/specify`
   that the current hardcoded Gaze `speckit.specify.md`
@@ -616,9 +621,9 @@ preserving any local configuration.
 - **SC-006**: The pipeline documentation covers all 9 Speckit
   phases and all 4 core OpenSpec actions with inputs, outputs,
   and prerequisites for each.
-- **SC-007**: The framework installs and functions correctly
-  in a non-Unbound Force repository (verified by testing in
-  a fresh, unrelated project).
+- **SC-007**: The `unbound init` command works correctly in a
+  non-Unbound Force repository (verified by running in a
+  fresh, unrelated project).
 - **SC-008**: An OpenSpec proposal created with the
   `unbound-force` schema contains a constitution alignment
   section with assessments for all three principles.
