@@ -108,6 +108,7 @@ already exist (unless `--force`).
 |------|-----------|
 | `.specify/templates/*.md` | Users may customize templates |
 | `.specify/scripts/bash/*.sh` | Users may add project-specific logic |
+| `.specify/config.yaml` | Users customize project-specific settings |
 | `.opencode/agents/*.md` | Users customize agent behavior |
 | `openspec/config.yaml` | Users customize project context |
 

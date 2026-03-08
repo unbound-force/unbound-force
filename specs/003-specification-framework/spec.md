@@ -71,6 +71,15 @@ for all framework artifacts."
 - Q: Where should OpenSpec specs live in hero repos? A: Same
   pattern everywhere. All repos use `./specs/` for Speckit and
   `openspec/specs/` for OpenSpec.
+- Q: What should the distribution binary be named? A: `unbound`
+  (not `speckit`, which would collide with the existing Speckit
+  CLI whose binary is `specify`). Distributed via
+  `brew install unbound-force/tap/unbound` and `go install`.
+- Q: What distribution mechanism should the framework use?
+  A: Go binary with `embed.FS` scaffold pattern, matching the
+  Gaze project's architecture. GoReleaser for cross-platform
+  builds, Homebrew cask for installation. Replaces the earlier
+  Bash copy script decision from Session 2026-02-24.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -132,13 +141,13 @@ is a valid superset.
 ### User Story 2 - Distribution and Installation (Priority: P1)
 
 A maintainer of a new or existing hero repository installs
-the specification framework from the canonical source. The
-installation process places Speckit files in the correct
-directories (`.specify/templates/`, `.specify/scripts/`,
-`.opencode/command/`), initializes the OpenSpec directory
-structure with the custom `unbound-force` schema and
-configuration, and records the installed version for future
-upgrade detection.
+the specification framework from the canonical source by
+running `unbound init`. The scaffold process places Speckit
+files in the correct directories (`.specify/templates/`,
+`.specify/scripts/`, `.opencode/command/`), initializes
+the OpenSpec directory structure with the custom
+`unbound-force` schema and configuration, and marks each
+scaffolded file with a version comment for provenance.
 
 **Why this priority**: P1 because without a distribution
 mechanism, the single source of truth is useless -- people
@@ -169,9 +178,10 @@ metadata.
    framework file, **When** the upgrade command runs, **Then**
    it detects the modification, skips that file, and warns the
    user with a diff summary.
-4. **Given** the installation completes, **When** a maintainer
-   inspects `.specify/speckit.version`, **Then** it contains
-   the installed framework version and installation timestamp.
+4. **Given** the scaffold completes, **When** a maintainer
+   inspects any scaffolded file, **Then** it contains a
+   version marker comment identifying which version of the
+   `unbound` binary created it.
 
 ---
 
@@ -429,28 +439,32 @@ preserving any local configuration.
 
 ### Edge Cases
 
-- What happens when a project uses a speckit version that is
+- What happens when a project uses a framework version that is
   incompatible with the latest canonical version? The version
-  file MUST include a minimum compatible speckit version, and
-  the upgrade command MUST refuse to upgrade if the project's
-  speckit usage relies on removed features.
+  marker in scaffolded files identifies the installed version.
+  Re-running `unbound init` overwrites tool-owned files with
+  the new version; user-owned files are preserved.
 - What happens when two speckit commands are run concurrently
   in the same repo? Speckit commands are designed for serial
-  execution. Concurrent execution SHOULD be detected and one
-  SHOULD yield with a warning.
+  execution within a single OpenCode session. Concurrent
+  execution across sessions is outside the scope of this spec
+  — it is an OpenCode runtime concern, not a framework
+  distribution concern. Concurrent writes to spec artifacts
+  produce undefined behavior.
 - What happens when speckit is installed in a non-hero
   repository (e.g., an external project)? The framework MUST
   work in any repository, not just Unbound Force hero repos.
   The Hero Interface Contract features and OpenSpec schema are
   additive.
 - What happens when a script (`common.sh`, etc.) is modified
-  locally and an upgrade is attempted? The upgrade tool MUST
-  detect the modification via checksum comparison and skip the
-  file with a warning.
+  locally and `unbound init` is re-run? Scripts are
+  user-owned files. Re-running `unbound init` skips
+  user-owned files that already exist (unless `--force` is
+  used).
 - What happens when a new speckit command is added in a later
-  version? The upgrade command MUST install new files that do
-  not exist locally, even when other files are skipped due to
-  modifications.
+  version? Re-running `unbound init` creates files that do
+  not exist locally (new files are always created regardless
+  of ownership classification).
 - What happens when a developer creates an OpenSpec change
   that should have been a Speckit spec? The boundary
   guidelines SHOULD provide an escalation path: convert the
@@ -601,8 +615,10 @@ preserving any local configuration.
 ### Measurable Outcomes
 
 - **SC-001**: This repository contains exactly 6 Speckit
-  templates, 5 scripts, 9 OpenCode commands, and 1 custom
-  OpenSpec schema with at least 4 template files.
+  templates, 5 scripts, 10 OpenCode command files
+  (9 speckit pipeline commands + 1 constitution-check),
+  1 agent file, and 1 custom OpenSpec schema with at least
+  4 template files.
 - **SC-002**: The `unbound init` command scaffolds all
   framework files into a fresh repository in under 5 seconds
   with zero errors.
