@@ -30,9 +30,9 @@ Markdown files. No new source code directories are created.
 configuration so OpenCode can launch the knowledge graph
 service.
 
-- [ ] T001 Install graphthulhu binary via `go install github.com/skridlevsky/graphthulhu@latest` and verify with `graphthulhu version`
-- [ ] T002 Create OpenCode MCP server configuration file at opencode.json in the project root, declaring the `knowledge-graph` server as `"type": "local"` with command `["graphthulhu", "serve", "--backend", "obsidian", "--vault", ".", "--read-only"]` per research.md R-001
-- [ ] T003 Start OpenCode with the new configuration and verify the knowledge graph MCP server launches successfully as a subprocess (check `health` tool response returns version, backend type, and page count)
+- [x] T001 Install graphthulhu binary via `go install github.com/skridlevsky/graphthulhu@latest` and verify with `graphthulhu version`
+- [x] T002 Create OpenCode MCP server configuration file at opencode.json in the project root, declaring the `knowledge-graph` server as `"type": "local"` with command `["graphthulhu", "serve", "--backend", "obsidian", "--vault", ".", "--read-only"]` per research.md R-001
+- [x] T003 Start OpenCode with the new configuration and verify the knowledge graph MCP server launches successfully as a subprocess (check `health` tool response returns version, backend type, and page count)
 
 **Checkpoint**: graphthulhu is installed, configured in
 OpenCode, and launches successfully. Agents can invoke the
@@ -48,17 +48,17 @@ the upstream PR (Phase 2) is complete. Hidden directories
 graphthulhu upstream so that content in `.specify/` and
 `.opencode/` can be indexed (FR-012, SC-008).
 
-- [ ] T004 Fork graphthulhu repository to the `unbound-force` GitHub organization (or personal fork) as a working branch for the upstream PR
-- [ ] T005 Add `includeHidden bool` field to `vault.Client` struct and `WithIncludeHidden(bool) Option` constructor in vault/vault.go, following the existing `WithDailyFolder` pattern
-- [ ] T006 Guard the hidden directory skip in `vault.Client.Load()` method in vault/vault.go with `&& !c.includeHidden` on the `strings.HasPrefix(info.Name(), ".")` check, while always skipping `.git` directories regardless of flag
-- [ ] T007 [P] Guard the hidden directory skip in `vault.Client.addWatcherDirs()` method in vault/vault.go with the same `&& !c.includeHidden` guard
-- [ ] T008 [P] Guard the hidden directory skip in `vault.Client.handleEvent()` method in vault/vault.go by adding `&& !c.includeHidden` to the `strings.Contains(event.Name, "/.")` check
-- [ ] T009 Add `--include-hidden` CLI flag in main.go `runServe()` function, passing it to `vault.New()` via `vault.WithIncludeHidden(*includeHidden)`
-- [ ] T010 Add test in vault/vault_test.go that creates a temporary vault with a hidden directory containing `.md` files, verifies they are skipped by default, and included when `WithIncludeHidden(true)` is set
-- [ ] T011 Run `go test ./...` and `go vet ./...` in the graphthulhu fork to verify all existing tests pass with the new changes
-- [ ] T012 Submit upstream pull request to `skridlevsky/graphthulhu` with the `--include-hidden` changes, referencing the use case of indexing project configuration directories like `.specify/` and `.opencode/`
-- [ ] T013 Update opencode.json to add `"--include-hidden"` to the graphthulhu command array (either after upstream PR is merged and a new release is available, or by installing from the fork branch)
-- [ ] T014 Verify that content in `.specify/memory/constitution.md` and `.opencode/agents/constitution-check.md` appears in search results after enabling `--include-hidden`
+- [x] T004 Fork graphthulhu repository to the `unbound-force` GitHub organization (or personal fork) as a working branch for the upstream PR
+- [x] T005 Add `includeHidden bool` field to `vault.Client` struct and `WithIncludeHidden(bool) Option` constructor in vault/vault.go, following the existing `WithDailyFolder` pattern
+- [x] T006 Guard the hidden directory skip in `vault.Client.Load()` method in vault/vault.go with `&& !c.includeHidden` on the `strings.HasPrefix(info.Name(), ".")` check, while always skipping `.git` directories regardless of flag
+- [x] T007 [P] Guard the hidden directory skip in `vault.Client.addWatcherDirs()` method in vault/vault.go with the same `&& !c.includeHidden` guard
+- [x] T008 [P] Guard the hidden directory skip in `vault.Client.handleEvent()` method in vault/vault.go by adding `&& !c.includeHidden` to the `strings.Contains(event.Name, "/.")` check
+- [x] T009 Add `--include-hidden` CLI flag in main.go `runServe()` function, passing it to `vault.New()` via `vault.WithIncludeHidden(*includeHidden)`
+- [x] T010 Add test in vault/vault_test.go that creates a temporary vault with a hidden directory containing `.md` files, verifies they are skipped by default, and included when `WithIncludeHidden(true)` is set
+- [x] T011 Run `go test ./...` and `go vet ./...` in the graphthulhu fork to verify all existing tests pass with the new changes
+- [x] T012 Submit upstream pull request to `skridlevsky/graphthulhu` with the `--include-hidden` changes, referencing the use case of indexing project configuration directories like `.specify/` and `.opencode/`
+- [x] T013 Update opencode.json to add `"--include-hidden"` to the graphthulhu command array (either after upstream PR is merged and a new release is available, or by installing from the fork branch)
+- [x] T014 Verify that content in `.specify/memory/constitution.md` and `.opencode/agents/constitution-check.md` appears in search results after enabling `--include-hidden`
 
 **Checkpoint**: Hidden directory support is contributed
 upstream (or available via fork). The OpenCode configuration
@@ -80,14 +80,14 @@ expected content from the repo's Markdown files.
 
 ### Implementation for User Story 1
 
-- [ ] T015 [US1] Invoke the `search` MCP tool with a query term that appears in multiple spec files (e.g., "constitution") and verify results return matches from all relevant files with parent block chain context
-- [ ] T016 [US1] Invoke the `get_page` MCP tool with a known spec page name (e.g., "specs/004-muti-mind-architecture/spec") and verify the response contains the full hierarchical block tree with parsed links, tags, and properties
-- [ ] T017 [US1] Invoke the `list_pages` MCP tool and verify the response lists all indexed Markdown files with their path-qualified names and metadata
-- [ ] T018 [US1] Verify that search results return contextual information (parent block chain and sibling blocks) by searching for a term that appears within a nested heading section and confirming ancestor headings are included in the response
-- [ ] T019 [US1] Verify that the `get_block` MCP tool retrieves a specific block by UUID (obtain a UUID from a `get_page` response) and returns the block with its ancestor chain and sibling context
-- [ ] T020 [US1] Verify read-only mode enforcement (FR-015): invoke a write tool (e.g., `create_page` or `append_blocks`) and confirm the service returns an MCP error rejecting the operation because `--read-only` is enabled
-- [ ] T021 [US1] Verify file non-modification (FR-019): record file timestamps of 3 indexed Markdown files before a query session, invoke `search`, `get_page`, and `list_pages`, then confirm all file timestamps are unchanged after the queries
-- [ ] T022 [US1] Document any discrepancies between expected and actual MCP tool behavior in a verification log at specs/010-knowledge-graph-integration/verification-log.md
+- [x] T015 [US1] Invoke the `search` MCP tool with a query term that appears in multiple spec files (e.g., "constitution") and verify results return matches from all relevant files with parent block chain context
+- [x] T016 [US1] Invoke the `get_page` MCP tool with a known spec page name (e.g., "specs/004-muti-mind-architecture/spec") and verify the response contains the full hierarchical block tree with parsed links, tags, and properties
+- [x] T017 [US1] Invoke the `list_pages` MCP tool and verify the response lists all indexed Markdown files with their path-qualified names and metadata
+- [x] T018 [US1] Verify that search results return contextual information (parent block chain and sibling blocks) by searching for a term that appears within a nested heading section and confirming ancestor headings are included in the response
+- [x] T019 [US1] Verify that the `get_block` MCP tool retrieves a specific block by UUID (obtain a UUID from a `get_page` response) and returns the block with its ancestor chain and sibling context
+- [x] T020 [US1] Verify read-only mode enforcement (FR-015): invoke a write tool (e.g., `create_page` or `append_blocks`) and confirm the service returns an MCP error rejecting the operation because `--read-only` is enabled
+- [x] T021 [US1] Verify file non-modification (FR-019): record file timestamps of 3 indexed Markdown files before a query session, invoke `search`, `get_page`, and `list_pages`, then confirm all file timestamps are unchanged after the queries
+- [x] T022 [US1] Document any discrepancies between expected and actual MCP tool behavior in a verification log at specs/010-knowledge-graph-integration/verification-log.md
 
 **Checkpoint**: Agents can search across all project files,
 retrieve specific pages by name, list all indexed content,
@@ -108,11 +108,11 @@ reflect the known structure of the unbound-force meta repo.
 
 ### Implementation for User Story 2
 
-- [ ] T023 [US2] Invoke the `graph_overview` MCP tool and verify it returns accurate statistics: total pages (matching the known file count), total blocks, and namespace breakdown (specs/, .specify/, .opencode/ etc.)
-- [ ] T024 [US2] Invoke the `knowledge_gaps` MCP tool and verify it correctly identifies orphan pages (pages with no wikilinks in or out) -- note: most current pages will be orphans since wikilinks have not been added yet
-- [ ] T025 [US2] Invoke the `list_orphans` MCP tool and verify the orphan list matches expectations (all pages should be orphans until content enrichment adds wikilinks)
-- [ ] T026 [US2] Invoke the `topic_clusters` MCP tool and verify it returns connected components -- note: with no wikilinks, each page will be its own isolated cluster
-- [ ] T027 [US2] Document analysis tool results and any discrepancies in specs/010-knowledge-graph-integration/verification-log.md
+- [x] T023 [US2] Invoke the `graph_overview` MCP tool and verify it returns accurate statistics: total pages (matching the known file count), total blocks, and namespace breakdown (specs/, .specify/, .opencode/ etc.)
+- [x] T024 [US2] Invoke the `knowledge_gaps` MCP tool and verify it correctly identifies orphan pages (pages with no wikilinks in or out) -- note: most current pages will be orphans since wikilinks have not been added yet
+- [x] T025 [US2] Invoke the `list_orphans` MCP tool and verify the orphan list matches expectations (all pages should be orphans until content enrichment adds wikilinks)
+- [x] T026 [US2] Invoke the `topic_clusters` MCP tool and verify it returns connected components -- note: with no wikilinks, each page will be its own isolated cluster
+- [x] T027 [US2] Document analysis tool results and any discrepancies in specs/010-knowledge-graph-integration/verification-log.md
 
 **Checkpoint**: Graph analysis tools work correctly. Results
 accurately reflect the current (un-enriched) state of the
@@ -133,11 +133,11 @@ service.
 
 ### Implementation for User Story 3
 
-- [ ] T028 [US3] Create a temporary test Markdown file (e.g., specs/010-knowledge-graph-integration/test-live-sync.md) with unique content, wait 5 seconds, then search for that content and verify it appears in results
-- [ ] T029 [US3] Modify the test file to change its content, wait 5 seconds, then search for the new content and verify the updated content appears (and old content does not)
-- [ ] T030 [US3] Delete the test file, wait 5 seconds, then search for its content and verify it no longer appears in results
-- [ ] T031 [US3] Invoke the `reload` MCP tool and verify it returns a confirmation with the correct number of re-indexed pages
-- [ ] T032 [US3] Document live sync verification results in specs/010-knowledge-graph-integration/verification-log.md
+- [x] T028 [US3] Create a temporary test Markdown file (e.g., specs/010-knowledge-graph-integration/test-live-sync.md) with unique content, wait 5 seconds, then search for that content and verify it appears in results
+- [x] T029 [US3] Modify the test file to change its content, wait 5 seconds, then search for the new content and verify the updated content appears (and old content does not)
+- [x] T030 [US3] Delete the test file, wait 5 seconds, then search for its content and verify it no longer appears in results
+- [x] T031 [US3] Invoke the `reload` MCP tool and verify it returns a confirmation with the correct number of re-indexed pages
+- [x] T032 [US3] Document live sync verification results in specs/010-knowledge-graph-integration/verification-log.md
 
 **Checkpoint**: File watching and live re-indexing work
 correctly. Agents always see current content without manual
@@ -157,13 +157,13 @@ navigate the link graph.
 
 ### Implementation for User Story 4
 
-- [ ] T033 [P] [US4] Add YAML frontmatter and wikilinks to specs/001-org-constitution/spec.md, adding frontmatter with `spec_id`, `title`, `phase`, `status`, and `depends_on` fields, and converting prose cross-references to `[[wikilinks]]` where specs reference each other
-- [ ] T034 [P] [US4] Add YAML frontmatter and wikilinks to specs/002-hero-interface-contract/spec.md with the same frontmatter schema, including `depends_on: ["[[001-org-constitution]]"]` and converting cross-references
-- [ ] T035 [P] [US4] Add YAML frontmatter and wikilinks to specs/004-muti-mind-architecture/spec.md with frontmatter including `depends_on` references to specs 001 and 002
-- [ ] T036 [US4] Invoke the `get_links` MCP tool on one of the enriched specs and verify it returns both outbound links (specs this page references) and inbound backlinks (specs that reference this page) with containing block context
-- [ ] T037 [US4] Invoke the `find_connections` MCP tool with two enriched spec page names and verify it returns direct links, shortest paths, and shared connections between them
-- [ ] T038 [US4] Invoke the `traverse` MCP tool between two specs connected through an intermediate page and verify it returns the shortest path through the link graph
-- [ ] T039 [US4] Document link traversal verification results in specs/010-knowledge-graph-integration/verification-log.md
+- [x] T033 [P] [US4] Add YAML frontmatter and wikilinks to specs/001-org-constitution/spec.md, adding frontmatter with `spec_id`, `title`, `phase`, `status`, and `depends_on` fields, and converting prose cross-references to `[[wikilinks]]` where specs reference each other
+- [x] T034 [P] [US4] Add YAML frontmatter and wikilinks to specs/002-hero-interface-contract/spec.md with the same frontmatter schema, including `depends_on: ["[[001-org-constitution]]"]` and converting cross-references
+- [x] T035 [P] [US4] Add YAML frontmatter and wikilinks to specs/004-muti-mind-architecture/spec.md with frontmatter including `depends_on` references to specs 001 and 002
+- [x] T036 [US4] Invoke the `get_links` MCP tool on one of the enriched specs and verify it returns both outbound links (specs this page references) and inbound backlinks (specs that reference this page) with containing block context
+- [x] T037 [US4] Invoke the `find_connections` MCP tool with two enriched spec page names and verify it returns direct links, shortest paths, and shared connections between them
+- [x] T038 [US4] Invoke the `traverse` MCP tool between two specs connected through an intermediate page and verify it returns the shortest path through the link graph
+- [x] T039 [US4] Document link traversal verification results in specs/010-knowledge-graph-integration/verification-log.md
 
 **Checkpoint**: Wikilink-based navigation works. Agents can
 traverse from one spec to related specs through the link
@@ -184,11 +184,11 @@ verify correct results.
 
 ### Implementation for User Story 5
 
-- [ ] T040 [US5] Verify that the YAML frontmatter added in Phase 6 (T033-T035) is correctly parsed by invoking `get_page` on an enriched spec and confirming properties appear in the response
-- [ ] T041 [US5] Invoke the `query_properties` MCP tool with property `status` equal to `draft` and verify it returns all spec files with that status in their frontmatter
-- [ ] T042 [US5] Invoke the `query_properties` MCP tool with property `phase` to filter specs by implementation phase and verify correct results
-- [ ] T043 [US5] Invoke the `find_by_tag` MCP tool with a tag present in enriched content and verify it returns the correct blocks and pages
-- [ ] T044 [US5] Document property-based querying verification results in specs/010-knowledge-graph-integration/verification-log.md
+- [x] T040 [US5] Verify that the YAML frontmatter added in Phase 6 (T033-T035) is correctly parsed by invoking `get_page` on an enriched spec and confirming properties appear in the response
+- [x] T041 [US5] Invoke the `query_properties` MCP tool with property `status` equal to `draft` and verify it returns all spec files with that status in their frontmatter
+- [x] T042 [US5] Invoke the `query_properties` MCP tool with property `phase` to filter specs by implementation phase and verify correct results
+- [x] T043 [US5] Invoke the `find_by_tag` MCP tool with a tag present in enriched content and verify it returns the correct blocks and pages
+- [x] T044 [US5] Document property-based querying verification results in specs/010-knowledge-graph-integration/verification-log.md
 
 **Checkpoint**: Property-based querying works for enriched
 files. Agents can find specs by metadata without full-text
@@ -203,11 +203,11 @@ this capability.
 **Purpose**: Documentation updates, AGENTS.md alignment, and
 cleanup.
 
-- [ ] T045 [P] Update AGENTS.md to add spec 010 to the Recent Changes section and update the spec organization tables to include 010-knowledge-graph-integration in the dependency graph
-- [ ] T046 [P] Update README.md to mention the knowledge graph integration as available tooling for the Unbound Force swarm
-- [ ] T047 Add remaining YAML frontmatter to specs 003, 005, 006, 007, 008, and 009 following the same schema used in T033-T035 (spec_id, title, phase, status, depends_on) in their respective spec.md files
-- [ ] T048 Review and finalize specs/010-knowledge-graph-integration/verification-log.md, ensuring all user stories have documented verification results
-- [ ] T049 Run the `graph_overview` and `knowledge_gaps` MCP tools one final time to produce a baseline knowledge graph health report for the fully enriched meta repo
+- [x] T045 [P] Update AGENTS.md to add spec 010 to the Recent Changes section and update the spec organization tables to include 010-knowledge-graph-integration in the dependency graph
+- [x] T046 [P] Update README.md to mention the knowledge graph integration as available tooling for the Unbound Force swarm
+- [x] T047 Add remaining YAML frontmatter to specs 003, 005, 006, 007, 008, and 009 following the same schema used in T033-T035 (spec_id, title, phase, status, depends_on) in their respective spec.md files
+- [x] T048 Review and finalize specs/010-knowledge-graph-integration/verification-log.md, ensuring all user stories have documented verification results
+- [x] T049 Run the `graph_overview` and `knowledge_gaps` MCP tools one final time to produce a baseline knowledge graph health report for the fully enriched meta repo
 
 **Checkpoint**: All documentation is updated. All spec files
 have YAML frontmatter. The knowledge graph reflects the full

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "knowledge-graph": {
+      "type": "local",
+      "command": [
+        "/Users/jflowers/go/1.24.0/bin/graphthulhu",
+        "serve",
+        "--backend", "obsidian",
+        "--vault", ".",
+        "--include-hidden",
+        "--read-only"
+      ],
+      "enabled": true
+    }
+  }
+}

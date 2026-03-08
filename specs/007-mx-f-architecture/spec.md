@@ -1,3 +1,13 @@
+---
+spec_id: "007"
+title: "Mx F Architecture (Manager)"
+phase: 1
+status: draft
+depends_on:
+  - "[[specs/001-org-constitution/spec]]"
+  - "[[specs/002-hero-interface-contract/spec]]"
+---
+
 # Feature Specification: Mx F Architecture (Manager)
 
 **Feature Branch**: `007-mx-f-architecture`

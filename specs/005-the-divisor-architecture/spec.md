@@ -1,3 +1,13 @@
+---
+spec_id: "005"
+title: "The Divisor Architecture (PR Reviewer Council)"
+phase: 1
+status: draft
+depends_on:
+  - "[[specs/001-org-constitution/spec]]"
+  - "[[specs/002-hero-interface-contract/spec]]"
+---
+
 # Feature Specification: The Divisor Architecture (PR Reviewer Council)
 
 **Feature Branch**: `005-the-divisor-architecture`

@@ -1,3 +1,12 @@
+---
+spec_id: "002"
+title: "Hero Interface Contract"
+phase: 0
+status: complete
+depends_on:
+  - "[[specs/001-org-constitution/spec]]"
+---
+
 # Feature Specification: Hero Interface Contract
 
 **Feature Branch**: `002-hero-interface-contract`
