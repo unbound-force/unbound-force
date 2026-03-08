@@ -1,3 +1,13 @@
+---
+spec_id: "006"
+title: "Cobalt-Crush Architecture (Developer)"
+phase: 1
+status: draft
+depends_on:
+  - "[[specs/001-org-constitution/spec]]"
+  - "[[specs/002-hero-interface-contract/spec]]"
+---
+
 # Feature Specification: Cobalt-Crush Architecture (Developer)
 
 **Feature Branch**: `006-cobalt-crush-architecture`

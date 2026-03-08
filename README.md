@@ -28,10 +28,15 @@ All hero repositories must maintain constitutions that align with (and never con
 
 This repo contains architectural design specs for all heroes and shared standards:
 
-- **`specs/`** -- 9 architectural specifications organized in three phases
+- **`specs/`** -- 10 architectural specifications organized in three phases
 - **`.specify/memory/constitution.md`** -- The org constitution (highest authority)
+- **`opencode.json`** -- MCP server configuration (knowledge graph via graphthulhu)
 - **`unbound-force.md`** -- Hero descriptions and team vision
 - **`AGENTS.md`** -- Development conventions and workflow guide
+
+## Knowledge Graph
+
+Project knowledge is indexed and queryable via [graphthulhu](https://github.com/skridlevsky/graphthulhu), an MCP-based knowledge graph server. Hero agents can search specs, traverse cross-references, and query document metadata without loading entire files into their context windows. See `specs/010-knowledge-graph-integration/` for the full specification.
 
 See [AGENTS.md](AGENTS.md) for full project structure, spec organization, and development workflow.
 

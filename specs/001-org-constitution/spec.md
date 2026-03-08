@@ -1,3 +1,11 @@
+---
+spec_id: "001"
+title: "Unbound Force Organization Constitution"
+phase: 0
+status: complete
+depends_on: []
+---
+
 # Feature Specification: Unbound Force Organization Constitution
 
 **Feature Branch**: `001-org-constitution`
@@ -18,9 +26,9 @@
 
 The following concerns are explicitly deferred to other specs and MUST NOT be defined in the constitution:
 
-- **Artifact schemas and envelope formats**: Defined by Spec 009 (Shared Data Model). The constitution references the requirement for machine-parseable output but does not define the JSON schemas.
-- **Repository structure and hero manifest**: Defined by Spec 002 (Hero Interface Contract). The constitution references the Hero Interface Contract concept but does not define its contents.
-- **Speckit pipeline mechanics**: Defined by Spec 003 (Speckit Framework). The constitution recommends spec-driven development but does not define the pipeline stages or commands.
+- **Artifact schemas and envelope formats**: Defined by [[specs/009-shared-data-model/spec]] (Shared Data Model). The constitution references the requirement for machine-parseable output but does not define the JSON schemas.
+- **Repository structure and hero manifest**: Defined by [[specs/002-hero-interface-contract/spec]] (Hero Interface Contract). The constitution references the Hero Interface Contract concept but does not define its contents.
+- **Speckit pipeline mechanics**: Defined by [[specs/003-speckit-framework/spec]] (Speckit Framework). The constitution recommends spec-driven development but does not define the pipeline stages or commands.
 - **Hero-specific implementation details**: Defined by Specs 004-007. The constitution constrains hero behavior via principles but does not prescribe architecture, technology, or implementation approach.
 - **Convention packs and coding standards**: Defined by Specs 005 and 006. The constitution does not govern language-specific coding conventions.
 

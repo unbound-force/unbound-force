@@ -1,3 +1,13 @@
+---
+spec_id: "008"
+title: "Swarm Orchestration"
+phase: 2
+status: draft
+depends_on:
+  - "[[specs/001-org-constitution/spec]]"
+  - "[[specs/002-hero-interface-contract/spec]]"
+---
+
 # Feature Specification: Swarm Orchestration
 
 **Feature Branch**: `008-swarm-orchestration`

@@ -1,3 +1,13 @@
+---
+spec_id: "004"
+title: "Muti-Mind Architecture (Product Owner)"
+phase: 1
+status: draft
+depends_on:
+  - "[[specs/001-org-constitution/spec]]"
+  - "[[specs/002-hero-interface-contract/spec]]"
+---
+
 # Feature Specification: Muti-Mind Architecture (Product Owner)
 
 **Feature Branch**: `004-muti-mind-architecture`

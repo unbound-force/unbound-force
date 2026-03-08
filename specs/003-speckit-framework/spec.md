@@ -1,3 +1,12 @@
+---
+spec_id: "003"
+title: "Speckit Framework Centralization"
+phase: 0
+status: draft
+depends_on:
+  - "[[specs/001-org-constitution/spec]]"
+---
+
 # Feature Specification: Speckit Framework Centralization
 
 **Feature Branch**: `003-speckit-framework`
