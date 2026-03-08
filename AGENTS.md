@@ -81,7 +81,7 @@ unbound-force/
 ├── specs/                           # Architectural specifications
 │   ├── 001-org-constitution/        # Org constitution ratification
 │   ├── 002-hero-interface-contract/ # Standard hero repo structure & protocols
-│   ├── 003-speckit-framework/       # Speckit centralization & distribution
+│   ├── 003-specification-framework/  # Specification framework (Speckit + OpenSpec)
 │   ├── 004-muti-mind-architecture/  # Product Owner hero design
 │   ├── 005-the-divisor-architecture/# PR Reviewer Council design
 │   ├── 006-cobalt-crush-architecture/# Developer hero design
@@ -113,7 +113,7 @@ Must be finalized before hero repos are built.
 
 - **001-org-constitution**: Three core principles, governance, hero alignment
 - **002-hero-interface-contract**: Standard repo structure, artifact envelope, naming conventions, hero manifest
-- **003-speckit-framework**: Centralize speckit, eliminate cross-repo drift, define extension points
+- **003-specification-framework**: Unified specification framework (Speckit strategic + OpenSpec tactical), define extension points
 
 ### Phase 1: Hero Architectures (004-007)
 
@@ -137,7 +137,7 @@ Depends on all Phase 1 specs.
 Phase 0 (Foundation)
   001-org-constitution
     └─> 002-hero-interface-contract
-    └─> 003-speckit-framework
+    └─> 003-specification-framework
 
 Phase 1 (Heroes) — all depend on 001 + 002
   004-muti-mind-architecture
