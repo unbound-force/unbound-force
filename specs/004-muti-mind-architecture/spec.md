@@ -2,7 +2,7 @@
 spec_id: "004"
 title: "Muti-Mind Architecture (Product Owner)"
 phase: 1
-status: draft
+status: complete
 depends_on:
   - "[[specs/001-org-constitution/spec]]"
   - "[[specs/002-hero-interface-contract/spec]]"
@@ -12,7 +12,7 @@ depends_on:
 
 **Feature Branch**: `004-muti-mind-architecture`
 **Created**: 2026-02-24
-**Status**: Draft
+**Status**: Complete
 **Input**: User description: "Design the architecture for Muti-Mind, the Product Owner hero. Muti-Mind is the Vision Keeper and Prioritization Engine — the voice of the user within the swarm. It includes an AI persona, a backlog management CLI tool, GitHub Issues/Projects integration, spec management integration with speckit, and acceptance authority capabilities."
 
 ## Clarifications
@@ -166,6 +166,7 @@ Muti-Mind generates user stories from high-level product goals or feature descri
 - **FR-009**: GitHub sync MUST map backlog attributes to GitHub primitives: type -> labels, priority -> labels, sprint -> milestones, status -> project board columns.
 - **FR-010**: Muti-Mind MUST integrate with the speckit pipeline: it MUST be able to invoke `/specify` and `/clarify` with backlog item context.
 - **FR-011**: Muti-Mind MUST serve as the acceptance authority: when invoked by the `/review-council` command with a Gaze quality report and the originating backlog item's acceptance criteria, it MUST produce an accept/reject/conditional decision.
+- ~~**FR-012**~~: (Removed — merged into FR-011)
 - **FR-013**: Muti-Mind MUST generate user stories from high-level goals, producing output in the speckit user story format.
 - **FR-014**: Generated stories MUST be proposals requiring explicit user approval before addition to the backlog.
 - **FR-015**: Muti-Mind MUST produce a `backlog-item` artifact type (per Spec 002) for consumption by other heroes (Mx F for metrics, The Divisor for intent verification).

@@ -32,15 +32,17 @@ type AcceptanceDecision struct {
 	DecidedAt      string   `json:"decided_at"`
 }
 
+const Version = "1.0.0"
+
 func writeArtifact(dir, artifactType, id string, payload interface{}) error {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal payload: %w", err)
 	}
 
 	envelope := Envelope{
 		Hero:          "muti-mind",
-		Version:       "1.0.0",
+		Version:       Version,
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 		ArtifactType:  artifactType,
 		SchemaVersion: "1.0.0",
@@ -49,15 +51,19 @@ func writeArtifact(dir, artifactType, id string, payload interface{}) error {
 
 	envelopeBytes, err := json.MarshalIndent(envelope, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal envelope: %w", err)
 	}
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
+		return fmt.Errorf("create artifacts directory %q: %w", dir, err)
 	}
 
 	filename := fmt.Sprintf("%s-%s.json", id, artifactType)
-	return os.WriteFile(filepath.Join(dir, filename), envelopeBytes, 0644)
+	targetPath := filepath.Join(dir, filename)
+	if err := os.WriteFile(targetPath, envelopeBytes, 0644); err != nil {
+		return fmt.Errorf("write artifact %q: %w", targetPath, err)
+	}
+	return nil
 }
 
 // GenerateBacklogItemArtifact generates a backlog-item JSON artifact

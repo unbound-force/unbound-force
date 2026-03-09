@@ -4,9 +4,11 @@ mode: subagent
 model: google-vertex-anthropic/claude-sonnet-4-6@default
 temperature: 0.1
 tools:
+  read: true
   write: false
   edit: false
   bash: false
+  webfetch: false
 ---
 
 # Role: The Adversary

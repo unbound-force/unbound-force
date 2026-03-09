@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/log"
 	"gopkg.in/yaml.v3"
 )
 
@@ -136,6 +137,8 @@ func (r *Repository) List() ([]*Item, error) {
 		item, err := r.Get(id)
 		if err == nil {
 			items = append(items, item)
+		} else {
+			log.Warn("Failed to read backlog item, skipping", "id", id, "error", err)
 		}
 	}
 

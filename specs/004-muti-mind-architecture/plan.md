@@ -1,9 +1,6 @@
-# Implementation Plan: [FEATURE]
+# Implementation Plan: Muti-Mind Architecture (Product Owner)
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
-
-**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
+**Branch**: `004-muti-mind-architecture` | **Date**: 2026-03-09 | **Spec**: [[specs/004-muti-mind-architecture/spec]]
 
 ## Summary
 
@@ -14,7 +11,7 @@ Muti-Mind is the Product Owner hero, responsible for maintaining the product bac
 **Language/Version**: Go 1.24+ (CLI backend), OpenCode Agents (AI runtime)
 **Primary Dependencies**: `github.com/spf13/cobra`, `github.com/charmbracelet/log`, OpenCode Runtime, `graphthulhu` MCP Server
 **Storage**: Local Markdown files with YAML frontmatter in `.muti-mind/backlog/`
-**Testing**: Go standard library `testing`, OpenCode command functional tests. **Coverage Strategy**: 80% global unit test coverage minimum, 90% unit test coverage for `internal/backlog` and `internal/artifacts` parsing logic. Integration tests required for all GitHub API interactions in `internal/sync`. Functional tests via OpenCode scenarios for agent interactions.
+**Testing**: Go standard library `testing`, OpenCode command functional tests. **Coverage Strategy**: 80% global unit test coverage minimum, 90% unit test coverage for `internal/backlog` and `internal/artifacts` parsing logic. 80% unit test coverage for `internal/sync` via interface mocking. 100% integration test coverage for Push/Pull/Sync happy paths. Functional tests via OpenCode scenarios for agent interactions.
 **Target Platform**: CLI / OpenCode runtime
 **Project Type**: CLI Tool + Agent Persona
 **Performance Goals**: Sub-second local data manipulation; graceful pagination for MCP knowledge graph queries

@@ -4,23 +4,23 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 
+	"github.com/charmbracelet/log"
 	"github.com/unbound-force/unbound-force/internal/backlog"
 )
 
-// Syncer handles bidirectional sync between local backlog and GitHub issues
-type Syncer struct {
-	repo *backlog.Repository
+// GHRunner is an interface for running GitHub CLI commands
+type GHRunner interface {
+	Run(args ...string) ([]byte, error)
 }
 
-// NewSyncer creates a new Syncer
-func NewSyncer(repo *backlog.Repository) *Syncer {
-	return &Syncer{repo: repo}
-}
+// DefaultGHRunner uses the real gh cli
+type DefaultGHRunner struct{}
 
-func runGH(args ...string) ([]byte, error) {
+func (d *DefaultGHRunner) Run(args ...string) ([]byte, error) {
 	cmd := exec.Command("gh", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -29,6 +29,22 @@ func runGH(args ...string) ([]byte, error) {
 		return nil, fmt.Errorf("gh %s failed: %w (stderr: %s)", strings.Join(args, " "), err, stderr.String())
 	}
 	return stdout.Bytes(), nil
+}
+
+// Syncer handles bidirectional sync between local backlog and GitHub issues
+type Syncer struct {
+	repo   *backlog.Repository
+	runner GHRunner
+	out    io.Writer
+}
+
+// NewSyncer creates a new Syncer
+func NewSyncer(repo *backlog.Repository, out io.Writer) *Syncer {
+	return &Syncer{
+		repo:   repo,
+		runner: &DefaultGHRunner{},
+		out:    out,
+	}
 }
 
 // Push local item to GitHub
@@ -54,7 +70,7 @@ func (s *Syncer) Push(id string) error {
 
 		if item.GitHubIssueNumber == nil {
 			// Create
-			out, err := runGH("issue", "create", "--title", fmt.Sprintf("[%s] %s", item.ID, item.Title), "--body", body)
+			out, err := s.runner.Run("issue", "create", "--title", fmt.Sprintf("[%s] %s", item.ID, item.Title), "--body", body)
 			if err != nil {
 				return err
 			}
@@ -70,16 +86,18 @@ func (s *Syncer) Push(id string) error {
 					if err := s.repo.Save(item); err != nil {
 						return err
 					}
-					fmt.Printf("Created GitHub Issue #%d for %s\n", num, item.ID)
+					log.Info("Created GitHub Issue", "issue", num, "id", item.ID)
+					fmt.Fprintf(s.out, "Created GitHub Issue #%d for %s\n", num, item.ID)
 				}
 			}
 		} else {
 			// Update
-			_, err := runGH("issue", "edit", fmt.Sprintf("%d", *item.GitHubIssueNumber), "--title", fmt.Sprintf("[%s] %s", item.ID, item.Title), "--body", body)
+			_, err := s.runner.Run("issue", "edit", fmt.Sprintf("%d", *item.GitHubIssueNumber), "--title", fmt.Sprintf("[%s] %s", item.ID, item.Title), "--body", body)
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Updated GitHub Issue #%d for %s\n", *item.GitHubIssueNumber, item.ID)
+			log.Info("Updated GitHub Issue", "issue", *item.GitHubIssueNumber, "id", item.ID)
+			fmt.Fprintf(s.out, "Updated GitHub Issue #%d for %s\n", *item.GitHubIssueNumber, item.ID)
 		}
 	}
 
@@ -88,11 +106,7 @@ func (s *Syncer) Push(id string) error {
 
 // Pull from GitHub
 func (s *Syncer) Pull() error {
-	// A naive implementation to pull recent issues and try to map them back
-	// or create new local backlog items.
-
-	// Example: get recent issues as JSON
-	out, err := runGH("issue", "list", "--json", "number,title,body,state,updatedAt")
+	out, err := s.runner.Run("issue", "list", "--json", "number,title,body,state,updatedAt")
 	if err != nil {
 		return err
 	}
@@ -124,8 +138,7 @@ func (s *Syncer) Pull() error {
 	for _, issue := range issues {
 		item, exists := itemByIssue[issue.Number]
 		if exists {
-			// Naive update (assume remote won)
-			// In a real implementation we'd check hashes or updated_at
+			// Simple naive implementation
 			item.Title = strings.TrimPrefix(issue.Title, fmt.Sprintf("[%s] ", item.ID))
 
 			statusMap := map[string]string{"OPEN": "ready", "CLOSED": "done"}
@@ -136,9 +149,29 @@ func (s *Syncer) Pull() error {
 			if err := s.repo.Save(item); err != nil {
 				return err
 			}
-			fmt.Printf("Pulled updates for %s from Issue #%d\n", item.ID, issue.Number)
+			log.Info("Pulled updates", "issue", issue.Number, "id", item.ID)
+			fmt.Fprintf(s.out, "Pulled updates for %s from Issue #%d\n", item.ID, issue.Number)
 		} else {
-			fmt.Printf("Skipping unmapped Issue #%d: %s\n", issue.Number, issue.Title)
+			// Create new local item
+			id, err := s.repo.NextID()
+			if err != nil {
+				return err
+			}
+			num := issue.Number
+			newItem := &backlog.Item{
+				ID:                id,
+				Title:             issue.Title,
+				Type:              "story", // default
+				Priority:          "P3",    // default
+				Status:            "ready",
+				Body:              issue.Body,
+				GitHubIssueNumber: &num,
+			}
+			if err := s.repo.Save(newItem); err != nil {
+				return err
+			}
+			log.Info("Imported unmapped issue", "issue", num, "id", id)
+			fmt.Fprintf(s.out, "Imported unmapped Issue #%d as %s\n", num, id)
 		}
 	}
 
@@ -152,8 +185,8 @@ func (s *Syncer) Status() error {
 		return err
 	}
 
-	fmt.Printf("%-10s %-15s %s\n", "ID", "SYNC STATUS", "GITHUB ISSUE")
-	fmt.Println("--------------------------------------------------")
+	fmt.Fprintf(s.out, "%-10s %-15s %s\n", "ID", "SYNC STATUS", "GITHUB ISSUE")
+	fmt.Fprintln(s.out, "--------------------------------------------------")
 
 	for _, item := range items {
 		status := "un-synced"
@@ -162,7 +195,7 @@ func (s *Syncer) Status() error {
 			status = "synced" // naive
 			issue = fmt.Sprintf("#%d", *item.GitHubIssueNumber)
 		}
-		fmt.Printf("%-10s %-15s %s\n", item.ID, status, issue)
+		fmt.Fprintf(s.out, "%-10s %-15s %s\n", item.ID, status, issue)
 	}
 
 	return nil
@@ -170,11 +203,11 @@ func (s *Syncer) Status() error {
 
 // Sync is bidirectional wrapper
 func (s *Syncer) Sync() error {
-	fmt.Println("Pulling updates from GitHub...")
+	fmt.Fprintln(s.out, "Pulling updates from GitHub...")
 	if err := s.Pull(); err != nil {
 		return err
 	}
-	fmt.Println("Pushing updates to GitHub...")
+	fmt.Fprintln(s.out, "Pushing updates to GitHub...")
 	if err := s.Push(""); err != nil {
 		return err
 	}
@@ -183,6 +216,6 @@ func (s *Syncer) Sync() error {
 
 // SyncProject wrapper (stub)
 func (s *Syncer) SyncProject() error {
-	fmt.Println("GitHub Project sync not fully implemented yet.")
+	fmt.Fprintln(s.out, "GitHub Project sync not fully implemented yet.")
 	return nil
 }

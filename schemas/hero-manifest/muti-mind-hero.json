@@ -3,9 +3,9 @@
   "display_name": "Muti-Mind",
   "role": "product-owner",
   "version": "1.0.0",
-  "description": "Product Owner hero acting as Vision Keeper and Prioritization Engine",
+  "description": "Product Owner hero acting as Vision Keeper and Prioritization Engine (requires graphthulhu MCP server)",
   "repository": "https://github.com/unbound-force/muti-mind",
-  "parent_constitution_version": "1.0.0",
+  "parent_constitution_version": "1.1.0",
   "artifacts_produced": [
     {
       "type_id": "acceptance-decision",
@@ -88,12 +88,5 @@
       "description": "Invoke Muti-Mind AI persona to generate user stories"
     }
   ],
-  "dependencies": [
-    {
-      "type": "mcp_server",
-      "name": "graphthulhu",
-      "description": "Required for querying the knowledge graph of backlog items",
-      "required": true
-    }
-  ]
+  "dependencies": []
 }

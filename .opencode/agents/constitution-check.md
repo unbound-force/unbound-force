@@ -41,7 +41,7 @@ If either file cannot be found, report the error and stop.
 
 ## Analysis Procedure
 
-For each of the three org principles (I, II, III):
+For each of the four org principles (I, II, III, IV):
 
 1. Read the org principle's name, description, and all MUST/SHOULD
    rules.
@@ -93,11 +93,11 @@ Produce your report using exactly this structure:
 **Rationale**: [2-3 sentence explanation of why this status was
   assigned, citing specific MUST rules from both constitutions]
 
-[Repeat for each of the three org principles]
+[Repeat for each of the four org principles]
 
 ## Summary
 
-- Principles checked: [count, always 3]
+- Principles checked: [count, always 4]
 - Aligned: [count]
 - Gaps: [count]
 - Contradictions: [count]
@@ -106,7 +106,7 @@ Produce your report using exactly this structure:
 
 ## Decision Criteria
 
-- **Overall Status = ALIGNED**: All three findings are ALIGNED or
+- **Overall Status = ALIGNED**: All four findings are ALIGNED or
   GAP (no CONTRADICTION), AND parent_constitution reference is
   PRESENT.
 - **Overall Status = NON-ALIGNED**: Any finding is CONTRADICTION,
