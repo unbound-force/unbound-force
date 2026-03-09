@@ -1,0 +1,51 @@
+version: 2
+
+builds:
+  - main: ./cmd/unbound
+    binary: unbound
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Tag}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.CommitDate}}
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: >-
+      unbound_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+    - title: Documentation
+      regexp: '^.*?docs(\([[:word:]]+\))??!?:.+$'
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - '^chore:'
+
+homebrew_casks:
+  - name: unbound
+    directory: Casks
+    repository:
+      owner: unbound-force
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
