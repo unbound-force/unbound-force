@@ -67,7 +67,10 @@ unbound-force/
 │   └── config.yaml                  # Project-specific configuration
 ├── .opencode/
 │   ├── agents/
-│   │   └── constitution-check.md    # Alignment checking agent (subagent)
+│   │   ├── constitution-check.md    # Alignment checking agent (subagent)
+│   │   ├── reviewer-guard.md        # The Guard: intent drift detection
+│   │   ├── reviewer-architect.md    # The Architect: structural review
+│   │   └── reviewer-adversary.md    # The Adversary: resilience audit
 │   └── command/                     # Speckit pipeline commands + utilities
 │       ├── speckit.constitution.md
 │       ├── speckit.specify.md

@@ -116,8 +116,11 @@ var expectedAssetPaths = []string{
 	"opencode/command/speckit.specify.md",
 	"opencode/command/speckit.tasks.md",
 	"opencode/command/speckit.taskstoissues.md",
-	// OpenCode agents (1)
+	// OpenCode agents (4)
 	"opencode/agents/constitution-check.md",
+	"opencode/agents/reviewer-adversary.md",
+	"opencode/agents/reviewer-architect.md",
+	"opencode/agents/reviewer-guard.md",
 	// OpenSpec schema (5)
 	"openspec/schemas/unbound-force/schema.yaml",
 	"openspec/schemas/unbound-force/templates/proposal.md",
