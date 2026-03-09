@@ -23,6 +23,7 @@ depends_on:
 - Q: How is the exact ordering/ranking of the backlog maintained? Does the index file store it? → A: GitHub is the source of truth for the backlog and its ordering. Users will manage rank in the GitHub web UI.
 - Q: What is the format of the local synchronized representation? → A: Local MD files. The local backlog acts as a contextual cache for augmented interactions and swarm execution. These files MUST be indexed by graphthulhu, so the cache location should be within its watched directories.
 - Q: How is the synchronization triggered? Does the user have to manually invoke the CLI? → A: Sync is handled via OpenCode commands. Any CLI built is strictly to support the OpenCode agents and the Swarm. The primary user interface is entirely within OpenCode (via commands, agents, or MCP servers).
+- Q: How does Muti-Mind receive or discover the Gaze quality report to initiate the acceptance review? → A: Through the review council command (`/review-council`), which orchestrates the handover of testing outcomes to the Product Owner for final acceptance.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -108,7 +109,7 @@ Muti-Mind integrates with the speckit pipeline to drive the specification and ac
 
 1. **Given** a backlog item tagged for implementation, **When** Muti-Mind initiates the speckit pipeline, **Then** it invokes `/specify` with the backlog item's description, acceptance criteria, and priority as input context.
 2. **Given** a completed spec, **When** Muti-Mind runs `/clarify`, **Then** it asks clarification questions grounded in the product vision and backlog priorities (not just technical ambiguity).
-3. **Given** a Gaze quality report for a completed feature, **When** Muti-Mind reviews it, **Then** it produces an acceptance decision (accept/reject/conditionally accept) based on whether the acceptance criteria from the originating backlog item are satisfied.
+3. **Given** a Gaze quality report surfaced via the `/review-council` command for a completed feature, **When** Muti-Mind reviews it, **Then** it produces an acceptance decision (accept/reject/conditionally accept) based on whether the acceptance criteria from the originating backlog item are satisfied.
 4. **Given** an accepted feature, **When** Muti-Mind updates the backlog, **Then** the backlog item is marked as "Done" and the acceptance report is linked to the item.
 5. **Given** a rejected feature, **When** Muti-Mind produces a rejection report, **Then** it specifies which acceptance criteria were not met, with references to the Gaze report findings.
 
@@ -156,7 +157,7 @@ Muti-Mind generates user stories from high-level product goals or feature descri
 - **FR-008a**: GitHub Issues/Projects MUST be treated as the ultimate source of truth for the backlog and its manual ordering. The local `.muti-mind/backlog/` is a synchronized reflection of the remote state.
 - **FR-009**: GitHub sync MUST map backlog attributes to GitHub primitives: type -> labels, priority -> labels, sprint -> milestones, status -> project board columns.
 - **FR-010**: Muti-Mind MUST integrate with the speckit pipeline: it MUST be able to invoke `/specify` and `/clarify` with backlog item context.
-- **FR-011**: Muti-Mind MUST serve as the acceptance authority: given a Gaze quality report and the originating backlog item's acceptance criteria, it MUST produce an accept/reject/conditional decision.
+- **FR-011**: Muti-Mind MUST serve as the acceptance authority: when invoked by the `/review-council` command with a Gaze quality report and the originating backlog item's acceptance criteria, it MUST produce an accept/reject/conditional decision.
 - **FR-012**: The acceptance decision MUST be machine-parseable (JSON artifact conforming to the inter-hero artifact envelope from Spec 002).
 - **FR-013**: Muti-Mind MUST generate user stories from high-level goals, producing output in the speckit user story format.
 - **FR-014**: Generated stories MUST be proposals requiring explicit user approval before addition to the backlog.
