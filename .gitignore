@@ -16,5 +16,6 @@ Thumbs.db
 *.test
 *.out
 /unbound
+/mutimind
 vendor/
 bin/

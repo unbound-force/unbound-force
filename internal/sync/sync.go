@@ -47,6 +47,12 @@ func NewSyncer(repo *backlog.Repository, out io.Writer) *Syncer {
 	}
 }
 
+// SetRunner replaces the GHRunner used by this Syncer.
+// Intended for use in tests to inject a stub runner.
+func (s *Syncer) SetRunner(r GHRunner) {
+	s.runner = r
+}
+
 // Push local item to GitHub
 func (s *Syncer) Push(id string) error {
 	var items []*backlog.Item

@@ -108,6 +108,38 @@ func TestRunInit_ForceFlag(t *testing.T) {
 	}
 }
 
+func TestInitCmd_Execute_CreatesFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	// Build a root command and point it at the temp dir by overriding os.Getwd
+	// is not possible without subprocess; instead we exercise newInitCmd via
+	// a hand-rolled root that wires --target-dir. Since newInitCmd uses
+	// os.Getwd() internally, we change the working directory for this test.
+	original, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(original) })
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init command error: %v", err)
+	}
+
+	// Verify at least one scaffolded file exists
+	specTemplate := filepath.Join(dir, ".specify", "templates", "spec-template.md")
+	if _, err := os.Stat(specTemplate); os.IsNotExist(err) {
+		t.Error("expected spec-template.md to be scaffolded by init command")
+	}
+}
+
 func TestVersionCmd_Output(t *testing.T) {
 	cmd := newVersionCmd()
 	var buf bytes.Buffer

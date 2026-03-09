@@ -18,11 +18,28 @@ type AppParams struct {
 	BacklogDir   string
 	ArtifactsDir string
 	OutputFormat string
+	GHRunner     sync.GHRunner
+}
+
+// newSyncerFromParams creates a Syncer, injecting the GHRunner from params
+// when provided (for tests), otherwise using the default gh CLI runner.
+func newSyncerFromParams(p *AppParams, repo *backlog.Repository, out io.Writer) *sync.Syncer {
+	s := sync.NewSyncer(repo, out)
+	if p.GHRunner != nil {
+		s.SetRunner(p.GHRunner)
+	}
+	return s
 }
 
 func newRootCmd() *cobra.Command {
-	var params AppParams
+	return newRootCmdWithParams(&AppParams{})
+}
 
+// newRootCmdWithParams builds the root command using a caller-supplied AppParams.
+// Fields already set on params are preserved; flag bindings fill in the rest at
+// parse time. This allows tests to inject stubs (e.g. GHRunner) without
+// spawning a real process.
+func newRootCmdWithParams(params *AppParams) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "mutimind",
 		Short: "Muti-Mind CLI for backlog management",
@@ -32,18 +49,18 @@ func newRootCmd() *cobra.Command {
 	rootCmd.PersistentFlags().StringVar(&params.BacklogDir, "backlog-dir", ".muti-mind/backlog", "Backlog directory")
 	rootCmd.PersistentFlags().StringVar(&params.ArtifactsDir, "artifacts-dir", ".muti-mind/artifacts", "Artifacts directory")
 
-	rootCmd.AddCommand(newInitCmd(&params))
-	rootCmd.AddCommand(newAddCmd(&params))
-	rootCmd.AddCommand(newListCmd(&params))
-	rootCmd.AddCommand(newUpdateCmd(&params))
-	rootCmd.AddCommand(newShowCmd(&params))
-	rootCmd.AddCommand(newSyncPushCmd(&params))
-	rootCmd.AddCommand(newSyncPullCmd(&params))
-	rootCmd.AddCommand(newSyncStatusCmd(&params))
-	rootCmd.AddCommand(newSyncCmd(&params))
-	rootCmd.AddCommand(newSyncProjectCmd(&params))
-	rootCmd.AddCommand(newGenerateArtifactCmd(&params))
-	rootCmd.AddCommand(newDecideCmd(&params))
+	rootCmd.AddCommand(newInitCmd(params))
+	rootCmd.AddCommand(newAddCmd(params))
+	rootCmd.AddCommand(newListCmd(params))
+	rootCmd.AddCommand(newUpdateCmd(params))
+	rootCmd.AddCommand(newShowCmd(params))
+	rootCmd.AddCommand(newSyncPushCmd(params))
+	rootCmd.AddCommand(newSyncPullCmd(params))
+	rootCmd.AddCommand(newSyncStatusCmd(params))
+	rootCmd.AddCommand(newSyncCmd(params))
+	rootCmd.AddCommand(newSyncProjectCmd(params))
+	rootCmd.AddCommand(newGenerateArtifactCmd(params))
+	rootCmd.AddCommand(newDecideCmd(params))
 
 	return rootCmd
 }
@@ -255,7 +272,7 @@ func newSyncPushCmd(p *AppParams) *cobra.Command {
 				id = args[0]
 			}
 			repo := backlog.NewRepository(p.BacklogDir)
-			syncer := sync.NewSyncer(repo, cmd.OutOrStdout())
+			syncer := newSyncerFromParams(p, repo, cmd.OutOrStdout())
 			return syncer.Push(id)
 		},
 	}
@@ -267,7 +284,7 @@ func newSyncPullCmd(p *AppParams) *cobra.Command {
 		Short: "Pull GitHub Issues into the local backlog",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repo := backlog.NewRepository(p.BacklogDir)
-			syncer := sync.NewSyncer(repo, cmd.OutOrStdout())
+			syncer := newSyncerFromParams(p, repo, cmd.OutOrStdout())
 			return syncer.Pull()
 		},
 	}
@@ -279,7 +296,7 @@ func newSyncStatusCmd(p *AppParams) *cobra.Command {
 		Short: "Report on the synchronization state",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repo := backlog.NewRepository(p.BacklogDir)
-			syncer := sync.NewSyncer(repo, cmd.OutOrStdout())
+			syncer := newSyncerFromParams(p, repo, cmd.OutOrStdout())
 			return syncer.Status()
 		},
 	}
@@ -291,7 +308,7 @@ func newSyncCmd(p *AppParams) *cobra.Command {
 		Short: "Bidirectional sync including conflict detection",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repo := backlog.NewRepository(p.BacklogDir)
-			syncer := sync.NewSyncer(repo, cmd.OutOrStdout())
+			syncer := newSyncerFromParams(p, repo, cmd.OutOrStdout())
 			return syncer.Sync()
 		},
 	}
@@ -303,7 +320,7 @@ func newSyncProjectCmd(p *AppParams) *cobra.Command {
 		Short: "Sync GitHub Projects",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repo := backlog.NewRepository(p.BacklogDir)
-			syncer := sync.NewSyncer(repo, cmd.OutOrStdout())
+			syncer := newSyncerFromParams(p, repo, cmd.OutOrStdout())
 			return syncer.SyncProject()
 		},
 	}
