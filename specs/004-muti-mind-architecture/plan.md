@@ -20,7 +20,10 @@ Design the architecture for Muti-Mind, the Product Owner hero. Muti-Mind acts as
 **Language/Version**: Go 1.24+ (for tooling/MCP if any, though primarily OpenCode agents/commands)
 **Primary Dependencies**: OpenCode runtime, GitHub CLI (`gh`) or GitHub API
 **Storage**: Local Markdown files (YAML frontmatter) in `.muti-mind/backlog/` indexed by graphthulhu
-**Testing**: Go standard library `testing` (if Go code), OpenCode simulation testing
+**Testing**:
+- **Strategy**: Unit testing for Go parsing logic, Integration testing for CLI commands using simulated OpenCode environments, E2E testing for full Swarm orchestration flows.
+- **Coverage Target**: >80% line coverage for all Go packages; >90% for core backlog MD parsing logic (`internal/backlog`). Coverage ratchets MUST be enforced via CI.
+- **Dependencies**: OpenCode simulation testing framework.
 **Target Platform**: OpenCode runtime environment (Swarm)
 **Project Type**: AI Agent Persona / OpenCode Commands / MCP Server
 **Performance Goals**: Fast local file operations, transparent LLM delegation, non-blocking GitHub sync
@@ -36,7 +39,7 @@ Design the architecture for Muti-Mind, the Product Owner hero. Muti-Mind acts as
 - **I. Autonomous Collaboration**: PASS - Muti-Mind collaborates via well-defined artifacts (`backlog-item`, `acceptance-decision`) and integrates via OpenCode commands rather than tight coupling.
 - **II. Composability First**: PASS - Muti-Mind can be deployed independently for backlog management without requiring other heroes (though value increases with Gaze/Divisor).
 - **III. Observable Quality**: PASS - Produces machine-parseable JSON artifacts (acceptance decisions) alongside human-readable markdown files.
-- **IV. Testability**: PASS - Functional requirements define clear inputs (Gaze reports, user prompts) and observable outputs (acceptance decisions, updated MD files).
+- **IV. Testability**: PASS - Coverage strategy defined with clear unit/integration/E2E boundaries and explicit line coverage targets (>80% overall, >90% parsing). CI coverage ratchets mandated.
 
 ## Project Structure
 
@@ -82,7 +85,7 @@ cmd/mutimind/                # (Optional) Go binary if complex logic requires MC
 └── main.go
 ```
 
-**Structure Decision**: Muti-Mind is primarily an OpenCode-native application. The core logic resides in `.opencode/agents/` and `.opencode/command/`. Data is stored in `.muti-mind/backlog/` as Markdown files to ensure graphthulhu indexing. If GitHub sync or complex operations exceed bash scripting limits within OpenCode commands, a Go binary under `cmd/mutimind/` may be introduced as a backend/MCP server.
+**Structure Decision**: Muti-Mind uses a hybrid architecture. To ensure robust handling of YAML frontmatter, markdown parsing, and complex bidirectional GitHub synchronization (conflict resolution), the core data logic is built as a Go CLI binary (`cmd/mutimind/`). The OpenCode commands (`.opencode/command/`) act exclusively as lightweight shells/wrappers that invoke the compiled Go binary. AI-driven generative features live natively within the OpenCode agents.
 
 ## Complexity Tracking
 

@@ -4,9 +4,10 @@
 **Goal**: Initialize the project structure and shared infrastructure.
 
 - [ ] T001 Create `.muti-mind/` and `.muti-mind/backlog/` directory structure
+- [ ] T001a Create hero manifest `schemas/hero-manifest/muti-mind-hero.json` defining the PO role, produced artifacts, and commands (FR-018)
 - [ ] T002 Create initial `.muti-mind/config.yaml` with default settings
-- [ ] T003 Create `cmd/mutimind/main.go` entrypoint (if backend CLI is needed)
-- [ ] T004 Create `internal/backlog` package for MD file parsing and serialization
+- [ ] T003 Create `cmd/mutimind/main.go` entrypoint as the backend CLI for data logic
+- [ ] T004 Create `internal/backlog` package for MD file parsing, writing, and synchronization logic
 
 ## Phase 2: User Story 1 - AI Persona and Decision Framework (P1)
 **Goal**: Establish the Muti-Mind AI persona and decision-making framework.
@@ -38,7 +39,8 @@
 - [ ] T013 [P] [US4] Implement `/muti-mind.sync-push` command (local -> GitHub)
 - [ ] T014 [P] [US4] Implement `/muti-mind.sync-pull` command (GitHub -> local)
 - [ ] T015 [P] [US4] Implement `/muti-mind.sync-status` command to report sync state
-- [ ] T016 [US4] Implement `/muti-mind.sync` (bidirectional) and `/muti-mind.sync-project` commands
+- [ ] T016 [US4] Implement `/muti-mind.sync` (bidirectional) including interactive conflict detection and resolution prompts
+- [ ] T016a [US4] Implement `/muti-mind.sync-project` command
 
 ## Phase 6: User Story 5 - Speckit Integration and Acceptance Authority (P3)
 **Goal**: Drive speckit pipeline and act as acceptance authority on Gaze reports.
@@ -47,6 +49,7 @@
 - [ ] T017 [US5] Update `muti-mind-po.md` agent to handle speckit `/specify` and `/clarify` invocation workflows
 - [ ] T018 [US5] Implement acceptance logic in `muti-mind-po.md` to evaluate Gaze reports against backlog item acceptance criteria
 - [ ] T019 [US5] Implement generation of the `acceptance-decision` JSON artifact
+- [ ] T019a [US5] Implement automated generation of the `backlog-item` JSON artifact representation (FR-015)
 
 ## Phase 7: User Story 6 - User Story Generation (P3)
 **Goal**: Generate structured user stories from high-level goals.
@@ -54,10 +57,12 @@
 
 - [ ] T020 [US6] Implement `/muti-mind.generate-stories` command
 - [ ] T021 [US6] Update `muti-mind-po.md` agent to support the story generation prompt and output format
+- [ ] T021a [US6] Implement interactive approval workflow to confirm generated story proposals before adding them to the backlog (FR-014)
 
 ## Final Phase: Polish & Cross-Cutting Concerns
 **Goal**: Ensure quality, formatting, documentation, and compliance.
 
 - [ ] T022 Ensure all commands support `--format json` and `--format text` (FR-017)
 - [ ] T023 Validate all outputs against Hero Interface Contract artifact envelopes
-- [ ] T024 Write integration tests verifying swarm orchestration flows
+- [ ] T024 Write integration tests verifying OpenCode shell delegation to Go binary
+- [ ] T025 Setup CI coverage ratchets (80% global, 90% internal/backlog) to enforce Principle IV testability

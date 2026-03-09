@@ -147,8 +147,7 @@ Muti-Mind generates user stories from high-level product goals or feature descri
 
 - **FR-001**: Muti-Mind MUST provide an AI agent persona with a documented decision-making framework, communication style, and behavioral constraints.
 - **FR-002**: The agent persona MUST be deployable as an OpenCode agent file (`muti-mind-po.md`) installable via `muti-mind init`.
-- **FR-003**: Muti-Mind MUST expose its functionality entirely through OpenCode interfaces (Commands, Agents, Skills, or MCP Servers). Any underlying CLI tool exists strictly to support the OpenCode runtime and swarm execution, not as the primary user interface.
-- **FR-003a**: AI-driven features (prioritization, story generation) MUST be implemented as OpenCode commands (`/muti-mind.prioritize`, `/muti-mind.generate-stories`) or agents, delegating LLM execution to the OpenCode runtime rather than the CLI.
+- **FR-003**: Muti-Mind MUST expose its functionality entirely through OpenCode interfaces (Commands, Agents, Skills, or MCP Servers). AI-driven features MUST delegate LLM execution to the OpenCode runtime.
 - **FR-004**: Backlog items MUST be stored as individual files in `.muti-mind/backlog/` in a human-readable format (YAML front matter + Markdown body). This location MUST be indexed by graphthulhu to support swarm execution and context retrieval.
 - **FR-005**: Each backlog item MUST have a unique identifier (BI-NNN), type (epic/story/task/bug), priority (P1-P5), status (draft/ready/in-progress/review/done/cancelled), and timestamps (created, modified).
 - **FR-006**: The priority scoring engine MUST evaluate items across at least five dimensions: business value, risk, dependencies, urgency, and effort.
@@ -158,11 +157,10 @@ Muti-Mind generates user stories from high-level product goals or feature descri
 - **FR-009**: GitHub sync MUST map backlog attributes to GitHub primitives: type -> labels, priority -> labels, sprint -> milestones, status -> project board columns.
 - **FR-010**: Muti-Mind MUST integrate with the speckit pipeline: it MUST be able to invoke `/specify` and `/clarify` with backlog item context.
 - **FR-011**: Muti-Mind MUST serve as the acceptance authority: when invoked by the `/review-council` command with a Gaze quality report and the originating backlog item's acceptance criteria, it MUST produce an accept/reject/conditional decision.
-- **FR-012**: The acceptance decision MUST be machine-parseable (JSON artifact conforming to the inter-hero artifact envelope from Spec 002).
 - **FR-013**: Muti-Mind MUST generate user stories from high-level goals, producing output in the speckit user story format.
 - **FR-014**: Generated stories MUST be proposals requiring explicit user approval before addition to the backlog.
 - **FR-015**: Muti-Mind MUST produce a `backlog-item` artifact type (per Spec 002) for consumption by other heroes (Mx F for metrics, The Divisor for intent verification).
-- **FR-016**: Muti-Mind MUST produce an `acceptance-decision` artifact type for consumption by other heroes.
+- **FR-016**: Muti-Mind MUST produce an `acceptance-decision` artifact type for consumption by other heroes. This decision MUST be a machine-parseable JSON artifact conforming to the inter-hero artifact envelope from Spec 002.
 - **FR-017**: The CLI MUST support `--format json` and `--format text` for all output commands (per Org Constitution Principle III).
 - **FR-018**: Muti-Mind MUST conform to the Hero Interface Contract (Spec 002): standard repo structure, hero manifest, speckit integration, OpenCode agent/command standards.
 
