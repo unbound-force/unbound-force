@@ -1,5 +1,5 @@
 ---
-description: Run the four-reviewer governance council to audit codebase or spec compliance.
+description: Run the five-reviewer governance council to audit codebase or spec compliance.
 ---
 <!-- scaffolded by gaze v1.2.7 -->
 
@@ -13,7 +13,7 @@ $ARGUMENTS
 
 ## Description
 
-Review the current codebase **or** SpecKit artifacts for compliance with the Behavioral Constraints in `AGENTS.md` using the review council (The Adversary, The Architect, The Guard, The Tester).
+Review the current codebase **or** SpecKit artifacts for compliance with the Behavioral Constraints in `AGENTS.md` using the review council (The Adversary, The Architect, The Guard, The Tester, The Operator).
 
 ## Determine Review Mode
 
@@ -30,17 +30,18 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
 
 ### Instructions
 
-1. Delegate the review to all four council agents in parallel using the Task tool:
+1. Delegate the review to all five council agents in parallel using the Task tool:
    - `reviewer-adversary` — audits for security, resilience, efficiency, and constraint violations
    - `reviewer-architect` — audits for architectural alignment, coding conventions, and plan adherence
    - `reviewer-guard` — audits for intent drift, neighborhood impact, and zero-waste compliance
    - `reviewer-testing` — audits for test architecture, coverage strategy, assertion quality, and testing convention compliance
+   - `reviewer-sre` — audits for deployment readiness, release pipeline integrity, dependency health, operational observability, and upgrade paths
 
    For each agent, instruct it to review the current changes and return its verdict (**APPROVE** or **REQUEST CHANGES**) along with all findings.
 
-2. Collect all **REQUEST CHANGES** findings from the four reviewers. If all four return **APPROVE**, report the result and stop.
+2. Collect all **REQUEST CHANGES** findings from the five reviewers. If all five return **APPROVE**, report the result and stop.
 
-3. If there are **REQUEST CHANGES**, address the findings by making the necessary code fixes. Then re-run all four reviewers to verify the fixes. Repeat this loop until all four return **APPROVE** or the process has exceeded 3 iterations.
+3. If there are **REQUEST CHANGES**, address the findings by making the necessary code fixes. Then re-run all five reviewers to verify the fixes. Repeat this loop until all five return **APPROVE** or the process has exceeded 3 iterations.
 
 4. If 3 iterations are exceeded, ask the user whether to continue or stop.
 
@@ -58,15 +59,16 @@ Review all SpecKit artifacts under `specs/` for quality, consistency, and alignm
 
 ### Instructions
 
-1. Delegate the review to all four council agents in parallel using the Task tool:
+1. Delegate the review to all five council agents in parallel using the Task tool:
    - `reviewer-adversary` — audits specs for completeness, testability, ambiguity, security gaps, dependency risks, and cross-spec consistency
    - `reviewer-architect` — audits specs for structural consistency, plan-to-spec alignment, task coverage, data model coherence, tech stack feasibility, and research quality
    - `reviewer-guard` — audits specs for intent fidelity, scope creep, inter-feature conflicts, status accuracy, user value, and constitution alignment
    - `reviewer-testing` — audits specs for testability of requirements, coverage strategy definition, fixture feasibility, and contract surface clarity
+   - `reviewer-sre` — audits specs for deployment feasibility, operational requirements, configuration management, dependency risks, maintenance burden, and cross-hero operational impact
 
    For each agent, instruct it to **operate in Spec Review Mode**: review all SpecKit artifacts under `specs/` (not code), plus `.specify/memory/constitution.md` and `AGENTS.md`. Instruct the agent to return its verdict (**APPROVE** or **REQUEST CHANGES**) along with all findings.
 
-2. Collect all **REQUEST CHANGES** findings from the four reviewers. If all four return **APPROVE**, report the result and stop.
+2. Collect all **REQUEST CHANGES** findings from the five reviewers. If all five return **APPROVE**, report the result and stop.
 
 3. If there are **REQUEST CHANGES**, apply the **hybrid fix policy**:
 
@@ -86,7 +88,7 @@ Review all SpecKit artifacts under `specs/` for quality, consistency, and alignm
    - Constitution violations
    - Ambiguous requirements that require human judgment to resolve
 
-4. After applying LOW/MEDIUM fixes, re-run all four reviewers to verify. Repeat this loop until all four return **APPROVE** (considering only remaining HIGH/CRITICAL findings as blocking) or the process has exceeded 3 iterations.
+4. After applying LOW/MEDIUM fixes, re-run all five reviewers to verify. Repeat this loop until all five return **APPROVE** (considering only remaining HIGH/CRITICAL findings as blocking) or the process has exceeded 3 iterations.
 
 5. If 3 iterations are exceeded, ask the user whether to continue or stop.
 
@@ -102,6 +104,6 @@ Review all SpecKit artifacts under `specs/` for quality, consistency, and alignm
 
 ## Verdict
 
-The council returns **APPROVE** only when all four reviewers return **APPROVE**. Any single **REQUEST CHANGES** means the council verdict is **REQUEST CHANGES**.
+The council returns **APPROVE** only when all five reviewers return **APPROVE**. Any single **REQUEST CHANGES** means the council verdict is **REQUEST CHANGES**.
 
 In Spec Review Mode, the council may return **APPROVE WITH ADVISORIES** when all LOW/MEDIUM findings have been auto-fixed but HIGH/CRITICAL findings remain that require human judgment. The advisories are the outstanding HIGH/CRITICAL findings.
