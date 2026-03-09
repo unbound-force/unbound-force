@@ -355,6 +355,42 @@ outcome is code review rejection per this documented
 convention. The reviewer SHOULD point the author to this
 section and recommend the correct directory.
 
+## Architecture
+
+Single binary CLI with layered internal packages:
+
+```text
+cmd/unbound/           CLI layer (Cobra commands, flag handling)
+internal/
+  scaffold/            Core scaffold engine (embed.FS, file ownership, version markers)
+```
+
+All business logic lives under `internal/` and MUST NOT be imported externally by other repositories.
+
+### Key Patterns
+
+- **Scaffold pattern (Gaze-derived)**: Configurable behavior uses `Options`/`Result` structs, a core `Run()` function, file ownership classification (`isToolOwned`), and version markers (`insertMarkerAfterFrontmatter`).
+- **Testable CLI pattern**: Commands delegate to `runXxx(params)` functions. Params structs include `io.Writer` for stdout/stderr, enabling unit testing without subprocess execution or `os.Stdout` mocking.
+
+## Coding Conventions
+
+- **Formatting**: `gofmt` and `goimports` (enforced by golangci-lint).
+- **Naming**: Standard Go conventions. PascalCase for exported, camelCase for unexported.
+- **Comments**: GoDoc-style comments on all exported functions and types.
+- **Error handling**: Return `error` values. Wrap with `fmt.Errorf("context: %w", err)`.
+- **Import grouping**: Standard library, then third-party, then internal packages (separated by blank lines).
+- **No global state**: Prefer functional style and dependency injection.
+- **Logging**: Use `github.com/charmbracelet/log` for all application logging. Avoid standard library `log` or `fmt.Println` for operational logs.
+- **CLI Framework**: Use `github.com/spf13/cobra` for command routing and flag parsing.
+
+## Testing Conventions
+
+- **Framework**: Standard library `testing` package only. No testify, gomega, or other external assertion libraries.
+- **Assertions**: Use `t.Errorf` / `t.Fatalf` directly. No assertion helpers from third-party packages.
+- **Test naming**: `TestXxx_Description` (e.g., `TestRun_CreatesFiles`, `TestIsToolOwned_ToolFiles`).
+- **Test isolation**: Use `t.TempDir()` for all filesystem tests. No shared mutable state between tests.
+- **Drift detection**: Tests MUST exist to ensure embedded assets (`internal/scaffold/assets`) perfectly match their canonical sources.
+
 ## Build & Test Commands
 
 ```bash
