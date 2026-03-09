@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -34,7 +35,7 @@ type initParams struct {
 	targetDir string
 	force     bool
 	version   string
-	stdout    *os.File
+	stdout    io.Writer
 }
 
 func runInit(p initParams) error {
@@ -84,7 +85,7 @@ Use --force to overwrite all files regardless of ownership.`,
 				targetDir: cwd,
 				force:     force,
 				version:   version,
-				stdout:    os.Stdout,
+				stdout:    cmd.OutOrStdout(),
 			})
 		},
 	}

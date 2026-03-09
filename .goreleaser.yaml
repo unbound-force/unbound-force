@@ -8,6 +8,7 @@ builds:
     goos:
       - darwin
       - linux
+      - windows
     goarch:
       - amd64
       - arm64
@@ -20,6 +21,10 @@ builds:
 archives:
   - formats:
       - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
     name_template: >-
       unbound_{{ .Version }}_{{ .Os }}_{{ .Arch }}
 
@@ -44,6 +49,8 @@ changelog:
 
 homebrew_casks:
   - name: unbound
+    description: "Unbound Force specification framework toolkit"
+    homepage: "https://github.com/unbound-force/unbound-force"
     directory: Casks
     repository:
       owner: unbound-force

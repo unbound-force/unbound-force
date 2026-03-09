@@ -11,6 +11,15 @@ import (
 	"strings"
 )
 
+// markerFileExtensions defines which file types receive version markers.
+// Files with extensions not in this set are written without markers.
+var markerFileExtensions = map[string]bool{
+	".md":   true,
+	".yaml": true,
+	".yml":  true,
+	".sh":   true,
+}
+
 //go:embed assets
 var assets embed.FS
 
@@ -41,14 +50,13 @@ func Run(opts Options) (*Result, error) {
 		opts.TargetDir = cwd
 	}
 	if opts.Version == "" {
-		opts.Version = "dev"
+		opts.Version = "0.0.0-dev"
 	}
 	if opts.Stdout == nil {
 		opts.Stdout = os.Stdout
 	}
 
 	result := &Result{}
-	marker := versionMarker(opts.Version)
 
 	err := fs.WalkDir(assets, "assets", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -74,8 +82,15 @@ func Run(opts Options) (*Result, error) {
 			return fmt.Errorf("read embedded %s: %w", path, err)
 		}
 
-		// Insert version marker
-		out := insertMarkerAfterFrontmatter(content, marker)
+		// Insert format-appropriate version marker for supported file types
+		ext := filepath.Ext(relPath)
+		var out []byte
+		if markerFileExtensions[ext] {
+			marker := versionMarker(opts.Version, ext)
+			out = insertMarkerAfterFrontmatter(content, marker)
+		} else {
+			out = content
+		}
 
 		// Create parent directories
 		dir := filepath.Dir(outPath)
@@ -125,7 +140,8 @@ func Run(opts Options) (*Result, error) {
 	})
 
 	if err != nil {
-		return nil, err
+		printSummary(opts.Stdout, result)
+		return result, err
 	}
 
 	// Create empty directories for user content
@@ -143,6 +159,11 @@ func Run(opts Options) (*Result, error) {
 	return result, nil
 }
 
+// knownAssetPrefixes enumerates the valid top-level prefixes
+// in the embedded assets directory. Used by mapAssetPath to
+// detect assets added under unexpected directories.
+var knownAssetPrefixes = []string{"specify/", "opencode/", "openspec/"}
+
 // mapAssetPath converts an embedded asset relative path to the
 // output path in the target directory. The assets/ directory
 // structure mirrors the target with these prefix mappings:
@@ -156,32 +177,42 @@ func mapAssetPath(relPath string) string {
 		return "." + relPath
 	case strings.HasPrefix(relPath, "opencode/"):
 		return "." + relPath
+	case strings.HasPrefix(relPath, "openspec/"):
+		// openspec/ paths pass through without dot prefix
+		return relPath
 	default:
-		// openspec/ and any other paths pass through unchanged
+		// Unknown prefix — pass through unchanged but this
+		// indicates a new asset directory was added without
+		// updating the mapping. The TestMapAssetPath test
+		// should be extended to cover the new prefix.
 		return relPath
 	}
 }
 
 // isToolOwned returns true if the file is maintained by the
 // unbound tool and should be overwritten when content differs.
-// Tool-owned files: speckit commands, constitution-check
-// command, and OpenSpec schema files.
+// Tool-owned files: all OpenCode commands, and OpenSpec schema
+// files.
 func isToolOwned(relPath string) bool {
 	if strings.HasPrefix(relPath, "openspec/schemas/") {
 		return true
 	}
-	switch {
-	case strings.HasPrefix(relPath, "opencode/command/speckit."):
-		return true
-	case relPath == "opencode/command/constitution-check.md":
+	if strings.HasPrefix(relPath, "opencode/command/") {
 		return true
 	}
 	return false
 }
 
-// versionMarker returns the HTML comment marker for provenance.
-func versionMarker(version string) string {
-	return fmt.Sprintf("<!-- scaffolded by unbound v%s -->", version)
+// versionMarker returns the provenance marker formatted for the
+// given file extension. Markdown files use HTML comments; YAML
+// and shell scripts use hash comments.
+func versionMarker(version string, ext string) string {
+	switch ext {
+	case ".yaml", ".yml", ".sh":
+		return fmt.Sprintf("# scaffolded by unbound v%s", version)
+	default:
+		return fmt.Sprintf("<!-- scaffolded by unbound v%s -->", version)
+	}
 }
 
 // insertMarkerAfterFrontmatter inserts the version marker after
@@ -219,6 +250,12 @@ func insertMarkerAfterFrontmatter(content []byte, marker string) []byte {
 	return []byte(before + marker + "\n" + after)
 }
 
+// Next-step hint commands shown after scaffold summary.
+const (
+	hintStrategic = "Run /speckit.specify to start a strategic spec."
+	hintTactical  = "Run /opsx:propose to start a tactical change."
+)
+
 // printSummary writes a human-readable summary of the scaffold
 // result to the given writer.
 func printSummary(w io.Writer, r *Result) {
@@ -251,8 +288,8 @@ func printSummary(w io.Writer, r *Result) {
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Run /speckit.specify to start a strategic spec.")
-	fmt.Fprintln(w, "Run /opsx:propose to start a tactical change.")
+	fmt.Fprintln(w, hintStrategic)
+	fmt.Fprintln(w, hintTactical)
 }
 
 // assetPaths returns all relative paths of embedded assets.

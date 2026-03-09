@@ -40,7 +40,7 @@ jobs:
         uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29  # v7.0.0
         with:
           distribution: goreleaser
-          version: '~> v2'
+          version: 'v2.6.1'
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -54,6 +54,7 @@ jobs:
     steps:
       - name: Import certificate into Keychain
         run: |
+          set -euo pipefail
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
 
@@ -70,18 +71,30 @@ jobs:
 
       - name: Prepare notary key
         run: |
+          set -euo pipefail
           echo -n "$MACOS_NOTARY_KEY" | base64 --decode -o $RUNNER_TEMP/notary_key.p8
         env:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
 
       - name: Download darwin archives
         run: |
+          set -euo pipefail
           gh release download "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --pattern "unbound_*_darwin_*.tar.gz" --dir ./artifacts
+
+          # Verify both expected archives were downloaded
+          VERSION="${GITHUB_REF_NAME#v}"
+          for arch in amd64 arm64; do
+            if [ ! -f "./artifacts/unbound_${VERSION}_darwin_${arch}.tar.gz" ]; then
+              echo "::error::Expected darwin_${arch} archive not found after download"
+              exit 1
+            fi
+          done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Sign and notarize
         run: |
+          set -euo pipefail
           mkdir -p ./signed
           for archive in ./artifacts/unbound_*_darwin_*.tar.gz; do
             echo "==> Processing $(basename "$archive")"
@@ -92,7 +105,7 @@ jobs:
 
             # Sign with codesign
             codesign --force --timestamp --options runtime \
-              --sign "Developer ID Application: John Flowers (PGFWLVZX55)" \
+              --sign "$MACOS_SIGN_IDENTITY" \
               "$workdir/unbound"
 
             # Verify signature
@@ -115,11 +128,13 @@ jobs:
             echo "==> Done: $(basename "$archive")"
           done
         env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
 
       - name: Replace release assets and update checksums
         run: |
+          set -euo pipefail
           # Upload signed darwin archives (replaces unsigned)
           gh release upload "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" ./signed/*.tar.gz --clobber
 
@@ -142,7 +157,16 @@ jobs:
 
       - name: Update Homebrew cask checksums
         run: |
+          set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
+
+          # Verify signed archives exist before computing checksums
+          for arch in arm64 amd64; do
+            if [ ! -f "./signed/unbound_${VERSION}_darwin_${arch}.tar.gz" ]; then
+              echo "::error::Signed darwin_${arch} archive not found"
+              exit 1
+            fi
+          done
 
           # Compute signed checksums
           ARM64_SHA=$(shasum -a 256 "./signed/unbound_${VERSION}_darwin_arm64.tar.gz" | awk '{print $1}')

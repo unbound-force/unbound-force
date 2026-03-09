@@ -74,7 +74,7 @@ This feature produces governance documents and OpenCode agent configurations, no
 
 **Goal**: Create an OpenCode agent and command that performs agent-assisted alignment checking of hero constitutions against the org constitution, producing a structured report.
 
-**Independent Test**: Run `/constitution-check` against the Gaze constitution at `/Users/jflowers/Projects/github/unbound-force/gaze/.specify/memory/constitution.md` and verify the report shows ALIGNED with zero contradictions (SC-003).
+**Independent Test**: Run `/constitution-check` against the Gaze constitution (clone `github.com/unbound-force/gaze` and point to its `.specify/memory/constitution.md`) and verify the report shows ALIGNED with zero contradictions (SC-003).
 
 ### Implementation for User Story 2
 

@@ -103,7 +103,8 @@ unbound-force/
 │   ├── 006-cobalt-crush-architecture/# Developer hero design
 │   ├── 007-mx-f-architecture/       # Manager hero design
 │   ├── 008-swarm-orchestration/     # End-to-end workflow & Swarm plugin
-│   └── 009-shared-data-model/       # JSON schemas for inter-hero artifacts
+│   ├── 009-shared-data-model/       # JSON schemas for inter-hero artifacts
+│   └── 010-knowledge-graph-integration/ # MCP knowledge graph via graphthulhu
 ├── schemas/                         # JSON Schemas for validation
 │   ├── hero-manifest/
 │   │   ├── v1.0.0.schema.json       # Hero manifest JSON Schema
@@ -114,6 +115,7 @@ unbound-force/
 ├── scripts/
 │   └── validate-hero-contract.sh    # Contract compliance validation
 ├── go.mod                           # Go module definition
+├── opencode.json                    # MCP server configuration (knowledge graph)
 ├── .goreleaser.yaml                 # GoReleaser release configuration
 ├── unbound-force.md                 # Hero descriptions and team vision
 ├── AGENTS.md                        # This file
@@ -149,6 +151,12 @@ Depends on all Phase 1 specs.
 - **008-swarm-orchestration**: Feature lifecycle workflow, artifact handoff, Swarm plugin, learning loop
 - **009-shared-data-model**: JSON schemas for all artifact types, versioning, schema registry
 
+### Phase 3: Infrastructure (010)
+
+Meta-repo operational spec (not a hero architecture).
+
+- **010-knowledge-graph-integration**: MCP knowledge graph via graphthulhu, Obsidian backend, spec search/traversal
+
 ### Dependency Graph
 
 ```text
@@ -166,6 +174,9 @@ Phase 1 (Heroes) — all depend on 001 + 002
 Phase 2 (Cross-Cutting) — depends on Phase 1
   008-swarm-orchestration
   009-shared-data-model
+
+Phase 3 (Infrastructure) — meta-repo operational
+  010-knowledge-graph-integration
 ```
 
 ## Inter-Hero Artifact Types
@@ -375,7 +386,7 @@ This repo is primarily specifications and governance documents. Follow these con
 
 ## Recent Changes
 
-- 003-specification-framework: Implemented unified two-tier specification framework -- `unbound` CLI binary (Go + Cobra + embed.FS), scaffolds 29 files (22 Speckit + 6 OpenSpec schema + 1 config) via `unbound init`, custom `unbound-force` OpenSpec schema with constitution alignment in proposals, boundary guidelines documented, GoReleaser v2 release pipeline, all 8 user stories (US1-US8) and 67 tasks completed, 12 passing tests including drift detection
+- 003-specification-framework: Implemented unified two-tier specification framework -- `unbound` CLI binary (Go + Cobra + embed.FS), scaffolds 32 files (22 Speckit + 6 OpenSpec + 4 agents) via `unbound init`, custom `unbound-force` OpenSpec schema with constitution alignment in proposals, boundary guidelines documented, GoReleaser v2 release pipeline, all 8 user stories (US1-US8) and 67 tasks completed, format-aware version markers, drift detection tests
 - 010-knowledge-graph-integration: Implemented knowledge graph integration -- graphthulhu installed with `--include-hidden` support (upstream PR submitted), OpenCode MCP configuration created, all 5 user stories verified (search, analysis, live sync, link traversal, property queries), YAML frontmatter added to specs 001/002/004, 50 pages indexed across all directories including `.specify/` and `.opencode/`
 - 002-hero-interface-contract: Completed spec implementation -- Hero Interface Contract v1.0.0 ratified, hero manifest JSON Schema created and validated, contract compliance validation script created and tested against Gaze and Website repos, sample artifact envelope and Gaze manifest produced, all FRs (001-015) and SCs (001-007) validated, spec status set to Complete
 - 001-org-constitution: Completed spec implementation -- constitution ratified v1.0.0, alignment agent and `/constitution-check` command created, all FRs and SCs validated, spec status set to Complete

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
 JSON_MODE=false
 SHORT_NAME=""
@@ -295,4 +295,4 @@ else
     echo "FEATURE_NUM: $FEATURE_NUM"
     echo "SPECIFY_FEATURE environment variable set to: $BRANCH_NAME"
 fi
-<!-- scaffolded by unbound vdev -->
+# scaffolded by unbound vdev

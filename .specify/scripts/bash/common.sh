@@ -124,9 +124,16 @@ find_feature_dir_by_prefix() {
     fi
 }
 
+# get_feature_paths sets shell variables for the current feature's
+# paths. MUST be called in the current shell (via `source` or
+# direct invocation), NOT in a subshell (e.g., `$(get_feature_paths)`).
+# The variables are intentionally not exported so they remain
+# scoped to the calling script's process.
 get_feature_paths() {
-    local repo_root=$(get_repo_root)
-    local current_branch=$(get_current_branch)
+    local repo_root
+    repo_root=$(get_repo_root)
+    local current_branch
+    current_branch=$(get_current_branch)
     local has_git_repo="false"
 
     if has_git; then
@@ -134,24 +141,25 @@ get_feature_paths() {
     fi
 
     # Use prefix-based lookup to support multiple branches per spec
-    local feature_dir=$(find_feature_dir_by_prefix "$repo_root" "$current_branch")
+    local feature_dir
+    feature_dir=$(find_feature_dir_by_prefix "$repo_root" "$current_branch")
 
-    cat <<EOF
-REPO_ROOT='$repo_root'
-CURRENT_BRANCH='$current_branch'
-HAS_GIT='$has_git_repo'
-FEATURE_DIR='$feature_dir'
-FEATURE_SPEC='$feature_dir/spec.md'
-IMPL_PLAN='$feature_dir/plan.md'
-TASKS='$feature_dir/tasks.md'
-RESEARCH='$feature_dir/research.md'
-DATA_MODEL='$feature_dir/data-model.md'
-QUICKSTART='$feature_dir/quickstart.md'
-CONTRACTS_DIR='$feature_dir/contracts'
-EOF
+    # Set variables directly in the caller's shell — no eval needed
+    # shellcheck disable=SC2034
+    REPO_ROOT="$repo_root"
+    CURRENT_BRANCH="$current_branch"
+    HAS_GIT="$has_git_repo"
+    FEATURE_DIR="$feature_dir"
+    FEATURE_SPEC="$feature_dir/spec.md"
+    IMPL_PLAN="$feature_dir/plan.md"
+    TASKS="$feature_dir/tasks.md"
+    RESEARCH="$feature_dir/research.md"
+    DATA_MODEL="$feature_dir/data-model.md"
+    QUICKSTART="$feature_dir/quickstart.md"
+    CONTRACTS_DIR="$feature_dir/contracts"
 }
 
 check_file() { [[ -f "$1" ]] && echo "  ✓ $2" || echo "  ✗ $2"; }
 check_dir() { [[ -d "$1" && -n $(ls -A "$1" 2>/dev/null) ]] && echo "  ✓ $2" || echo "  ✗ $2"; }
 
-<!-- scaffolded by unbound vdev -->
+# scaffolded by unbound vdev

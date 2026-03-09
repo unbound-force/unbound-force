@@ -2,7 +2,7 @@
 
 **Feature Branch**: `010-knowledge-graph-integration`
 **Created**: 2026-03-08
-**Status**: Draft
+**Status**: Complete
 **Input**: User description: "Integrate graphthulhu (MIT-licensed Go MCP server) with its Obsidian backend as the knowledge management layer for the Unbound Force swarm. graphthulhu reads Markdown files directly from the repo, builds an in-memory knowledge graph with wikilink indexing, full-text search, and graph analysis, and exposes it via MCP so that hero agents (starting with Muti-Mind) can query project knowledge without exceeding context window limits. This addresses the architectural gap where no spec currently defines how heroes retrieve, search, or traverse accumulated project knowledge at scale."
 
 ## Clarifications
