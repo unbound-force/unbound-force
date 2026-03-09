@@ -26,4 +26,22 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -race -count=1 ./...
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Enforce Coverage Ratchets
+        run: |
+          # Calculate global coverage
+          GLOBAL_COV=$(go tool cover -func=coverage.out | grep total: | awk '{print substr($3, 1, length($3)-1)}')
+          echo "Global coverage: $GLOBAL_COV%"
+          if (( $(echo "$GLOBAL_COV < 80.0" | bc -l) )); then
+            echo "Error: Global coverage $GLOBAL_COV% is below the 80% threshold."
+            exit 1
+          fi
+
+          # Calculate internal/backlog coverage
+          BACKLOG_COV=$(go tool cover -func=coverage.out | grep github.com/unbound-force/unbound-force/internal/backlog | awk '{print substr($3, 1, length($3)-1)}' | awk '{total += $1; count++} END {if (count > 0) print total/count; else print 0}')
+          echo "Backlog coverage: $BACKLOG_COV%"
+          if (( $(echo "$BACKLOG_COV < 90.0" | bc -l) )); then
+            echo "Error: internal/backlog coverage $BACKLOG_COV% is below the 90% threshold."
+            exit 1
+          fi

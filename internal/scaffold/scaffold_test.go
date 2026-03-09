@@ -795,11 +795,24 @@ func TestRun_PrintSummaryIntegration(t *testing.T) {
 // binary. These are local-only tooling files (e.g., installed by
 // the Gaze scaffold) that are specific to this repository.
 var knownNonEmbeddedFiles = map[string]bool{
-	".opencode/agents/gaze-reporter.md":       true,
-	".opencode/agents/reviewer-testing.md":    true,
-	".opencode/command/gaze.md":               true,
-	".opencode/command/review-council.md":     true,
-	".opencode/command/speckit.testreview.md": true,
+	".opencode/agents/gaze-reporter.md":               true,
+	".opencode/agents/reviewer-testing.md":            true,
+	".opencode/agents/muti-mind-po.md":                true,
+	".opencode/command/gaze.md":                       true,
+	".opencode/command/review-council.md":             true,
+	".opencode/command/speckit.testreview.md":         true,
+	".opencode/command/muti-mind.backlog-add.md":      true,
+	".opencode/command/muti-mind.backlog-list.md":     true,
+	".opencode/command/muti-mind.backlog-show.md":     true,
+	".opencode/command/muti-mind.backlog-update.md":   true,
+	".opencode/command/muti-mind.generate-stories.md": true,
+	".opencode/command/muti-mind.init.md":             true,
+	".opencode/command/muti-mind.prioritize.md":       true,
+	".opencode/command/muti-mind.sync-project.md":     true,
+	".opencode/command/muti-mind.sync-pull.md":        true,
+	".opencode/command/muti-mind.sync-push.md":        true,
+	".opencode/command/muti-mind.sync-status.md":      true,
+	".opencode/command/muti-mind.sync.md":             true,
 }
 
 func TestCanonicalSources_AreEmbedded(t *testing.T) {

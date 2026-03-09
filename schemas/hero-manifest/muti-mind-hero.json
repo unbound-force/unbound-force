@@ -1,0 +1,51 @@
+{
+  "name": "muti-mind",
+  "display_name": "Muti-Mind",
+  "role": "product-owner",
+  "version": "1.0.0",
+  "description": "Product Owner hero acting as Vision Keeper and Prioritization Engine",
+  "repository": "https://github.com/unbound-force/muti-mind",
+  "parent_constitution_version": "1.0.0",
+  "artifacts_produced": [
+    {
+      "type_id": "acceptance-decision",
+      "schema_version": "1.0.0",
+      "description": "Decision artifact evaluating quality reports against backlog items"
+    },
+    {
+      "type_id": "backlog-item",
+      "schema_version": "1.0.0",
+      "description": "JSON representation of a backlog item"
+    }
+  ],
+  "artifacts_consumed": [
+    {
+      "type_id": "quality-report",
+      "schema_version": "1.0.0",
+      "description": "Quality reports from Gaze for acceptance evaluation"
+    }
+  ],
+  "opencode_agents": [
+    {
+      "name": "muti-mind-po",
+      "description": "AI persona and decision framework for backlog management",
+      "mode": "agent",
+      "tools": ["bash", "read", "write", "edit"]
+    }
+  ],
+  "opencode_commands": [
+    { "name": "/muti-mind.init", "description": "Initialize Muti-Mind environment" },
+    { "name": "/muti-mind.backlog-add", "description": "Create a new backlog item" },
+    { "name": "/muti-mind.backlog-list", "description": "List current backlog items" },
+    { "name": "/muti-mind.backlog-update", "description": "Update an existing backlog item" },
+    { "name": "/muti-mind.backlog-show", "description": "Display full details of an item" },
+    { "name": "/muti-mind.sync-push", "description": "Push local backlog items to GitHub Issues" },
+    { "name": "/muti-mind.sync-pull", "description": "Pull GitHub Issues into the local backlog" },
+    { "name": "/muti-mind.sync-status", "description": "Report on synchronization state" },
+    { "name": "/muti-mind.sync", "description": "Bidirectional sync including interactive conflict detection" },
+    { "name": "/muti-mind.sync-project", "description": "Sync GitHub Projects" },
+    { "name": "/muti-mind.prioritize", "description": "Invoke Muti-Mind AI persona to score and rank the backlog" },
+    { "name": "/muti-mind.generate-stories", "description": "Invoke Muti-Mind AI persona to generate user stories" }
+  ],
+  "dependencies": []
+}
