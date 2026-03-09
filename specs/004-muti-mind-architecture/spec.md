@@ -22,6 +22,7 @@ depends_on:
 - Q: Does the `muti-mind` CLI make direct API calls to LLM providers, or does it delegate AI tasks to the OpenCode runtime? → A: AI features (priority scoring, story generation) happen inside OpenCode as OpenCode commands or agents, not directly in the CLI.
 - Q: How is the exact ordering/ranking of the backlog maintained? Does the index file store it? → A: GitHub is the source of truth for the backlog and its ordering. Users will manage rank in the GitHub web UI.
 - Q: What is the format of the local synchronized representation? → A: Local MD files. The local backlog acts as a contextual cache for augmented interactions and swarm execution. These files MUST be indexed by graphthulhu, so the cache location should be within its watched directories.
+- Q: How is the synchronization triggered? Does the user have to manually invoke the CLI? → A: Sync is handled via OpenCode commands. Any CLI built is strictly to support the OpenCode agents and the Swarm. The primary user interface is entirely within OpenCode (via commands, agents, or MCP servers).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -44,7 +45,7 @@ A developer or agent working on a feature consults Muti-Mind for product decisio
 
 ### User Story 2 - Backlog Management CLI (Priority: P1)
 
-A product owner or developer manages the product backlog through a Muti-Mind CLI tool. The CLI supports creating, reading, updating, and deleting backlog items (user stories, epics, tasks). Items are stored locally in a structured format and can be synced with GitHub Issues/Projects.
+A product owner or developer manages the product backlog entirely within OpenCode (via `/muti-mind.*` commands). Any underlying CLI tooling exists strictly as an execution layer for OpenCode agents and Swarm orchestration. The CLI supports creating, reading, updating, and deleting backlog items (user stories, epics, tasks). Items are stored locally in a structured format and can be synced with GitHub Issues/Projects.
 
 **Why this priority**: P1 because the backlog is the primary artifact Muti-Mind manages. Without a backlog management tool, there is no structured way to capture, prioritize, or communicate product requirements.
 
@@ -52,11 +53,11 @@ A product owner or developer manages the product backlog through a Muti-Mind CLI
 
 **Acceptance Scenarios**:
 
-1. **Given** an empty project, **When** `muti-mind backlog init` is run, **Then** it creates a `.muti-mind/backlog/` directory (an index file is no longer needed as GitHub is the source of truth).
-2. **Given** an initialized backlog, **When** `muti-mind backlog add --type story --title "User login" --priority P1 --description "..."` is run, **Then** a new backlog item file is created with a unique ID, the specified attributes, and a creation timestamp.
-3. **Given** a backlog with 10 items of varying priorities, **When** `muti-mind backlog list` is run, **Then** items are displayed in priority order (P1 first) with: ID, title, type, priority, status, and sprint assignment (if any).
-4. **Given** a backlog item, **When** `muti-mind backlog update BI-003 --priority P2 --sprint "Sprint 3"` is run, **Then** the item's priority and sprint assignment are updated and the change is logged.
-5. **Given** a backlog item, **When** `muti-mind backlog show BI-003` is run, **Then** the full item details are displayed including: title, description, type, priority, status, acceptance criteria, sprint, creation date, last modified date, and related specs.
+1. **Given** an empty project, **When** `/muti-mind.init` OpenCode command is run, **Then** it creates a `.muti-mind/backlog/` directory (an index file is no longer needed as GitHub is the source of truth).
+2. **Given** an initialized backlog, **When** `/muti-mind.backlog-add --type story --title "User login" --priority P1 --description "..."` is run, **Then** a new backlog item file is created with a unique ID, the specified attributes, and a creation timestamp.
+3. **Given** a backlog with 10 items of varying priorities, **When** `/muti-mind.backlog-list` is run, **Then** items are displayed in priority order (P1 first) with: ID, title, type, priority, status, and sprint assignment (if any).
+4. **Given** a backlog item, **When** `/muti-mind.backlog-update BI-003 --priority P2 --sprint "Sprint 3"` is run, **Then** the item's priority and sprint assignment are updated and the change is logged.
+5. **Given** a backlog item, **When** `/muti-mind.backlog-show BI-003` is run, **Then** the full item details are displayed including: title, description, type, priority, status, acceptance criteria, sprint, creation date, last modified date, and related specs.
 
 ---
 
@@ -87,11 +88,11 @@ Muti-Mind synchronizes the local backlog with GitHub Issues and GitHub Projects.
 
 **Acceptance Scenarios**:
 
-1. **Given** a local backlog item, **When** `muti-mind sync push` is run, **Then** a GitHub Issue is created with: title from backlog title, body from description and acceptance criteria, labels from type and priority (e.g., `type:story`, `priority:P1`), and milestone from sprint.
-2. **Given** a GitHub Issue not in the local backlog, **When** `muti-mind sync pull` is run, **Then** the Issue is imported as a new backlog item with attributes mapped from labels and milestone.
-3. **Given** a synced item modified on both sides, **When** `muti-mind sync` is run, **Then** conflicts are detected, listed, and the user is prompted to choose the local or remote version for each conflicting field.
-4. **Given** a GitHub Project board, **When** `muti-mind sync project --project "Sprint Board"` is run, **Then** backlog items are mapped to project columns based on status (e.g., "To Do", "In Progress", "Done").
-5. **Given** a synced backlog, **When** `muti-mind sync status` is run, **Then** it reports: items in sync, items modified locally, items modified remotely, items only local, items only remote.
+1. **Given** a local backlog item, **When** `/muti-mind.sync-push` is run, **Then** a GitHub Issue is created with: title from backlog title, body from description and acceptance criteria, labels from type and priority (e.g., `type:story`, `priority:P1`), and milestone from sprint.
+2. **Given** a GitHub Issue not in the local backlog, **When** `/muti-mind.sync-pull` is run, **Then** the Issue is imported as a new backlog item with attributes mapped from labels and milestone.
+3. **Given** a synced item modified on both sides, **When** `/muti-mind.sync` is run, **Then** conflicts are detected, listed, and the user is prompted to choose the local or remote version for each conflicting field.
+4. **Given** a GitHub Project board, **When** `/muti-mind.sync-project --project "Sprint Board"` is run, **Then** backlog items are mapped to project columns based on status (e.g., "To Do", "In Progress", "Done").
+5. **Given** a synced backlog, **When** `/muti-mind.sync-status` is run, **Then** it reports: items in sync, items modified locally, items modified remotely, items only local, items only remote.
 
 ---
 
@@ -131,7 +132,7 @@ Muti-Mind generates user stories from high-level product goals or feature descri
 
 ### Edge Cases
 
-- What happens when `muti-mind sync push` is run without GitHub credentials configured? The command MUST fail with a clear error message directing the user to configure authentication (e.g., `gh auth login` or `GITHUB_TOKEN`).
+- What happens when `/muti-mind.sync-push` is run without GitHub credentials configured? The command MUST fail with a clear error message directing the user to configure authentication (e.g., `gh auth login` or `GITHUB_TOKEN`).
 - What happens when a backlog item has no acceptance criteria? Muti-Mind MUST warn that the item is not "Ready" for implementation and recommend running the `clarify` phase.
 - What happens when prioritization is run on an empty backlog? The command MUST report "no items to prioritize" and exit cleanly.
 - What happens when GitHub sync encounters rate limiting? The command MUST detect HTTP 429 responses, report the rate limit, and suggest retrying after the reset time.
@@ -145,7 +146,7 @@ Muti-Mind generates user stories from high-level product goals or feature descri
 
 - **FR-001**: Muti-Mind MUST provide an AI agent persona with a documented decision-making framework, communication style, and behavioral constraints.
 - **FR-002**: The agent persona MUST be deployable as an OpenCode agent file (`muti-mind-po.md`) installable via `muti-mind init`.
-- **FR-003**: Muti-Mind MUST provide a CLI tool (`muti-mind`) for backlog management with subcommands: `init`, `backlog` (add/list/show/update/delete), `sync`, and `accept`.
+- **FR-003**: Muti-Mind MUST expose its functionality entirely through OpenCode interfaces (Commands, Agents, Skills, or MCP Servers). Any underlying CLI tool exists strictly to support the OpenCode runtime and swarm execution, not as the primary user interface.
 - **FR-003a**: AI-driven features (prioritization, story generation) MUST be implemented as OpenCode commands (`/muti-mind.prioritize`, `/muti-mind.generate-stories`) or agents, delegating LLM execution to the OpenCode runtime rather than the CLI.
 - **FR-004**: Backlog items MUST be stored as individual files in `.muti-mind/backlog/` in a human-readable format (YAML front matter + Markdown body). This location MUST be indexed by graphthulhu to support swarm execution and context retrieval.
 - **FR-005**: Each backlog item MUST have a unique identifier (BI-NNN), type (epic/story/task/bug), priority (P1-P5), status (draft/ready/in-progress/review/done/cancelled), and timestamps (created, modified).
