@@ -15,6 +15,14 @@ depends_on:
 **Status**: Draft
 **Input**: User description: "Design the architecture for Muti-Mind, the Product Owner hero. Muti-Mind is the Vision Keeper and Prioritization Engine — the voice of the user within the swarm. It includes an AI persona, a backlog management CLI tool, GitHub Issues/Projects integration, spec management integration with speckit, and acceptance authority capabilities."
 
+## Clarifications
+
+### Session 2026-03-09
+
+- Q: Does the `muti-mind` CLI make direct API calls to LLM providers, or does it delegate AI tasks to the OpenCode runtime? → A: AI features (priority scoring, story generation) happen inside OpenCode as OpenCode commands or agents, not directly in the CLI.
+- Q: How is the exact ordering/ranking of the backlog maintained? Does the index file store it? → A: GitHub is the source of truth for the backlog and its ordering. Users will manage rank in the GitHub web UI.
+- Q: What is the format of the local synchronized representation? → A: Local MD files. The local backlog acts as a contextual cache for augmented interactions and swarm execution. These files MUST be indexed by graphthulhu, so the cache location should be within its watched directories.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - AI Persona and Decision Framework (Priority: P1)
@@ -44,7 +52,7 @@ A product owner or developer manages the product backlog through a Muti-Mind CLI
 
 **Acceptance Scenarios**:
 
-1. **Given** an empty project, **When** `muti-mind backlog init` is run, **Then** it creates a `.muti-mind/backlog/` directory with an empty backlog index file.
+1. **Given** an empty project, **When** `muti-mind backlog init` is run, **Then** it creates a `.muti-mind/backlog/` directory (an index file is no longer needed as GitHub is the source of truth).
 2. **Given** an initialized backlog, **When** `muti-mind backlog add --type story --title "User login" --priority P1 --description "..."` is run, **Then** a new backlog item file is created with a unique ID, the specified attributes, and a creation timestamp.
 3. **Given** a backlog with 10 items of varying priorities, **When** `muti-mind backlog list` is run, **Then** items are displayed in priority order (P1 first) with: ID, title, type, priority, status, and sprint assignment (if any).
 4. **Given** a backlog item, **When** `muti-mind backlog update BI-003 --priority P2 --sprint "Sprint 3"` is run, **Then** the item's priority and sprint assignment are updated and the change is logged.
@@ -62,7 +70,7 @@ Muti-Mind provides an AI-assisted priority scoring algorithm that evaluates back
 
 **Acceptance Scenarios**:
 
-1. **Given** a backlog item with value, risk, dependency, urgency, and effort attributes, **When** `muti-mind prioritize` is run, **Then** each item receives a composite priority score and the backlog is re-ranked by score.
+1. **Given** a backlog item with value, risk, dependency, urgency, and effort attributes, **When** `/muti-mind.prioritize` OpenCode command is run, **Then** each item receives a composite priority score and the backlog is re-ranked by score.
 2. **Given** a prioritized backlog, **When** a user inspects an item's score, **Then** the score breakdown shows the contribution of each dimension (e.g., "value: 8/10, risk: 3/10, dependencies: 2 blocking items, urgency: high, effort: medium -> composite: 82").
 3. **Given** two items with similar scores, **When** the prioritization runs, **Then** Muti-Mind flags them for manual tiebreaking and provides a recommendation based on dependency analysis.
 4. **Given** a backlog item that blocks other items, **When** prioritization runs, **Then** the blocking item's score is boosted proportional to the aggregate value of the items it blocks.
@@ -115,7 +123,7 @@ Muti-Mind generates user stories from high-level product goals or feature descri
 
 **Acceptance Scenarios**:
 
-1. **Given** a high-level goal "users need to export their data in CSV and PDF formats", **When** `muti-mind generate stories --goal "..."` is run, **Then** it produces at least two user stories (one per format) with titles, descriptions, acceptance criteria, and priority recommendations.
+1. **Given** a high-level goal "users need to export their data in CSV and PDF formats", **When** `/muti-mind.generate-stories "..."` OpenCode command is run, **Then** it produces at least two user stories (one per format) with titles, descriptions, acceptance criteria, and priority recommendations.
 2. **Given** a generated set of stories, **When** a reviewer inspects them, **Then** each story follows the speckit user story format: title, priority, independent test description, and Given/When/Then acceptance scenarios.
 3. **Given** a product backlog with existing items, **When** stories are generated, **Then** Muti-Mind checks for overlap with existing items and flags potential duplicates.
 
@@ -137,12 +145,14 @@ Muti-Mind generates user stories from high-level product goals or feature descri
 
 - **FR-001**: Muti-Mind MUST provide an AI agent persona with a documented decision-making framework, communication style, and behavioral constraints.
 - **FR-002**: The agent persona MUST be deployable as an OpenCode agent file (`muti-mind-po.md`) installable via `muti-mind init`.
-- **FR-003**: Muti-Mind MUST provide a CLI tool (`muti-mind`) for backlog management with subcommands: `init`, `backlog` (add/list/show/update/delete), `prioritize`, `sync`, `generate`, and `accept`.
-- **FR-004**: Backlog items MUST be stored as individual files in `.muti-mind/backlog/` in a human-readable format (YAML front matter + Markdown body).
+- **FR-003**: Muti-Mind MUST provide a CLI tool (`muti-mind`) for backlog management with subcommands: `init`, `backlog` (add/list/show/update/delete), `sync`, and `accept`.
+- **FR-003a**: AI-driven features (prioritization, story generation) MUST be implemented as OpenCode commands (`/muti-mind.prioritize`, `/muti-mind.generate-stories`) or agents, delegating LLM execution to the OpenCode runtime rather than the CLI.
+- **FR-004**: Backlog items MUST be stored as individual files in `.muti-mind/backlog/` in a human-readable format (YAML front matter + Markdown body). This location MUST be indexed by graphthulhu to support swarm execution and context retrieval.
 - **FR-005**: Each backlog item MUST have a unique identifier (BI-NNN), type (epic/story/task/bug), priority (P1-P5), status (draft/ready/in-progress/review/done/cancelled), and timestamps (created, modified).
 - **FR-006**: The priority scoring engine MUST evaluate items across at least five dimensions: business value, risk, dependencies, urgency, and effort.
 - **FR-007**: The priority score MUST be transparent: each dimension's contribution to the composite score MUST be visible.
 - **FR-008**: GitHub sync MUST support push (local -> GitHub Issues), pull (GitHub Issues -> local), and bidirectional sync with conflict detection.
+- **FR-008a**: GitHub Issues/Projects MUST be treated as the ultimate source of truth for the backlog and its manual ordering. The local `.muti-mind/backlog/` is a synchronized reflection of the remote state.
 - **FR-009**: GitHub sync MUST map backlog attributes to GitHub primitives: type -> labels, priority -> labels, sprint -> milestones, status -> project board columns.
 - **FR-010**: Muti-Mind MUST integrate with the speckit pipeline: it MUST be able to invoke `/specify` and `/clarify` with backlog item context.
 - **FR-011**: Muti-Mind MUST serve as the acceptance authority: given a Gaze quality report and the originating backlog item's acceptance criteria, it MUST produce an accept/reject/conditional decision.
