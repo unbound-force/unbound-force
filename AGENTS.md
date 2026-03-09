@@ -440,6 +440,8 @@ This repo is primarily specifications and governance documents. Follow these con
 - JSON Schema draft 2020-12 (hero manifest schema, sample artifact envelope)
 - OpenCode + Speckit + OpenSpec (development workflow)
 - Node.js >= 20.19.0 (OpenSpec CLI, `@fission-ai/openspec`)
+- Go 1.24+ (for tooling/MCP if any, though primarily OpenCode agents/commands) + OpenCode runtime, GitHub CLI (`gh`) or GitHub API (004-muti-mind-architecture)
+- Local Markdown files (YAML frontmatter) in `.muti-mind/backlog/` indexed by graphthulhu (004-muti-mind-architecture)
 
 ## Recent Changes
 
