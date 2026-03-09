@@ -66,11 +66,11 @@
 **Goal**: Expand Muti-Mind capabilities to use `graphthulhu` MCP tools for context retrieval and dependency mapping.
 **Independent Test**: The agent executes backlog query operations using exclusively the MCP tools, handles limits safely, and builds dependency trees through graph links.
 
-- [ ] T026 Update `schemas/hero-manifest/muti-mind-hero.json` to include the `mcp_server` dependency (`graphthulhu`)
-- [ ] T027 Update `.opencode/agents/muti-mind-po.md` with instructions to use MCP knowledge graph tools exclusively for all backlog read operations (FR-004a)
-- [ ] T028 Update `.opencode/agents/muti-mind-po.md` with rules to implement a pagination loop or recursive fetching strategy for handling `graphthulhu` result limits (FR-004b)
-- [ ] T029 Update `.opencode/agents/muti-mind-po.md` priority scoring rules to combine explicit YAML dependencies with knowledge graph traversal (FR-006a)
-- [ ] T030 Update `.opencode/agents/muti-mind-po.md` error handling rules to fail fast and clearly report MCP failures or timeouts
+- [x] T026 Update `schemas/hero-manifest/muti-mind-hero.json` to include the `mcp_server` dependency (`graphthulhu`)
+- [x] T027 Update `.opencode/agents/muti-mind-po.md` with instructions to use MCP knowledge graph tools exclusively for all backlog read operations (FR-004a)
+- [x] T028 Update `.opencode/agents/muti-mind-po.md` with rules to implement a pagination loop or recursive fetching strategy for handling `graphthulhu` result limits (FR-004b)
+- [x] T029 Update `.opencode/agents/muti-mind-po.md` priority scoring rules to combine explicit YAML dependencies with knowledge graph traversal (FR-006a)
+- [x] T030 Update `.opencode/agents/muti-mind-po.md` error handling rules to fail fast and clearly report MCP failures or timeouts
 
 ## Final Phase: Polish & Cross-Cutting Concerns
 **Goal**: Ensure quality, formatting, documentation, and compliance.
