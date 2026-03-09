@@ -24,7 +24,7 @@ Your job is to ensure the application is deployable, maintainable, and operable 
 Before reviewing, read:
 
 1. `AGENTS.md` -- Project Structure, Active Technologies, Git & Workflow
-2. `.specify/memory/constitution.md` -- Org Constitution v1.0.0
+2. `.specify/memory/constitution.md` -- Org Constitution v1.1.0
 3. The relevant spec, plan, and tasks files under `specs/` for the current work
 4. `.goreleaser.yaml` and `.github/workflows/release.yml` -- Release pipeline
 5. `go.mod` -- Dependency declarations

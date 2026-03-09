@@ -16,11 +16,12 @@ Unbound Force is an organization of AI agent personas (heroes) that collaborate 
 
 ## Constitution
 
-This organization is governed by a [constitution](.specify/memory/constitution.md) (v1.0.0) that defines three core principles:
+This organization is governed by a [constitution](.specify/memory/constitution.md) (v1.1.0) that defines four core principles:
 
 1. **Autonomous Collaboration** -- Heroes communicate through well-defined artifacts, not runtime coupling. Every hero completes its primary function independently.
 2. **Composability First** -- Every hero is independently installable and usable alone. Combining heroes produces additive value without mandatory dependencies.
 3. **Observable Quality** -- Every hero produces machine-parseable output (JSON minimum) with provenance metadata. Quality claims are backed by automated evidence.
+4. **Testability** -- Every component MUST be testable in isolation without requiring external services or shared mutable state.
 
 All hero repositories must maintain constitutions that align with (and never contradict) these org-level principles.
 
@@ -40,7 +41,7 @@ The framework provides:
 
 - **Speckit** (strategic): Full 9-phase pipeline for architectural work (`/speckit.specify` through `/speckit.implement`)
 - **OpenSpec** (tactical): Lightweight workflow for bug fixes and small changes (`/opsx:propose` through `/opsx:archive`)
-- **Constitution governance bridge**: Every proposal includes alignment assessment against the three org principles
+- **Constitution governance bridge**: Every proposal includes alignment assessment against the four org principles
 
 `unbound init` scaffolds 33 files into your repository: templates, scripts, commands, agents, and the custom `unbound-force` OpenSpec schema. User-owned files are skipped on re-run; tool-owned files are auto-updated when content changes.
 

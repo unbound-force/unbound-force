@@ -24,7 +24,7 @@ Your job is to verify that "Intent Driving Implementation" is maintained: work i
 Before reviewing, read:
 
 1. `AGENTS.md` -- Project Structure, Spec Organization, Writing Style, Active Technologies, Git & Workflow
-2. `.specify/memory/constitution.md` -- Org Constitution v1.0.0
+2. `.specify/memory/constitution.md` -- Org Constitution v1.1.0
 3. The relevant `plan.md` and `tasks.md` under `specs/` for the current work
 
 ---

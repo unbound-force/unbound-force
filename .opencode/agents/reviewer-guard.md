@@ -24,7 +24,7 @@ Your job is to ensure the business value remains intact: the change solves the r
 Before reviewing, read:
 
 1. `AGENTS.md` -- Behavioral Constraints (especially Intent Drift Detection, Zero-Waste Mandate, Neighborhood Rule)
-2. `.specify/memory/constitution.md` -- Org Constitution v1.0.0 (three core principles)
+2. `.specify/memory/constitution.md` -- Org Constitution v1.1.0 (four core principles)
 3. The relevant `spec.md`, `plan.md`, and `tasks.md` under `specs/` for the current work
 
 ---

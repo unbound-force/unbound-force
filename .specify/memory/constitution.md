@@ -1,54 +1,33 @@
 <!--
   SYNC IMPACT REPORT
   ==================
-  Version change: (none) → 1.0.0 (initial ratification)
+  Version change: 1.0.0 → 1.1.0 (MINOR: new principle added)
 
-  Modified principles:
-    - [PRINCIPLE_1_NAME] → I. Autonomous Collaboration
-    - [PRINCIPLE_2_NAME] → II. Composability First
-    - [PRINCIPLE_3_NAME] → III. Observable Quality
-    - [PRINCIPLE_4_NAME] → (removed, 3 principles selected)
-    - [PRINCIPLE_5_NAME] → (removed, 3 principles selected)
+  Added principles:
+    - IV. Testability
 
-  Added sections:
-    - Hero Constitution Alignment (Section 2)
-    - Development Workflow (Section 3)
-    - Governance (filled from template)
+  Unchanged principles:
+    - I. Autonomous Collaboration
+    - II. Composability First
+    - III. Observable Quality
 
-  Removed sections:
-    - Principles 4 and 5 (3 principles selected per spec 001)
+  Unchanged sections:
+    - Hero Constitution Alignment
+    - Development Workflow
+    - Governance
 
   Templates requiring updates:
     ✅ .specify/templates/plan-template.md — no changes needed;
        Constitution Check section is generic and will align at
-       plan time using these three principles.
-    ✅ .specify/templates/spec-template.md — no changes needed;
-       requirements format already uses MUST/SHOULD language
-       consistent with principle definitions.
-    ✅ .specify/templates/tasks-template.md — no changes needed;
-       task phases are feature-driven, not principle-specific.
+       plan time using these four principles.
+    ✅ .specify/templates/spec-template.md — no changes needed.
+    ✅ .specify/templates/tasks-template.md — no changes needed.
     ✅ .specify/templates/checklist-template.md — no changes needed.
     ✅ .specify/templates/agent-file-template.md — no changes needed.
-    ✅ No command files in .specify/templates/commands/ (absent).
-    ✅ README.md — single-line placeholder; no principle refs to
-       update.
-    ✅ unbound-force.md — describes heroes and roles; does not
-       reference constitution principles directly. No update needed.
 
   Hero constitution alignment:
-    ✅ Gaze v1.0.0 — Accuracy maps to Observable Quality;
-       Minimal Assumptions maps to Composability First;
-       Actionable Output maps to Observable Quality.
-       Zero contradictions found.
-    ✅ Website v1.0.0 — Content Accuracy maps to Observable Quality;
-       Minimal Footprint maps to Composability First;
-       Visitor Clarity maps to Observable Quality.
-       Zero contradictions found.
-    ⚠  Gaze and Website constitutions predate this org constitution.
-       Each SHOULD add a parent_constitution field referencing
-       Unbound Force v1.0.0 at next amendment.
-
-  Deferred TODOs: none.
+    ✅ Gaze v1.1.0 — Testability principle already matches.
+    ⚠  Website v1.0.0 — Will need to be reviewed for Testability alignment.
 -->
 
 # Unbound Force Constitution
@@ -139,6 +118,27 @@ and The Divisor to ground reviews in evidence rather than opinion.
 Provenance metadata ensures that every data point is traceable to
 its source, preventing "trust me" assertions.
 
+### IV. Testability
+
+Every component built within the Unbound Force ecosystem MUST be
+testable in isolation without requiring external services, network
+access, or shared mutable state.
+
+- Test contracts MUST verify observable side effects (return values,
+  state mutations, I/O operations) rather than implementation details.
+- Coverage strategy (unit vs. integration vs. e2e, with specific
+  targets) MUST be defined in the implementation plan for all new code.
+- Coverage ratchets MUST be enforced by automated tests; any coverage
+  regression MUST be treated as a test failure and block the build.
+- Missing coverage strategy in a spec or plan is a CRITICAL-severity
+  finding and MUST be resolved before implementation begins.
+
+**Rationale**: AI agents generate code rapidly. If that code is not
+structurally testable, the resulting system will quickly collapse under
+its own unverified complexity. Testability is a first-class governance
+concern because untestable code cannot be reliably verified by Gaze or
+any other automated mechanism. Unverified code cannot be trusted.
+
 ## Hero Constitution Alignment
 
 Every hero repository MUST maintain its own constitution in
@@ -210,4 +210,4 @@ and project-specific guidance.
   implicit priority over another; resolution is context-dependent
   and requires written justification.
 
-**Version**: 1.0.0 | **Ratified**: 2026-02-25 | **Last Amended**: 2026-02-25
+**Version**: 1.1.0 | **Ratified**: 2026-02-25 | **Last Amended**: 2026-03-09

@@ -23,7 +23,7 @@
 
 ## Constitution Alignment
 
-Assessed against Unbound Force org constitution v1.0.0.
+Assessed against Unbound Force org constitution v1.1.0.
 
 ### I. Autonomous Collaboration
 
@@ -47,3 +47,10 @@ dependencies? -->
 
 <!-- Does this change produce machine-parseable
 output? Does it maintain provenance metadata? -->
+
+### IV. Testability
+
+**Assessment**: PASS | N/A
+
+<!-- Does this change verify observable side effects?
+Are components testable in isolation? -->

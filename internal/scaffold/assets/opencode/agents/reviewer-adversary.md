@@ -24,7 +24,7 @@ Your job is to find where the code or specs will break under stress, violate con
 Before reviewing, read:
 
 1. `AGENTS.md` -- Behavioral Constraints, Active Technologies, Git & Workflow
-2. `.specify/memory/constitution.md` -- Org Constitution v1.0.0
+2. `.specify/memory/constitution.md` -- Org Constitution v1.1.0
 3. The relevant spec, plan, and tasks files under `specs/` for the current work
 
 ---

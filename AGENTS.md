@@ -24,11 +24,12 @@ Unbound Force is an organization of AI agent personas and roles for a software a
 
 ## Constitution (Highest Authority)
 
-The org constitution at `.specify/memory/constitution.md` (v1.0.0) defines three core principles that govern all hero repositories:
+The org constitution at `.specify/memory/constitution.md` (v1.1.0) defines four core principles that govern all hero repositories:
 
 1. **I. Autonomous Collaboration**: Heroes communicate through well-defined artifacts (files, reports, schemas), not runtime coupling. Every hero completes its primary function independently. Outputs are self-describing.
 2. **II. Composability First**: Every hero is independently installable and usable alone. Heroes expose extension points for integration. Combining heroes produces additive value without mandatory dependencies.
 3. **III. Observable Quality**: Every hero produces machine-parseable output (JSON minimum). Artifacts include provenance metadata. Quality claims are backed by automated, reproducible evidence.
+4. **IV. Testability**: Every component MUST be testable in isolation without requiring external services or shared mutable state.
 
 Hero constitutions extend (never contradict) the org constitution. See the constitution for the full MUST/SHOULD rules and governance model.
 
@@ -50,7 +51,7 @@ Gaze is the only hero with a functional implementation. The Divisor has a protot
 unbound-force/
 ├── .specify/
 │   ├── memory/
-│   │   └── constitution.md          # Org constitution v1.0.0 (highest authority)
+│   │   └── constitution.md          # Org constitution v1.1.0 (highest authority)
 │   ├── templates/                   # Speckit templates (6 files)
 │   │   ├── spec-template.md
 │   │   ├── plan-template.md
@@ -294,7 +295,7 @@ All spec artifacts (`spec.md`, `plan.md`, `tasks.md`, and any other files under 
 
 ### Constitution Check
 
-A mandatory gate at the planning phase. The constitution's three core principles -- Autonomous Collaboration, Composability First, and Observable Quality -- must each receive a PASS before proceeding. Constitution violations are automatically CRITICAL severity and non-negotiable.
+A mandatory gate at the planning phase. The constitution's four core principles -- Autonomous Collaboration, Composability First, Observable Quality, and Testability -- must each receive a PASS before proceeding. Constitution violations are automatically CRITICAL severity and non-negotiable.
 
 For hero constitution alignment validation, use the `/constitution-check` command. This invokes a dedicated OpenCode agent that compares a hero constitution against the org constitution and produces a structured alignment report with per-principle findings and an overall ALIGNED/NON-ALIGNED verdict. See `.opencode/agents/constitution-check.md` and `.opencode/command/constitution-check.md` for implementation details.
 
