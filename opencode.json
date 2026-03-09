@@ -4,7 +4,7 @@
     "knowledge-graph": {
       "type": "local",
       "command": [
-        "/Users/jflowers/go/1.24.0/bin/graphthulhu",
+        "graphthulhu",
         "serve",
         "--backend", "obsidian",
         "--vault", ".",

@@ -2,7 +2,7 @@
 spec_id: "003"
 title: "Specification Framework"
 phase: 0
-status: draft
+status: complete
 depends_on:
   - "[[specs/001-org-constitution/spec]]"
 ---
@@ -12,7 +12,7 @@ depends_on:
 **Feature Branch**: `003-specification-framework`
 **Created**: 2026-02-24
 **Updated**: 2026-03-08
-**Status**: Draft
+**Status**: Complete
 **Input**: User description: "Establish a unified specification
 framework with two tiers: Speckit for strategic, architectural
 work (new heroes, cross-cutting specs, constitution changes) and
@@ -617,8 +617,9 @@ preserving any local configuration.
 - **SC-001**: This repository contains exactly 6 Speckit
   templates, 5 scripts, 10 OpenCode command files
   (9 speckit pipeline commands + 1 constitution-check),
-  1 agent file, and 1 custom OpenSpec schema with at least
-  4 template files.
+  4 agent files (constitution-check, reviewer-adversary,
+  reviewer-architect, reviewer-guard), and 1 custom OpenSpec
+  schema with at least 4 template files.
 - **SC-002**: The `unbound init` command scaffolds all
   framework files into a fresh repository in under 5 seconds
   with zero errors.

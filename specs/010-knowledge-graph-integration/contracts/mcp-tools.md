@@ -134,8 +134,8 @@ Discover how two pages are connected.
 
 | Parameter | Type   | Required | Description           |
 |-----------|--------|----------|-----------------------|
-| page_a    | string | Yes      | First page name       |
-| page_b    | string | Yes      | Second page name      |
+| from      | string | Yes      | Starting page name    |
+| to        | string | Yes      | Target page name      |
 
 **Returns**: Direct links, shortest paths, and shared
 connections between the pages.

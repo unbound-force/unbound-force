@@ -37,8 +37,8 @@ Linux linux/amd64 + linux/arm64 (static binaries, CGO_ENABLED=0)
 **Performance Goals**: Scaffold in under 5 seconds (SC-002)
 **Constraints**: Self-contained binary with zero runtime
 dependencies; Node.js required only for OpenSpec CLI
-**Scale/Scope**: 27+ canonical files (22 Speckit + 5 OpenSpec
-schema) embedded in binary, distributed to N consumer
+**Scale/Scope**: 32 canonical files (22 Speckit + 6 OpenSpec
++ 4 agents) embedded in binary, distributed to N consumer
 repositories (currently 3: Gaze, Website, unbound-force)
 
 ## Constitution Check
@@ -136,7 +136,7 @@ internal/scaffold/
     |   +-- scripts/bash/         # 5 Speckit scripts
     +-- opencode/
     |   +-- command/              # 10 OpenCode commands
-    |   +-- agents/               # 1 agent file
+    |   +-- agents/               # 4 agent files
     +-- openspec/
         +-- schemas/
         |   +-- unbound-force/    # Custom OpenSpec schema
@@ -152,9 +152,7 @@ internal/scaffold/
 
 .opencode/
 +-- command/                      # 10 commands (9 speckit + 1)
-+-- agents/                       # 1 agent file
-+-- commands/                     # NEW: OpenSpec commands
-+-- skills/                       # NEW: OpenSpec skills
++-- agents/                       # 4 agent files
 
 openspec/                         # NEW: OpenSpec directory
 +-- specs/                        # Living behavior contracts

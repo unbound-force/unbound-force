@@ -19,7 +19,7 @@
 #   Text mode: FEATURE_DIR:... \n AVAILABLE_DOCS: \n ✓/✗ file.md
 #   Paths only: REPO_ROOT: ... \n BRANCH: ... \n FEATURE_DIR: ... etc.
 
-set -e
+set -euo pipefail
 
 # Parse command line arguments
 JSON_MODE=false
@@ -79,7 +79,7 @@ SCRIPT_DIR="$(CDPATH="" cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 # Get feature paths and validate branch
-eval $(get_feature_paths)
+get_feature_paths
 check_feature_branch "$CURRENT_BRANCH" "$HAS_GIT" || exit 1
 
 # If paths-only mode, output paths and exit (support JSON + paths-only combined)
@@ -164,4 +164,4 @@ else
         check_file "$TASKS" "tasks.md"
     fi
 fi
-<!-- scaffolded by unbound vdev -->
+# scaffolded by unbound vdev

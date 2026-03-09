@@ -187,7 +187,7 @@ The Divisor produces a standardized review report artifact (conforming to the in
 
 ### Reference Implementation
 
-- **Gaze Prototype**: The agents in `/Users/jflowers/Projects/github/unbound-force/gaze/.opencode/agents/` (`reviewer-guard.md`, `reviewer-architect.md`, `reviewer-adversary.md`) and the `/review-council` command (`review-council.md`) serve as the prototype deployment. The Divisor framework must produce equivalent (or improved) output for Go projects.
+- **Gaze Prototype**: The agents in the Gaze repo at `.opencode/agents/` (`reviewer-guard.md`, `reviewer-architect.md`, `reviewer-adversary.md`) and the `/review-council` command (`review-council.md`) serve as the prototype deployment (see [github.com/unbound-force/gaze](https://github.com/unbound-force/gaze)). The Divisor framework must produce equivalent (or improved) output for Go projects.
 
 ```
 The Divisor Framework

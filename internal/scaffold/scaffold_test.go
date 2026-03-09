@@ -2,6 +2,7 @@ package scaffold
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,7 +11,7 @@ import (
 )
 
 // findProjectRoot walks up from the current directory looking
-// for go.mod to find the project root.
+// for go.mod to find the project root. Returns "" if not found.
 func findProjectRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -23,7 +24,7 @@ func findProjectRoot(t *testing.T) string {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatal("could not find project root (no go.mod found)")
+			return ""
 		}
 		dir = parent
 	}
@@ -33,8 +34,11 @@ func findProjectRoot(t *testing.T) string {
 // internal/scaffold/assets/ is byte-identical to the canonical
 // source file at the repo root. This prevents drift between the
 // embedded copies and the files developers actually use.
-func TestEmbeddedAssetsMatchSource(t *testing.T) {
+func TestEmbeddedAssets_MatchSource(t *testing.T) {
 	root := findProjectRoot(t)
+	if root == "" {
+		t.Skip("project root not found; skipping drift detection")
+	}
 
 	paths, err := assetPaths()
 	if err != nil {
@@ -71,20 +75,10 @@ func TestEmbeddedAssetsMatchSource(t *testing.T) {
 }
 
 // mapAssetToSource converts an embedded asset relative path to
-// the canonical source path at the repo root.
-//
-//	specify/   -> .specify/
-//	opencode/  -> .opencode/
-//	openspec/  -> openspec/
+// the canonical source path at the repo root. Delegates to
+// mapAssetPath to avoid duplicating the prefix mapping logic.
 func mapAssetToSource(relPath string) string {
-	switch {
-	case strings.HasPrefix(relPath, "specify/"):
-		return "." + relPath
-	case strings.HasPrefix(relPath, "opencode/"):
-		return "." + relPath
-	default:
-		return relPath
-	}
+	return mapAssetPath(relPath)
 }
 
 // expectedAssetPaths is the canonical list of embedded assets.
@@ -131,7 +125,7 @@ var expectedAssetPaths = []string{
 	"openspec/config.yaml",
 }
 
-func TestAssetPaths(t *testing.T) {
+func TestAssetPaths_MatchExpected(t *testing.T) {
 	paths, err := assetPaths()
 	if err != nil {
 		t.Fatalf("get asset paths: %v", err)
@@ -240,11 +234,37 @@ func TestRun_SkipsExisting(t *testing.T) {
 	}
 	// All files should be skipped (user-owned skipped, tool-owned
 	// skipped because content is identical)
-	totalSkipped := len(result.Skipped)
-	totalUpdated := len(result.Updated)
-	if totalSkipped+totalUpdated != len(expectedAssetPaths) {
-		t.Errorf("expected %d skipped+updated files, got skipped=%d updated=%d",
-			len(expectedAssetPaths), totalSkipped, totalUpdated)
+	if len(result.Updated) != 0 {
+		t.Errorf("expected no updated files on identical re-run, got %d: %v",
+			len(result.Updated), result.Updated)
+	}
+	if len(result.Skipped) != len(expectedAssetPaths) {
+		t.Errorf("expected %d skipped files, got %d",
+			len(expectedAssetPaths), len(result.Skipped))
+	}
+
+	// Verify a known tool-owned file is in Skipped
+	foundToolSkip := false
+	for _, f := range result.Skipped {
+		if strings.Contains(f, "speckit.specify.md") {
+			foundToolSkip = true
+			break
+		}
+	}
+	if !foundToolSkip {
+		t.Error("expected tool-owned speckit.specify.md to be in Skipped list")
+	}
+
+	// Verify a known user-owned file is in Skipped
+	foundUserSkip := false
+	for _, f := range result.Skipped {
+		if strings.Contains(f, "spec-template.md") {
+			foundUserSkip = true
+			break
+		}
+	}
+	if !foundUserSkip {
+		t.Error("expected user-owned spec-template.md to be in Skipped list")
 	}
 }
 
@@ -296,9 +316,12 @@ func TestRun_VersionMarker(t *testing.T) {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	marker := "<!-- scaffolded by unbound v1.2.3 -->"
-
 	for _, relPath := range expectedAssetPaths {
+		ext := filepath.Ext(relPath)
+		if !markerFileExtensions[ext] {
+			continue // unsupported extensions don't get markers
+		}
+
 		outRel := mapAssetPath(relPath)
 		outPath := filepath.Join(dir, outRel)
 
@@ -307,6 +330,8 @@ func TestRun_VersionMarker(t *testing.T) {
 			t.Errorf("read %s: %v", outRel, err)
 			continue
 		}
+
+		marker := versionMarker("1.2.3", ext)
 
 		if !strings.Contains(string(content), marker) {
 			t.Errorf("file %s does not contain version marker %q", outRel, marker)
@@ -326,18 +351,27 @@ func TestRun_VersionMarkerDev(t *testing.T) {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	// Version defaults to "dev"
-	marker := "<!-- scaffolded by unbound vdev -->"
+	// Version defaults to "0.0.0-dev" — check all supported files
+	for _, relPath := range expectedAssetPaths {
+		ext := filepath.Ext(relPath)
+		if !markerFileExtensions[ext] {
+			continue // unsupported extensions don't get markers
+		}
 
-	// Check at least one file
-	outPath := filepath.Join(dir, ".specify", "templates", "spec-template.md")
-	content, err := os.ReadFile(outPath)
-	if err != nil {
-		t.Fatalf("read spec-template.md: %v", err)
-	}
+		outRel := mapAssetPath(relPath)
+		outPath := filepath.Join(dir, outRel)
 
-	if !strings.Contains(string(content), marker) {
-		t.Errorf("file does not contain dev version marker %q", marker)
+		content, err := os.ReadFile(outPath)
+		if err != nil {
+			t.Errorf("read %s: %v", outRel, err)
+			continue
+		}
+
+		marker := versionMarker("0.0.0-dev", ext)
+
+		if !strings.Contains(string(content), marker) {
+			t.Errorf("file %s does not contain dev version marker %q", outRel, marker)
+		}
 	}
 }
 
@@ -462,7 +496,7 @@ func TestIsToolOwned(t *testing.T) {
 		path     string
 		expected bool
 	}{
-		// Tool-owned
+		// Tool-owned: all commands
 		{"opencode/command/speckit.specify.md", true},
 		{"opencode/command/speckit.plan.md", true},
 		{"opencode/command/speckit.tasks.md", true},
@@ -473,6 +507,9 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/command/speckit.constitution.md", true},
 		{"opencode/command/speckit.taskstoissues.md", true},
 		{"opencode/command/constitution-check.md", true},
+		// Tool-owned: hypothetical future command (M1 fix)
+		{"opencode/command/opsx.propose.md", true},
+		// Tool-owned: OpenSpec schema
 		{"openspec/schemas/unbound-force/schema.yaml", true},
 		{"openspec/schemas/unbound-force/templates/proposal.md", true},
 		// User-owned
@@ -573,48 +610,293 @@ func TestRun_SchemaDistribution(t *testing.T) {
 }
 
 func TestInsertMarkerAfterFrontmatter(t *testing.T) {
-	marker := "<!-- scaffolded by unbound v1.0.0 -->"
+	mdMarker := "<!-- scaffolded by unbound v1.0.0 -->"
+	hashMarker := "# scaffolded by unbound v1.0.0"
 
 	tests := []struct {
 		name     string
 		input    string
+		marker   string
 		expected string
 	}{
 		{
 			name:     "empty content",
 			input:    "",
-			expected: marker + "\n",
+			marker:   mdMarker,
+			expected: mdMarker + "\n",
 		},
 		{
 			name:     "no frontmatter",
 			input:    "# Hello\n\nSome content.\n",
-			expected: "# Hello\n\nSome content.\n" + marker + "\n",
+			marker:   mdMarker,
+			expected: "# Hello\n\nSome content.\n" + mdMarker + "\n",
 		},
 		{
-			name:  "with frontmatter",
-			input: "---\ntitle: Test\n---\n# Content\n",
-			expected: "---\ntitle: Test\n---\n" + marker + "\n" +
+			name:   "with frontmatter",
+			input:  "---\ntitle: Test\n---\n# Content\n",
+			marker: mdMarker,
+			expected: "---\ntitle: Test\n---\n" + mdMarker + "\n" +
 				"# Content\n",
 		},
 		{
 			name:     "unclosed frontmatter",
 			input:    "---\ntitle: Test\nno closing\n",
-			expected: "---\ntitle: Test\nno closing\n" + marker + "\n",
+			marker:   mdMarker,
+			expected: "---\ntitle: Test\nno closing\n" + mdMarker + "\n",
 		},
 		{
-			name:  "frontmatter with dashes in body",
-			input: "---\ntitle: Test\n---\nSome text\n---\nMore text\n",
-			expected: "---\ntitle: Test\n---\n" + marker + "\n" +
+			name:   "frontmatter with dashes in body",
+			input:  "---\ntitle: Test\n---\nSome text\n---\nMore text\n",
+			marker: mdMarker,
+			expected: "---\ntitle: Test\n---\n" + mdMarker + "\n" +
 				"Some text\n---\nMore text\n",
+		},
+		{
+			name:     "bash script",
+			input:    "#!/usr/bin/env bash\nset -e\n",
+			marker:   hashMarker,
+			expected: "#!/usr/bin/env bash\nset -e\n" + hashMarker + "\n",
+		},
+		{
+			name:     "yaml document",
+			input:    "---\nkey: value\n---\nmore: yaml\n",
+			marker:   hashMarker,
+			expected: "---\nkey: value\n---\n" + hashMarker + "\nmore: yaml\n",
+		},
+		{
+			name:   "double insert on repeat call",
+			input:  "# Hello\n" + mdMarker + "\n",
+			marker: mdMarker,
+			// insertMarkerAfterFrontmatter is not idempotent by design.
+			// Run() achieves idempotency via the bytes.Equal check for
+			// tool-owned files. This test documents the raw function behavior.
+			expected: "# Hello\n" + mdMarker + "\n" + mdMarker + "\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := insertMarkerAfterFrontmatter([]byte(tt.input), marker)
+			got := insertMarkerAfterFrontmatter([]byte(tt.input), tt.marker)
 			if string(got) != tt.expected {
 				t.Errorf("got:\n%s\nexpected:\n%s", string(got), tt.expected)
 			}
 		})
+	}
+}
+
+func TestPrintSummary_Output(t *testing.T) {
+	t.Run("created_updated_skipped", func(t *testing.T) {
+		var buf bytes.Buffer
+
+		r := &Result{
+			Created:     []string{".specify/templates/spec-template.md", ".opencode/command/speckit.specify.md"},
+			Updated:     []string{".opencode/command/speckit.plan.md"},
+			Overwritten: []string{},
+			Skipped:     []string{".specify/config.yaml"},
+		}
+
+		printSummary(&buf, r)
+		output := buf.String()
+
+		// Verify total count line
+		if !strings.Contains(output, "unbound init: 4 files processed") {
+			t.Errorf("expected total count of 4, got output:\n%s", output)
+		}
+
+		// Verify section headers
+		if !strings.Contains(output, "created:     2") {
+			t.Errorf("expected created count of 2, got output:\n%s", output)
+		}
+		if !strings.Contains(output, "updated:     1") {
+			t.Errorf("expected updated count of 1, got output:\n%s", output)
+		}
+		if !strings.Contains(output, "skipped:     1") {
+			t.Errorf("expected skipped count of 1, got output:\n%s", output)
+		}
+
+		// Verify file prefix characters
+		if !strings.Contains(output, "+ .specify/templates/spec-template.md") {
+			t.Errorf("expected '+' prefix for created files")
+		}
+		if !strings.Contains(output, "~ .opencode/command/speckit.plan.md") {
+			t.Errorf("expected '~' prefix for updated files")
+		}
+		if !strings.Contains(output, "- .specify/config.yaml") {
+			t.Errorf("expected '-' prefix for skipped files")
+		}
+
+		// Verify trailing hint lines
+		if !strings.Contains(output, "Run /speckit.specify") {
+			t.Errorf("expected speckit.specify hint line")
+		}
+		if !strings.Contains(output, "Run /opsx:propose") {
+			t.Errorf("expected opsx:propose hint line")
+		}
+	})
+
+	t.Run("overwritten", func(t *testing.T) {
+		var buf bytes.Buffer
+
+		r := &Result{
+			Created:     []string{},
+			Updated:     []string{},
+			Overwritten: []string{".specify/templates/spec-template.md", ".opencode/command/speckit.specify.md"},
+			Skipped:     []string{},
+		}
+
+		printSummary(&buf, r)
+		output := buf.String()
+
+		if !strings.Contains(output, "unbound init: 2 files processed") {
+			t.Errorf("expected total count of 2, got output:\n%s", output)
+		}
+		if !strings.Contains(output, "overwritten: 2") {
+			t.Errorf("expected overwritten count of 2, got output:\n%s", output)
+		}
+		if !strings.Contains(output, "! .specify/templates/spec-template.md") {
+			t.Errorf("expected '!' prefix for overwritten files")
+		}
+		if !strings.Contains(output, "! .opencode/command/speckit.specify.md") {
+			t.Errorf("expected '!' prefix for second overwritten file")
+		}
+	})
+}
+
+func TestRun_PrintSummaryIntegration(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	result, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0",
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	output := buf.String()
+	expected := fmt.Sprintf("unbound init: %d files processed", len(result.Created))
+	if !strings.Contains(output, expected) {
+		t.Errorf("expected summary to contain %q, got:\n%s", expected, output)
+	}
+
+	// Verify the output includes at least one specific file name
+	if len(result.Created) > 0 {
+		if !strings.Contains(output, result.Created[0]) {
+			t.Errorf("expected output to contain file name %q", result.Created[0])
+		}
+	}
+}
+
+// knownNonEmbeddedFiles lists canonical source files that exist
+// in .opencode/ but are intentionally NOT embedded in the unbound
+// binary. These are local-only tooling files (e.g., installed by
+// the Gaze scaffold) that are specific to this repository.
+var knownNonEmbeddedFiles = map[string]bool{
+	".opencode/agents/gaze-reporter.md":       true,
+	".opencode/agents/reviewer-testing.md":    true,
+	".opencode/command/gaze.md":               true,
+	".opencode/command/review-council.md":     true,
+	".opencode/command/speckit.testreview.md": true,
+}
+
+func TestCanonicalSources_AreEmbedded(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Skip("project root not found; skipping reverse drift detection")
+	}
+
+	// Build a set of embedded asset paths (mapped to source paths)
+	embeddedSet := make(map[string]bool)
+	for _, p := range expectedAssetPaths {
+		srcRel := mapAssetToSource(p)
+		embeddedSet[srcRel] = true
+	}
+
+	// Walk canonical source directories and check each file
+	canonicalDirs := []string{
+		".opencode/command",
+		".opencode/agents",
+		".specify/templates",
+		".specify/scripts/bash",
+		"openspec/schemas",
+	}
+
+	for _, dir := range canonicalDirs {
+		fullDir := filepath.Join(root, dir)
+		if _, err := os.Stat(fullDir); os.IsNotExist(err) {
+			continue
+		}
+		err := filepath.Walk(fullDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return err
+			}
+			relPath, _ := filepath.Rel(root, path)
+			if knownNonEmbeddedFiles[relPath] {
+				return nil // Explicitly excluded
+			}
+			if !embeddedSet[relPath] {
+				t.Errorf("canonical source %s is not embedded and not in knownNonEmbeddedFiles exclusion list", relPath)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Errorf("walk %s: %v", dir, err)
+		}
+	}
+
+	// Also check the two standalone config files
+	for _, f := range []string{".specify/config.yaml", "openspec/config.yaml"} {
+		if _, err := os.Stat(filepath.Join(root, f)); err == nil {
+			if !embeddedSet[f] {
+				t.Errorf("canonical source %s is not embedded", f)
+			}
+		}
+	}
+}
+
+func TestMapAssetPath_Prefixes(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"specify/templates/spec-template.md", ".specify/templates/spec-template.md"},
+		{"opencode/command/speckit.specify.md", ".opencode/command/speckit.specify.md"},
+		{"openspec/config.yaml", "openspec/config.yaml"},
+		{"openspec/schemas/unbound-force/schema.yaml", "openspec/schemas/unbound-force/schema.yaml"},
+		// Unknown prefix passes through unchanged (default branch)
+		{"scripts/validate.sh", "scripts/validate.sh"},
+	}
+
+	for _, tt := range tests {
+		got := mapAssetPath(tt.input)
+		if got != tt.expected {
+			t.Errorf("mapAssetPath(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+// TestAssetPaths_KnownPrefixes verifies all embedded assets use
+// a recognized top-level prefix. Catches new directories added
+// without updating mapAssetPath.
+func TestAssetPaths_KnownPrefixes(t *testing.T) {
+	paths, err := assetPaths()
+	if err != nil {
+		t.Fatalf("get asset paths: %v", err)
+	}
+
+	for _, p := range paths {
+		found := false
+		for _, prefix := range knownAssetPrefixes {
+			if strings.HasPrefix(p, prefix) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("asset %q does not match any known prefix %v — update mapAssetPath and knownAssetPrefixes",
+				p, knownAssetPrefixes)
+		}
 	}
 }

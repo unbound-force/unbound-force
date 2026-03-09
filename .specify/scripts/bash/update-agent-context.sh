@@ -38,11 +38,7 @@
 # Agent types: claude|gemini|copilot|cursor-agent|qwen|opencode|codex|windsurf|kilocode|auggie|roo|codebuddy|amp|shai|q|agy|bob|qodercli
 # Leave empty to update all existing agent files
 
-set -e
-
-# Enable strict error handling
-set -u
-set -o pipefail
+set -euo pipefail
 
 #==============================================================================
 # Configuration and Global Variables
@@ -53,7 +49,7 @@ SCRIPT_DIR="$(CDPATH="" cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 # Get all paths and variables from common functions
-eval $(get_feature_paths)
+get_feature_paths
 
 NEW_PLAN="$IMPL_PLAN"  # Alias for compatibility with existing code
 AGENT_TYPE="${1:-}"
@@ -106,11 +102,15 @@ log_warning() {
     echo "WARNING: $1" >&2
 }
 
+# Track temporary files for cleanup
+TEMP_FILES=()
+
 # Cleanup function for temporary files
 cleanup() {
     local exit_code=$?
-    rm -f /tmp/agent_update_*_$$
-    rm -f /tmp/manual_additions_$$
+    for f in "${TEMP_FILES[@]+"${TEMP_FILES[@]}"}"; do
+        rm -f "$f"
+    done
     exit $exit_code
 }
 
@@ -373,6 +373,7 @@ update_existing_agent_file() {
         log_error "Failed to create temporary file"
         return 1
     }
+    TEMP_FILES+=("$temp_file")
     
     # Process the file in one pass
     local tech_stack=$(format_technology_stack "$NEW_LANG" "$NEW_FRAMEWORK")
@@ -538,6 +539,7 @@ update_agent_file() {
             log_error "Failed to create temporary file"
             return 1
         }
+        TEMP_FILES+=("$temp_file")
         
         if create_new_agent_file "$target_file" "$temp_file" "$project_name" "$current_date"; then
             if mv "$temp_file" "$target_file"; then
@@ -808,4 +810,4 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi
 
-<!-- scaffolded by unbound vdev -->
+# scaffolded by unbound vdev
