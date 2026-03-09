@@ -24,6 +24,11 @@ depends_on:
 - Q: What is the format of the local synchronized representation? → A: Local MD files. The local backlog acts as a contextual cache for augmented interactions and swarm execution. These files MUST be indexed by graphthulhu, so the cache location should be within its watched directories.
 - Q: How is the synchronization triggered? Does the user have to manually invoke the CLI? → A: Sync is handled via OpenCode commands. Any CLI built is strictly to support the OpenCode agents and the Swarm. The primary user interface is entirely within OpenCode (via commands, agents, or MCP servers).
 - Q: How does Muti-Mind receive or discover the Gaze quality report to initiate the acceptance review? → A: Through the review council command (`/review-council`), which orchestrates the handover of testing outcomes to the Product Owner for final acceptance.
+- Q: How should the Muti-Mind OpenCode agent decide when to invoke `graphthulhu` MCP tools (e.g., `knowledge-graph_search`) versus using the local `muti-mind` CLI? → A: Exclusive for all reads (Recommended). The agent should use MCP tools exclusively for all read operations, reserving the CLI solely for write/sync operations.
+- Q: Should the `graphthulhu` MCP server be declared as a hard dependency in Muti-Mind's hero manifest, or a soft/optional dependency? → A: Hard Dependency (Recommended). Since Muti-Mind relies on the MCP server exclusively for backlog reads, it cannot function without it.
+- Q: How should Muti-Mind discover and evaluate dependencies between backlog items during the priority scoring process? → A: Combine both methods (Recommended). Combine explicit YAML dependencies with knowledge graph traversal for a comprehensive dependency map.
+- Q: How should the Muti-Mind agent handle failures or timeouts when querying the `graphthulhu` MCP server? → A: Fail fast with clear error (Recommended). Fail fast and return a clear error message instructing the user to check the MCP server status.
+- Q: How should Muti-Mind handle pagination or result limits when querying `graphthulhu` for operations requiring the full backlog (e.g., full reprioritization)? → A: Implement pagination loop (Recommended). Implement a pagination loop or recursive fetching strategy to retrieve all necessary items safely.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -133,6 +138,7 @@ Muti-Mind generates user stories from high-level product goals or feature descri
 
 ### Edge Cases
 
+- What happens when the Muti-Mind agent encounters failures or timeouts querying the `graphthulhu` MCP server? The agent MUST fail fast and return a clear error message instructing the user to check the MCP server status.
 - What happens when `/muti-mind.sync-push` is run without GitHub credentials configured? The command MUST fail with a clear error message directing the user to configure authentication (e.g., `gh auth login` or `GITHUB_TOKEN`).
 - What happens when a backlog item has no acceptance criteria? Muti-Mind MUST warn that the item is not "Ready" for implementation and recommend running the `clarify` phase.
 - What happens when prioritization is run on an empty backlog? The command MUST report "no items to prioritize" and exit cleanly.
@@ -149,8 +155,11 @@ Muti-Mind generates user stories from high-level product goals or feature descri
 - **FR-002**: The agent persona MUST be deployable as an OpenCode agent file (`muti-mind-po.md`) installable via `muti-mind init`.
 - **FR-003**: Muti-Mind MUST expose its functionality entirely through OpenCode interfaces (Commands, Agents, Skills, or MCP Servers). AI-driven features MUST delegate LLM execution to the OpenCode runtime.
 - **FR-004**: Backlog items MUST be stored as individual files in `.muti-mind/backlog/` in a human-readable format (YAML front matter + Markdown body). This location MUST be indexed by graphthulhu to support swarm execution and context retrieval.
+- **FR-004a**: The Muti-Mind OpenCode agent MUST use graphthulhu MCP tools exclusively for all backlog read operations, reserving the muti-mind CLI solely for write/sync operations.
+- **FR-004b**: When performing operations that require the full backlog (e.g., full reprioritization), the agent MUST implement a pagination loop or recursive fetching strategy to handle `graphthulhu` result limits safely.
 - **FR-005**: Each backlog item MUST have a unique identifier (BI-NNN), type (epic/story/task/bug), priority (P1-P5), status (draft/ready/in-progress/review/done/cancelled), and timestamps (created, modified).
 - **FR-006**: The priority scoring engine MUST evaluate items across at least five dimensions: business value, risk, dependencies, urgency, and effort.
+- **FR-006a**: The scoring engine MUST combine explicit YAML `dependencies[]` with knowledge graph traversal (via `graphthulhu` link tools) to build a comprehensive dependency map.
 - **FR-007**: The priority score MUST be transparent: each dimension's contribution to the composite score MUST be visible.
 - **FR-008**: GitHub sync MUST support push (local -> GitHub Issues), pull (GitHub Issues -> local), and bidirectional sync with conflict detection.
 - **FR-008a**: GitHub Issues/Projects MUST be treated as the ultimate source of truth for the backlog and its manual ordering. The local `.muti-mind/backlog/` is a synchronized reflection of the remote state.
@@ -202,3 +211,4 @@ Muti-Mind generates user stories from high-level product goals or feature descri
 
 - **GitHub API**: GitHub Issues, Projects, Labels, Milestones APIs for sync functionality.
 - **GitHub CLI (`gh`)**: May be used as a dependency for GitHub API interaction.
+- **graphthulhu MCP Server**: A hard dependency for the Muti-Mind OpenCode agent to perform backlog reads and semantic queries.

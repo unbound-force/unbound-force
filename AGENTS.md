@@ -442,6 +442,8 @@ This repo is primarily specifications and governance documents. Follow these con
 - Node.js >= 20.19.0 (OpenSpec CLI, `@fission-ai/openspec`)
 - Go 1.24+ (for tooling/MCP if any, though primarily OpenCode agents/commands) + OpenCode runtime, GitHub CLI (`gh`) or GitHub API (004-muti-mind-architecture)
 - Local Markdown files (YAML frontmatter) in `.muti-mind/backlog/` indexed by graphthulhu (004-muti-mind-architecture)
+- Go 1.24+ (CLI backend), OpenCode Agents (AI runtime) + `github.com/spf13/cobra`, `github.com/charmbracelet/log`, OpenCode Runtime, `graphthulhu` MCP Server (004-muti-mind-architecture)
+- Local Markdown files with YAML frontmatter in `.muti-mind/backlog/` (004-muti-mind-architecture)
 
 ## Recent Changes
 

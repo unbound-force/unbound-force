@@ -1,5 +1,8 @@
 # Implementation Tasks: Muti-Mind Architecture (Product Owner)
 
+**Input**: Design documents from `/specs/004-muti-mind-architecture/`
+**Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
+
 ## Phase 1: Setup & Infrastructure
 **Goal**: Initialize the project structure and shared infrastructure.
 
@@ -49,7 +52,7 @@
 - [x] T017 [US5] Update `muti-mind-po.md` agent to handle speckit `/specify` and `/clarify` invocation workflows
 - [x] T018 [US5] Implement acceptance logic in `muti-mind-po.md` to evaluate Gaze reports against backlog item acceptance criteria
 - [x] T019 [US5] Implement generation of the `acceptance-decision` JSON artifact
-- [x] T019a [US5] Implement automated generation of the `backlog-item` JSON artifact representation (FR-015)
+- [x] T019a [US5] Implement automated generation of the `backlog-item` JSON artifact representation in `internal/artifacts/backlog.go` (FR-015)
 
 ## Phase 7: User Story 6 - User Story Generation (P3)
 **Goal**: Generate structured user stories from high-level goals.
@@ -59,6 +62,16 @@
 - [x] T021 [US6] Update `muti-mind-po.md` agent to support the story generation prompt and output format
 - [x] T021a [US6] Implement interactive approval workflow to confirm generated story proposals before adding them to the backlog (FR-014)
 
+## Phase 8: Knowledge Graph Integration (Spec 010 Expansion)
+**Goal**: Expand Muti-Mind capabilities to use `graphthulhu` MCP tools for context retrieval and dependency mapping.
+**Independent Test**: The agent executes backlog query operations using exclusively the MCP tools, handles limits safely, and builds dependency trees through graph links.
+
+- [ ] T026 Update `schemas/hero-manifest/muti-mind-hero.json` to include the `mcp_server` dependency (`graphthulhu`)
+- [ ] T027 Update `.opencode/agents/muti-mind-po.md` with instructions to use MCP knowledge graph tools exclusively for all backlog read operations (FR-004a)
+- [ ] T028 Update `.opencode/agents/muti-mind-po.md` with rules to implement a pagination loop or recursive fetching strategy for handling `graphthulhu` result limits (FR-004b)
+- [ ] T029 Update `.opencode/agents/muti-mind-po.md` priority scoring rules to combine explicit YAML dependencies with knowledge graph traversal (FR-006a)
+- [ ] T030 Update `.opencode/agents/muti-mind-po.md` error handling rules to fail fast and clearly report MCP failures or timeouts
+
 ## Final Phase: Polish & Cross-Cutting Concerns
 **Goal**: Ensure quality, formatting, documentation, and compliance.
 
@@ -66,3 +79,15 @@
 - [x] T023 Validate all outputs against Hero Interface Contract artifact envelopes
 - [x] T024 Write integration tests verifying OpenCode shell delegation to Go binary
 - [x] T025 Setup CI coverage ratchets (80% global, 90% internal/backlog) to enforce Principle IV testability
+
+---
+
+## Dependencies & Execution Order
+
+### Phase Dependencies
+- **Phase 1-7**: Completed
+- **Phase 8 (Knowledge Graph Integration)**: Depends on Phase 1-7.
+- **Final Phase (Polish)**: Depends on Phase 8 being complete.
+
+### Implementation Strategy
+The core functionality of Muti-Mind (US1-US6) is fully implemented. The current focus is executing **Phase 8** to adapt the OpenCode AI agent and manifest to properly consume the `graphthulhu` knowledge graph in adherence to Spec 010.

@@ -16,3 +16,18 @@
 - **Decision**: Muti-Mind's interface will be exclusively OpenCode commands and agents. A Go binary will only be introduced if an MCP server is strictly required for complex GitHub API interactions that exceed simple bash scripting.
 - **Rationale**: Aligns with "Intent-to-Context" and ensures the user stays in the AI environment where the rest of the swarm operates.
 - **Alternatives considered**: A standalone CLI binary as the primary interface (rejected: breaks the seamless swarm UX).
+
+## Decision 4: Knowledge Graph Integration
+- **Decision**: Muti-Mind OpenCode agent MUST exclusively use `graphthulhu` MCP tools for all read operations, using the CLI only for write/sync operations. It is a hard dependency.
+- **Rationale**: Relying on MCP ensures the agent has access to the full dependency graph and semantic search capabilities, adhering to Spec 010.
+- **Alternatives considered**: Soft dependency with CLI fallback (rejected because it fractures the architecture and creates inconsistent AI context retrieval).
+
+## Decision 5: Dependency Resolution
+- **Decision**: Combine explicit YAML `dependencies[]` with knowledge graph link traversal to build a dependency map.
+- **Rationale**: Ensures accurate priority scoring by factoring in both manual constraints and implicit links discovered by the graph.
+- **Alternatives considered**: Solely relying on explicit YAML dependencies (rejected because it misses systemic context).
+
+## Decision 6: Edge Case Handling (MCP)
+- **Decision**: Implement a pagination loop for handling large backlog queries via MCP and fail fast with clear errors on MCP failure.
+- **Rationale**: Graphthulhu limits results to conserve tokens; pagination is necessary for full-backlog operations like reprioritization.
+- **Alternatives considered**: Local file reads for full backlog (rejected due to exclusive read constraint on MCP).

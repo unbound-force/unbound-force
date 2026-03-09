@@ -1,53 +1,56 @@
 # Muti-Mind Quickstart
 
-## 1. Initialization
+## Installation
 
-Initialize the Muti-Mind backlog structure in your repository:
+Muti-Mind operates as an OpenCode agent backed by a local CLI tool and requires the `graphthulhu` MCP server to be active.
+
+1. Ensure the `unbound` repo is initialized and `graphthulhu` MCP server is running.
+2. Ensure you have GitHub CLI (`gh`) authenticated if you intend to sync with GitHub Issues.
+3. In OpenCode, install the Muti-Mind persona and command wrappers:
+   ```bash
+   # (Assuming future opencode plugin/agent install commands)
+   # Muti-Mind agents are located in .opencode/agents/muti-mind-po.md
+   ```
+
+## Initialization
+
+Initialize a new backlog in your project:
 
 ```bash
 /muti-mind.init
 ```
-This creates the `.muti-mind/backlog/` directory where all items will be stored as Markdown files.
+This creates the `.muti-mind/backlog/` directory.
 
-## 2. Managing the Backlog
+## Managing the Backlog
 
-You can ask the Muti-Mind agent to generate stories for you:
-
+Add a new item:
 ```bash
-/muti-mind.generate-stories "Users need to be able to export their data in CSV format"
+/muti-mind.backlog-add --type story --title "Implement user login" --priority P2
 ```
 
-Or you can add items directly:
-
-```bash
-/muti-mind.backlog-add --type story --title "CSV Data Export" --priority P2
-```
-
-List your current backlog:
-
+View the backlog:
 ```bash
 /muti-mind.backlog-list
 ```
 
-## 3. Prioritization
+## AI Prioritization
 
-If your backlog is growing, you can ask the Muti-Mind agent to re-score and prioritize it based on business value, risk, and dependencies:
+To let Muti-Mind analyze dependencies via the Knowledge Graph and re-score the backlog:
 
 ```bash
 /muti-mind.prioritize
 ```
 
-## 4. GitHub Sync
+## GitHub Sync
 
-Keep your local MD cache in sync with the repository's GitHub Issues:
+Push your local backlog to GitHub Issues:
 
 ```bash
-# Push local changes to GitHub
 /muti-mind.sync-push
+```
 
-# Pull new issues from GitHub
+Pull new issues from GitHub into your local backlog:
+
+```bash
 /muti-mind.sync-pull
-
-# Check sync status
-/muti-mind.sync-status
 ```
