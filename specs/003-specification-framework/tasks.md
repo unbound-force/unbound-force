@@ -16,9 +16,9 @@
 **Purpose**: Initialize Go project and create the directory
 structure for the `unbound` CLI binary
 
-- [ ] T001 Initialize Go module with `go mod init github.com/unbound-force/unbound-force` in go.mod
-- [ ] T002 Add Cobra dependency with `go get github.com/spf13/cobra@latest`
-- [ ] T003 Create CLI entry point with root and version commands in cmd/unbound/main.go
+- [x] T001 Initialize Go module with `go mod init github.com/unbound-force/unbound-force` in go.mod
+- [x] T002 Add Cobra dependency with `go get github.com/spf13/cobra@latest`
+- [x] T003 Create CLI entry point with root and version commands in cmd/unbound/main.go
 
 ---
 
@@ -31,13 +31,13 @@ following the Gaze pattern.
 **CRITICAL**: No user story work can begin until this
 phase is complete.
 
-- [ ] T004 Create scaffold Options and Result structs in internal/scaffold/scaffold.go per data-model.md entities 1-2
-- [ ] T005 Implement `isToolOwned()` function in internal/scaffold/scaffold.go per contracts/installer-cli.md ownership rules
-- [ ] T006 Implement `insertMarkerAfterFrontmatter()` function in internal/scaffold/scaffold.go for version marker injection (`<!-- scaffolded by unbound vX.Y.Z -->`)
-- [ ] T007 Implement `Run()` function in internal/scaffold/scaffold.go: walk embedded assets, apply ownership rules, write files, return Result
-- [ ] T008 Implement `printSummary()` function in internal/scaffold/scaffold.go to report created/skipped/updated/overwritten files
-- [ ] T009 Wire `init` subcommand in cmd/unbound/main.go to call scaffold.Run() with Options from flags (--force)
-- [ ] T010 Create empty embedded assets directory structure at internal/scaffold/assets/ with subdirectories: specify/templates/, specify/scripts/bash/, opencode/command/, opencode/agents/, openspec/schemas/unbound-force/templates/, openspec/
+- [x] T004 Create scaffold Options and Result structs in internal/scaffold/scaffold.go per data-model.md entities 1-2
+- [x] T005 Implement `isToolOwned()` function in internal/scaffold/scaffold.go per contracts/installer-cli.md ownership rules
+- [x] T006 Implement `insertMarkerAfterFrontmatter()` function in internal/scaffold/scaffold.go for version marker injection (`<!-- scaffolded by unbound vX.Y.Z -->`)
+- [x] T007 Implement `Run()` function in internal/scaffold/scaffold.go: walk embedded assets, apply ownership rules, write files, return Result
+- [x] T008 Implement `printSummary()` function in internal/scaffold/scaffold.go to report created/skipped/updated/overwritten files
+- [x] T009 Wire `init` subcommand in cmd/unbound/main.go to call scaffold.Run() with Options from flags (--force)
+- [x] T010 Create empty embedded assets directory structure at internal/scaffold/assets/ with subdirectories: specify/templates/, specify/scripts/bash/, opencode/command/, opencode/agents/, openspec/schemas/unbound-force/templates/, openspec/
 
 **Checkpoint**: Scaffold engine complete. `unbound init`
 runs but has no assets to extract yet.
@@ -55,13 +55,13 @@ verify it contains copies of all 22 Speckit files plus the
 OpenSpec schema files. Run `go test ./internal/scaffold/...`
 and verify the drift detection test passes.
 
-- [ ] T011 [P] [US1] Copy 6 Speckit templates from .specify/templates/ to internal/scaffold/assets/specify/templates/
-- [ ] T012 [P] [US1] Copy 5 Speckit scripts from .specify/scripts/bash/ to internal/scaffold/assets/specify/scripts/bash/
-- [ ] T013 [P] [US1] Copy 10 OpenCode commands from .opencode/command/ to internal/scaffold/assets/opencode/command/
-- [ ] T014 [P] [US1] Copy 1 agent file from .opencode/agents/constitution-check.md to internal/scaffold/assets/opencode/agents/constitution-check.md
-- [ ] T015 [US1] Add `//go:embed assets` directive in internal/scaffold/scaffold.go to embed the assets filesystem
-- [ ] T016 [US1] Implement TestEmbeddedAssetsMatchSource drift detection test in internal/scaffold/scaffold_test.go: walk assets/, compare each file byte-for-byte against canonical source at repo root
-- [ ] T017 [US1] Run `go test ./internal/scaffold/...` and verify drift detection test passes
+- [x] T011 [P] [US1] Copy 6 Speckit templates from .specify/templates/ to internal/scaffold/assets/specify/templates/
+- [x] T012 [P] [US1] Copy 5 Speckit scripts from .specify/scripts/bash/ to internal/scaffold/assets/specify/scripts/bash/
+- [x] T013 [P] [US1] Copy 10 OpenCode commands from .opencode/command/ to internal/scaffold/assets/opencode/command/
+- [x] T014 [P] [US1] Copy 1 agent file from .opencode/agents/constitution-check.md to internal/scaffold/assets/opencode/agents/constitution-check.md
+- [x] T015 [US1] Add `//go:embed assets` directive in internal/scaffold/scaffold.go to embed the assets filesystem
+- [x] T016 [US1] Implement TestEmbeddedAssetsMatchSource drift detection test in internal/scaffold/scaffold_test.go: walk assets/, compare each file byte-for-byte against canonical source at repo root
+- [x] T017 [US1] Run `go test ./internal/scaffold/...` and verify drift detection test passes
 
 **Checkpoint**: This repo contains exactly one authoritative
 version of each framework file. Embedded copies are
@@ -81,13 +81,13 @@ created. Modify a user-owned file, re-run `unbound init`,
 verify it is skipped. Modify a tool-owned file's embedded
 source, re-run, verify it is updated.
 
-- [ ] T018 [US2] Implement scaffold test for fresh repo: create temp dir, run scaffold.Run(), verify all files created in internal/scaffold/scaffold_test.go
-- [ ] T019 [US2] Implement scaffold test for re-run: run scaffold.Run() twice, verify user-owned files skipped, tool-owned files unchanged in internal/scaffold/scaffold_test.go
-- [ ] T020 [US2] Implement scaffold test for --force flag: run scaffold.Run() with Force=true, verify all files overwritten in internal/scaffold/scaffold_test.go
-- [ ] T021 [US2] Implement scaffold test for version marker: verify scaffolded files contain `<!-- scaffolded by unbound ... -->` after YAML frontmatter in internal/scaffold/scaffold_test.go
-- [ ] T022 [US2] Implement scaffold test for tool-owned update: modify a tool-owned file on disk, re-run scaffold.Run(), verify it is overwritten in internal/scaffold/scaffold_test.go
-- [ ] T023 [US2] Run `go test ./...` and verify all scaffold tests pass
-- [ ] T024 [US2] Build binary with `go build -o unbound ./cmd/unbound` and run `./unbound init` in a temp directory to verify end-to-end
+- [x] T018 [US2] Implement scaffold test for fresh repo: create temp dir, run scaffold.Run(), verify all files created in internal/scaffold/scaffold_test.go
+- [x] T019 [US2] Implement scaffold test for re-run: run scaffold.Run() twice, verify user-owned files skipped, tool-owned files unchanged in internal/scaffold/scaffold_test.go
+- [x] T020 [US2] Implement scaffold test for --force flag: run scaffold.Run() with Force=true, verify all files overwritten in internal/scaffold/scaffold_test.go
+- [x] T021 [US2] Implement scaffold test for version marker: verify scaffolded files contain `<!-- scaffolded by unbound ... -->` after YAML frontmatter in internal/scaffold/scaffold_test.go
+- [x] T022 [US2] Implement scaffold test for tool-owned update: modify a tool-owned file on disk, re-run scaffold.Run(), verify it is overwritten in internal/scaffold/scaffold_test.go
+- [x] T023 [US2] Run `go test ./...` and verify all scaffold tests pass
+- [x] T024 [US2] Build binary with `go build -o unbound ./cmd/unbound` and run `./unbound init` in a temp directory to verify end-to-end
 
 **Checkpoint**: `unbound init` works in a fresh repo (SC-002),
 re-run skips user-owned files (SC-003), and version markers
@@ -105,15 +105,15 @@ verify `openspec/` directory exists with schemas, config,
 specs, and changes subdirectories. Install OpenSpec CLI and
 verify `openspec schemas` lists `unbound-force`.
 
-- [ ] T025 [P] [US5] Create OpenSpec schema.yaml file at openspec/schemas/unbound-force/schema.yaml per contracts/openspec-schema.md
-- [ ] T026 [P] [US5] Create OpenSpec proposal template at openspec/schemas/unbound-force/templates/proposal.md per contracts/openspec-schema.md (including Constitution Alignment section)
-- [ ] T027 [P] [US5] Create OpenSpec spec template at openspec/schemas/unbound-force/templates/spec.md per contracts/openspec-schema.md (ADDED/MODIFIED/REMOVED with RFC 2119)
-- [ ] T028 [P] [US5] Create OpenSpec design template at openspec/schemas/unbound-force/templates/design.md per contracts/openspec-schema.md
-- [ ] T029 [P] [US5] Create OpenSpec tasks template at openspec/schemas/unbound-force/templates/tasks.md per contracts/openspec-schema.md
-- [ ] T030 [US5] Create default OpenSpec config at openspec/config.yaml per contracts/openspec-schema.md (with constitution context and per-artifact rules)
-- [ ] T031 [US5] Copy all OpenSpec files (T025-T030) to internal/scaffold/assets/openspec/ for embedding
-- [ ] T032 [US5] Run `go test ./internal/scaffold/...` to verify drift detection passes for new OpenSpec files
-- [ ] T033 [US5] Build binary and run `unbound init` in temp dir, verify openspec/ directory structure is created with schema, templates, config, specs/, and changes/ subdirectories
+- [x] T025 [P] [US5] Create OpenSpec schema.yaml file at openspec/schemas/unbound-force/schema.yaml per contracts/openspec-schema.md
+- [x] T026 [P] [US5] Create OpenSpec proposal template at openspec/schemas/unbound-force/templates/proposal.md per contracts/openspec-schema.md (including Constitution Alignment section)
+- [x] T027 [P] [US5] Create OpenSpec spec template at openspec/schemas/unbound-force/templates/spec.md per contracts/openspec-schema.md (ADDED/MODIFIED/REMOVED with RFC 2119)
+- [x] T028 [P] [US5] Create OpenSpec design template at openspec/schemas/unbound-force/templates/design.md per contracts/openspec-schema.md
+- [x] T029 [P] [US5] Create OpenSpec tasks template at openspec/schemas/unbound-force/templates/tasks.md per contracts/openspec-schema.md
+- [x] T030 [US5] Create default OpenSpec config at openspec/config.yaml per contracts/openspec-schema.md (with constitution context and per-artifact rules)
+- [x] T031 [US5] Copy all OpenSpec files (T025-T030) to internal/scaffold/assets/openspec/ for embedding
+- [x] T032 [US5] Run `go test ./internal/scaffold/...` to verify drift detection passes for new OpenSpec files
+- [x] T033 [US5] Build binary and run `unbound init` in temp dir, verify openspec/ directory structure is created with schema, templates, config, specs/, and changes/ subdirectories
 
 **Checkpoint**: OpenSpec tactical workflow is scaffolded.
 `openspec/schemas/unbound-force/` exists with all templates.
@@ -132,10 +132,10 @@ verify it contains Constitution Alignment section headings
 for all three principles. Inspect `openspec/config.yaml`
 and verify the context field references the constitution.
 
-- [ ] T034 [US6] Verify proposal.md template (from T026) contains "Constitution Alignment" section with I. Autonomous Collaboration, II. Composability First, III. Observable Quality subsections and PASS/N/A assessment fields
-- [ ] T035 [US6] Verify openspec/config.yaml (from T030) context field references `.specify/memory/constitution.md` and includes three principle summaries
-- [ ] T036 [US6] Verify openspec/config.yaml (from T030) rules.proposal includes "MUST include Constitution Alignment section"
-- [ ] T037 [US6] Verify schema.yaml (from T025) proposal artifact instruction includes "MUST include a Constitution Alignment section" and "Read the constitution from .specify/memory/constitution.md"
+- [x] T034 [US6] Verify proposal.md template (from T026) contains "Constitution Alignment" section with I. Autonomous Collaboration, II. Composability First, III. Observable Quality subsections and PASS/N/A assessment fields
+- [x] T035 [US6] Verify openspec/config.yaml (from T030) context field references `.specify/memory/constitution.md` and includes three principle summaries
+- [x] T036 [US6] Verify openspec/config.yaml (from T030) rules.proposal includes "MUST include Constitution Alignment section"
+- [x] T037 [US6] Verify schema.yaml (from T025) proposal artifact instruction includes "MUST include a Constitution Alignment section" and "Read the constitution from .specify/memory/constitution.md"
 
 **Checkpoint**: Constitution governance bridge is structurally
 enforced via template, context injection, and per-artifact
@@ -153,9 +153,9 @@ OpenSpec for any given piece of work.
 documentation and classify 10 representative work items.
 At least 8 of 10 should produce a clear recommendation.
 
-- [ ] T038 [US7] Add boundary guidelines section to AGENTS.md with decision criteria matrix (story count, cross-repo impact, constitution changes, bug fixes, maintenance) per research.md R4
-- [ ] T039 [US7] Add escalation path guidance to AGENTS.md: "when in doubt, start with OpenSpec and escalate to Speckit if scope grows beyond 3 stories or crosses repo boundaries"
-- [ ] T040 [US7] Add boundary guidelines to quickstart.md Decision Guide table (already partially present, verify completeness) in specs/003-specification-framework/quickstart.md
+- [x] T038 [US7] Add boundary guidelines section to AGENTS.md with decision criteria matrix (story count, cross-repo impact, constitution changes, bug fixes, maintenance) per research.md R4
+- [x] T039 [US7] Add escalation path guidance to AGENTS.md: "when in doubt, start with OpenSpec and escalate to Speckit if scope grows beyond 3 stories or crosses repo boundaries"
+- [x] T040 [US7] Add boundary guidelines to quickstart.md Decision Guide table (already partially present, verify completeness) in specs/003-specification-framework/quickstart.md
 
 **Checkpoint**: Boundary guidelines documented with decision
 matrix, heuristic, and escalation path (SC-009).
@@ -172,10 +172,10 @@ actions, inputs, outputs, and prerequisites.
 quickstart documentation to scaffold a repo, run the first
 three Speckit phases, and create an OpenSpec proposal.
 
-- [ ] T041 [P] [US4] Document all 9 Speckit pipeline phases in AGENTS.md with purpose, prerequisites, inputs, outputs, and command for each phase
-- [ ] T042 [P] [US4] Document all 4 core OpenSpec actions (propose, explore, apply, archive) in AGENTS.md with purpose, prerequisites, inputs, outputs, and command for each action
-- [ ] T043 [US4] Add pipeline overview section to AGENTS.md showing the dual-tier framework with Speckit and OpenSpec side by side, including which phases are mandatory vs optional
-- [ ] T044 [US4] Verify quickstart.md (specs/003-specification-framework/quickstart.md) covers end-to-end workflow from installation through first spec and first proposal
+- [x] T041 [P] [US4] Document all 9 Speckit pipeline phases in AGENTS.md with purpose, prerequisites, inputs, outputs, and command for each phase
+- [x] T042 [P] [US4] Document all 4 core OpenSpec actions (propose, explore, apply, archive) in AGENTS.md with purpose, prerequisites, inputs, outputs, and command for each action
+- [x] T043 [US4] Add pipeline overview section to AGENTS.md showing the dual-tier framework with Speckit and OpenSpec side by side, including which phases are mandatory vs optional
+- [x] T044 [US4] Verify quickstart.md (specs/003-specification-framework/quickstart.md) covers end-to-end workflow from installation through first spec and first proposal
 
 **Checkpoint**: Pipeline documentation covers all 9 Speckit
 phases and 4 OpenSpec actions (SC-006).
@@ -191,12 +191,12 @@ phases and 4 OpenSpec actions (SC-006).
 `language: go` in a test repo. Run a speckit command and
 verify it uses the Go-specific patterns instead of defaults.
 
-- [ ] T045 [US3] Create default .specify/config.yaml template with all fields (language, framework, build_command, test_command, integration_patterns, project_type) and sensible defaults
-- [ ] T046 [US3] Copy .specify/config.yaml to internal/scaffold/assets/specify/config.yaml for embedding
-- [ ] T047 [US3] Update speckit.specify.md command in .opencode/command/speckit.specify.md to read integration_patterns from .specify/config.yaml instead of hardcoding patterns
-- [ ] T048 [US3] Update speckit.plan.md command in .opencode/command/speckit.plan.md to read project_type from .specify/config.yaml to determine contract type (API/CLI/library)
-- [ ] T049 [US3] Copy updated speckit.specify.md and speckit.plan.md to internal/scaffold/assets/opencode/command/ and verify drift test passes
-- [ ] T050 [US3] Run `go test ./internal/scaffold/...` to verify all drift detection tests pass after config and command updates
+- [x] T045 [US3] Create default .specify/config.yaml template with all fields (language, framework, build_command, test_command, integration_patterns, project_type) and sensible defaults
+- [x] T046 [US3] Copy .specify/config.yaml to internal/scaffold/assets/specify/config.yaml for embedding
+- [x] T047 [US3] Update speckit.specify.md command in .opencode/command/speckit.specify.md to read integration_patterns from .specify/config.yaml instead of hardcoding patterns
+- [x] T048 [US3] Update speckit.plan.md command in .opencode/command/speckit.plan.md to read project_type from .specify/config.yaml to determine contract type (API/CLI/library)
+- [x] T049 [US3] Copy updated speckit.specify.md and speckit.plan.md to internal/scaffold/assets/opencode/command/ and verify drift test passes
+- [x] T050 [US3] Run `go test ./internal/scaffold/...` to verify all drift detection tests pass after config and command updates
 
 **Checkpoint**: Extension points functional. Config-driven
 customization replaces hardcoded patterns (SC-005).
@@ -214,10 +214,10 @@ canonical source, rebuild the binary, re-run `unbound init`
 in a repo that already has the schema. Verify the schema
 file is updated while `openspec/config.yaml` is preserved.
 
-- [ ] T051 [US8] Verify isToolOwned() classifies all files under openspec/schemas/ as tool-owned in internal/scaffold/scaffold.go
-- [ ] T052 [US8] Verify isToolOwned() classifies openspec/config.yaml as user-owned in internal/scaffold/scaffold.go
-- [ ] T053 [US8] Add scaffold test: modify schema file on disk, re-run scaffold.Run(), verify schema is updated while config.yaml is preserved in internal/scaffold/scaffold_test.go
-- [ ] T054 [US8] Run `go test ./internal/scaffold/...` to verify schema distribution test passes
+- [x] T051 [US8] Verify isToolOwned() classifies all files under openspec/schemas/ as tool-owned in internal/scaffold/scaffold.go
+- [x] T052 [US8] Verify isToolOwned() classifies openspec/config.yaml as user-owned in internal/scaffold/scaffold.go
+- [x] T053 [US8] Add scaffold test: modify schema file on disk, re-run scaffold.Run(), verify schema is updated while config.yaml is preserved in internal/scaffold/scaffold_test.go
+- [x] T054 [US8] Run `go test ./internal/scaffold/...` to verify schema distribution test passes
 
 **Checkpoint**: Schema distributed via unbound init with
 correct ownership behavior (SC-003 for OpenSpec files).
@@ -229,19 +229,19 @@ correct ownership behavior (SC-003 for OpenSpec files).
 **Purpose**: Release pipeline, documentation updates, and
 final validation across all user stories.
 
-- [ ] T055 [P] Create .goreleaser.yaml at repo root with cross-platform build config (darwin/amd64, darwin/arm64, linux/amd64, linux/arm64), CGO_ENABLED=0, ldflags for version/commit/date injection, Homebrew cask publishing to unbound-force/homebrew-tap
-- [ ] T056 [P] Create .github/workflows/release.yml for GoReleaser release pipeline triggered by v* tags (matching Gaze's release.yml pattern)
-- [ ] T057 [P] Update AGENTS.md Active Technologies section with Go, Cobra, embed, GoReleaser, OpenSpec
-- [ ] T058 [P] Update AGENTS.md Recent Changes section with spec 003 implementation summary
-- [ ] T059 Update AGENTS.md Project Structure tree to include cmd/unbound/, internal/scaffold/, openspec/, go.mod, .goreleaser.yaml
-- [ ] T060 Update README.md with Specification Framework section covering installation (`brew install unbound-force/tap/unbound`), usage (`unbound init`), and both workflows
-- [ ] T061 Run `go vet ./...` and fix any issues
-- [ ] T062 Run `go test ./...` and verify all tests pass
-- [ ] T063 Build final binary with `go build -o unbound ./cmd/unbound` and run end-to-end validation: `unbound init` in fresh repo, verify all files created, re-run to verify skip/update behavior, run with `--force` to verify overwrite
-- [ ] T064 Run quickstart.md validation: follow steps 1-6 in specs/003-specification-framework/quickstart.md in a fresh test repo and verify each step produces expected output
-- [ ] T065 [US2] Verify `unbound init` works in a non-Unbound Force repository: run in a fresh directory with no `.specify/memory/constitution.md` or hero manifest, verify all files are created without errors and no hero-specific assumptions cause failures (SC-007, FR-012)
-- [ ] T066 [US7] Document directory boundary enforcement in boundary guidelines (AGENTS.md): OpenSpec changes MUST NOT modify files under `specs/`, Speckit specs MUST NOT be created under `openspec/`. Enforcement is by convention and code review, not automated gates in v1.0.0 (FR-021, FR-022, SC-010)
-- [ ] T067 [US7] Add boundary violation examples to quickstart.md or AGENTS.md showing what happens when a developer attempts to create a Speckit spec under `openspec/` or an OpenSpec delta spec under `specs/` -- expected outcome is code review rejection per documented convention (SC-010)
+- [x] T055 [P] Create .goreleaser.yaml at repo root with cross-platform build config (darwin/amd64, darwin/arm64, linux/amd64, linux/arm64), CGO_ENABLED=0, ldflags for version/commit/date injection, Homebrew cask publishing to unbound-force/homebrew-tap
+- [x] T056 [P] Create .github/workflows/release.yml for GoReleaser release pipeline triggered by v* tags (matching Gaze's release.yml pattern)
+- [x] T057 [P] Update AGENTS.md Active Technologies section with Go, Cobra, embed, GoReleaser, OpenSpec
+- [x] T058 [P] Update AGENTS.md Recent Changes section with spec 003 implementation summary
+- [x] T059 Update AGENTS.md Project Structure tree to include cmd/unbound/, internal/scaffold/, openspec/, go.mod, .goreleaser.yaml
+- [x] T060 Update README.md with Specification Framework section covering installation (`brew install unbound-force/tap/unbound`), usage (`unbound init`), and both workflows
+- [x] T061 Run `go vet ./...` and fix any issues
+- [x] T062 Run `go test ./...` and verify all tests pass
+- [x] T063 Build final binary with `go build -o unbound ./cmd/unbound` and run end-to-end validation: `unbound init` in fresh repo, verify all files created, re-run to verify skip/update behavior, run with `--force` to verify overwrite
+- [x] T064 Run quickstart.md validation: follow steps 1-6 in specs/003-specification-framework/quickstart.md in a fresh test repo and verify each step produces expected output
+- [x] T065 [US2] Verify `unbound init` works in a non-Unbound Force repository: run in a fresh directory with no `.specify/memory/constitution.md` or hero manifest, verify all files are created without errors and no hero-specific assumptions cause failures (SC-007, FR-012)
+- [x] T066 [US7] Document directory boundary enforcement in boundary guidelines (AGENTS.md): OpenSpec changes MUST NOT modify files under `specs/`, Speckit specs MUST NOT be created under `openspec/`. Enforcement is by convention and code review, not automated gates in v1.0.0 (FR-021, FR-022, SC-010)
+- [x] T067 [US7] Add boundary violation examples to quickstart.md or AGENTS.md showing what happens when a developer attempts to create a Speckit spec under `openspec/` or an OpenSpec delta spec under `specs/` -- expected outcome is code review rejection per documented convention (SC-010)
 
 ---
 

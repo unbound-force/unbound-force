@@ -58,12 +58,13 @@ unbound-force/
 │   │   ├── checklist-template.md
 │   │   ├── constitution-template.md
 │   │   └── agent-file-template.md
-│   └── scripts/bash/               # Speckit automation scripts (5 files)
-│       ├── common.sh
-│       ├── check-prerequisites.sh
-│       ├── setup-plan.sh
-│       ├── create-new-feature.sh
-│       └── update-agent-context.sh
+│   ├── scripts/bash/               # Speckit automation scripts (5 files)
+│   │   ├── common.sh
+│   │   ├── check-prerequisites.sh
+│   │   ├── setup-plan.sh
+│   │   ├── create-new-feature.sh
+│   │   └── update-agent-context.sh
+│   └── config.yaml                  # Project-specific configuration
 ├── .opencode/
 │   ├── agents/
 │   │   └── constitution-check.md    # Alignment checking agent (subagent)
@@ -78,10 +79,22 @@ unbound-force/
 │       ├── speckit.implement.md
 │       ├── speckit.taskstoissues.md
 │       └── constitution-check.md    # /constitution-check command
+├── cmd/unbound/
+│   └── main.go                      # Cobra CLI entry point
+├── internal/scaffold/
+│   ├── scaffold.go                  # Core scaffold engine
+│   ├── scaffold_test.go             # Tests + drift detection
+│   └── assets/                      # Embedded files (go:embed)
+├── openspec/                        # OpenSpec tactical workflow
+│   ├── specs/                       # Living behavior contracts
+│   ├── changes/                     # Active tactical changes
+│   ├── schemas/
+│   │   └── unbound-force/           # Custom schema + templates
+│   └── config.yaml                  # OpenSpec configuration
 ├── specs/                           # Architectural specifications
 │   ├── 001-org-constitution/        # Org constitution ratification
 │   ├── 002-hero-interface-contract/ # Standard hero repo structure & protocols
-│   ├── 003-specification-framework/  # Specification framework (Speckit + OpenSpec)
+│   ├── 003-specification-framework/ # Specification framework (Speckit + OpenSpec)
 │   ├── 004-muti-mind-architecture/  # Product Owner hero design
 │   ├── 005-the-divisor-architecture/# PR Reviewer Council design
 │   ├── 006-cobalt-crush-architecture/# Developer hero design
@@ -97,6 +110,8 @@ unbound-force/
 │       └── sample-quality-report-envelope.json  # Sample artifact envelope
 ├── scripts/
 │   └── validate-hero-contract.sh    # Contract compliance validation
+├── go.mod                           # Go module definition
+├── .goreleaser.yaml                 # GoReleaser release configuration
 ├── unbound-force.md                 # Hero descriptions and team vision
 ├── AGENTS.md                        # This file
 ├── README.md
@@ -174,29 +189,64 @@ All artifacts use the standard envelope format: `hero`, `version`, `timestamp`, 
 | `unbound-force/website` | Public website (Hugo + Doks) | v1.0.0 (Content Accuracy, Minimal Footprint, Visitor Clarity) | Active, 1 spec complete |
 | `unbound-force/homebrew-tap` | Homebrew formula distribution | N/A | Active |
 
-## Speckit Workflow (Mandatory)
+## Specification Framework
 
-All non-trivial feature work **must** go through the Speckit pipeline. The constitution (`.specify/memory/constitution.md`) is the highest-authority document in this project -- all work must align with it.
+This repo uses a unified two-tier specification framework
+distributed via the `unbound` CLI binary. Install with
+`brew install unbound-force/tap/unbound` and run
+`unbound init` to scaffold into any repository.
 
-### Pipeline
+### Dual-Tier Overview
 
-The workflow is a strict, sequential pipeline. Each stage has a corresponding `/speckit.*` command:
+| Tier | Tool | When to Use | Artifacts |
+|------|------|-------------|-----------|
+| Strategic | Speckit | 3+ stories, cross-repo, architecture | `specs/NNN-*/` |
+| Tactical | OpenSpec | <3 stories, bug fix, maintenance | `openspec/` |
+
+Both tiers share the org constitution as their governance
+bridge. See the "Strategic vs Tactical" section for
+selection criteria.
+
+### Speckit Pipeline (Strategic -- Mandatory)
+
+All non-trivial feature work **must** go through the
+Speckit pipeline. The constitution
+(`.specify/memory/constitution.md`) is the
+highest-authority document -- all work must align with it.
+
+The workflow is a strict, sequential pipeline:
 
 ```text
-constitution → specify → clarify → plan → tasks → analyze → checklist → implement
+constitution → specify → clarify → plan → tasks
+  → analyze → checklist → implement
 ```
 
-| Command | Purpose |
-|---------|---------|
-| `/speckit.constitution` | Create or update the project constitution |
-| `/speckit.specify` | Create a feature specification from a description |
-| `/speckit.clarify` | Reduce ambiguity in the spec before planning |
-| `/speckit.plan` | Generate the technical implementation plan |
-| `/speckit.tasks` | Generate actionable, dependency-ordered task list |
-| `/speckit.analyze` | Non-destructive cross-artifact consistency analysis |
-| `/speckit.checklist` | Generate requirement quality validation checklists |
-| `/speckit.implement` | Execute the implementation plan task by task |
-| `/speckit.taskstoissues` | Convert tasks.md into GitHub Issues |
+| Phase | Command | Purpose | Prerequisites | Inputs | Outputs | Required? |
+|-------|---------|---------|---------------|--------|---------|:---------:|
+| 1 | `/speckit.constitution` | Create/update project constitution | None | User description | `.specify/memory/constitution.md` | Yes (once) |
+| 2 | `/speckit.specify` | Create feature specification | Constitution | User description | `specs/NNN-*/spec.md` | Yes |
+| 3 | `/speckit.clarify` | Reduce spec ambiguity | spec.md | spec.md | Updated spec.md | Recommended |
+| 4 | `/speckit.plan` | Generate implementation plan | spec.md | spec.md, research | `plan.md`, `contracts/`, `data-model.md` | Yes |
+| 5 | `/speckit.tasks` | Generate task list | plan.md | plan.md, spec.md | `tasks.md` | Yes |
+| 6 | `/speckit.analyze` | Consistency analysis | tasks.md | All artifacts | Analysis report | Recommended |
+| 7 | `/speckit.checklist` | Quality validation | spec.md | spec.md | `checklists/*.md` | Yes |
+| 8 | `/speckit.implement` | Execute tasks | tasks.md, checklists | All artifacts | Implementation | Yes |
+| 9 | `/speckit.taskstoissues` | Convert to GitHub Issues | tasks.md | tasks.md | GitHub Issues | Optional |
+
+### OpenSpec Workflow (Tactical)
+
+For small changes: bug fixes, minor enhancements (<3
+stories), maintenance tasks, single-repo refactoring.
+
+Requires Node.js >= 20.19.0 and the OpenSpec CLI:
+`npm install -g @fission-ai/openspec@latest`
+
+| Action | Command | Purpose | Prerequisites | Inputs | Outputs |
+|--------|---------|---------|---------------|--------|---------|
+| Propose | `/opsx:propose` | Create change proposal + plan | Constitution | User description | `openspec/changes/*/proposal.md` |
+| Explore | `/opsx:explore` | Analyze specs and design | proposal.md | proposal.md | `specs/*.md`, `design.md` |
+| Apply | `/opsx:apply` | Implement from task list | tasks.md | All artifacts | Implementation |
+| Archive | `/opsx:archive` | Archive completed change | Completed tasks | Change directory | Archived change |
 
 ### Ordering Constraints
 
@@ -234,6 +284,63 @@ A mandatory gate at the planning phase. The constitution's three core principles
 
 For hero constitution alignment validation, use the `/constitution-check` command. This invokes a dedicated OpenCode agent that compares a hero constitution against the org constitution and produces a structured alignment report with per-principle findings and an overall ALIGNED/NON-ALIGNED verdict. See `.opencode/agents/constitution-check.md` and `.opencode/command/constitution-check.md` for implementation details.
 
+## Strategic vs Tactical: Boundary Guidelines
+
+This project uses a two-tier specification framework:
+
+- **Speckit** (strategic): Full pipeline for architectural
+  work. Specs live under `specs/` as numbered directories.
+- **OpenSpec** (tactical): Lightweight workflow for small
+  changes. Artifacts live under `openspec/specs/` and
+  `openspec/changes/`.
+
+### Decision Criteria Matrix
+
+| Criterion | Speckit (Strategic) | OpenSpec (Tactical) |
+|-----------|:------------------:|:-------------------:|
+| User stories | >= 3 | < 3 |
+| Cross-repo impact | Yes | No |
+| Constitution changes | Always | Never |
+| New hero architecture | Always | Never |
+| New inter-hero artifact types | Always | Never |
+| Bug fix | Never | Always |
+| Single-repo maintenance | Never | Always |
+| Refactoring (non-architectural) | Rarely | Usually |
+
+### Default Heuristic
+
+When in doubt, start with OpenSpec. If the scope grows
+beyond 3 stories or crosses repo boundaries, escalate to
+Speckit by extracting the proposal into a new numbered
+spec directory under `specs/`.
+
+### Escalation Path
+
+1. Start with `/opsx:propose` for the initial change.
+2. During exploration, if the scope expands beyond 3 user
+   stories or affects multiple repositories, stop.
+3. Run `/speckit.specify` to create a full spec under
+   `specs/NNN-feature-name/`.
+4. Archive the OpenSpec proposal with `/opsx:archive`.
+5. Continue with the Speckit pipeline from the new spec.
+
+### Directory Boundary Enforcement
+
+These boundaries are enforced by convention and code
+review, not automated gates (v1.0.0):
+
+- OpenSpec changes MUST NOT modify files under `specs/`.
+  OpenSpec artifacts belong exclusively in `openspec/`.
+- Speckit specs MUST NOT be created under `openspec/`.
+  Strategic specs belong exclusively in `specs/NNN-*/`.
+
+**Violation examples**: If a developer attempts to create
+a Speckit-style numbered spec directory under `openspec/`,
+or an OpenSpec delta spec under `specs/`, the expected
+outcome is code review rejection per this documented
+convention. The reviewer SHOULD point the author to this
+section and recommend the correct directory.
+
 ## Writing Style for Specs
 
 This repo is primarily specifications and governance documents. Follow these conventions:
@@ -254,20 +361,18 @@ This repo is primarily specifications and governance documents. Follow these con
 - **Semantic versioning**: For releases and constitution amendments.
 
 ## Active Technologies
-- Markdown (constitution document) + OpenCode agent configuration (Markdown agent files) + OpenCode (agent runtime), speckit (pipeline integration) (001-org-constitution)
-- Filesystem only -- constitution at `.specify/memory/constitution.md`, agent files in `.opencode/agents/` and `.opencode/command/` (001-org-constitution)
-- Markdown (contract document) + JSON Schema draft 2020-12 + Bash (validation script) + OpenCode (agent runtime), speckit (pipeline integration) (002-hero-interface-contract)
-- Filesystem only — contract document in `specs/002-hero-interface-contract/`, hero manifest schema in `schemas/hero-manifest/`, validation script in `scripts/` (002-hero-interface-contract)
-- Go (graphthulhu is a Go project; this + graphthulhu v0.4.0+ (MIT license, (010-knowledge-graph-integration)
-- In-memory index built from filesystem Markdown (010-knowledge-graph-integration)
-
-- Markdown (specifications, governance)
+- Go 1.24+ (unbound CLI binary, Cobra CLI framework, embed.FS scaffold)
+- GoReleaser v2 (cross-platform release pipeline, Homebrew cask publishing)
+- Markdown (specifications, governance, templates, commands)
+- YAML (OpenSpec schema, configuration files)
 - Bash (speckit scripts)
 - JSON Schema draft 2020-12 (hero manifest schema, sample artifact envelope)
-- OpenCode + Speckit (development workflow)
+- OpenCode + Speckit + OpenSpec (development workflow)
+- Node.js >= 20.19.0 (OpenSpec CLI, `@fission-ai/openspec`)
 
 ## Recent Changes
 
+- 003-specification-framework: Implemented unified two-tier specification framework -- `unbound` CLI binary (Go + Cobra + embed.FS), scaffolds 29 files (22 Speckit + 6 OpenSpec schema + 1 config) via `unbound init`, custom `unbound-force` OpenSpec schema with constitution alignment in proposals, boundary guidelines documented, GoReleaser v2 release pipeline, all 8 user stories (US1-US8) and 67 tasks completed, 12 passing tests including drift detection
 - 010-knowledge-graph-integration: Implemented knowledge graph integration -- graphthulhu installed with `--include-hidden` support (upstream PR submitted), OpenCode MCP configuration created, all 5 user stories verified (search, analysis, live sync, link traversal, property queries), YAML frontmatter added to specs 001/002/004, 50 pages indexed across all directories including `.specify/` and `.opencode/`
 - 002-hero-interface-contract: Completed spec implementation -- Hero Interface Contract v1.0.0 ratified, hero manifest JSON Schema created and validated, contract compliance validation script created and tested against Gaze and Website repos, sample artifact envelope and Gaze manifest produced, all FRs (001-015) and SCs (001-007) validated, spec status set to Complete
 - 001-org-constitution: Completed spec implementation -- constitution ratified v1.0.0, alignment agent and `/constitution-check` command created, all FRs and SCs validated, spec status set to Complete

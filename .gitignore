@@ -10,3 +10,10 @@ Thumbs.db
 
 # Environment
 .env*
+
+# Go
+*.exe
+*.test
+*.out
+/unbound
+vendor/
