@@ -28,8 +28,8 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 
 	// Verify the summary includes a non-trivial file count
-	if !strings.Contains(output, "32 files processed") {
-		t.Errorf("expected '32 files processed' in output, got:\n%s", output)
+	if !strings.Contains(output, "33 files processed") {
+		t.Errorf("expected '33 files processed' in output, got:\n%s", output)
 	}
 
 	// Verify a user-owned file was created

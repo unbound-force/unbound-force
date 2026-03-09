@@ -355,6 +355,26 @@ outcome is code review rejection per this documented
 convention. The reviewer SHOULD point the author to this
 section and recommend the correct directory.
 
+## Build & Test Commands
+
+```bash
+# Build
+make build
+# or: go build ./...
+
+# Run tests
+make test
+# or: go test -race -count=1 ./...
+
+# Run all checks (build, test, vet, lint)
+make check
+
+# Lint
+golangci-lint run
+```
+
+Always run tests with `-race -count=1`. CI enforces this.
+
 ## Writing Style for Specs
 
 This repo is primarily specifications and governance documents. Follow these conventions:
@@ -386,7 +406,7 @@ This repo is primarily specifications and governance documents. Follow these con
 
 ## Recent Changes
 
-- 003-specification-framework: Implemented unified two-tier specification framework -- `unbound` CLI binary (Go + Cobra + embed.FS), scaffolds 32 files (22 Speckit + 6 OpenSpec + 4 agents) via `unbound init`, custom `unbound-force` OpenSpec schema with constitution alignment in proposals, boundary guidelines documented, GoReleaser v2 release pipeline, all 8 user stories (US1-US8) and 67 tasks completed, format-aware version markers, drift detection tests
+- 003-specification-framework: Implemented unified two-tier specification framework -- `unbound` CLI binary (Go + Cobra + embed.FS), scaffolds 33 files (22 Speckit + 6 OpenSpec + 5 agents) via `unbound init`, custom `unbound-force` OpenSpec schema with constitution alignment in proposals, boundary guidelines documented, GoReleaser v2 release pipeline, all 8 user stories (US1-US8) and 67 tasks completed, format-aware version markers, drift detection tests
 - 010-knowledge-graph-integration: Implemented knowledge graph integration -- graphthulhu installed with `--include-hidden` support (upstream PR submitted), OpenCode MCP configuration created, all 5 user stories verified (search, analysis, live sync, link traversal, property queries), YAML frontmatter added to specs 001/002/004, 50 pages indexed across all directories including `.specify/` and `.opencode/`
 - 002-hero-interface-contract: Completed spec implementation -- Hero Interface Contract v1.0.0 ratified, hero manifest JSON Schema created and validated, contract compliance validation script created and tested against Gaze and Website repos, sample artifact envelope and Gaze manifest produced, all FRs (001-015) and SCs (001-007) validated, spec status set to Complete
 - 001-org-constitution: Completed spec implementation -- constitution ratified v1.0.0, alignment agent and `/constitution-check` command created, all FRs and SCs validated, spec status set to Complete

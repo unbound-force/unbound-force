@@ -42,7 +42,7 @@ The framework provides:
 - **OpenSpec** (tactical): Lightweight workflow for bug fixes and small changes (`/opsx:propose` through `/opsx:archive`)
 - **Constitution governance bridge**: Every proposal includes alignment assessment against the three org principles
 
-`unbound init` scaffolds 32 files into your repository: templates, scripts, commands, agents, and the custom `unbound-force` OpenSpec schema. User-owned files are skipped on re-run; tool-owned files are auto-updated when content changes.
+`unbound init` scaffolds 33 files into your repository: templates, scripts, commands, agents, and the custom `unbound-force` OpenSpec schema. User-owned files are skipped on re-run; tool-owned files are auto-updated when content changes.
 
 See [AGENTS.md](AGENTS.md) for full workflow documentation and boundary guidelines.
 
