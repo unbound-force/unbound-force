@@ -1,4 +1,5 @@
 name: unbound-force
+version: 1
 description: >
   Unbound Force specification schema with constitution
   alignment. Extends the spec-driven workflow with

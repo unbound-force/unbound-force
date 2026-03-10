@@ -813,6 +813,11 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".opencode/command/muti-mind.sync-push.md":        true,
 	".opencode/command/muti-mind.sync-status.md":      true,
 	".opencode/command/muti-mind.sync.md":             true,
+	// OpenSpec skill commands — local workflow tooling, not scaffolded by unbound init
+	".opencode/command/opsx-apply.md":   true,
+	".opencode/command/opsx-archive.md": true,
+	".opencode/command/opsx-explore.md": true,
+	".opencode/command/opsx-propose.md": true,
 }
 
 func TestCanonicalSources_AreEmbedded(t *testing.T) {
