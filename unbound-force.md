@@ -98,9 +98,9 @@ By being the "Engineering Core and Adaptive Implementation Engine," Cobalt-Crush
 
 PR Reviewer: The Divisor Council
 
-**Focus:** *The Architectural Conscience and Code Integrity Guardian, realized by the Council (The Guard, The Architect, The Adversary)*
+**Focus:** *The Architectural Conscience and Code Integrity Guardian, realized by the Council (Guard, Architect, Adversary, SRE, Testing)*
 
-The Divisor embodies the ultimate archetype of a Peer Reviewer and Technical Authority, functioning as the architectural conscience and code integrity guardian within the Unbound Force swarm. Their primary mission is to ensure that all code changes proposed by Cobalt-Crush (Developer), once validated by Gaze (Tester), adhere strictly to the established architectural standards, best practices, security policies, and maintainability requirements of the product. The Divisor acts as the final technical gate before integration, translating high-level architectural standards into actionable review criteria. **The Divisor operates as a council of distinct personas—The Guard, The Architect, and The Adversary—to provide comprehensive, multi-faceted validation of every code submission.**
+The Divisor embodies the ultimate archetype of a Peer Reviewer and Technical Authority, functioning as the architectural conscience and code integrity guardian within the Unbound Force swarm. Their primary mission is to ensure that all code changes proposed by Cobalt-Crush (Developer), once validated by Gaze (Tester), adhere strictly to the established architectural standards, best practices, security policies, and maintainability requirements of the product. The Divisor acts as the final technical gate before integration, translating high-level architectural standards into actionable review criteria. **The Divisor operates as a council of dynamically discovered personas — five canonical roles ship by default (Guard, Architect, Adversary, SRE, Testing), with users able to add or remove personas freely. Convention packs provide language-specific review criteria loaded at review time.** The Divisor is distributed through the `unbound` binary (`unbound init --divisor`) rather than a standalone repo.
 
 **Key Responsibilities within the Swarm (Council Personas):**
 
@@ -114,7 +114,7 @@ The Divisor embodies the ultimate archetype of a Peer Reviewer and Technical Aut
 
 The Divisor, as the Reviewer Council, serves as the definitive, single source of truth for all "Is the Code Right?" and "Does It Fit the Blueprint?" questions, critically safeguarding the quality and future of the product:
 
-- **For Developers (Cobalt-Crush):** Cobalt-Crush relies on The Divisor for the final technical sign-off. The detailed, multi-faceted feedback from the three personas ensures the developer receives a holistic critique covering intent, structure, security, and robustness. By maintaining clear architectural standards, The Divisor minimizes uncertainty for Cobalt-Crush, allowing them to code with confidence and alignment.
+- **For Developers (Cobalt-Crush):** Cobalt-Crush relies on The Divisor for the final technical sign-off. The detailed, multi-faceted feedback from the council personas ensures the developer receives a holistic critique covering intent, structure, security, and robustness. By maintaining clear architectural standards, The Divisor minimizes uncertainty for Cobalt-Crush, allowing them to code with confidence and alignment.
 
 - **For the Tester (Gaze):** Gaze relies on The Divisor to establish the architectural and non-functional requirements (security, efficiency) against which testability must be measured. Gaze's green light on functional tests is the necessary entry criterion for The Divisor's review, ensuring that The Divisor's time is spent on high-level risk and structure, not defect finding.
 

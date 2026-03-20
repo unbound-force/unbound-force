@@ -110,12 +110,26 @@ var expectedAssetPaths = []string{
 	"opencode/command/speckit.specify.md",
 	"opencode/command/speckit.tasks.md",
 	"opencode/command/speckit.taskstoissues.md",
-	// OpenCode agents (5)
+	// OpenCode agents — legacy reviewers (4) + Divisor personas (5) + constitution-check (1)
 	"opencode/agents/constitution-check.md",
+	"opencode/agents/divisor-adversary.md",
+	"opencode/agents/divisor-architect.md",
+	"opencode/agents/divisor-guard.md",
+	"opencode/agents/divisor-sre.md",
+	"opencode/agents/divisor-testing.md",
 	"opencode/agents/reviewer-adversary.md",
 	"opencode/agents/reviewer-architect.md",
 	"opencode/agents/reviewer-guard.md",
 	"opencode/agents/reviewer-sre.md",
+	// OpenCode commands — includes review-council (11)
+	"opencode/command/review-council.md",
+	// Divisor convention packs (6)
+	"opencode/divisor/packs/default-custom.md",
+	"opencode/divisor/packs/default.md",
+	"opencode/divisor/packs/go-custom.md",
+	"opencode/divisor/packs/go.md",
+	"opencode/divisor/packs/typescript-custom.md",
+	"opencode/divisor/packs/typescript.md",
 	// OpenSpec schema (5)
 	"openspec/schemas/unbound-force/schema.yaml",
 	"openspec/schemas/unbound-force/templates/proposal.md",
@@ -184,6 +198,7 @@ func TestRun_CreatesFiles(t *testing.T) {
 		".specify/scripts/bash",
 		".opencode/command",
 		".opencode/agents",
+		".opencode/divisor/packs",
 		"openspec/specs",
 		"openspec/changes",
 	}
@@ -513,7 +528,18 @@ func TestIsToolOwned(t *testing.T) {
 		// Tool-owned: OpenSpec schema
 		{"openspec/schemas/unbound-force/schema.yaml", true},
 		{"openspec/schemas/unbound-force/templates/proposal.md", true},
-		// User-owned
+		// Tool-owned: convention packs (canonical)
+		{"opencode/divisor/packs/go.md", true},
+		{"opencode/divisor/packs/default.md", true},
+		{"opencode/divisor/packs/typescript.md", true},
+		// User-owned: convention packs (custom)
+		{"opencode/divisor/packs/go-custom.md", false},
+		{"opencode/divisor/packs/default-custom.md", false},
+		{"opencode/divisor/packs/typescript-custom.md", false},
+		// User-owned: agents (including Divisor personas)
+		{"opencode/agents/divisor-guard.md", false},
+		{"opencode/agents/divisor-architect.md", false},
+		// User-owned: other
 		{"specify/templates/spec-template.md", false},
 		{"specify/templates/plan-template.md", false},
 		{"specify/scripts/bash/common.sh", false},
@@ -696,7 +722,7 @@ func TestPrintSummary_Output(t *testing.T) {
 			Skipped:     []string{".specify/config.yaml"},
 		}
 
-		printSummary(&buf, r)
+		printSummary(&buf, false, false, true, r)
 		output := buf.String()
 
 		// Verify total count line
@@ -735,6 +761,45 @@ func TestPrintSummary_Output(t *testing.T) {
 		}
 	})
 
+	t.Run("divisor_mode", func(t *testing.T) {
+		var buf bytes.Buffer
+
+		r := &Result{
+			Created: []string{".opencode/agents/divisor-guard.md", ".opencode/command/review-council.md"},
+		}
+
+		printSummary(&buf, true, false, true, r)
+		output := buf.String()
+
+		if !strings.Contains(output, "unbound init (divisor): 2 files processed") {
+			t.Errorf("expected divisor label, got output:\n%s", output)
+		}
+		if !strings.Contains(output, "Run /review-council") {
+			t.Error("expected review-council hint in divisor mode")
+		}
+		if strings.Contains(output, "Run /speckit.specify") {
+			t.Error("speckit hint should not appear in divisor mode")
+		}
+		if strings.Contains(output, "Run /opsx:propose") {
+			t.Error("opsx hint should not appear in divisor mode")
+		}
+	})
+
+	t.Run("divisor_mode_no_lang", func(t *testing.T) {
+		var buf bytes.Buffer
+
+		r := &Result{
+			Created: []string{".opencode/agents/divisor-guard.md"},
+		}
+
+		printSummary(&buf, true, false, false, r)
+		output := buf.String()
+
+		if !strings.Contains(output, "language not detected") {
+			t.Errorf("expected language detection warning, got:\n%s", output)
+		}
+	})
+
 	t.Run("overwritten", func(t *testing.T) {
 		var buf bytes.Buffer
 
@@ -745,7 +810,7 @@ func TestPrintSummary_Output(t *testing.T) {
 			Skipped:     []string{},
 		}
 
-		printSummary(&buf, r)
+		printSummary(&buf, false, false, true, r)
 		output := buf.String()
 
 		if !strings.Contains(output, "unbound init: 2 files processed") {
@@ -795,11 +860,14 @@ func TestRun_PrintSummaryIntegration(t *testing.T) {
 // binary. These are local-only tooling files (e.g., installed by
 // the Gaze scaffold) that are specific to this repository.
 var knownNonEmbeddedFiles = map[string]bool{
-	".opencode/agents/gaze-reporter.md":               true,
-	".opencode/agents/reviewer-testing.md":            true,
-	".opencode/agents/muti-mind-po.md":                true,
+	// Agents — local-only tooling, not scaffolded by unbound init
+	".opencode/agents/gaze-reporter.md":       true,
+	".opencode/agents/gaze-test-generator.md": true,
+	".opencode/agents/reviewer-testing.md":    true,
+	".opencode/agents/muti-mind-po.md":        true,
+	// Commands — local-only tooling
 	".opencode/command/gaze.md":                       true,
-	".opencode/command/review-council.md":             true,
+	".opencode/command/gaze-fix.md":                   true,
 	".opencode/command/speckit.testreview.md":         true,
 	".opencode/command/muti-mind.backlog-add.md":      true,
 	".opencode/command/muti-mind.backlog-list.md":     true,
@@ -837,6 +905,7 @@ func TestCanonicalSources_AreEmbedded(t *testing.T) {
 	canonicalDirs := []string{
 		".opencode/command",
 		".opencode/agents",
+		".opencode/divisor/packs",
 		".specify/templates",
 		".specify/scripts/bash",
 		"openspec/schemas",
@@ -893,6 +962,285 @@ func TestMapAssetPath_Prefixes(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("mapAssetPath(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
+	}
+}
+
+func TestIsDivisorAsset(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		// Divisor agents
+		{"opencode/agents/divisor-guard.md", true},
+		{"opencode/agents/divisor-architect.md", true},
+		{"opencode/agents/divisor-adversary.md", true},
+		{"opencode/agents/divisor-sre.md", true},
+		{"opencode/agents/divisor-testing.md", true},
+		// Divisor command
+		{"opencode/command/review-council.md", true},
+		// Divisor convention packs
+		{"opencode/divisor/packs/go.md", true},
+		{"opencode/divisor/packs/default.md", true},
+		{"opencode/divisor/packs/go-custom.md", true},
+		// Non-Divisor assets
+		{"opencode/agents/constitution-check.md", false},
+		{"opencode/agents/reviewer-guard.md", false},
+		{"opencode/agents/reviewer-architect.md", false},
+		{"opencode/command/speckit.specify.md", false},
+		{"opencode/command/speckit.plan.md", false},
+		{"specify/templates/spec-template.md", false},
+		{"openspec/config.yaml", false},
+	}
+
+	for _, tt := range tests {
+		got := isDivisorAsset(tt.path)
+		if got != tt.expected {
+			t.Errorf("isDivisorAsset(%q) = %v, want %v",
+				tt.path, got, tt.expected)
+		}
+	}
+}
+
+func TestDetectLang(t *testing.T) {
+	tests := []struct {
+		name     string
+		files    []string
+		expected string
+	}{
+		{"go project", []string{"go.mod"}, "go"},
+		{"typescript tsconfig", []string{"tsconfig.json"}, "typescript"},
+		{"typescript package.json", []string{"package.json"}, "typescript"},
+		{"python project", []string{"pyproject.toml"}, "python"},
+		{"rust project", []string{"Cargo.toml"}, "rust"},
+		{"no markers", []string{}, ""},
+		{"go takes priority over ts", []string{"go.mod", "package.json"}, "go"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, f := range tt.files {
+				if err := os.WriteFile(filepath.Join(dir, f), []byte{}, 0o644); err != nil {
+					t.Fatalf("create marker %s: %v", f, err)
+				}
+			}
+			got := detectLang(dir)
+			if got != tt.expected {
+				t.Errorf("detectLang() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestShouldDeployPack(t *testing.T) {
+	tests := []struct {
+		relPath  string
+		lang     string
+		expected bool
+	}{
+		// Non-pack files always pass
+		{"opencode/agents/divisor-guard.md", "go", true},
+		{"opencode/command/review-council.md", "go", true},
+		// Default packs always deploy
+		{"opencode/divisor/packs/default.md", "go", true},
+		{"opencode/divisor/packs/default-custom.md", "go", true},
+		{"opencode/divisor/packs/default.md", "typescript", true},
+		// Matching language packs deploy
+		{"opencode/divisor/packs/go.md", "go", true},
+		{"opencode/divisor/packs/go-custom.md", "go", true},
+		{"opencode/divisor/packs/typescript.md", "typescript", true},
+		{"opencode/divisor/packs/typescript-custom.md", "typescript", true},
+		// Non-matching language packs do NOT deploy
+		{"opencode/divisor/packs/typescript.md", "go", false},
+		{"opencode/divisor/packs/typescript-custom.md", "go", false},
+		{"opencode/divisor/packs/go.md", "typescript", false},
+		{"opencode/divisor/packs/go-custom.md", "typescript", false},
+		// Default lang gets only default packs
+		{"opencode/divisor/packs/go.md", "default", false},
+		{"opencode/divisor/packs/default.md", "default", true},
+	}
+
+	for _, tt := range tests {
+		name := fmt.Sprintf("%s_lang=%s", filepath.Base(tt.relPath), tt.lang)
+		t.Run(name, func(t *testing.T) {
+			got := shouldDeployPack(tt.relPath, tt.lang)
+			if got != tt.expected {
+				t.Errorf("shouldDeployPack(%q, %q) = %v, want %v",
+					tt.relPath, tt.lang, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestRun_DivisorSubset(t *testing.T) {
+	dir := t.TempDir()
+	// Create a go.mod to trigger Go language detection
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test"), 0o644); err != nil {
+		t.Fatalf("create go.mod: %v", err)
+	}
+
+	var buf bytes.Buffer
+	result, err := Run(Options{
+		TargetDir:   dir,
+		DivisorOnly: true,
+		Version:     "1.0.0",
+		Stdout:      &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Should create only Divisor files
+	if len(result.Created) == 0 {
+		t.Fatal("expected Divisor files to be created")
+	}
+
+	// Verify no speckit/openspec files created
+	for _, f := range result.Created {
+		if strings.HasPrefix(f, ".specify/") || strings.HasPrefix(f, "openspec/") {
+			t.Errorf("DivisorOnly should not create %s", f)
+		}
+		if strings.Contains(f, "reviewer-") {
+			t.Errorf("DivisorOnly should not create legacy reviewer files: %s", f)
+		}
+		if strings.Contains(f, "speckit.") {
+			t.Errorf("DivisorOnly should not create speckit commands: %s", f)
+		}
+	}
+
+	// Verify Divisor agents exist
+	for _, agent := range []string{"divisor-guard.md", "divisor-architect.md", "divisor-adversary.md", "divisor-sre.md", "divisor-testing.md"} {
+		found := false
+		for _, f := range result.Created {
+			if strings.HasSuffix(f, agent) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected %s to be created", agent)
+		}
+	}
+
+	// Verify Go convention pack deployed (auto-detected)
+	foundGoPack := false
+	for _, f := range result.Created {
+		if strings.HasSuffix(f, "go.md") && strings.Contains(f, "divisor/packs") {
+			foundGoPack = true
+			break
+		}
+	}
+	if !foundGoPack {
+		t.Error("expected Go convention pack to be deployed")
+	}
+
+	// Verify no openspec empty dirs
+	specsDir := filepath.Join(dir, "openspec", "specs")
+	if _, err := os.Stat(specsDir); !os.IsNotExist(err) {
+		t.Error("DivisorOnly should not create openspec/specs directory")
+	}
+
+	// Verify summary mentions divisor
+	output := buf.String()
+	if !strings.Contains(output, "divisor") {
+		t.Errorf("expected summary to mention divisor, got:\n%s", output)
+	}
+	if !strings.Contains(output, "review-council") {
+		t.Errorf("expected summary to mention review-council hint")
+	}
+}
+
+func TestRun_DivisorSubset_WithLangFlag(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	result, err := Run(Options{
+		TargetDir:   dir,
+		DivisorOnly: true,
+		Lang:        "typescript",
+		Version:     "1.0.0",
+		Stdout:      &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Verify TypeScript pack deployed
+	foundTSPack := false
+	for _, f := range result.Created {
+		if strings.HasSuffix(f, "typescript.md") && strings.Contains(f, "divisor/packs") {
+			foundTSPack = true
+		}
+	}
+	if !foundTSPack {
+		t.Error("expected TypeScript convention pack to be deployed")
+	}
+
+	// Verify Go pack NOT deployed
+	for _, f := range result.Created {
+		if strings.HasSuffix(f, "/go.md") && strings.Contains(f, "divisor/packs") {
+			t.Error("Go convention pack should not be deployed when lang=typescript")
+		}
+	}
+
+	// All 5 agent files still created
+	agentCount := 0
+	for _, f := range result.Created {
+		if strings.Contains(f, "agents/divisor-") {
+			agentCount++
+		}
+	}
+	if agentCount != 5 {
+		t.Errorf("expected 5 Divisor agent files, got %d", agentCount)
+	}
+}
+
+func TestRun_DivisorSubset_DefaultFallback(t *testing.T) {
+	dir := t.TempDir() // Empty — no language markers
+	var buf bytes.Buffer
+
+	result, err := Run(Options{
+		TargetDir:   dir,
+		DivisorOnly: true,
+		Version:     "1.0.0",
+		Stdout:      &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Verify only default packs deployed
+	for _, f := range result.Created {
+		if strings.Contains(f, "divisor/packs") {
+			base := filepath.Base(f)
+			if !strings.HasPrefix(base, "default") {
+				t.Errorf("expected only default packs, got %s", f)
+			}
+		}
+	}
+
+	// Verify default.md and default-custom.md exist
+	foundDefault := false
+	foundDefaultCustom := false
+	for _, f := range result.Created {
+		if strings.HasSuffix(f, "default.md") {
+			foundDefault = true
+		}
+		if strings.HasSuffix(f, "default-custom.md") {
+			foundDefaultCustom = true
+		}
+	}
+	if !foundDefault {
+		t.Error("expected default.md pack to be deployed")
+	}
+	if !foundDefaultCustom {
+		t.Error("expected default-custom.md pack to be deployed")
+	}
+
+	// Verify language detection warning in output
+	output := buf.String()
+	if !strings.Contains(output, "language not detected") {
+		t.Errorf("expected language detection warning, got:\n%s", output)
 	}
 }
 
