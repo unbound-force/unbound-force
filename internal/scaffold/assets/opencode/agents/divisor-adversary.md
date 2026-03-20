@@ -26,7 +26,7 @@ Before reviewing, read:
 1. `AGENTS.md` -- Behavioral Constraints, Active Technologies, Git & Workflow
 2. `.specify/memory/constitution.md` -- Constitution (if present)
 3. The relevant spec, plan, and tasks files under `specs/` for the current work
-4. `.opencode/divisor/packs/` -- Convention pack for this project's language/framework (if present). Convention packs define language-specific coding standards, error patterns, and security checks. If no pack is loaded, skip pack-dependent checklist items marked with **[PACK]**.
+4. `.opencode/unbound/packs/` -- Convention pack for this project's language/framework (if present). Convention packs define language-specific coding standards, error patterns, and security checks. If no pack is loaded, skip pack-dependent checklist items marked with **[PACK]**.
 
 ---
 
@@ -100,7 +100,7 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 
 #### 6. Language-Specific Error Patterns [PACK]
 
-> Skip this section if no convention pack is loaded from `.opencode/divisor/packs/`.
+> Skip this section if no convention pack is loaded from `.opencode/unbound/packs/`.
 
 - Check the convention pack's `security_checks` section for language-specific vulnerability patterns.
 - Apply the pack's error handling conventions to the changed code.
@@ -108,7 +108,7 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 
 #### 7. Dependency Vulnerabilities [PACK]
 
-> Skip this section if no convention pack is loaded from `.opencode/divisor/packs/`.
+> Skip this section if no convention pack is loaded from `.opencode/unbound/packs/`.
 
 - Check based on convention pack guidance for dependency security.
 - Verify dependency version pins are specific (not floating ranges) per pack conventions.

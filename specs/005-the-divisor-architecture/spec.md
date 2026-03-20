@@ -53,7 +53,7 @@ The Divisor defines a formal review protocol with dynamic persona discovery that
 
 ### User Story 2 - Convention Packs: Language and Framework Adaptation (Priority: P1)
 
-The Divisor supports convention packs — pluggable configurations that define language-specific and framework-specific coding conventions, architectural patterns, and security checks. Convention packs are deployed as separate files to `.opencode/divisor/packs/` and loaded dynamically at review time by each persona, allowing the same review protocol to evaluate Go code, TypeScript code, Python code, or any other stack.
+The Divisor supports convention packs — pluggable configurations that define language-specific and framework-specific coding conventions, architectural patterns, and security checks. Convention packs are deployed as separate files to `.opencode/unbound/packs/` and loaded dynamically at review time by each persona, allowing the same review protocol to evaluate Go code, TypeScript code, Python code, or any other stack.
 
 **Why this priority**: P1 because the Gaze prototype is hardcoded for Go. Without convention packs, The Divisor cannot be deployed to non-Go projects, making it a single-project tool rather than a framework.
 
@@ -61,10 +61,10 @@ The Divisor supports convention packs — pluggable configurations that define l
 
 **Acceptance Scenarios**:
 
-1. **Given** a Go convention pack deployed at `.opencode/divisor/packs/go.md`, **When** The Architect reviews a Go PR, **Then** it dynamically loads the pack and checks for: gofmt compliance, GoDoc on exported symbols, error wrapping with `%w`, import grouping (stdlib/external/internal), and no global mutable state.
+1. **Given** a Go convention pack deployed at `.opencode/unbound/packs/go.md`, **When** The Architect reviews a Go PR, **Then** it dynamically loads the pack and checks for: gofmt compliance, GoDoc on exported symbols, error wrapping with `%w`, import grouping (stdlib/external/internal), and no global mutable state.
 2. **Given** a convention pack for TypeScript, **When** The Architect reviews a TypeScript PR, **Then** it checks for: ESLint compliance, JSDoc on exported functions, proper error handling, import organization, and no `any` type usage.
 3. **Given** a project with no convention pack configured, **When** The Divisor is deployed, **Then** the personas use a language-agnostic default pack that checks universal principles (SOLID, DRY, error handling, test coverage).
-4. **Given** a convention pack file at `.opencode/divisor/packs/{language}.md`, **When** a maintainer inspects its structure, **Then** it is a structured document (Markdown or YAML) with sections for: coding_style, architectural_patterns, security_checks, testing_conventions, and documentation_requirements.
+4. **Given** a convention pack file at `.opencode/unbound/packs/{language}.md`, **When** a maintainer inspects its structure, **Then** it is a structured document (Markdown or YAML) with sections for: coding_style, architectural_patterns, security_checks, testing_conventions, and documentation_requirements.
 5. **Given** a convention pack, **When** a project needs a custom rule not in the pack, **Then** the pack supports a `custom_rules[]` extension section where project-specific checks can be added without modifying the pack itself.
 
 ---
@@ -88,7 +88,7 @@ The Divisor personas are project-aware: they read the target project's constitut
 
 ### User Story 4 - Deployment via `unbound init` (Priority: P2)
 
-The Divisor is distributed through the existing `unbound` binary. `unbound init` deploys all scaffold files including Divisor agents, the `/review-council` command, and the appropriate convention pack file. `unbound init --divisor` deploys only Divisor-specific files as a subset. The scaffold engine auto-detects the project language and deploys the matching convention pack to `.opencode/divisor/packs/`.
+The Divisor is distributed through the existing `unbound` binary. `unbound init` deploys all scaffold files including Divisor agents, the `/review-council` command, and the appropriate convention pack file. `unbound init --divisor` deploys only Divisor-specific files as a subset. The scaffold engine auto-detects the project language and deploys the matching convention pack to `.opencode/unbound/packs/`.
 
 **Why this priority**: P2 because the deployment mechanism depends on the protocol (US1) and convention packs (US2) being defined first.
 
@@ -96,9 +96,9 @@ The Divisor is distributed through the existing `unbound` binary. `unbound init`
 
 **Acceptance Scenarios**:
 
-1. **Given** a Go project with a constitution, **When** `unbound init` is run, **Then** it creates `.opencode/agents/divisor-guard.md`, `.opencode/agents/divisor-architect.md`, `.opencode/agents/divisor-adversary.md`, `.opencode/agents/divisor-sre.md`, `.opencode/agents/divisor-testing.md`, `.opencode/command/review-council.md`, and `.opencode/divisor/packs/go.md` (among all other scaffold files).
+1. **Given** a Go project with a constitution, **When** `unbound init` is run, **Then** it creates `.opencode/agents/divisor-guard.md`, `.opencode/agents/divisor-architect.md`, `.opencode/agents/divisor-adversary.md`, `.opencode/agents/divisor-sre.md`, `.opencode/agents/divisor-testing.md`, `.opencode/command/review-council.md`, and `.opencode/unbound/packs/go.md` (among all other scaffold files).
 2. **Given** a Go project, **When** `unbound init --divisor` is run, **Then** it creates only the Divisor agent and command files (not speckit templates, openspec schema, etc.).
-3. **Given** a TypeScript project, **When** `unbound init --divisor --lang typescript` is run, **Then** it deploys the same persona agents plus `.opencode/divisor/packs/typescript.md` containing TypeScript-specific convention checks.
+3. **Given** a TypeScript project, **When** `unbound init --divisor --lang typescript` is run, **Then** it deploys the same persona agents plus `.opencode/unbound/packs/typescript.md` containing TypeScript-specific convention checks.
 4. **Given** a project with an existing Divisor deployment, **When** `unbound init --divisor` is run without `--force`, **Then** existing Divisor files are skipped with a warning.
 5. **Given** the generated agents, **When** a developer compares them to the Gaze prototype agents, **Then** the generated agents follow the same structural pattern but with convention-pack-driven content instead of hardcoded Go checks.
 
@@ -141,8 +141,8 @@ The Divisor produces a standardized review report artifact (conforming to the in
 - **FR-004**: The council decision MUST be APPROVE only when no discovered persona has issued REQUEST_CHANGES. Absent personas (not present as `divisor-*.md` files) MUST NOT affect the verdict.
 - **FR-005**: The iteration protocol MUST re-run only personas that issued REQUEST_CHANGES, up to a configurable maximum (default 3 iterations).
 - **FR-006**: The Divisor MUST support convention packs — pluggable configurations defining language/framework-specific review criteria. Convention packs are loaded dynamically at review time, not baked into agent files at scaffold time.
-- **FR-007**: Convention packs MUST be structured documents (Markdown or YAML) deployed to `.opencode/divisor/packs/` with sections: coding_style, architectural_patterns, security_checks, testing_conventions, documentation_requirements, and custom_rules[]. Each persona agent MUST reference the active pack file path and load it when invoked.
-- **FR-008**: The Divisor MUST ship with at least two convention packs: Go (matching the Gaze prototype) and a language-agnostic default. `unbound init` deploys the appropriate pack to `.opencode/divisor/packs/` based on language detection.
+- **FR-007**: Convention packs MUST be structured documents (Markdown or YAML) deployed to `.opencode/unbound/packs/` with sections: coding_style, architectural_patterns, security_checks, testing_conventions, documentation_requirements, and custom_rules[]. Each persona agent MUST reference the active pack file path and load it when invoked.
+- **FR-008**: The Divisor MUST ship with at least two convention packs: Go (matching the Gaze prototype) and a language-agnostic default. `unbound init` deploys the appropriate pack to `.opencode/unbound/packs/` based on language detection.
 - **FR-009**: The Divisor MUST be project-aware: personas MUST read the target project's constitution, active spec, and AGENTS.md when available.
 - **FR-010**: The Guard MUST validate PR changes against the active spec's user stories and acceptance criteria ("intent drift detection").
 - **FR-011**: The Architect MUST validate code structure against the project's constitution principles and the convention pack's architectural patterns.
@@ -161,7 +161,7 @@ The Divisor produces a standardized review report artifact (conforming to the in
 ### Key Entities
 
 - **Review Protocol**: The formal process governing a review council session. Attributes: discovery_pattern (`divisor-*.md`), canonical_personas[] (5: guard, architect, adversary, sre, testing), voting_rules, iteration_max (int), timeout_per_persona (duration), escalation_policy.
-- **Convention Pack**: Pluggable review criteria for a specific language/framework, deployed to `.opencode/divisor/packs/` and loaded dynamically at review time. Attributes: pack_id, language, framework (optional), coding_style{}, architectural_patterns{}, security_checks{}, testing_conventions{}, documentation_requirements{}, custom_rules[]. File path: `.opencode/divisor/packs/{language}.md` (e.g., `go.md`, `typescript.md`, `default.md`).
+- **Convention Pack**: Pluggable review criteria for a specific language/framework, deployed to `.opencode/unbound/packs/` and loaded dynamically at review time. Attributes: pack_id, language, framework (optional), coding_style{}, architectural_patterns{}, security_checks{}, testing_conventions{}, documentation_requirements{}, custom_rules[]. File path: `.opencode/unbound/packs/{language}.md` (e.g., `go.md`, `typescript.md`, `default.md`).
 - **Persona Verdict**: One reviewer persona's evaluation of a PR. Attributes: persona (guard/architect/adversary/sre/testing or any dynamically discovered persona), verdict (APPROVE/REQUEST_CHANGES/COMMENT), findings[], summary, reviewed_at, iteration_number.
 - **Review Finding**: A single issue identified during review. Attributes: id (F-NNN), severity (critical/major/minor/info), category, file, line (optional), description, recommendation, persona_source.
 - **Council Decision**: The aggregate outcome of a review session. Attributes: decision (APPROVED/CHANGES_REQUESTED/ESCALATED), discovered_personas[], absent_personas[], persona_verdicts[], iteration_count, unresolved_findings[], reviewed_at, convention_pack_used, pr_url.

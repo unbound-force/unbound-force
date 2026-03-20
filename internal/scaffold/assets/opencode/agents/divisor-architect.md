@@ -24,7 +24,7 @@ Before reviewing, read:
 1. `AGENTS.md` -- Project Structure, Active Technologies, conventions
 2. `.specify/memory/constitution.md` -- Constitution principles
 3. The relevant spec, plan, and tasks files under `specs/` for the current work
-4. Read all `*.md` files from `.opencode/divisor/packs/` to load the active convention pack. If no pack files are found, note this and proceed with universal checks only.
+4. Read all `*.md` files from `.opencode/unbound/packs/` to load the active convention pack. If no pack files are found, note this and proceed with universal checks only.
 
 ---
 

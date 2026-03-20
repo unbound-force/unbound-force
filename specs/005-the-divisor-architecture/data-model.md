@@ -8,7 +8,7 @@
 ### Convention Pack
 
 A structured Markdown document defining language-specific
-review criteria. Deployed to `.opencode/divisor/packs/`
+review criteria. Deployed to `.opencode/unbound/packs/`
 and loaded dynamically at review time by persona agents.
 
 | Attribute | Type | Source | Notes |
@@ -25,8 +25,8 @@ and loaded dynamically at review time by persona agents.
 | custom_rules | Markdown section | H2 body (in `-custom.md` file) | Rules with CR-NNN identifiers |
 
 **File layout**:
-- `.opencode/divisor/packs/{pack_id}.md` — canonical rules (tool-owned)
-- `.opencode/divisor/packs/{pack_id}-custom.md` — project extensions (user-owned)
+- `.opencode/unbound/packs/{pack_id}.md` — canonical rules (tool-owned)
+- `.opencode/unbound/packs/{pack_id}-custom.md` — project extensions (user-owned)
 
 **Identity**: `pack_id` is unique. One canonical pack per
 language. One custom extension file per canonical pack.

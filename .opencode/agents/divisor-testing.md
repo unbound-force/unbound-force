@@ -24,7 +24,7 @@ Before reviewing, read:
 1. `AGENTS.md` -- Testing conventions, coding conventions, build & test commands
 2. `.specify/memory/constitution.md` -- Core principles (especially Observable Quality and Testability)
 3. The relevant spec, plan, and tasks files under `specs/` for the current work
-4. All `*.md` files from `.opencode/divisor/packs/` -- active convention pack. If no pack files are found, note this in your findings and proceed with universal checks only.
+4. All `*.md` files from `.opencode/unbound/packs/` -- active convention pack. If no pack files are found, note this in your findings and proceed with universal checks only.
 
 ---
 

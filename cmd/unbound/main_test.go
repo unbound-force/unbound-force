@@ -28,9 +28,9 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 
 	// Verify the summary includes a non-trivial file count
-	// 45 = 33 original + 12 Divisor files (5 agents, 1 command, 6 packs)
-	if !strings.Contains(output, "45 files processed") {
-		t.Errorf("expected '45 files processed' in output, got:\n%s", output)
+	// 46 = 33 original + 12 Divisor files + 1 Cobalt-Crush agent
+	if !strings.Contains(output, "46 files processed") {
+		t.Errorf("expected '46 files processed' in output, got:\n%s", output)
 	}
 
 	// Verify a user-owned file was created

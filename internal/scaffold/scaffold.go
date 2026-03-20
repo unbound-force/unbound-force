@@ -239,7 +239,10 @@ func isToolOwned(relPath string) bool {
 
 // isDivisorAsset returns true if the asset belongs to the
 // Divisor PR Reviewer Council subset. Used to filter assets
-// when DivisorOnly mode is active.
+// when DivisorOnly mode is active. Convention packs at the
+// shared opencode/unbound/packs/ location are included via
+// isConventionPack() since they are essential for Divisor
+// personas to function.
 func isDivisorAsset(relPath string) bool {
 	if strings.HasPrefix(relPath, "opencode/agents/divisor-") {
 		return true
@@ -247,16 +250,16 @@ func isDivisorAsset(relPath string) bool {
 	if relPath == "opencode/command/review-council.md" {
 		return true
 	}
-	if strings.HasPrefix(relPath, "opencode/divisor/") {
+	if isConventionPack(relPath) {
 		return true
 	}
 	return false
 }
 
 // isConventionPack returns true if the asset is a convention
-// pack file under opencode/divisor/packs/.
+// pack file under opencode/unbound/packs/.
 func isConventionPack(relPath string) bool {
-	return strings.HasPrefix(relPath, "opencode/divisor/packs/")
+	return strings.HasPrefix(relPath, "opencode/unbound/packs/")
 }
 
 // shouldDeployPack returns true if the convention pack file
