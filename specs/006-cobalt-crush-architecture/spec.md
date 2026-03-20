@@ -104,7 +104,7 @@ Cobalt-Crush serves as the coding persona for `/speckit.implement`. The implemen
 
 ### User Story 6 - Deployment via `unbound init` (Priority: P3)
 
-Cobalt-Crush is distributed through the existing `unbound` binary. `unbound init` deploys the `cobalt-crush-dev.md` agent file alongside all other scaffold files (including Divisor agents and convention packs). The agent is project-agnostic and loads convention packs dynamically at runtime, using the same `.opencode/divisor/packs/` convention packs that The Divisor uses.
+Cobalt-Crush is distributed through the existing `unbound` binary. `unbound init` deploys the `cobalt-crush-dev.md` agent file alongside all other scaffold files (including Divisor agents and convention packs). The agent is project-agnostic and loads convention packs dynamically at runtime, using the shared convention packs at `.opencode/unbound/packs/`.
 
 **Why this priority**: P3 because the deployment mechanism depends on the persona, coding standards, and feedback loops being defined first.
 

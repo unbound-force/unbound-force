@@ -537,9 +537,10 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/unbound/packs/go-custom.md", false},
 		{"opencode/unbound/packs/default-custom.md", false},
 		{"opencode/unbound/packs/typescript-custom.md", false},
-		// User-owned: agents (including Divisor personas)
+		// User-owned: agents (including Divisor personas and Cobalt-Crush)
 		{"opencode/agents/divisor-guard.md", false},
 		{"opencode/agents/divisor-architect.md", false},
+		{"opencode/agents/cobalt-crush-dev.md", false},
 		// User-owned: other
 		{"specify/templates/spec-template.md", false},
 		{"specify/templates/plan-template.md", false},
@@ -991,6 +992,8 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/command/speckit.plan.md", false},
 		{"specify/templates/spec-template.md", false},
 		{"openspec/config.yaml", false},
+		// Non-Divisor: Cobalt-Crush agent
+		{"opencode/agents/cobalt-crush-dev.md", false},
 	}
 
 	for _, tt := range tests {
@@ -1106,6 +1109,9 @@ func TestRun_DivisorSubset(t *testing.T) {
 		}
 		if strings.Contains(f, "speckit.") {
 			t.Errorf("DivisorOnly should not create speckit commands: %s", f)
+		}
+		if strings.Contains(f, "cobalt-crush") {
+			t.Errorf("DivisorOnly should not create cobalt-crush files: %s", f)
 		}
 	}
 

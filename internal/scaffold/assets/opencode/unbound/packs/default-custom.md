@@ -7,9 +7,9 @@ version: 1.0.0
 # Custom Rules: Default
 
 Project-specific conventions that extend the canonical
-default convention pack. Rules in this file are loaded
-alongside `default.md` by all Divisor persona agents at
-review time.
+default convention pack. Rules in this file are loaded alongside
+`default.md` by Cobalt-Crush (during implementation) and
+all Divisor persona agents (during review).
 
 Use the `CR-NNN` prefix for all custom rules. Use `[MUST]`,
 `[SHOULD]`, or `[MAY]` severity indicators per RFC 2119.

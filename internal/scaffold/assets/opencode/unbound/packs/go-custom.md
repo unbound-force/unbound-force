@@ -8,7 +8,8 @@ version: 1.0.0
 
 Project-specific Go conventions that extend the canonical
 Go convention pack. Rules in this file are loaded alongside
-`go.md` by all Divisor persona agents at review time.
+`go.md` by Cobalt-Crush (during implementation) and
+all Divisor persona agents (during review).
 
 Use the `CR-NNN` prefix for all custom rules. Use `[MUST]`,
 `[SHOULD]`, or `[MAY]` severity indicators per RFC 2119.
