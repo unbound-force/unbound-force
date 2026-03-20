@@ -32,18 +32,22 @@ func main() {
 }
 
 type initParams struct {
-	targetDir string
-	force     bool
-	version   string
-	stdout    io.Writer
+	targetDir   string
+	force       bool
+	divisorOnly bool
+	lang        string
+	version     string
+	stdout      io.Writer
 }
 
 func runInit(p initParams) error {
 	_, err := scaffold.Run(scaffold.Options{
-		TargetDir: p.targetDir,
-		Force:     p.force,
-		Version:   p.version,
-		Stdout:    p.stdout,
+		TargetDir:   p.targetDir,
+		Force:       p.force,
+		DivisorOnly: p.divisorOnly,
+		Lang:        p.lang,
+		Version:     p.version,
+		Stdout:      p.stdout,
 	})
 	return err
 }
@@ -66,29 +70,43 @@ func newInitCmd() *cobra.Command {
 		Short: "Scaffold specification framework into current directory",
 		Long: `Initialize the Unbound Force specification framework in the
 current directory. This creates the Speckit templates, scripts,
-OpenCode commands and agents, and OpenSpec schema files needed
-for both strategic and tactical specification workflows.
+OpenCode commands and agents, Divisor review personas and
+convention packs, and OpenSpec schema files needed for both
+strategic and tactical specification workflows.
 
 User-owned files (templates, scripts, agents, config) are
 skipped if they already exist. Tool-owned files (speckit
-commands, OpenSpec schema) are updated if their content
-has changed.
+commands, OpenSpec schema, convention packs) are updated if
+their content has changed.
+
+Use --divisor to deploy only The Divisor review agents,
+the /review-council command, and convention packs.
+
+Use --lang to specify the project language for convention
+pack selection (auto-detected from go.mod, package.json,
+etc. if not provided).
 
 Use --force to overwrite all files regardless of ownership.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			force, _ := cmd.Flags().GetBool("force")
+			divisorOnly, _ := cmd.Flags().GetBool("divisor")
+			lang, _ := cmd.Flags().GetString("lang")
 			cwd, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("get working directory: %w", err)
 			}
 			return runInit(initParams{
-				targetDir: cwd,
-				force:     force,
-				version:   version,
-				stdout:    cmd.OutOrStdout(),
+				targetDir:   cwd,
+				force:       force,
+				divisorOnly: divisorOnly,
+				lang:        lang,
+				version:     version,
+				stdout:      cmd.OutOrStdout(),
 			})
 		},
 	}
 	cmd.Flags().Bool("force", false, "Overwrite all existing files")
+	cmd.Flags().Bool("divisor", false, "Deploy only Divisor review agents and convention packs")
+	cmd.Flags().String("lang", "", "Project language for convention pack (auto-detected if omitted)")
 	return cmd
 }

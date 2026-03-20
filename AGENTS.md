@@ -40,7 +40,7 @@ Hero constitutions extend (never contradict) the org constitution. See the const
 | Muti-Mind | Product Owner | `unbound-force/muti-mind` | Implemented (Spec 004) |
 | Cobalt-Crush | Developer | `unbound-force/cobalt-crush` | Spec only (006) |
 | Gaze | Tester | `unbound-force/gaze` | Implemented |
-| The Divisor | PR Reviewer (Council) | `unbound-force/the-divisor` | Spec only (005) |
+| The Divisor | PR Reviewer (Council) | Embedded in `unbound` binary | Implemented (Spec 005) |
 | Mx F | Manager | `unbound-force/mx-f` | Spec only (007) |
 
 Gaze is the only hero with a functional implementation. The Divisor has a prototype deployment (reviewer agents) inside the Gaze repo.
@@ -69,24 +69,38 @@ unbound-force/
 ├── .opencode/
 │   ├── agents/
 │   │   ├── constitution-check.md    # Alignment checking agent (subagent)
+│   │   ├── divisor-adversary.md     # The Adversary: resilience/security (Divisor)
+│   │   ├── divisor-architect.md     # The Architect: structural review (Divisor)
+│   │   ├── divisor-guard.md         # The Guard: intent drift detection (Divisor)
+│   │   ├── divisor-sre.md           # The Operator: operational readiness (Divisor)
+│   │   ├── divisor-testing.md       # The Tester: test quality (Divisor)
 │   │   ├── gaze-reporter.md         # Gaze report agent
 │   │   ├── muti-mind-po.md          # Muti-Mind Product Owner agent
-│   │   ├── reviewer-adversary.md    # The Adversary: resilience audit
-│   │   ├── reviewer-architect.md    # The Architect: structural review
-│   │   ├── reviewer-guard.md        # The Guard: intent drift detection
-│   │   ├── reviewer-sre.md          # The SRE: reliability audit
-│   │   └── reviewer-testing.md      # The Tester: quality audit
-│   └── command/                     # Speckit pipeline commands + utilities
-│       ├── speckit.constitution.md
-│       ├── speckit.specify.md
-│       ├── speckit.clarify.md
-│       ├── speckit.plan.md
-│       ├── speckit.tasks.md
-│       ├── speckit.analyze.md
-│       ├── speckit.checklist.md
-│       ├── speckit.implement.md
-│       ├── speckit.taskstoissues.md
-│       └── constitution-check.md    # /constitution-check command
+│   │   ├── reviewer-adversary.md    # Legacy reviewer (superseded by divisor-*)
+│   │   ├── reviewer-architect.md    # Legacy reviewer (superseded by divisor-*)
+│   │   ├── reviewer-guard.md        # Legacy reviewer (superseded by divisor-*)
+│   │   ├── reviewer-sre.md          # Legacy reviewer (superseded by divisor-*)
+│   │   └── reviewer-testing.md      # Legacy reviewer (superseded by divisor-*)
+│   ├── command/                     # Speckit pipeline commands + utilities
+│   │   ├── speckit.constitution.md
+│   │   ├── speckit.specify.md
+│   │   ├── speckit.clarify.md
+│   │   ├── speckit.plan.md
+│   │   ├── speckit.tasks.md
+│   │   ├── speckit.analyze.md
+│   │   ├── speckit.checklist.md
+│   │   ├── speckit.implement.md
+│   │   ├── speckit.taskstoissues.md
+│   │   ├── review-council.md        # /review-council command (Divisor)
+│   │   └── constitution-check.md    # /constitution-check command
+│   └── divisor/
+│       └── packs/                   # Convention packs for Divisor personas
+│           ├── go.md                # Go convention pack (tool-owned)
+│           ├── go-custom.md         # Go custom rules (user-owned)
+│           ├── default.md           # Language-agnostic default (tool-owned)
+│           ├── default-custom.md    # Default custom rules (user-owned)
+│           ├── typescript.md        # TypeScript convention pack (tool-owned)
+│           └── typescript-custom.md # TypeScript custom rules (user-owned)
 ├── cmd/unbound/
 │   └── main.go                      # Cobra CLI entry point
 ├── cmd/mutimind/
@@ -453,12 +467,15 @@ This repo is primarily specifications and governance documents. Follow these con
 - Local Markdown files (YAML frontmatter) in `.muti-mind/backlog/` indexed by graphthulhu (004-muti-mind-architecture)
 - Go 1.24+ (CLI backend), OpenCode Agents (AI runtime) + `github.com/spf13/cobra`, `github.com/charmbracelet/log`, OpenCode Runtime, `graphthulhu` MCP Server (004-muti-mind-architecture)
 - Local Markdown files with YAML frontmatter in `.muti-mind/backlog/` (004-muti-mind-architecture)
+- Go 1.24+ (CLI/scaffold engine), Markdown (agents, packs, commands) + `github.com/spf13/cobra` (CLI), `embed.FS` (asset embedding), `github.com/charmbracelet/log` (logging) (005-the-divisor-architecture)
+- Filesystem only (embedded assets deployed to target directory) (005-the-divisor-architecture)
 
 ## Recent Changes
 
+- 005-the-divisor-architecture: Implemented The Divisor PR Reviewer Council -- 5 canonical `divisor-*.md` persona agents (Guard, Architect, Adversary, SRE, Testing) with dynamic discovery, 6 convention pack files (Go, TypeScript, default + custom stubs) loaded at review time, `/review-council` command updated to `divisor-*` pattern, `unbound init --divisor` subset deployment with `--lang` language override, scaffold engine extended with `isDivisorAsset()`, `detectLang()`, `shouldDeployPack()`, convention pack ownership model (tool-owned canonical, user-owned custom), 45 total embedded files (was 33), all 5 user stories and 44 tasks completed.
 - graphthulhu-homebrew-distribution: `brew install unbound-force/tap/unbound` now installs graphthulhu automatically as a cask dependency. Added `Casks/graphthulhu.rb` to `unbound-force/homebrew-tap` (v0.4.0, all four platform checksums), added `dependencies: [{cask: graphthulhu}]` and macOS quarantine-removal hook to `.goreleaser.yaml`, opened upstream PR to `skridlevsky/graphthulhu` (#5) for eventual tap ownership transfer.
 - 004-muti-mind-architecture: Implemented Muti-Mind backend CLI (`cmd/mutimind`), OpenCode agent (`muti-mind-po`), commands, local MD backlog parsing, GitHub bidirectional sync, and JSON artifact generation (`backlog-item`, `acceptance-decision`).
-- 003-specification-framework: Implemented unified two-tier specification framework -- `unbound` CLI binary (Go + Cobra + embed.FS), scaffolds 33 files (22 Speckit + 6 OpenSpec + 5 agents) via `unbound init`, custom `unbound-force` OpenSpec schema with constitution alignment in proposals, boundary guidelines documented, GoReleaser v2 release pipeline, all 8 user stories (US1-US8) and 67 tasks completed, format-aware version markers, drift detection tests
+- 003-specification-framework: Implemented unified two-tier specification framework -- `unbound` CLI binary (Go + Cobra + embed.FS), scaffolds files via `unbound init` (33 initial, extended to 45 by Spec 005), custom `unbound-force` OpenSpec schema with constitution alignment in proposals, boundary guidelines documented, GoReleaser v2 release pipeline, all 8 user stories (US1-US8) and 67 tasks completed, format-aware version markers, drift detection tests
 - 010-knowledge-graph-integration: Implemented knowledge graph integration -- graphthulhu installed with `--include-hidden` support (upstream PR submitted), OpenCode MCP configuration created, all 5 user stories verified (search, analysis, live sync, link traversal, property queries), YAML frontmatter added to specs 001/002/004, 50 pages indexed across all directories including `.specify/` and `.opencode/`
 - 002-hero-interface-contract: Completed spec implementation -- Hero Interface Contract v1.0.0 ratified, hero manifest JSON Schema created and validated, contract compliance validation script created and tested against Gaze and Website repos, sample artifact envelope and Gaze manifest produced, all FRs (001-015) and SCs (001-007) validated, spec status set to Complete
 - 001-org-constitution: Completed spec implementation -- constitution ratified v1.0.0, alignment agent and `/constitution-check` command created, all FRs and SCs validated, spec status set to Complete

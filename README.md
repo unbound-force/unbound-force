@@ -9,9 +9,9 @@ Unbound Force is an organization of AI agent personas (heroes) that collaborate 
 | Hero | Role | Status |
 |------|------|--------|
 | **Gaze** | Tester (Quality Sentinel) | Implemented |
-| **Muti-Mind** | Product Owner (Vision Keeper) | Spec only |
+| **Muti-Mind** | Product Owner (Vision Keeper) | Implemented |
 | **Cobalt-Crush** | Developer (Engineering Core) | Spec only |
-| **The Divisor** | PR Reviewer (Council) | Spec only |
+| **The Divisor** | PR Reviewer (Council) | Implemented (embedded in `unbound`) |
 | **Mx F** | Manager (Flow Facilitator) | Spec only |
 
 ## Constitution
@@ -43,7 +43,7 @@ The framework provides:
 - **OpenSpec** (tactical): Lightweight workflow for bug fixes and small changes (`/opsx:propose` through `/opsx:archive`)
 - **Constitution governance bridge**: Every proposal includes alignment assessment against the four org principles
 
-`unbound init` scaffolds 33 files into your repository: templates, scripts, commands, agents, and the custom `unbound-force` OpenSpec schema. User-owned files are skipped on re-run; tool-owned files are auto-updated when content changes.
+`unbound init` scaffolds 45 files into your repository: templates, scripts, commands, agents, Divisor review personas, convention packs, and the custom `unbound-force` OpenSpec schema. Use `unbound init --divisor` to deploy only the PR review agents and convention packs. Use `--lang` to override language auto-detection for convention pack selection. User-owned files are skipped on re-run; tool-owned files are auto-updated when content changes.
 
 See [AGENTS.md](AGENTS.md) for full workflow documentation and boundary guidelines.
 
