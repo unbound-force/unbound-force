@@ -140,3 +140,98 @@ func TestWriteArtifact_ErrorDir(t *testing.T) {
 		t.Errorf("Expected error when target dir is a file, got nil")
 	}
 }
+
+func TestFindArtifacts_MatchesType(t *testing.T) {
+	dir := t.TempDir()
+	// Write 2 artifacts with different types
+	if err := artifacts.WriteArtifact(dir, "gaze", "quality-report", "r1", map[string]string{"score": "A"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.WriteArtifact(dir, "divisor", "review-verdict", "v1", map[string]string{"decision": "approve"}); err != nil {
+		t.Fatal(err)
+	}
+
+	paths, err := artifacts.FindArtifacts(dir, "quality-report")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("expected 1 quality-report, got %d", len(paths))
+	}
+}
+
+func TestFindArtifacts_EmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	paths, err := artifacts.FindArtifacts(dir, "quality-report")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 0 {
+		t.Errorf("expected 0 artifacts in empty dir, got %d", len(paths))
+	}
+}
+
+func TestFindArtifacts_SkipsNonJSON(t *testing.T) {
+	dir := t.TempDir()
+	// Write a non-JSON file
+	os.WriteFile(filepath.Join(dir, "readme.md"), []byte("# hello"), 0644)
+	// Write a valid artifact
+	artifacts.WriteArtifact(dir, "gaze", "quality-report", "r1", map[string]string{})
+
+	paths, err := artifacts.FindArtifacts(dir, "quality-report")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 {
+		t.Errorf("expected 1 artifact (skipping .md), got %d", len(paths))
+	}
+}
+
+func TestReadEnvelope_ValidFile(t *testing.T) {
+	dir := t.TempDir()
+	artifacts.WriteArtifact(dir, "mx-f", "metrics-snapshot", "s1", map[string]float64{"velocity": 8.2})
+
+	// Find the written file
+	paths, _ := artifacts.FindArtifacts(dir, "metrics-snapshot")
+	if len(paths) == 0 {
+		t.Fatal("no artifact found")
+	}
+
+	env, err := artifacts.ReadEnvelope(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Hero != "mx-f" {
+		t.Errorf("Hero = %q", env.Hero)
+	}
+	if env.ArtifactType != "metrics-snapshot" {
+		t.Errorf("Type = %q", env.ArtifactType)
+	}
+}
+
+func TestReadEnvelope_MalformedFile(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{invalid json"), 0644)
+	_, err := artifacts.ReadEnvelope(filepath.Join(dir, "bad.json"))
+	if err == nil {
+		t.Error("expected error for malformed JSON")
+	}
+}
+
+func TestWriteArtifact_CustomHero(t *testing.T) {
+	dir := t.TempDir()
+	err := artifacts.WriteArtifact(dir, "mx-f", "metrics-snapshot", "snap-001", map[string]string{"v": "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	paths, _ := artifacts.FindArtifacts(dir, "metrics-snapshot")
+	if len(paths) != 1 {
+		t.Fatal("expected 1 artifact")
+	}
+
+	env, _ := artifacts.ReadEnvelope(paths[0])
+	if env.Hero != "mx-f" {
+		t.Errorf("Hero = %q, want mx-f", env.Hero)
+	}
+}

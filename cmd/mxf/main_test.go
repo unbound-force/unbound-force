@@ -790,3 +790,99 @@ func TestRunStandup_WithSprintAndImpediments(t *testing.T) {
 		t.Errorf("standup output missing impediment severity, got:\n%s", out)
 	}
 }
+
+// =============================================================
+// runImpediment tests (add_tests)
+// =============================================================
+
+func TestRunImpedimentAdd_CreatesFile(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	p := MxFParams{
+		DataDir: dir, Stdout: &buf, Stderr: &buf,
+		Now: func() time.Time { return time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC) },
+	}
+	p.defaults()
+	err := runImpedimentAdd(p, "Flaky CI", "high", "@dev", "CI is flaky")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "IMP-001") {
+		t.Errorf("expected IMP-001 in output, got: %s", buf.String())
+	}
+}
+
+func TestRunImpedimentList_TextFormat(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	now := func() time.Time { return time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC) }
+	p := MxFParams{DataDir: dir, Stdout: &buf, Stderr: &buf, Now: now}
+	p.defaults()
+	// Add impediments first
+	_ = runImpedimentAdd(p, "High issue", "high", "@dev", "desc")
+	buf.Reset()
+	_ = runImpedimentAdd(p, "Low issue", "low", "@dev2", "desc2")
+	buf.Reset()
+
+	err := runImpedimentList(p, "all", "text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := buf.String()
+	if !strings.Contains(output, "IMP-001") {
+		t.Error("missing IMP-001")
+	}
+	if !strings.Contains(output, "IMP-002") {
+		t.Error("missing IMP-002")
+	}
+}
+
+func TestRunImpedimentList_JSONFormat(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	now := func() time.Time { return time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC) }
+	p := MxFParams{DataDir: dir, Stdout: &buf, Stderr: &buf, Now: now}
+	p.defaults()
+	_ = runImpedimentAdd(p, "Test", "medium", "@dev", "desc")
+	buf.Reset()
+
+	err := runImpedimentList(p, "all", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "IMP-001") {
+		t.Error("JSON should contain IMP-001")
+	}
+	if !strings.HasPrefix(strings.TrimSpace(buf.String()), "[") {
+		t.Error("JSON output should be an array")
+	}
+}
+
+func TestRunImpedimentList_Empty(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	p := MxFParams{DataDir: dir, Stdout: &buf, Stderr: &buf}
+	p.defaults()
+	err := runImpedimentList(p, "all", "text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "No impediments") {
+		t.Errorf("expected 'No impediments' message, got: %s", buf.String())
+	}
+}
+
+func TestRunImpedimentDetect_NoData(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	p := MxFParams{DataDir: dir, Stdout: &buf, Stderr: &buf}
+	p.defaults()
+	// With no metrics data, detect should report insufficient data
+	err := runImpedimentDetect(p)
+	if err == nil {
+		// Either error or "No potential impediments" message is acceptable
+		if !strings.Contains(buf.String(), "No potential") && !strings.Contains(buf.String(), "insufficient") {
+			t.Errorf("expected insufficient data message, got: %s", buf.String())
+		}
+	}
+}
