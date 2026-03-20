@@ -13,7 +13,7 @@ repo), with `unbound init` deploying Divisor agents alongside all
 other scaffold files and `unbound init --divisor` deploying only
 the Divisor subset. The implementation extends the existing scaffold
 engine with: new `divisor-*.md` agent assets, a `/review-council`
-command, convention pack files in `.opencode/divisor/packs/`, a
+command, convention pack files in `.opencode/unbound/packs/`, a
 `--divisor` subset flag, and a `--lang` language detection flag.
 
 ## Technical Context

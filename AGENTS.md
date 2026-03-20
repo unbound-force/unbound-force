@@ -38,7 +38,7 @@ Hero constitutions extend (never contradict) the org constitution. See the const
 | Hero | Role | Repo | Status |
 |------|------|------|--------|
 | Muti-Mind | Product Owner | `unbound-force/muti-mind` | Implemented (Spec 004) |
-| Cobalt-Crush | Developer | `unbound-force/cobalt-crush` | Spec only (006) |
+| Cobalt-Crush | Developer | Embedded in `unbound` binary | Implemented (Spec 006) |
 | Gaze | Tester | `unbound-force/gaze` | Implemented |
 | The Divisor | PR Reviewer (Council) | Embedded in `unbound` binary | Implemented (Spec 005) |
 | Mx F | Manager | `unbound-force/mx-f` | Spec only (007) |
@@ -68,6 +68,7 @@ unbound-force/
 │   └── config.yaml                  # Project-specific configuration
 ├── .opencode/
 │   ├── agents/
+│   │   ├── cobalt-crush-dev.md       # Developer persona (Cobalt-Crush)
 │   │   ├── constitution-check.md    # Alignment checking agent (subagent)
 │   │   ├── divisor-adversary.md     # The Adversary: resilience/security (Divisor)
 │   │   ├── divisor-architect.md     # The Architect: structural review (Divisor)
@@ -93,8 +94,8 @@ unbound-force/
 │   │   ├── speckit.taskstoissues.md
 │   │   ├── review-council.md        # /review-council command (Divisor)
 │   │   └── constitution-check.md    # /constitution-check command
-│   └── divisor/
-│       └── packs/                   # Convention packs for Divisor personas
+│   └── unbound/
+│       └── packs/                   # Convention packs (shared by all heroes)
 │           ├── go.md                # Go convention pack (tool-owned)
 │           ├── go-custom.md         # Go custom rules (user-owned)
 │           ├── default.md           # Language-agnostic default (tool-owned)
@@ -469,9 +470,12 @@ This repo is primarily specifications and governance documents. Follow these con
 - Local Markdown files with YAML frontmatter in `.muti-mind/backlog/` (004-muti-mind-architecture)
 - Go 1.24+ (CLI/scaffold engine), Markdown (agents, packs, commands) + `github.com/spf13/cobra` (CLI), `embed.FS` (asset embedding), `github.com/charmbracelet/log` (logging) (005-the-divisor-architecture)
 - Filesystem only (embedded assets deployed to target directory) (005-the-divisor-architecture)
+- Markdown (agent file), Go 1.24+ (scaffold engine refactor) + `embed.FS` (asset embedding), existing scaffold engine (006-cobalt-crush-architecture)
+- Filesystem only (Markdown files deployed to target directory) (006-cobalt-crush-architecture)
 
 ## Recent Changes
 
+- 006-cobalt-crush-architecture: Implemented Cobalt-Crush Developer persona -- single `cobalt-crush-dev.md` agent file with engineering philosophy (clean code, SOLID, TDD, spec-driven development), convention pack adherence via shared `.opencode/unbound/packs/`, Gaze feedback loop (quality report consumption), Divisor review preparation (finding resolution, learned patterns), speckit integration (task processing, phase checkpoints), graphthulhu MCP integration (optional). Prerequisite refactor relocated convention packs from `.opencode/divisor/packs/` to `.opencode/unbound/packs/` (shared neutral location), updating scaffold engine, tests, Divisor agents, and documentation. 46 total embedded files (was 45).
 - 005-the-divisor-architecture: Implemented The Divisor PR Reviewer Council -- 5 canonical `divisor-*.md` persona agents (Guard, Architect, Adversary, SRE, Testing) with dynamic discovery, 6 convention pack files (Go, TypeScript, default + custom stubs) loaded at review time, `/review-council` command updated to `divisor-*` pattern, `unbound init --divisor` subset deployment with `--lang` language override, scaffold engine extended with `isDivisorAsset()`, `detectLang()`, `shouldDeployPack()`, convention pack ownership model (tool-owned canonical, user-owned custom), 45 total embedded files (was 33), all 5 user stories and 44 tasks completed.
 - graphthulhu-homebrew-distribution: `brew install unbound-force/tap/unbound` now installs graphthulhu automatically as a cask dependency. Added `Casks/graphthulhu.rb` to `unbound-force/homebrew-tap` (v0.4.0, all four platform checksums), added `dependencies: [{cask: graphthulhu}]` and macOS quarantine-removal hook to `.goreleaser.yaml`, opened upstream PR to `skridlevsky/graphthulhu` (#5) for eventual tap ownership transfer.
 - 004-muti-mind-architecture: Implemented Muti-Mind backend CLI (`cmd/mutimind`), OpenCode agent (`muti-mind-po`), commands, local MD backlog parsing, GitHub bidirectional sync, and JSON artifact generation (`backlog-item`, `acceptance-decision`).

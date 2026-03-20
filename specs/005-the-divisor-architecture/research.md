@@ -111,7 +111,7 @@ pattern. Two files keep the architecture simple.
 **Decision**: All `divisor-*.md` agents include a
 standardized `### Convention Pack` subsection under
 `## Source Documents` that instructs the agent to read
-all `*.md` files from `.opencode/divisor/packs/`.
+all `*.md` files from `.opencode/unbound/packs/`.
 
 **Rationale**: Reading "all `*.md` files" (rather than a
 single named file) allows projects to have both a
@@ -180,7 +180,7 @@ is true.
 The predicate matches:
 - `opencode/agents/divisor-*.md` (prefix match)
 - `opencode/command/review-council.md` (exact match)
-- `opencode/divisor/packs/*` (prefix match)
+- `opencode/unbound/packs/*` (prefix match)
 
 **Rationale**: A predicate function is more extensible
 than an explicit list (adding a new `divisor-foo.md`

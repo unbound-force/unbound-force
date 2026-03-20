@@ -53,10 +53,10 @@ When `--divisor` is set, only these files are deployed:
 - `.opencode/command/review-council.md`
 
 **Convention Packs** (tool-owned canonical + user-owned custom):
-- `.opencode/divisor/packs/{lang}.md`
-- `.opencode/divisor/packs/{lang}-custom.md`
-- `.opencode/divisor/packs/default.md`
-- `.opencode/divisor/packs/default-custom.md`
+- `.opencode/unbound/packs/{lang}.md`
+- `.opencode/unbound/packs/{lang}-custom.md`
+- `.opencode/unbound/packs/default.md`
+- `.opencode/unbound/packs/default-custom.md`
 
 ### Output Format
 
@@ -69,10 +69,10 @@ unbound v1.2.3 initialized (divisor)
   + .opencode/agents/divisor-sre.md
   + .opencode/agents/divisor-testing.md
   + .opencode/command/review-council.md
-  + .opencode/divisor/packs/go.md
-  + .opencode/divisor/packs/go-custom.md
-  + .opencode/divisor/packs/default.md
-  + .opencode/divisor/packs/default-custom.md
+  + .opencode/unbound/packs/go.md
+  + .opencode/unbound/packs/go-custom.md
+  + .opencode/unbound/packs/default.md
+  + .opencode/unbound/packs/default-custom.md
 
 Created: 10  Skipped: 0  Updated: 0
 
@@ -134,6 +134,6 @@ type Result struct {
 |---------|-----------|:---:|
 | `opencode/agents/divisor-*.md` | User-owned | No |
 | `opencode/command/review-council.md` | Tool-owned | Yes |
-| `opencode/divisor/packs/{lang}.md` | Tool-owned | Yes |
-| `opencode/divisor/packs/{lang}-custom.md` | User-owned | No |
+| `opencode/unbound/packs/{lang}.md` | Tool-owned | Yes |
+| `opencode/unbound/packs/{lang}-custom.md` | User-owned | No |
 <!-- scaffolded by unbound vdev -->

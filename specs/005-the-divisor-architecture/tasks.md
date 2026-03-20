@@ -17,7 +17,7 @@
 
 **Purpose**: Create canonical source files for Divisor assets before embedding them in the scaffold engine.
 
-- [x] T001 Create directory structure for convention packs at `.opencode/divisor/packs/`
+- [x] T001 Create directory structure for convention packs at `.opencode/unbound/packs/`
 
 ---
 
@@ -27,12 +27,12 @@
 
 **CRITICAL**: No user story work can begin until these packs exist as canonical source files.
 
-- [x] T002 [P] Create Go convention pack at `.opencode/divisor/packs/go.md` with YAML frontmatter (`pack_id: go`, `language: Go`, `version: 1.0.0`) and six H2 sections: Coding Style (CS-001 through CS-013), Architectural Patterns (AP-001 through AP-007), Security Checks (SC-001 through SC-006), Testing Conventions (TC-001 through TC-012), Documentation Requirements (DR-001 through DR-005), Custom Rules (empty placeholder). Extract Go-specific rules from existing `reviewer-*.md` agents per research.md R8.
-- [x] T003 [P] Create language-agnostic default convention pack at `.opencode/divisor/packs/default.md` with YAML frontmatter (`pack_id: default`, `language: Any`, `version: 1.0.0`) and same six H2 sections with universal software engineering rules (SOLID, DRY, error handling, test coverage). Use CS-NNN/AP-NNN/SC-NNN/TC-NNN/DR-NNN identifiers with `[MUST]`/`[SHOULD]`/`[MAY]` severity indicators.
-- [x] T004 [P] Create TypeScript convention pack at `.opencode/divisor/packs/typescript.md` with YAML frontmatter (`pack_id: typescript`, `language: TypeScript`, `version: 1.0.0`) and same six H2 sections with TypeScript-specific rules (ESLint, JSDoc, no `any`, import organization, error handling patterns).
-- [x] T005 [P] Create Go custom rules stub at `.opencode/divisor/packs/go-custom.md` with empty Custom Rules section and `<!-- Add project-specific rules below this line -->` marker.
-- [x] T006 [P] Create default custom rules stub at `.opencode/divisor/packs/default-custom.md` with empty Custom Rules section.
-- [x] T007 [P] Create TypeScript custom rules stub at `.opencode/divisor/packs/typescript-custom.md` with empty Custom Rules section.
+- [x] T002 [P] Create Go convention pack at `.opencode/unbound/packs/go.md` with YAML frontmatter (`pack_id: go`, `language: Go`, `version: 1.0.0`) and six H2 sections: Coding Style (CS-001 through CS-013), Architectural Patterns (AP-001 through AP-007), Security Checks (SC-001 through SC-006), Testing Conventions (TC-001 through TC-012), Documentation Requirements (DR-001 through DR-005), Custom Rules (empty placeholder). Extract Go-specific rules from existing `reviewer-*.md` agents per research.md R8.
+- [x] T003 [P] Create language-agnostic default convention pack at `.opencode/unbound/packs/default.md` with YAML frontmatter (`pack_id: default`, `language: Any`, `version: 1.0.0`) and same six H2 sections with universal software engineering rules (SOLID, DRY, error handling, test coverage). Use CS-NNN/AP-NNN/SC-NNN/TC-NNN/DR-NNN identifiers with `[MUST]`/`[SHOULD]`/`[MAY]` severity indicators.
+- [x] T004 [P] Create TypeScript convention pack at `.opencode/unbound/packs/typescript.md` with YAML frontmatter (`pack_id: typescript`, `language: TypeScript`, `version: 1.0.0`) and same six H2 sections with TypeScript-specific rules (ESLint, JSDoc, no `any`, import organization, error handling patterns).
+- [x] T005 [P] Create Go custom rules stub at `.opencode/unbound/packs/go-custom.md` with empty Custom Rules section and `<!-- Add project-specific rules below this line -->` marker.
+- [x] T006 [P] Create default custom rules stub at `.opencode/unbound/packs/default-custom.md` with empty Custom Rules section.
+- [x] T007 [P] Create TypeScript custom rules stub at `.opencode/unbound/packs/typescript-custom.md` with empty Custom Rules section.
 
 **Checkpoint**: All convention packs exist as canonical source files. Agents and scaffold engine can now reference them.
 
@@ -46,7 +46,7 @@
 
 ### Implementation for User Story 1
 
-- [x] T008 [P] [US1] Create `divisor-guard.md` at `.opencode/agents/divisor-guard.md`. Structure: YAML frontmatter (description, mode: subagent, model, temperature: 0.1, tools: write/edit/bash false), H1 Role (generic intent drift detector — no project-specific references), H2 Source Documents (AGENTS.md, constitution, specs, convention pack loading instruction to read all `*.md` from `.opencode/divisor/packs/`), H2 Code Review Mode with universal checklist sections (Intent Drift Detection, Constitution Alignment, Zero-Waste Mandate, Neighborhood Rule [PACK]), H2 Spec Review Mode, H2 Output Format (structured finding template with severity/file/description/recommendation), H2 Decision Criteria (APPROVE/REQUEST CHANGES rules). Derive from existing `reviewer-guard.md` but remove all unbound-force-specific content per research.md R8 classification.
+- [x] T008 [P] [US1] Create `divisor-guard.md` at `.opencode/agents/divisor-guard.md`. Structure: YAML frontmatter (description, mode: subagent, model, temperature: 0.1, tools: write/edit/bash false), H1 Role (generic intent drift detector — no project-specific references), H2 Source Documents (AGENTS.md, constitution, specs, convention pack loading instruction to read all `*.md` from `.opencode/unbound/packs/`), H2 Code Review Mode with universal checklist sections (Intent Drift Detection, Constitution Alignment, Zero-Waste Mandate, Neighborhood Rule [PACK]), H2 Spec Review Mode, H2 Output Format (structured finding template with severity/file/description/recommendation), H2 Decision Criteria (APPROVE/REQUEST CHANGES rules). Derive from existing `reviewer-guard.md` but remove all unbound-force-specific content per research.md R8 classification.
 - [x] T009 [P] [US1] Create `divisor-architect.md` at `.opencode/agents/divisor-architect.md`. Same structural template as T008 but with Architect-specific focus: H2 Code Review Mode with universal sections (Architectural Alignment, DRY/Structural Integrity, Plan Alignment) plus `[PACK]` sections (Coding Convention Compliance referencing `coding_style`/`architectural_patterns`, Testing Convention Compliance referencing `testing_conventions`, Documentation Compliance referencing `documentation_requirements`). Include Architectural Alignment Score (1-10) per existing reviewer-architect.md pattern.
 - [x] T010 [P] [US1] Create `divisor-adversary.md` at `.opencode/agents/divisor-adversary.md`. Same structural template but with Adversary-specific focus: universal sections (Zero-Waste, Error Handling/Resilience, Efficiency, Test Safety, Universal Security — hardcoded secrets, injection patterns per FR-020) plus `[PACK]` sections (Language-Specific Error Patterns referencing `security_checks`, Framework-Specific Resilience referencing `custom_rules`, Dependency Vulnerabilities). Include `read: true` in YAML frontmatter tools.
 - [x] T011 [P] [US1] Create `divisor-sre.md` at `.opencode/agents/divisor-sre.md`. Same structural template but with SRE-specific focus: universal sections (Runtime Observability, Operational Documentation, Backup/Recovery, Upgrade/Migration Paths) plus `[PACK]` sections (Release Pipeline Integrity referencing `architectural_patterns`, Dependency Health, Configuration/Environment).
@@ -66,9 +66,9 @@
 
 ### Implementation for User Story 2
 
-- [x] T015 [US2] Validate Go convention pack (`.opencode/divisor/packs/go.md`) produces equivalent review behavior to existing `reviewer-architect.md` Go checks. Run `/review-council` on a sample change in this repo and compare findings against what `reviewer-architect.md` would produce. Adjust Go pack rules if gaps are found.
-- [x] T016 [US2] Validate default convention pack (`.opencode/divisor/packs/default.md`) produces meaningful findings on a non-Go project. Verify that universal principles (SOLID, DRY, error handling, test coverage) are checked. Adjust default pack rules if gaps are found.
-- [x] T017 [US2] Validate graceful degradation: temporarily remove all packs from `.opencode/divisor/packs/`, run `/review-council`, verify agents skip `[PACK]` sections and note "No convention pack found" in their findings. Restore packs after validation.
+- [x] T015 [US2] Validate Go convention pack (`.opencode/unbound/packs/go.md`) produces equivalent review behavior to existing `reviewer-architect.md` Go checks. Run `/review-council` on a sample change in this repo and compare findings against what `reviewer-architect.md` would produce. Adjust Go pack rules if gaps are found.
+- [x] T016 [US2] Validate default convention pack (`.opencode/unbound/packs/default.md`) produces meaningful findings on a non-Go project. Verify that universal principles (SOLID, DRY, error handling, test coverage) are checked. Adjust default pack rules if gaps are found.
+- [x] T017 [US2] Validate graceful degradation: temporarily remove all packs from `.opencode/unbound/packs/`, run `/review-council`, verify agents skip `[PACK]` sections and note "No convention pack found" in their findings. Restore packs after validation.
 
 **Checkpoint**: Convention packs are loaded dynamically at review time. Go pack matches prototype behavior. Default pack provides universal coverage. Graceful degradation works when no pack exists.
 
@@ -99,7 +99,7 @@
 
 ### Tests for User Story 4
 
-- [x] T022 [US4] Add `isDivisorAsset()` function to `internal/scaffold/scaffold.go` and create `TestIsDivisorAsset` table-driven test in `internal/scaffold/scaffold_test.go` per contracts/scaffold-cli.md. Predicate matches: `opencode/agents/divisor-*.md` (prefix), `opencode/command/review-council.md` (exact), `opencode/divisor/packs/*` (prefix). Test both positive cases (all Divisor files) and negative cases (reviewer-*, constitution-check, speckit commands).
+- [x] T022 [US4] Add `isDivisorAsset()` function to `internal/scaffold/scaffold.go` and create `TestIsDivisorAsset` table-driven test in `internal/scaffold/scaffold_test.go` per contracts/scaffold-cli.md. Predicate matches: `opencode/agents/divisor-*.md` (prefix), `opencode/command/review-council.md` (exact), `opencode/unbound/packs/*` (prefix). Test both positive cases (all Divisor files) and negative cases (reviewer-*, constitution-check, speckit commands).
 - [x] T023 [US4] Add `detectLang()` function to `internal/scaffold/scaffold.go` and create `TestDetectLang` table-driven test in `internal/scaffold/scaffold_test.go`. Check marker files in priority order: go.mod→"go", tsconfig.json→"typescript", package.json→"typescript", pyproject.toml→"python", Cargo.toml→"rust". Return "" if none found. Test with `t.TempDir()` and marker file creation.
 - [x] T024 [US4] Add `isConventionPack()` and `shouldDeployPack()` functions to `internal/scaffold/scaffold.go` and create `TestShouldDeployPack` table-driven test in `internal/scaffold/scaffold_test.go`. `shouldDeployPack(relPath, lang)` returns true for: `{lang}.md`, `{lang}-custom.md`, `default.md`, `default-custom.md`. Returns false for other packs. Non-pack files always return true.
 
@@ -108,12 +108,12 @@
 ### Implementation for User Story 4
 
 - [x] T025 [US4] Add `DivisorOnly bool` and `Lang string` fields to `Options` struct in `internal/scaffold/scaffold.go`. Modify `Run()` function: add language resolution block (Lang flag → auto-detect → "default" fallback), add `isDivisorAsset` filter in `fs.WalkDir` callback when `DivisorOnly=true`, add `shouldDeployPack` filter for convention pack language selection, suppress `openspec/specs` and `openspec/changes` empty directory creation when `DivisorOnly=true`.
-- [x] T026 [US4] Update `isToolOwned()` in `internal/scaffold/scaffold.go`: add convention pack ownership rules — `opencode/divisor/packs/*.md` files are tool-owned UNLESS filename contains `-custom` (those are user-owned).
+- [x] T026 [US4] Update `isToolOwned()` in `internal/scaffold/scaffold.go`: add convention pack ownership rules — `opencode/unbound/packs/*.md` files are tool-owned UNLESS filename contains `-custom` (those are user-owned).
 - [x] T027 [US4] Update `printSummary()` in `internal/scaffold/scaffold.go`: accept `divisorOnly` parameter, show Divisor-specific hint line ("Run /review-council to start a code review.") when `divisorOnly=true`. Add informational note when language could not be detected and `--lang` was not provided.
 - [x] T028 [US4] Add `--divisor` and `--lang` flags to CLI in `cmd/unbound/main.go`: add `divisorOnly bool` and `lang string` to `initParams` struct, register `--divisor` (bool, default false) and `--lang` (string, default "") flags on init command, pass through to `scaffold.Options`. Update Long description to document the new flags.
-- [x] T029 [P] [US4] Copy all new canonical source files to embedded assets directory. Copy `.opencode/agents/divisor-guard.md` to `internal/scaffold/assets/opencode/agents/divisor-guard.md`. Repeat for `divisor-architect.md`, `divisor-adversary.md`, `divisor-sre.md`, `divisor-testing.md`. Copy `.opencode/command/review-council.md` to `internal/scaffold/assets/opencode/command/review-council.md`. Copy `.opencode/divisor/packs/go.md`, `default.md`, `typescript.md`, `go-custom.md`, `default-custom.md`, `typescript-custom.md` to `internal/scaffold/assets/opencode/divisor/packs/`.
-- [x] T030 [US4] Update `expectedAssetPaths` in `internal/scaffold/scaffold_test.go`: add 12 new entries (5 divisor agents, 1 review-council command, 3 canonical packs, 3 custom pack stubs). Update `knownNonEmbeddedFiles`: remove `review-council.md` (now embedded). Add `.opencode/divisor/packs` to `expectedDirs` in `TestRun_CreatesFiles`. Add `.opencode/divisor` to `canonicalDirs` in `TestCanonicalSources_AreEmbedded`.
-- [x] T031 [US4] Add `TestIsToolOwned` cases for convention packs in `internal/scaffold/scaffold_test.go`: `opencode/divisor/packs/go.md` → true (tool-owned), `opencode/divisor/packs/go-custom.md` → false (user-owned), `opencode/agents/divisor-guard.md` → false (user-owned agents).
+- [x] T029 [P] [US4] Copy all new canonical source files to embedded assets directory. Copy `.opencode/agents/divisor-guard.md` to `internal/scaffold/assets/opencode/agents/divisor-guard.md`. Repeat for `divisor-architect.md`, `divisor-adversary.md`, `divisor-sre.md`, `divisor-testing.md`. Copy `.opencode/command/review-council.md` to `internal/scaffold/assets/opencode/command/review-council.md`. Copy `.opencode/unbound/packs/go.md`, `default.md`, `typescript.md`, `go-custom.md`, `default-custom.md`, `typescript-custom.md` to `internal/scaffold/assets/opencode/unbound/packs/`.
+- [x] T030 [US4] Update `expectedAssetPaths` in `internal/scaffold/scaffold_test.go`: add 12 new entries (5 divisor agents, 1 review-council command, 3 canonical packs, 3 custom pack stubs). Update `knownNonEmbeddedFiles`: remove `review-council.md` (now embedded). Add `.opencode/unbound/packs` to `expectedDirs` in `TestRun_CreatesFiles`. Add `.opencode/divisor` to `canonicalDirs` in `TestCanonicalSources_AreEmbedded`.
+- [x] T031 [US4] Add `TestIsToolOwned` cases for convention packs in `internal/scaffold/scaffold_test.go`: `opencode/unbound/packs/go.md` → true (tool-owned), `opencode/unbound/packs/go-custom.md` → false (user-owned), `opencode/agents/divisor-guard.md` → false (user-owned agents).
 - [x] T032 [US4] Create `TestRun_DivisorSubset` integration test in `internal/scaffold/scaffold_test.go`: create temp dir with `go.mod`, run `Run()` with `DivisorOnly=true`, verify only Divisor files created (agents, command, Go+default packs), verify no speckit/openspec files created, verify no openspec empty dirs created, verify summary mentions review-council.
 - [x] T033 [US4] Create `TestRun_DivisorSubset_WithLangFlag` integration test in `internal/scaffold/scaffold_test.go`: run with `DivisorOnly=true, Lang="typescript"` in empty temp dir, verify TypeScript pack deployed and Go pack NOT deployed, verify all 5 agent files still created.
 - [x] T034 [US4] Create `TestRun_DivisorSubset_DefaultFallback` integration test in `internal/scaffold/scaffold_test.go`: run with `DivisorOnly=true` in empty temp dir (no language markers), verify only `default.md` and `default-custom.md` packs deployed, verify informational message about no language detection in output.
@@ -158,7 +158,7 @@
 
 - **Setup (Phase 1)**: No dependencies — can start immediately
 - **Foundational (Phase 2)**: Depends on Phase 1 — convention packs MUST exist before agents reference them
-- **US1 (Phase 3)**: Depends on Phase 2 — agents load convention packs from `.opencode/divisor/packs/`
+- **US1 (Phase 3)**: Depends on Phase 2 — agents load convention packs from `.opencode/unbound/packs/`
 - **US2 (Phase 4)**: Depends on Phase 3 — validates pack integration with agents
 - **US3 (Phase 5)**: Depends on Phase 3 — validates project-context features in agents
 - **US4 (Phase 6)**: Depends on Phase 3 — embeds agent files created in Phase 3 into scaffold

@@ -87,7 +87,7 @@ Reviews specification artifacts instead of code changes.
 
 ### Add project-specific rules
 
-Edit `.opencode/divisor/packs/{lang}-custom.md` and add
+Edit `.opencode/unbound/packs/{lang}-custom.md` and add
 rules using the `CR-NNN` prefix:
 
 ```markdown

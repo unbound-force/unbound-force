@@ -110,7 +110,8 @@ var expectedAssetPaths = []string{
 	"opencode/command/speckit.specify.md",
 	"opencode/command/speckit.tasks.md",
 	"opencode/command/speckit.taskstoissues.md",
-	// OpenCode agents — legacy reviewers (4) + Divisor personas (5) + constitution-check (1)
+	// OpenCode agents — legacy reviewers (4) + Divisor personas (5) + Cobalt-Crush (1) + constitution-check (1)
+	"opencode/agents/cobalt-crush-dev.md",
 	"opencode/agents/constitution-check.md",
 	"opencode/agents/divisor-adversary.md",
 	"opencode/agents/divisor-architect.md",
@@ -123,13 +124,13 @@ var expectedAssetPaths = []string{
 	"opencode/agents/reviewer-sre.md",
 	// OpenCode commands — includes review-council (11)
 	"opencode/command/review-council.md",
-	// Divisor convention packs (6)
-	"opencode/divisor/packs/default-custom.md",
-	"opencode/divisor/packs/default.md",
-	"opencode/divisor/packs/go-custom.md",
-	"opencode/divisor/packs/go.md",
-	"opencode/divisor/packs/typescript-custom.md",
-	"opencode/divisor/packs/typescript.md",
+	// Convention packs — shared by all heroes (6)
+	"opencode/unbound/packs/default-custom.md",
+	"opencode/unbound/packs/default.md",
+	"opencode/unbound/packs/go-custom.md",
+	"opencode/unbound/packs/go.md",
+	"opencode/unbound/packs/typescript-custom.md",
+	"opencode/unbound/packs/typescript.md",
 	// OpenSpec schema (5)
 	"openspec/schemas/unbound-force/schema.yaml",
 	"openspec/schemas/unbound-force/templates/proposal.md",
@@ -198,7 +199,7 @@ func TestRun_CreatesFiles(t *testing.T) {
 		".specify/scripts/bash",
 		".opencode/command",
 		".opencode/agents",
-		".opencode/divisor/packs",
+		".opencode/unbound/packs",
 		"openspec/specs",
 		"openspec/changes",
 	}
@@ -529,13 +530,13 @@ func TestIsToolOwned(t *testing.T) {
 		{"openspec/schemas/unbound-force/schema.yaml", true},
 		{"openspec/schemas/unbound-force/templates/proposal.md", true},
 		// Tool-owned: convention packs (canonical)
-		{"opencode/divisor/packs/go.md", true},
-		{"opencode/divisor/packs/default.md", true},
-		{"opencode/divisor/packs/typescript.md", true},
+		{"opencode/unbound/packs/go.md", true},
+		{"opencode/unbound/packs/default.md", true},
+		{"opencode/unbound/packs/typescript.md", true},
 		// User-owned: convention packs (custom)
-		{"opencode/divisor/packs/go-custom.md", false},
-		{"opencode/divisor/packs/default-custom.md", false},
-		{"opencode/divisor/packs/typescript-custom.md", false},
+		{"opencode/unbound/packs/go-custom.md", false},
+		{"opencode/unbound/packs/default-custom.md", false},
+		{"opencode/unbound/packs/typescript-custom.md", false},
 		// User-owned: agents (including Divisor personas)
 		{"opencode/agents/divisor-guard.md", false},
 		{"opencode/agents/divisor-architect.md", false},
@@ -905,7 +906,7 @@ func TestCanonicalSources_AreEmbedded(t *testing.T) {
 	canonicalDirs := []string{
 		".opencode/command",
 		".opencode/agents",
-		".opencode/divisor/packs",
+		".opencode/unbound/packs",
 		".specify/templates",
 		".specify/scripts/bash",
 		"openspec/schemas",
@@ -979,9 +980,9 @@ func TestIsDivisorAsset(t *testing.T) {
 		// Divisor command
 		{"opencode/command/review-council.md", true},
 		// Divisor convention packs
-		{"opencode/divisor/packs/go.md", true},
-		{"opencode/divisor/packs/default.md", true},
-		{"opencode/divisor/packs/go-custom.md", true},
+		{"opencode/unbound/packs/go.md", true},
+		{"opencode/unbound/packs/default.md", true},
+		{"opencode/unbound/packs/go-custom.md", true},
 		// Non-Divisor assets
 		{"opencode/agents/constitution-check.md", false},
 		{"opencode/agents/reviewer-guard.md", false},
@@ -1042,22 +1043,22 @@ func TestShouldDeployPack(t *testing.T) {
 		{"opencode/agents/divisor-guard.md", "go", true},
 		{"opencode/command/review-council.md", "go", true},
 		// Default packs always deploy
-		{"opencode/divisor/packs/default.md", "go", true},
-		{"opencode/divisor/packs/default-custom.md", "go", true},
-		{"opencode/divisor/packs/default.md", "typescript", true},
+		{"opencode/unbound/packs/default.md", "go", true},
+		{"opencode/unbound/packs/default-custom.md", "go", true},
+		{"opencode/unbound/packs/default.md", "typescript", true},
 		// Matching language packs deploy
-		{"opencode/divisor/packs/go.md", "go", true},
-		{"opencode/divisor/packs/go-custom.md", "go", true},
-		{"opencode/divisor/packs/typescript.md", "typescript", true},
-		{"opencode/divisor/packs/typescript-custom.md", "typescript", true},
+		{"opencode/unbound/packs/go.md", "go", true},
+		{"opencode/unbound/packs/go-custom.md", "go", true},
+		{"opencode/unbound/packs/typescript.md", "typescript", true},
+		{"opencode/unbound/packs/typescript-custom.md", "typescript", true},
 		// Non-matching language packs do NOT deploy
-		{"opencode/divisor/packs/typescript.md", "go", false},
-		{"opencode/divisor/packs/typescript-custom.md", "go", false},
-		{"opencode/divisor/packs/go.md", "typescript", false},
-		{"opencode/divisor/packs/go-custom.md", "typescript", false},
+		{"opencode/unbound/packs/typescript.md", "go", false},
+		{"opencode/unbound/packs/typescript-custom.md", "go", false},
+		{"opencode/unbound/packs/go.md", "typescript", false},
+		{"opencode/unbound/packs/go-custom.md", "typescript", false},
 		// Default lang gets only default packs
-		{"opencode/divisor/packs/go.md", "default", false},
-		{"opencode/divisor/packs/default.md", "default", true},
+		{"opencode/unbound/packs/go.md", "default", false},
+		{"opencode/unbound/packs/default.md", "default", true},
 	}
 
 	for _, tt := range tests {
@@ -1125,7 +1126,7 @@ func TestRun_DivisorSubset(t *testing.T) {
 	// Verify Go convention pack deployed (auto-detected)
 	foundGoPack := false
 	for _, f := range result.Created {
-		if strings.HasSuffix(f, "go.md") && strings.Contains(f, "divisor/packs") {
+		if strings.HasSuffix(f, "go.md") && strings.Contains(f, "unbound/packs") {
 			foundGoPack = true
 			break
 		}
@@ -1168,7 +1169,7 @@ func TestRun_DivisorSubset_WithLangFlag(t *testing.T) {
 	// Verify TypeScript pack deployed
 	foundTSPack := false
 	for _, f := range result.Created {
-		if strings.HasSuffix(f, "typescript.md") && strings.Contains(f, "divisor/packs") {
+		if strings.HasSuffix(f, "typescript.md") && strings.Contains(f, "unbound/packs") {
 			foundTSPack = true
 		}
 	}
@@ -1178,7 +1179,7 @@ func TestRun_DivisorSubset_WithLangFlag(t *testing.T) {
 
 	// Verify Go pack NOT deployed
 	for _, f := range result.Created {
-		if strings.HasSuffix(f, "/go.md") && strings.Contains(f, "divisor/packs") {
+		if strings.HasSuffix(f, "/go.md") && strings.Contains(f, "unbound/packs") {
 			t.Error("Go convention pack should not be deployed when lang=typescript")
 		}
 	}
@@ -1211,7 +1212,7 @@ func TestRun_DivisorSubset_DefaultFallback(t *testing.T) {
 
 	// Verify only default packs deployed
 	for _, f := range result.Created {
-		if strings.Contains(f, "divisor/packs") {
+		if strings.Contains(f, "unbound/packs") {
 			base := filepath.Base(f)
 			if !strings.HasPrefix(base, "default") {
 				t.Errorf("expected only default packs, got %s", f)

@@ -2,7 +2,7 @@
 spec_id: "006"
 title: "Cobalt-Crush Architecture (Developer)"
 phase: 1
-status: draft
+status: complete
 depends_on:
   - "[[specs/001-org-constitution/spec]]"
   - "[[specs/002-hero-interface-contract/spec]]"
@@ -12,7 +12,7 @@ depends_on:
 
 **Feature Branch**: `006-cobalt-crush-architecture`
 **Created**: 2026-02-24
-**Status**: Draft
+**Status**: Complete
 **Input**: User description: "Design the architecture for Cobalt-Crush, the Developer hero. Cobalt-Crush is the Engineering Core and Adaptive Implementation Engine. It includes an AI agent persona with coding conventions, templates, and integration with Gaze (test feedback) and The Divisor (review feedback) feedback loops."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -85,13 +85,13 @@ Cobalt-Crush integrates with The Divisor's review feedback. When The Divisor iss
 
 ---
 
-### User Story 5 - Task Consumption and Speckit Integration (Priority: P3)
+### User Story 5 - Speckit Integration as `/speckit.implement` Persona (Priority: P3)
 
-Cobalt-Crush consumes the speckit `tasks.md` file to drive implementation. It processes tasks phase by phase, respecting dependencies, marking tasks as complete, and producing checkpoint summaries. This is the operational integration between the spec-driven workflow and the actual code writing.
+Cobalt-Crush serves as the coding persona for `/speckit.implement`. The implement command handles task orchestration (reading tasks.md, processing phases, tracking dependencies). Cobalt-Crush defines *how* each task is executed: which coding conventions to follow, when to generate test hooks, how to document decisions, and how to integrate Gaze/Divisor feedback. This is the operational integration between the spec-driven workflow and the Cobalt-Crush engineering philosophy.
 
-**Why this priority**: P3 because this is the automation of the development workflow. Manual task consumption works, but integration with speckit's `/implement` command enables autonomous, spec-driven development.
+**Why this priority**: P3 because this is the integration layer. The implement command and the agent persona both work independently, but together they provide autonomous, spec-driven, convention-compliant development.
 
-**Independent Test**: Can be tested by providing Cobalt-Crush with a tasks.md containing a simple phase, having it execute the tasks, and verifying the correct files are created/modified and tasks are marked complete.
+**Independent Test**: Can be tested by running `/speckit.implement` with the Cobalt-Crush agent active, executing a simple phase from tasks.md, and verifying the output follows Cobalt-Crush's coding conventions and includes test hooks.
 
 **Acceptance Scenarios**:
 
@@ -102,20 +102,20 @@ Cobalt-Crush consumes the speckit `tasks.md` file to drive implementation. It pr
 
 ---
 
-### User Story 6 - Deployment Generator (Priority: P3)
+### User Story 6 - Deployment via `unbound init` (Priority: P3)
 
-Cobalt-Crush provides a `cobalt-crush init` command that deploys the Cobalt-Crush agent configuration into a target project. The generated agent file is pre-configured with the project's language, coding standards, and integrations with Gaze and The Divisor.
+Cobalt-Crush is distributed through the existing `unbound` binary. `unbound init` deploys the `cobalt-crush-dev.md` agent file alongside all other scaffold files (including Divisor agents and convention packs). The agent is project-agnostic and loads convention packs dynamically at runtime, using the same `.opencode/divisor/packs/` convention packs that The Divisor uses.
 
-**Why this priority**: P3 because the deployment generator enables adoption in any project. It depends on the persona, coding standards, and feedback loops being defined first.
+**Why this priority**: P3 because the deployment mechanism depends on the persona, coding standards, and feedback loops being defined first.
 
-**Independent Test**: Can be tested by running `cobalt-crush init` in a Go project and verifying the generated agent file contains Go-specific coding conventions and references to Gaze and Divisor integration.
+**Independent Test**: Can be tested by running `unbound init` in a Go project and verifying `.opencode/agents/cobalt-crush-dev.md` exists and references the convention pack loading pattern.
 
 **Acceptance Scenarios**:
 
-1. **Given** a Go project, **When** `cobalt-crush init` is run, **Then** it creates `.opencode/agents/cobalt-crush-dev.md` with Go coding conventions, Gaze feedback loop instructions, and Divisor review preparation guidelines.
-2. **Given** a TypeScript project, **When** `cobalt-crush init --lang typescript` is run, **Then** the generated agent uses TypeScript conventions.
-3. **Given** a project with Gaze and Divisor already deployed, **When** `cobalt-crush init` is run, **Then** the generated agent references the existing Gaze and Divisor agents by name for the feedback loops.
-4. **Given** an existing Cobalt-Crush deployment, **When** `cobalt-crush init` is run without `--force`, **Then** existing files are skipped with a warning.
+1. **Given** a Go project, **When** `unbound init` is run, **Then** it creates `.opencode/agents/cobalt-crush-dev.md` (among all other scaffold files) with convention pack loading instructions, Gaze feedback loop instructions, and Divisor review preparation guidelines.
+2. **Given** a project with Gaze and Divisor already deployed, **When** `unbound init` is run, **Then** the `cobalt-crush-dev.md` agent references the shared convention packs at `.opencode/unbound/packs/` for coding standards.
+3. **Given** an existing Cobalt-Crush deployment, **When** `unbound init` is run without `--force`, **Then** the existing `cobalt-crush-dev.md` is skipped with a warning (user-owned file).
+4. **Given** the deployed agent, **When** a developer inspects it, **Then** it is project-agnostic (no hardcoded project references) and loads language-specific conventions from the convention packs at runtime.
 
 ---
 
@@ -125,37 +125,39 @@ Cobalt-Crush provides a `cobalt-crush init` command that deploys the Cobalt-Crus
 - What happens when Cobalt-Crush is deployed in a project without The Divisor? Cobalt-Crush MUST still function. The Divisor feedback loop is optional — the agent notes that automated review is not available.
 - What happens when Cobalt-Crush encounters a task in tasks.md that requires a technology it has no convention pack for? Cobalt-Crush MUST apply language-agnostic principles and flag the gap.
 - What happens when Gaze and Divisor feedback contradict (e.g., Gaze says "add more tests," Divisor says "reduce test complexity")? Cobalt-Crush MUST address both by finding a solution that satisfies both constraints (e.g., more focused tests rather than more numerous tests). If irreconcilable, it MUST escalate to Muti-Mind for prioritization.
-- What happens when `cobalt-crush init` cannot auto-detect the project language? It MUST prompt the user or accept `--lang` flag, falling back to language-agnostic defaults.
+- What happens when `unbound init` cannot auto-detect the project language? The existing scaffold engine falls back to the `default` convention pack (already handled by `detectLang()` in Spec 005). Cobalt-Crush reads whatever packs are deployed.
 - What happens when a convention pack is updated after Cobalt-Crush has already written code? The next development session SHOULD note the convention pack version has changed and offer to review existing code against the new conventions.
+- What happens when the graphthulhu MCP server is not available? Cobalt-Crush MUST fall back to reading project files directly (AGENTS.md, specs/, .unbound-force/artifacts/). MCP server availability is a SHOULD enhancement, not a MUST dependency.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
 - **FR-001**: Cobalt-Crush MUST provide an AI agent persona with a documented engineering philosophy: clean code, SOLID, TDD awareness, CI/CD focus, and spec-driven development.
-- **FR-002**: The agent persona MUST be deployable as an OpenCode agent file (`cobalt-crush-dev.md`) installable via `cobalt-crush init`.
+- **FR-002**: The agent persona MUST be deployable as an OpenCode agent file (`cobalt-crush-dev.md`) distributed through the `unbound` binary via `unbound init`.
 - **FR-003**: Cobalt-Crush MUST define a coding standards framework with: language-agnostic principles and language-specific convention packs.
-- **FR-004**: Convention packs MUST be compatible with The Divisor's convention packs (Spec 005) — same rules, same terminology, same categories — ensuring developer-reviewer alignment.
-- **FR-005**: Cobalt-Crush MUST integrate with Gaze's quality reporting: consume quality reports (JSON), identify issues, and produce corrective code changes.
-- **FR-006**: Cobalt-Crush MUST integrate with The Divisor's review feedback: consume review-verdict artifacts, address findings, and re-submit for review.
-- **FR-007**: Cobalt-Crush MUST maintain awareness of past review feedback patterns and proactively apply learned conventions to new code.
-- **FR-008**: Cobalt-Crush MUST integrate with the speckit pipeline: consume tasks.md, process tasks in dependency order, respect parallelization markers, and mark tasks complete.
-- **FR-009**: Cobalt-Crush MUST provide a CLI tool (`cobalt-crush init`) that generates project-specific OpenCode agent files pre-configured with the correct language and integrations.
-- **FR-010**: `cobalt-crush init` MUST auto-detect the project language (from go.mod, package.json, pyproject.toml, etc.) or accept a `--lang` flag.
+- **FR-004**: Convention packs MUST be shared between Cobalt-Crush and The Divisor from a single source of truth at `.opencode/unbound/packs/`. Both heroes read the same files, ensuring developer-reviewer alignment with zero drift by design.
+- **FR-005**: The Cobalt-Crush agent instructions MUST include a Gaze feedback loop: read Gaze quality reports from `.unbound-force/artifacts/` (structured output), identify issues (CRAP scores, coverage gaps, testability findings), and produce corrective code changes. All behavior is encoded as LLM instructions in the agent Markdown.
+- **FR-006**: The Cobalt-Crush agent instructions MUST include a Divisor feedback loop: read review-verdict reports from `.unbound-force/artifacts/` (structured Markdown output), address findings systematically, and re-run validation after changes. All behavior is encoded as LLM instructions.
+- **FR-007**: The Cobalt-Crush agent instructions MUST direct the LLM to read past review findings from `.unbound-force/artifacts/` and proactively apply learned conventions to new code. This is instruction-based pattern recognition, not persistent runtime state.
+- **FR-018**: The Cobalt-Crush agent instructions SHOULD direct the LLM to use the graphthulhu MCP server (if available) to search the knowledge graph for related specs, past review patterns, architectural decisions, and project context. If the MCP server is not available, the agent MUST fall back to reading project files directly.
+- **FR-008**: Cobalt-Crush is the coding persona for `/speckit.implement`. The implement command handles task orchestration (phase ordering, dependency resolution, `[P]` markers, `[x]` completion). Cobalt-Crush defines how each task is executed: convention pack adherence, test hook generation, documentation patterns, and feedback loop integration. The agent instructions MUST be compatible with the implement command's execution model.
+- **FR-009**: Cobalt-Crush MUST be distributed through the `unbound` binary. `unbound init` deploys the agent file alongside all other scaffold files. No separate `cobalt-crush init` command is needed.
+- **FR-010**: The deployed agent MUST reference the convention packs at `.opencode/unbound/packs/` for language-specific coding standards. Language detection is handled by the existing scaffold engine (`detectLang()`). This requires a prerequisite refactor to move packs from `.opencode/divisor/packs/` to `.opencode/unbound/packs/`.
 - **FR-011**: The agent MUST follow the Hero Interface Contract naming convention: `cobalt-crush-dev.md`.
 - **FR-012**: Cobalt-Crush MUST produce code with appropriate test hooks (interface abstractions, dependency injection, exported test helpers) to facilitate Gaze's validation.
 - **FR-013**: Cobalt-Crush MUST produce code that adheres to the project's constitution principles.
 - **FR-014**: Cobalt-Crush MUST include documentation generation: inline code comments, GoDoc/JSDoc for exported symbols, and design decision records when architectural choices are made.
-- **FR-015**: Cobalt-Crush MUST provide phase checkpoint validation: run the project's test suite after each completed phase and report results before proceeding.
-- **FR-016**: Cobalt-Crush MUST conform to the Hero Interface Contract (Spec 002): standard repo structure, hero manifest, speckit integration, OpenCode agent/command standards.
-- **FR-017**: Cobalt-Crush SHOULD share convention packs with The Divisor from a single source of truth, preventing drift between developer conventions and reviewer expectations.
+- **FR-015**: The Cobalt-Crush agent instructions MUST direct the LLM to run the project's test suite after each completed phase and report results before proceeding to the next phase.
+- **FR-016**: Cobalt-Crush MUST conform to the Hero Interface Contract (Spec 002) as an embedded hero: OpenCode agent/command standards and artifact envelope compliance. The Cobalt-Crush agent does not require a standalone repo; it is distributed as part of the `unbound` binary's scaffold assets.
+- **FR-017**: Convention packs MUST be shared from `.opencode/unbound/packs/` — a neutral, org-level location. Both Cobalt-Crush and The Divisor read the same pack files. The prerequisite refactor moves existing packs from `.opencode/divisor/packs/` to `.opencode/unbound/packs/` and updates all references in Divisor agents, scaffold engine, and tests.
 
 ### Key Entities
 
 - **Developer Persona Configuration**: The AI agent's behavioral framework. Attributes: engineering_philosophy (clean code, SOLID, etc.), communication_style, decision_framework (how to resolve ambiguity), learning_model (how past feedback informs future behavior).
 - **Coding Standards Framework**: The complete set of coding rules. Attributes: universal_principles[] (SOLID, DRY, YAGNI, etc.), language_packs{} (keyed by language), active_pack (the pack in use for the current project).
-- **Convention Pack** (shared with The Divisor): Language-specific coding rules. Attributes: pack_id, language, coding_style{}, architectural_patterns{}, testing_conventions{}, documentation_requirements{}.
-- **Feedback Loop Record**: A record of a Gaze or Divisor feedback cycle. Attributes: source_hero (gaze/divisor), report_ref (path), findings_addressed[], changes_made[], validation_result (pass/fail).
+- **Convention Pack** (shared at `.opencode/unbound/packs/`): Language-specific coding rules read by both Cobalt-Crush and The Divisor. Attributes: pack_id, language, coding_style{}, architectural_patterns{}, testing_conventions{}, documentation_requirements{}. Location: `.opencode/unbound/packs/{lang}.md` (canonical, tool-owned) and `.opencode/unbound/packs/{lang}-custom.md` (project-specific, user-owned).
+- **Feedback Loop Record**: A record of a Gaze or Divisor feedback cycle, stored in `.unbound-force/artifacts/`. Attributes: source_hero (gaze/divisor), report_ref (path within artifacts dir), findings_addressed[], changes_made[], validation_result (pass/fail).
 - **Task Execution Context**: State tracked while processing tasks.md. Attributes: current_phase, tasks_completed[], tasks_remaining[], dependencies_satisfied[], phase_checkpoint_result.
 
 ## Success Criteria *(mandatory)*
@@ -167,8 +169,18 @@ Cobalt-Crush provides a `cobalt-crush init` command that deploys the Cobalt-Crus
 - **SC-003**: Given a Gaze quality report with 3 identified issues, Cobalt-Crush produces corrective changes that resolve all 3 issues (verified by re-running Gaze).
 - **SC-004**: Given a Divisor review with 3 findings, Cobalt-Crush addresses all 3 findings without introducing new ones (verified by re-running The Divisor).
 - **SC-005**: Task consumption processes a 5-task phase in dependency order, marks all tasks complete, and runs the test suite checkpoint.
-- **SC-006**: `cobalt-crush init` generates a functional agent file for at least two languages (Go and TypeScript).
+- **SC-006**: `unbound init` deploys a functional `cobalt-crush-dev.md` agent file that works with at least two convention packs (Go and TypeScript).
 - **SC-007**: The Cobalt-Crush agent functions without Gaze or The Divisor installed (standalone capability per Principle II).
+
+## Clarifications
+
+### Session 2026-03-20
+
+- Q: Should Cobalt-Crush follow the same embedded distribution model as The Divisor? → A: Yes. Cobalt-Crush is distributed through the existing `unbound` binary. `unbound init` deploys the agent file alongside everything else. No separate `cobalt-crush init` command or standalone repo.
+- Q: Should Cobalt-Crush use The Divisor's convention packs directly or maintain separate copies? → A: Shared neutral location. Convention packs move from `.opencode/divisor/packs/` to `.opencode/unbound/packs/`. Both Cobalt-Crush and The Divisor read from this shared location. This prevents drift and establishes the packs as an org-level framework resource, not a hero-specific artifact.
+- Q: What is the concrete implementation scope for Cobalt-Crush? → A: Single agent file only (`cobalt-crush-dev.md`). All behavior is LLM instructions in Markdown. No Go code, no runtime state. "Consuming Gaze reports" means the agent reads Gaze output files. "Learning from past reviews" means the agent reads previous review findings. This matches how Muti-Mind and The Divisor were implemented.
+- Q: What is the relationship between Cobalt-Crush and `/speckit.implement`? → A: Cobalt-Crush is the persona for `/speckit.implement`. The command orchestrates task processing (what to execute); Cobalt-Crush defines the coding behavior, convention adherence, and feedback loops (how to code). They are complementary, not competing.
+- Q: How should the Cobalt-Crush agent discover Gaze and Divisor feedback? → A: Read from a formal artifact directory (`.unbound-force/artifacts/`). Gaze and Divisor write structured output there. Additionally, if the graphthulhu MCP server is available, Cobalt-Crush should use it to search the knowledge graph for related specs, past review patterns, and project context.
 
 ## Dependencies
 
