@@ -17,7 +17,7 @@ Gaze Version: v1.0.0 · Go: 1.24.6 · Date: 2026-02-28
 | Average complexity | 6.2 |
 | Average line coverage | 79.0% |
 | Average CRAP score | 7.7 |
-| CRAPload | 24 (functions ≥ threshold 15) |
+| CRAPload | 24 (functions ≥ threshold 15) | <!-- T from summary.crap_threshold -->
 
 Top 5 Worst CRAP Scores
 | Function | CRAP | Complexity | Coverage | File |
@@ -70,4 +70,4 @@ Top 5 Prioritized Recommendations
 4. 🟡 Resolve ambiguous classifications — 66.5% ambiguous rate can be reduced with project documentation providing stronger signal evidence.
 5. 🟢 Run per-package quality analysis — module-level returned 0 tests; per-package analysis provides granular contract coverage data.
 ```
-<!-- scaffolded by gaze v1.2.7 -->
+<!-- scaffolded by gaze v1.4.6 -->
