@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/unbound-force/unbound-force/internal/schemas/quality-report-payload",
+  "properties": {
+    "summary": {
+      "properties": {
+        "total_functions": {
+          "type": "integer",
+          "description": "Total number of analyzed functions"
+        },
+        "avg_coverage": {
+          "type": "number",
+          "description": "Average code coverage percentage"
+        },
+        "avg_crap": {
+          "type": "number",
+          "description": "Average CRAP score"
+        },
+        "crap_load": {
+          "type": "integer",
+          "description": "Number of functions with CRAP score above threshold"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "total_functions",
+        "avg_coverage",
+        "avg_crap",
+        "crap_load"
+      ],
+      "description": "Overall quality scores"
+    },
+    "functions": {
+      "items": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Fully qualified function name"
+          },
+          "crap_score": {
+            "type": "number",
+            "description": "CRAP (Change Risk Anti-Patterns) score"
+          },
+          "complexity": {
+            "type": "integer",
+            "description": "Cyclomatic complexity"
+          },
+          "coverage": {
+            "type": "number",
+            "description": "Code coverage percentage"
+          },
+          "contract_coverage": {
+            "type": "number",
+            "description": "Contract-level coverage percentage"
+          },
+          "classification": {
+            "type": "string",
+            "description": "Function classification (contractual or incidental)"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "crap_score",
+          "complexity",
+          "coverage",
+          "contract_coverage",
+          "classification"
+        ]
+      },
+      "type": "array",
+      "description": "Per-function quality metrics"
+    },
+    "coverage": {
+      "properties": {
+        "total_lines": {
+          "type": "integer",
+          "description": "Total lines of code"
+        },
+        "covered_lines": {
+          "type": "integer",
+          "description": "Lines covered by tests"
+        },
+        "percentage": {
+          "type": "number",
+          "description": "Coverage percentage"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "total_lines",
+        "covered_lines",
+        "percentage"
+      ],
+      "description": "Aggregate coverage data"
+    },
+    "recommendations": {
+      "items": {
+        "properties": {
+          "priority": {
+            "type": "string",
+            "description": "Recommendation priority (high/medium/low)"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable recommendation"
+          },
+          "target": {
+            "type": "string",
+            "description": "Target function or package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "priority",
+          "description",
+          "target"
+        ]
+      },
+      "type": "array",
+      "description": "Improvement recommendations"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "summary",
+    "functions",
+    "coverage",
+    "recommendations"
+  ]
+}

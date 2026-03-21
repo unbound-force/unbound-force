@@ -2,7 +2,7 @@
 spec_id: "009"
 title: "Shared Data Model"
 phase: 2
-status: draft
+status: complete
 depends_on:
   - "[[specs/001-org-constitution/spec]]"
   - "[[specs/002-hero-interface-contract/spec]]"
@@ -17,7 +17,7 @@ depends_on:
 
 **Feature Branch**: `009-shared-data-model`
 **Created**: 2026-02-24
-**Status**: Draft
+**Status**: Complete
 **Input**: User description: "Define the shared data structures and JSON schemas used for inter-hero communication across the Unbound Force swarm. This includes all artifact type schemas, versioning strategy, backward compatibility rules, and the event/notification model."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -132,11 +132,11 @@ The shared data model defines the schema for convention packs — the pluggable 
 - **FR-008**: The schema registry MUST be organized as: `schemas/{artifact_type}/v{MAJOR}.{MINOR}.{PATCH}.schema.json` with a `README.md` per type.
 - **FR-009**: The schema registry MUST include sample artifacts for each type (`schemas/{artifact_type}/samples/`) that validate against the schema.
 - **FR-010**: CI MUST validate all schemas are syntactically valid JSON Schema and all samples validate against their respective schemas.
-- **FR-011**: The shared data model MUST define the convention pack schema with required sections: `pack_id`, `language`, `coding_style`, `architectural_patterns`, `security_checks`, `testing_conventions`, `documentation_requirements`, and optional `custom_rules[]` and `framework` fields.
+- **FR-011**: The shared data model MUST define structural validation rules for convention packs (Markdown files with YAML frontmatter). Required frontmatter: `pack_id`, `language`, `version`. Required H2 sections: Coding Style, Architectural Patterns, Security Checks, Testing Conventions, Documentation Requirements, Custom Rules. Optional frontmatter: `framework`. Convention packs remain Markdown format — no conversion to JSON/YAML.
 - **FR-012**: The convention pack schema MUST be shared between Cobalt-Crush and The Divisor (single source of truth, not duplicated).
 - **FR-013**: Artifact type names MUST be unique across the registry. Duplicate registrations MUST be rejected.
 - **FR-014**: The envelope MUST include an optional `correlation_id` field (UUID) for linking related artifacts across workflow stages.
-- **FR-015**: The shared data model SHOULD define an event model for hero-to-hero notifications (e.g., "quality-report available for PR #42") as an optional enhancement over polling-based artifact discovery.
+- **FR-015**: *(Deferred to future spec)* An event model for hero-to-hero notifications is not required for v1.1.0. Synchronous inter-hero communication is handled by the Swarm coordinator. Asynchronous handoff is handled by artifact polling via `FindArtifacts`. No gap exists in the current architecture.
 
 ### Key Entities
 
@@ -163,6 +163,16 @@ The shared data model defines the schema for convention packs — the pluggable 
 - **SC-006**: CI validation runs against all schemas and samples with 100% pass rate.
 - **SC-007**: The convention pack schema validates the Go convention pack and is parseable by both a hypothetical Cobalt-Crush consumer and a hypothetical Divisor consumer.
 - **SC-008**: A developer can generate Go and TypeScript type definitions from any schema using standard JSON Schema code generation tools.
+
+## Clarifications
+
+### Session 2026-03-21
+
+- Q: What is the concrete implementation scope for Spec 009? → A: Full bidirectional. JSON Schema files + Go validation + code generation to ensure schemas and Go structs never drift. CI validates schemas and samples via `go test`. Includes a Go validation helper in `internal/artifacts/`.
+- Q: Which direction should the generation flow? → A: Go → Schema. Go structs are the source of truth. Generate JSON Schemas from Go struct tags (using `invopop/jsonschema` or similar). Existing Go code is unchanged — schemas are derived from the existing battle-tested structs.
+- Q: Should the convention pack schema validate existing Markdown packs or define a new format? → A: Structural validation of existing Markdown packs. Validate YAML frontmatter fields (pack_id, language, version) + required H2 section headers (Coding Style, Architectural Patterns, Security Checks, Testing Conventions, Documentation Requirements, Custom Rules). No format change — packs stay as Markdown.
+- Q: Should FR-015 (event model for hero-to-hero notifications) be in scope for v1.1.0? → A: Deferred. Swarm's coordinator handles synchronous inter-hero routing (e.g., Cobalt-Crush asking Muti-Mind a question). Artifacts handle asynchronous handoff. The event model adds complexity without a current need. FR-015 downgraded to future consideration.
+- Q: Which Go library for JSON Schema generation? → A: `invopop/jsonschema` — mature, supports JSON Schema draft 2020-12 (FR-001), generates from Go struct tags, handles `omitempty`, actively maintained. Use `go generate` to regenerate schemas from Go structs.
 
 ## Dependencies
 

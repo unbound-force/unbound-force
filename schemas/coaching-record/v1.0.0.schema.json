@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/unbound-force/unbound-force/internal/schemas/coaching-record-payload",
+  "properties": {
+    "record_type": {
+      "type": "string",
+      "description": "Record type (retrospective or coaching)"
+    },
+    "retrospective": {
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "Retrospective date (YYYY-MM-DD)"
+        },
+        "participants": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Session participants"
+        },
+        "patterns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Identified patterns"
+        },
+        "root_causes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Root causes identified"
+        },
+        "action_items": {
+          "items": {
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Action item identifier"
+              },
+              "description": {
+                "type": "string",
+                "description": "Action item description"
+              },
+              "owner": {
+                "type": "string",
+                "description": "Responsible person or hero"
+              },
+              "deadline": {
+                "type": "string",
+                "description": "Target completion date (YYYY-MM-DD)"
+              },
+              "status": {
+                "type": "string",
+                "description": "Status (pending/in-progress/completed/stale)"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "id",
+              "description",
+              "owner",
+              "deadline",
+              "status"
+            ]
+          },
+          "type": "array",
+          "description": "Committed action items"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "date",
+        "patterns",
+        "action_items"
+      ],
+      "description": "Retrospective session data"
+    },
+    "coaching_interaction": {
+      "properties": {
+        "topic": {
+          "type": "string",
+          "description": "Coaching topic"
+        },
+        "questions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Questions asked during session"
+        },
+        "insights": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Insights surfaced"
+        },
+        "outcome": {
+          "type": "string",
+          "description": "Session outcome (action_item/escalation/resolved/deferred)"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "topic",
+        "questions",
+        "insights",
+        "outcome"
+      ],
+      "description": "Coaching interaction data"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "record_type"
+  ]
+}

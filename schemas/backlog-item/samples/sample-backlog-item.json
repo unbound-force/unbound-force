@@ -1,0 +1,24 @@
+{
+  "id": "BI-001",
+  "title": "Implement artifact envelope schema validation",
+  "description": "Add JSON Schema validation for all inter-hero artifact envelopes to ensure contract compliance.",
+  "type": "feature",
+  "priority": "P1",
+  "status": "ready",
+  "acceptance_criteria": [
+    {
+      "given": "a valid artifact envelope JSON file",
+      "when": "validated against the envelope schema",
+      "then": "validation passes with zero errors"
+    },
+    {
+      "given": "an artifact missing the hero field",
+      "when": "validated against the envelope schema",
+      "then": "validation reports a required property error"
+    }
+  ],
+  "sprint": "2026-S06",
+  "effort_estimate": "M",
+  "dependencies": ["BI-042"],
+  "related_specs": ["009"]
+}

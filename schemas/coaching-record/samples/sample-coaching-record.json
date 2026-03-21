@@ -1,0 +1,23 @@
+{
+  "record_type": "retrospective",
+  "retrospective": {
+    "date": "2026-03-21",
+    "participants": ["cobalt-crush", "gaze", "the-divisor"],
+    "patterns": [
+      "Review iterations decreased from 2.1 to 1.3 after convention pack adoption",
+      "CRAP scores trending down across all packages"
+    ],
+    "root_causes": [
+      "Convention pack enforcement reduced style-related review findings"
+    ],
+    "action_items": [
+      {
+        "id": "AI-001",
+        "description": "Add TypeScript convention pack for website hero",
+        "owner": "cobalt-crush",
+        "deadline": "2026-04-01",
+        "status": "pending"
+      }
+    ]
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/unbound-force/unbound-force/internal/metrics/metrics-snapshot",
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "velocity": {
+      "type": "number"
+    },
+    "cycle_time": {
+      "properties": {
+        "avg": {
+          "type": "number"
+        },
+        "median": {
+          "type": "number"
+        },
+        "p90": {
+          "type": "number"
+        },
+        "p99": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "avg",
+        "median",
+        "p90",
+        "p99"
+      ]
+    },
+    "lead_time": {
+      "type": "number"
+    },
+    "defect_rate": {
+      "type": "number"
+    },
+    "review_iterations": {
+      "type": "number"
+    },
+    "ci_pass_rate": {
+      "type": "number"
+    },
+    "backlog_health": {
+      "properties": {
+        "total": {
+          "type": "integer"
+        },
+        "ready": {
+          "type": "integer"
+        },
+        "stale": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "total",
+        "ready",
+        "stale"
+      ]
+    },
+    "flow_efficiency": {
+      "type": "number"
+    },
+    "sources_collected": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "health_indicators": {
+      "items": {
+        "properties": {
+          "dimension": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          },
+          "threshold_green": {
+            "type": "number"
+          },
+          "threshold_yellow": {
+            "type": "number"
+          },
+          "trend": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "dimension",
+          "status",
+          "value",
+          "threshold_green",
+          "threshold_yellow",
+          "trend"
+        ]
+      },
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "timestamp",
+    "velocity",
+    "cycle_time",
+    "lead_time",
+    "defect_rate",
+    "review_iterations",
+    "ci_pass_rate",
+    "backlog_health",
+    "flow_efficiency",
+    "sources_collected"
+  ]
+}

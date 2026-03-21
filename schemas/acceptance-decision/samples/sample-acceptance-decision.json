@@ -1,0 +1,12 @@
+{
+  "item_id": "BI-001",
+  "decision": "accept",
+  "rationale": "All acceptance criteria met. Quality report shows 92% coverage with CRAP load of 3.",
+  "criteria_met": [
+    "Schema validates all sample artifacts",
+    "CI pipeline passes with 100% schema validation"
+  ],
+  "criteria_failed": [],
+  "gaze_report_ref": ".unbound-force/artifacts/quality-report/2026-03-21T10-00-00Z-gaze.json",
+  "decided_at": "2026-03-21T12:00:00Z"
+}

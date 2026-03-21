@@ -121,6 +121,7 @@ unbound-force/
 ├── internal/backlog/                # Muti-Mind local backlog parsing
 ├── internal/sync/                   # Muti-Mind GitHub issue sync
 ├── internal/artifacts/              # Artifact envelope I/O (WriteArtifact, ReadEnvelope, FindArtifacts)
+├── internal/schemas/               # JSON Schema generation, validation, convention pack validation (Spec 009)
 ├── internal/orchestration/          # Swarm orchestration engine (Spec 008)
 ├── openspec/                        # OpenSpec tactical workflow
 │   ├── specs/                       # Living behavior contracts
@@ -139,13 +140,18 @@ unbound-force/
 │   ├── 008-swarm-orchestration/     # End-to-end workflow & Swarm plugin
 │   ├── 009-shared-data-model/       # JSON schemas for inter-hero artifacts
 │   └── 010-knowledge-graph-integration/ # MCP knowledge graph via graphthulhu
-├── schemas/                         # JSON Schemas for validation
-│   ├── hero-manifest/
-│   │   ├── v1.0.0.schema.json       # Hero manifest JSON Schema
-│   │   └── samples/
-│   │       └── gaze-hero.json       # Sample Gaze hero manifest
-│   └── samples/
-│       └── sample-quality-report-envelope.json  # Sample artifact envelope
+├── schemas/                         # JSON Schema registry for inter-hero artifacts
+│   ├── envelope/                    # Artifact envelope schema + samples
+│   ├── quality-report/              # Gaze quality report payload schema
+│   ├── review-verdict/              # Divisor review verdict payload schema
+│   ├── backlog-item/                # Muti-Mind backlog item payload schema
+│   ├── acceptance-decision/         # Muti-Mind acceptance decision payload schema
+│   ├── metrics-snapshot/            # Mx F metrics snapshot payload schema
+│   ├── coaching-record/             # Mx F coaching record payload schema
+│   ├── workflow-record/             # Orchestration workflow record payload schema
+│   ├── convention-pack/             # Convention pack structural schema
+│   ├── hero-manifest/               # Hero manifest JSON Schema
+│   └── samples/                     # Legacy sample artifacts
 ├── scripts/
 │   └── validate-hero-contract.sh    # Contract compliance validation
 ├── go.mod                           # Go module definition
@@ -488,6 +494,7 @@ This repo is primarily specifications and governance documents. Follow these con
 
 ## Recent Changes
 
+- 009-shared-data-model: Implemented shared data model -- Go package `internal/schemas/` with JSON Schema generation from Go structs (`invopop/jsonschema`), runtime validation (`santhosh-tekuri/jsonschema/v6`), convention pack structural validation, schema versioning with semver compatibility checking. Schema registry at `schemas/` with 9 artifact type directories (envelope, quality-report, review-verdict, backlog-item, acceptance-decision, metrics-snapshot, coaching-record, workflow-record, convention-pack), each containing v1.0.0.schema.json, samples/, and README.md. Type aliases reuse existing Go structs (MetricsSnapshot, WorkflowRecord, AcceptanceDecision); new structs defined for QualityReportPayload and ReviewVerdictPayload. CI tests validate all schemas are draft 2020-12, all samples pass validation, and directory structure is complete. All 5 user stories and 20 tasks completed.
 - 008-swarm-orchestration: Implemented swarm orchestration engine -- Go package `internal/orchestration/` with Orchestrator struct (Start, Advance, Skip, Escalate, Complete, Status, List), 6-stage hero lifecycle workflow (define, implement, validate, review, accept, measure), hero availability detection via agent files and exec.LookPath, workflow state persistence as JSON at `.unbound-force/workflows/`, workflow-record artifact production via `internal/artifacts`, learning feedback extraction (AnalyzeWorkflows, SaveFeedback, LoadFeedback), failure mode handling (max iterations escalation, acceptance rejection, inter-hero contradiction), ArtifactContext struct for workflow metadata in envelopes, FindArtifactsByHero and FindArtifactsSince for enhanced artifact discovery, CheckSchemaVersion for compatibility checking, 4 `/workflow` commands (start, status, list, advance), Swarm skills package at `.opencode/skill/unbound-force-heroes/SKILL.md`. All 5 user stories and 31 tasks completed.
 - 007-mx-f-architecture: Implemented Mx F Manager hero -- Go CLI backend (`cmd/mxf/`) with 7 subcommands (collect, metrics, impediment, dashboard, sprint, standup, retro), 5 domain packages (`internal/metrics/`, `internal/impediment/`, `internal/coaching/`, `internal/dashboard/`, `internal/sprint/`), OpenCode coaching agent (`mx-f-coach.md`), artifact package generalization (WriteArtifact, ReadEnvelope, FindArtifacts), GoReleaser multi-binary configuration, 47 total embedded files (was 46). All 6 user stories and 68 tasks completed.
 - 006-cobalt-crush-architecture: Implemented Cobalt-Crush Developer persona -- single `cobalt-crush-dev.md` agent file with engineering philosophy (clean code, SOLID, TDD, spec-driven development), convention pack adherence via shared `.opencode/unbound/packs/`, Gaze feedback loop (quality report consumption), Divisor review preparation (finding resolution, learned patterns), speckit integration (task processing, phase checkpoints), graphthulhu MCP integration (optional). Prerequisite refactor relocated convention packs from `.opencode/divisor/packs/` to `.opencode/unbound/packs/` (shared neutral location), updating scaffold engine, tests, Divisor agents, and documentation. 46 total embedded files (was 45).

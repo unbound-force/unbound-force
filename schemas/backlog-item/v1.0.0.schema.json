@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/unbound-force/unbound-force/internal/schemas/backlog-item-payload",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Backlog item identifier (e.g. BI-001)"
+    },
+    "title": {
+      "type": "string",
+      "description": "Item title"
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed description"
+    },
+    "type": {
+      "type": "string",
+      "description": "Item type (feature/bug/chore/spike)"
+    },
+    "priority": {
+      "type": "string",
+      "description": "Priority level (P1/P2/P3)"
+    },
+    "status": {
+      "type": "string",
+      "description": "Current status (backlog/ready/in-progress/done)"
+    },
+    "acceptance_criteria": {
+      "items": {
+        "properties": {
+          "given": {
+            "type": "string",
+            "description": "Precondition"
+          },
+          "when": {
+            "type": "string",
+            "description": "Action"
+          },
+          "then": {
+            "type": "string",
+            "description": "Expected outcome"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "given",
+          "when",
+          "then"
+        ]
+      },
+      "type": "array",
+      "description": "Acceptance criteria in Given/When/Then format"
+    },
+    "sprint": {
+      "type": "string",
+      "description": "Assigned sprint"
+    },
+    "effort_estimate": {
+      "type": "string",
+      "description": "Effort estimate"
+    },
+    "dependencies": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "Dependent backlog item IDs"
+    },
+    "related_specs": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "Related specification IDs"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "id",
+    "title",
+    "type",
+    "priority",
+    "status",
+    "acceptance_criteria"
+  ]
+}

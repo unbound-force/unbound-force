@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/unbound-force/unbound-force/internal/artifacts/acceptance-decision",
+  "properties": {
+    "item_id": {
+      "type": "string"
+    },
+    "decision": {
+      "type": "string"
+    },
+    "rationale": {
+      "type": "string"
+    },
+    "criteria_met": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "criteria_failed": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "gaze_report_ref": {
+      "type": "string"
+    },
+    "decided_at": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "item_id",
+    "decision",
+    "rationale",
+    "criteria_met",
+    "criteria_failed",
+    "gaze_report_ref",
+    "decided_at"
+  ]
+}

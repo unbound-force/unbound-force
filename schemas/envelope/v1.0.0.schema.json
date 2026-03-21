@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/unbound-force/unbound-force/internal/schemas/envelope-schema",
+  "properties": {
+    "hero": {
+      "type": "string",
+      "description": "Producing hero identifier",
+      "examples": [
+        "gaze"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "description": "Hero version (semver)",
+      "examples": [
+        "1.0.0"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "ISO 8601 timestamp",
+      "examples": [
+        "2026-03-21T10:00:00Z"
+      ]
+    },
+    "artifact_type": {
+      "type": "string",
+      "description": "Artifact type identifier",
+      "examples": [
+        "quality-report"
+      ]
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Schema version (semver)",
+      "examples": [
+        "1.0.0"
+      ]
+    },
+    "context": {
+      "properties": {
+        "branch": {
+          "type": "string",
+          "description": "Git branch name"
+        },
+        "commit": {
+          "type": "string",
+          "description": "Git commit SHA"
+        },
+        "backlog_item_id": {
+          "type": "string",
+          "description": "Originating backlog item ID"
+        },
+        "correlation_id": {
+          "type": "string",
+          "description": "UUID linking related artifacts across workflow stages"
+        },
+        "workflow_id": {
+          "type": "string",
+          "description": "Workflow instance ID"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Workflow context metadata"
+    },
+    "payload": {
+      "description": "Type-specific payload object"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "hero",
+    "version",
+    "timestamp",
+    "artifact_type",
+    "schema_version",
+    "context",
+    "payload"
+  ]
+}

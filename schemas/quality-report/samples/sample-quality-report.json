@@ -1,0 +1,38 @@
+{
+  "summary": {
+    "total_functions": 42,
+    "avg_coverage": 85.3,
+    "avg_crap": 4.2,
+    "crap_load": 12
+  },
+  "functions": [
+    {
+      "name": "internal/analysis.Analyze",
+      "crap_score": 2.1,
+      "complexity": 3,
+      "coverage": 92.0,
+      "contract_coverage": 88.5,
+      "classification": "contractual"
+    },
+    {
+      "name": "internal/loader.LoadPackages",
+      "crap_score": 8.4,
+      "complexity": 7,
+      "coverage": 65.0,
+      "contract_coverage": 50.0,
+      "classification": "incidental"
+    }
+  ],
+  "coverage": {
+    "total_lines": 1200,
+    "covered_lines": 1020,
+    "percentage": 85.0
+  },
+  "recommendations": [
+    {
+      "priority": "high",
+      "description": "Improve test coverage for LoadPackages — CRAP score 8.4 exceeds threshold",
+      "target": "internal/loader.LoadPackages"
+    }
+  ]
+}

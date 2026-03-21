@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/unbound-force/unbound-force/internal/orchestration/workflow-record",
+  "properties": {
+    "workflow_id": {
+      "type": "string"
+    },
+    "backlog_item_id": {
+      "type": "string"
+    },
+    "stages": {
+      "items": {
+        "properties": {
+          "stage_name": {
+            "type": "string"
+          },
+          "hero": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "artifacts_produced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "artifacts_consumed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "skip_reason": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stage_name",
+          "hero",
+          "status"
+        ]
+      },
+      "type": "array"
+    },
+    "artifacts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "decisions": {
+      "items": {
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "hero": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "iteration": {
+            "type": "integer"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "hero",
+          "result",
+          "rationale",
+          "iteration",
+          "timestamp"
+        ]
+      },
+      "type": "array"
+    },
+    "total_elapsed_time": {
+      "type": "string"
+    },
+    "outcome": {
+      "type": "string"
+    },
+    "learning_feedback": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "workflow_id",
+    "backlog_item_id",
+    "stages",
+    "artifacts",
+    "decisions",
+    "total_elapsed_time",
+    "outcome"
+  ]
+}
