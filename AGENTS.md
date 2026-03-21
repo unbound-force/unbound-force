@@ -94,7 +94,14 @@ unbound-force/
 │   │   ├── speckit.implement.md
 │   │   ├── speckit.taskstoissues.md
 │   │   ├── review-council.md        # /review-council command (Divisor)
-│   │   └── constitution-check.md    # /constitution-check command
+│   │   ├── constitution-check.md    # /constitution-check command
+│   │   ├── workflow-start.md        # /workflow start command (Spec 008)
+│   │   ├── workflow-status.md       # /workflow status command (Spec 008)
+│   │   ├── workflow-list.md         # /workflow list command (Spec 008)
+│   │   └── workflow-advance.md      # /workflow advance command (Spec 008)
+│   ├── skill/                       # Swarm skills packages
+│   │   └── unbound-force-heroes/
+│   │       └── SKILL.md             # Hero roles, routing, workflow stages (Spec 008)
 │   └── unbound/
 │       └── packs/                   # Convention packs (shared by all heroes)
 │           ├── go.md                # Go convention pack (tool-owned)
@@ -113,7 +120,8 @@ unbound-force/
 │   └── assets/                      # Embedded files (go:embed)
 ├── internal/backlog/                # Muti-Mind local backlog parsing
 ├── internal/sync/                   # Muti-Mind GitHub issue sync
-├── internal/artifacts/              # Muti-Mind JSON artifact generation
+├── internal/artifacts/              # Artifact envelope I/O (WriteArtifact, ReadEnvelope, FindArtifacts)
+├── internal/orchestration/          # Swarm orchestration engine (Spec 008)
 ├── openspec/                        # OpenSpec tactical workflow
 │   ├── specs/                       # Living behavior contracts
 │   ├── changes/                     # Active tactical changes
@@ -480,6 +488,7 @@ This repo is primarily specifications and governance documents. Follow these con
 
 ## Recent Changes
 
+- 008-swarm-orchestration: Implemented swarm orchestration engine -- Go package `internal/orchestration/` with Orchestrator struct (Start, Advance, Skip, Escalate, Complete, Status, List), 6-stage hero lifecycle workflow (define, implement, validate, review, accept, measure), hero availability detection via agent files and exec.LookPath, workflow state persistence as JSON at `.unbound-force/workflows/`, workflow-record artifact production via `internal/artifacts`, learning feedback extraction (AnalyzeWorkflows, SaveFeedback, LoadFeedback), failure mode handling (max iterations escalation, acceptance rejection, inter-hero contradiction), ArtifactContext struct for workflow metadata in envelopes, FindArtifactsByHero and FindArtifactsSince for enhanced artifact discovery, CheckSchemaVersion for compatibility checking, 4 `/workflow` commands (start, status, list, advance), Swarm skills package at `.opencode/skill/unbound-force-heroes/SKILL.md`. All 5 user stories and 31 tasks completed.
 - 007-mx-f-architecture: Implemented Mx F Manager hero -- Go CLI backend (`cmd/mxf/`) with 7 subcommands (collect, metrics, impediment, dashboard, sprint, standup, retro), 5 domain packages (`internal/metrics/`, `internal/impediment/`, `internal/coaching/`, `internal/dashboard/`, `internal/sprint/`), OpenCode coaching agent (`mx-f-coach.md`), artifact package generalization (WriteArtifact, ReadEnvelope, FindArtifacts), GoReleaser multi-binary configuration, 47 total embedded files (was 46). All 6 user stories and 68 tasks completed.
 - 006-cobalt-crush-architecture: Implemented Cobalt-Crush Developer persona -- single `cobalt-crush-dev.md` agent file with engineering philosophy (clean code, SOLID, TDD, spec-driven development), convention pack adherence via shared `.opencode/unbound/packs/`, Gaze feedback loop (quality report consumption), Divisor review preparation (finding resolution, learned patterns), speckit integration (task processing, phase checkpoints), graphthulhu MCP integration (optional). Prerequisite refactor relocated convention packs from `.opencode/divisor/packs/` to `.opencode/unbound/packs/` (shared neutral location), updating scaffold engine, tests, Divisor agents, and documentation. 46 total embedded files (was 45).
 - 005-the-divisor-architecture: Implemented The Divisor PR Reviewer Council -- 5 canonical `divisor-*.md` persona agents (Guard, Architect, Adversary, SRE, Testing) with dynamic discovery, 6 convention pack files (Go, TypeScript, default + custom stubs) loaded at review time, `/review-council` command updated to `divisor-*` pattern, `unbound init --divisor` subset deployment with `--lang` language override, scaffold engine extended with `isDivisorAsset()`, `detectLang()`, `shouldDeployPack()`, convention pack ownership model (tool-owned canonical, user-owned custom), 45 total embedded files (was 33), all 5 user stories and 44 tasks completed.

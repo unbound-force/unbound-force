@@ -890,6 +890,13 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".opencode/command/opsx-archive.md": true,
 	".opencode/command/opsx-explore.md": true,
 	".opencode/command/opsx-propose.md": true,
+	// Workflow commands — Spec 008 swarm orchestration, local-only
+	".opencode/command/workflow-start.md":   true,
+	".opencode/command/workflow-status.md":  true,
+	".opencode/command/workflow-list.md":    true,
+	".opencode/command/workflow-advance.md": true,
+	// Swarm skills — Spec 008, local-only
+	".opencode/skill/unbound-force-heroes/SKILL.md": true,
 }
 
 func TestCanonicalSources_AreEmbedded(t *testing.T) {

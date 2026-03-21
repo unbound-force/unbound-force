@@ -41,6 +41,7 @@ The framework provides:
 
 - **Speckit** (strategic): Full 9-phase pipeline for architectural work (`/speckit.specify` through `/speckit.implement`)
 - **OpenSpec** (tactical): Lightweight workflow for bug fixes and small changes (`/opsx:propose` through `/opsx:archive`)
+- **Workflow orchestration**: Hero lifecycle commands (`/workflow start`, `/workflow status`, `/workflow list`, `/workflow advance`) for managing the 6-stage feature lifecycle
 - **Constitution governance bridge**: Every proposal includes alignment assessment against the four org principles
 
 `unbound init` scaffolds 47 files into your repository: templates, scripts, commands, agents, Divisor review personas, convention packs, and the custom `unbound-force` OpenSpec schema. Use `unbound init --divisor` to deploy only the PR review agents and convention packs. Use `--lang` to override language auto-detection for convention pack selection. User-owned files are skipped on re-run; tool-owned files are auto-updated when content changes.
