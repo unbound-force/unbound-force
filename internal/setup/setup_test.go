@@ -1089,3 +1089,107 @@ func TestFormatSetupText(t *testing.T) {
 		t.Error("expected 'failed' message")
 	}
 }
+
+func TestSetupRun_OllamaTip(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":     "/opt/homebrew/bin/brew",
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
+			"go":       "/usr/local/bin/go",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"swarm":    "/usr/local/bin/swarm",
+			// ollama NOT in PATH
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Tip") {
+		t.Error("expected Ollama tip when ollama not installed")
+	}
+	if !strings.Contains(output, "ollama") {
+		t.Error("expected 'ollama' in tip message")
+	}
+	if !strings.Contains(output, "mxbai-embed-large") {
+		t.Error("expected 'mxbai-embed-large' in tip message")
+	}
+}
+
+func TestSetupRun_NoOllamaTip(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":     "/opt/homebrew/bin/brew",
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
+			"go":       "/usr/local/bin/go",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"swarm":    "/usr/local/bin/swarm",
+			"ollama":   "/usr/local/bin/ollama", // ollama IS in PATH
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	output := buf.String()
+	if strings.Contains(output, "Tip") {
+		t.Error("should NOT show Ollama tip when ollama is installed")
+	}
+}

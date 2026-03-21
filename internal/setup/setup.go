@@ -227,6 +227,15 @@ func Run(opts Options) error {
 	}
 
 	fmt.Fprintln(opts.Stdout, "Setup complete! Run `unbound doctor` to verify.")
+
+	// Ollama tip: suggest installation for enhanced semantic memory.
+	if _, ollamaErr := opts.LookPath("ollama"); ollamaErr != nil {
+		fmt.Fprintln(opts.Stdout)
+		fmt.Fprintln(opts.Stdout, "Tip: Install Ollama for enhanced semantic memory:")
+		fmt.Fprintln(opts.Stdout, "  brew install ollama && ollama pull mxbai-embed-large")
+		fmt.Fprintln(opts.Stdout, "  (Without Ollama, semantic memory uses full-text search)")
+	}
+
 	return nil
 }
 

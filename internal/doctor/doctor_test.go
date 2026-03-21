@@ -2068,3 +2068,125 @@ func TestFormatJSON_EmptyReport(t *testing.T) {
 		}
 	}
 }
+
+// --- Ollama check tests ---
+
+func TestCheckOllama_InstalledWithModel(t *testing.T) {
+	dir := t.TempDir()
+
+	ollamaListOutput := "NAME                    ID              SIZE    MODIFIED\nmxbai-embed-large:latest abc123  1.2 GB  2 days ago\nllama3:latest            def456  4.7 GB  1 week ago\n"
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath: stubLookPath(map[string]string{
+			"go":       "/usr/local/bin/go",
+			"opencode": "/usr/local/bin/opencode",
+			"ollama":   "/usr/local/bin/ollama",
+		}),
+		ExecCmd: stubExecCmd(
+			map[string]string{
+				"go version":  "go version go1.24.3 darwin/arm64",
+				"ollama list": ollamaListOutput,
+			},
+			nil,
+		),
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+	}
+
+	env := DetectEnvironment(opts)
+	group := checkCoreTools(opts, env)
+
+	// Find ollama result.
+	for _, r := range group.Results {
+		if r.Name == "ollama" {
+			if r.Severity != Pass {
+				t.Errorf("ollama severity = %v, want Pass", r.Severity)
+			}
+			if !strings.Contains(r.Message, "mxbai-embed-large model ready") {
+				t.Errorf("ollama message = %q, want 'mxbai-embed-large model ready'", r.Message)
+			}
+			return
+		}
+	}
+	t.Error("ollama result not found in Core Tools")
+}
+
+func TestCheckOllama_InstalledWithoutModel(t *testing.T) {
+	dir := t.TempDir()
+
+	ollamaListOutput := "NAME             ID       SIZE    MODIFIED\nllama3:latest    def456   4.7 GB  1 week ago\n"
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath: stubLookPath(map[string]string{
+			"go":       "/usr/local/bin/go",
+			"opencode": "/usr/local/bin/opencode",
+			"ollama":   "/usr/local/bin/ollama",
+		}),
+		ExecCmd: stubExecCmd(
+			map[string]string{
+				"go version":  "go version go1.24.3 darwin/arm64",
+				"ollama list": ollamaListOutput,
+			},
+			nil,
+		),
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+	}
+
+	env := DetectEnvironment(opts)
+	group := checkCoreTools(opts, env)
+
+	for _, r := range group.Results {
+		if r.Name == "ollama" {
+			if r.Severity != Pass {
+				t.Errorf("ollama severity = %v, want Pass", r.Severity)
+			}
+			if r.InstallHint != "ollama pull mxbai-embed-large" {
+				t.Errorf("ollama install hint = %q, want 'ollama pull mxbai-embed-large'", r.InstallHint)
+			}
+			return
+		}
+	}
+	t.Error("ollama result not found in Core Tools")
+}
+
+func TestCheckOllama_NotInstalled(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath: stubLookPath(map[string]string{
+			"go":       "/usr/local/bin/go",
+			"opencode": "/usr/local/bin/opencode",
+		}),
+		ExecCmd: stubExecCmd(
+			map[string]string{
+				"go version": "go version go1.24.3 darwin/arm64",
+			},
+			nil,
+		),
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+	}
+
+	env := DetectEnvironment(opts)
+	group := checkCoreTools(opts, env)
+
+	for _, r := range group.Results {
+		if r.Name == "ollama" {
+			if r.Severity != Pass {
+				t.Errorf("ollama severity = %v, want Pass (informational)", r.Severity)
+			}
+			if r.InstallHint == "" {
+				t.Error("expected install hint when ollama not found")
+			}
+			return
+		}
+	}
+	t.Error("ollama result not found in Core Tools")
+}

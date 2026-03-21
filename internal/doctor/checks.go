@@ -116,9 +116,12 @@ var coreToolSpecs = []toolSpec{
 	{
 		name: "swarm",
 	},
+	{
+		name: "ollama",
+	},
 }
 
-// checkCoreTools checks the 8 core binaries per FR-001/002/003.
+// checkCoreTools checks the core binaries per FR-001/002/003.
 func checkCoreTools(opts *Options, env DetectedEnvironment) CheckGroup {
 	group := CheckGroup{
 		Name:    "Core Tools",
@@ -128,9 +131,39 @@ func checkCoreTools(opts *Options, env DetectedEnvironment) CheckGroup {
 	for _, spec := range coreToolSpecs {
 		result := checkOneTool(spec, opts, env)
 		group.Results = append(group.Results, result)
+
+		// Ollama post-check: when ollama is found, verify
+		// the mxbai-embed-large model is pulled.
+		if spec.name == "ollama" && result.Severity == Pass && result.Message != "not found" {
+			result = checkOllamaModel(opts, result)
+			// Replace the last result with the enriched one.
+			group.Results[len(group.Results)-1] = result
+		}
 	}
 
 	return group
+}
+
+// checkOllamaModel checks whether the mxbai-embed-large model
+// is available in the local Ollama installation. Enriches the
+// existing CheckResult with model status.
+func checkOllamaModel(opts *Options, base CheckResult) CheckResult {
+	output, err := opts.ExecCmd("ollama", "list")
+	if err != nil {
+		// ollama list failed — keep existing result, add hint.
+		base.InstallHint = "ollama pull mxbai-embed-large"
+		return base
+	}
+
+	if strings.Contains(string(output), "mxbai-embed-large") {
+		base.Message = base.Message + " (mxbai-embed-large model ready)"
+		return base
+	}
+
+	// Model not pulled.
+	base.InstallHint = "ollama pull mxbai-embed-large"
+	base.Message = base.Message + " (model not pulled)"
+	return base
 }
 
 // checkOneTool checks a single tool binary.

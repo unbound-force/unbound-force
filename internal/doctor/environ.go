@@ -270,6 +270,8 @@ func homebrewInstallCmd(toolName string) string {
 		return "brew install gh"
 	case "swarm":
 		return "npm install -g opencode-swarm-plugin@latest"
+	case "ollama":
+		return "brew install ollama && ollama pull mxbai-embed-large"
 	default:
 		return "brew install " + toolName
 	}
@@ -291,6 +293,8 @@ func genericInstallCmd(toolName string) string {
 		return "npm install -g opencode-swarm-plugin@latest"
 	case "gh":
 		return "Download from https://cli.github.com/"
+	case "ollama":
+		return "brew install ollama && ollama pull mxbai-embed-large"
 	default:
 		return "Install " + toolName
 	}
@@ -322,6 +326,8 @@ func installURL(toolName string) string {
 		return "https://cli.github.com/"
 	case "graphthulhu":
 		return "https://github.com/skridlevsky/graphthulhu"
+	case "ollama":
+		return "https://ollama.com"
 	default:
 		return ""
 	}

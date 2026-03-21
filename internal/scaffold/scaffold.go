@@ -228,6 +228,10 @@ func isToolOwned(relPath string) bool {
 	if strings.HasPrefix(relPath, "opencode/command/") {
 		return true
 	}
+	// Skill files are tool-owned (maintained by unbound init).
+	if strings.HasPrefix(relPath, "opencode/skill/") {
+		return true
+	}
 	// Convention packs: canonical packs are tool-owned,
 	// custom packs (-custom.md) are user-owned
 	if isConventionPack(relPath) {

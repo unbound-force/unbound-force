@@ -140,6 +140,8 @@ var expectedAssetPaths = []string{
 	"openspec/schemas/unbound-force/templates/tasks.md",
 	// OpenSpec config (1)
 	"openspec/config.yaml",
+	// Swarm skills (1)
+	"opencode/skill/speckit-workflow/SKILL.md",
 }
 
 func TestAssetPaths_MatchExpected(t *testing.T) {
