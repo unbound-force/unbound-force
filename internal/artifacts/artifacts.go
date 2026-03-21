@@ -33,11 +33,27 @@ type AcceptanceDecision struct {
 	DecidedAt      string   `json:"decided_at"`
 }
 
+// ArtifactContext provides workflow-level metadata for artifact envelopes.
+// Fields are optional (omitempty) to support incremental adoption.
+type ArtifactContext struct {
+	Branch        string `json:"branch,omitempty"`
+	Commit        string `json:"commit,omitempty"`
+	BacklogItemID string `json:"backlog_item_id,omitempty"`
+	CorrelationID string `json:"correlation_id,omitempty"`
+	WorkflowID    string `json:"workflow_id,omitempty"`
+}
+
 const Version = "1.0.0"
 
 // WriteArtifact writes a JSON artifact envelope to the given directory.
 // The hero parameter identifies the producing hero (e.g., "mx-f", "muti-mind").
 func WriteArtifact(dir, hero, artifactType, id string, payload interface{}) error {
+	return WriteArtifactWithContext(dir, hero, artifactType, id, payload, nil)
+}
+
+// WriteArtifactWithContext writes a JSON artifact envelope with optional workflow context.
+// If ctx is non-nil, the context fields are included in the envelope for workflow tracking.
+func WriteArtifactWithContext(dir, hero, artifactType, id string, payload interface{}, ctx *ArtifactContext) error {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
@@ -50,6 +66,14 @@ func WriteArtifact(dir, hero, artifactType, id string, payload interface{}) erro
 		ArtifactType:  artifactType,
 		SchemaVersion: "1.0.0",
 		Payload:       payloadBytes,
+	}
+
+	if ctx != nil {
+		ctxBytes, err := json.Marshal(ctx)
+		if err != nil {
+			return fmt.Errorf("marshal context: %w", err)
+		}
+		envelope.Context = ctxBytes
 	}
 
 	envelopeBytes, err := json.MarshalIndent(envelope, "", "  ")
@@ -108,6 +132,96 @@ func FindArtifacts(dir, artifactType string) ([]string, error) {
 	// Sort descending by filename (timestamps sort naturally)
 	sort.Sort(sort.Reverse(sort.StringSlice(matches)))
 	return matches, nil
+}
+
+// FindArtifactsByHero discovers artifact files of the given type produced
+// by a specific hero. Returns file paths sorted by filename descending.
+func FindArtifactsByHero(dir, artifactType, hero string) ([]string, error) {
+	all, err := FindArtifacts(dir, artifactType)
+	if err != nil {
+		return nil, err
+	}
+
+	var matches []string
+	for _, path := range all {
+		env, err := ReadEnvelope(path)
+		if err != nil {
+			continue
+		}
+		if env.Hero == hero {
+			matches = append(matches, path)
+		}
+	}
+	return matches, nil
+}
+
+// FindArtifactsSince discovers artifact files of the given type created
+// after the specified time. Returns file paths sorted by filename descending.
+func FindArtifactsSince(dir, artifactType string, since time.Time) ([]string, error) {
+	all, err := FindArtifacts(dir, artifactType)
+	if err != nil {
+		return nil, err
+	}
+
+	var matches []string
+	for _, path := range all {
+		env, err := ReadEnvelope(path)
+		if err != nil {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339, env.Timestamp)
+		if err != nil {
+			continue
+		}
+		if ts.After(since) || ts.Equal(since) {
+			matches = append(matches, path)
+		}
+	}
+	return matches, nil
+}
+
+// CheckSchemaVersion compares an envelope's schema version with the expected
+// version. Returns compatible=true if the major version matches. Returns a
+// warning string if minor or patch versions differ.
+func CheckSchemaVersion(envelope *Envelope, expectedVersion string) (compatible bool, warning string) {
+	if envelope.SchemaVersion == expectedVersion {
+		return true, ""
+	}
+
+	envParts := splitVersion(envelope.SchemaVersion)
+	expParts := splitVersion(expectedVersion)
+
+	if len(envParts) < 1 || len(expParts) < 1 {
+		return false, fmt.Sprintf("invalid version format: envelope=%q expected=%q", envelope.SchemaVersion, expectedVersion)
+	}
+
+	if envParts[0] != expParts[0] {
+		return false, fmt.Sprintf("major version mismatch: envelope=%q expected=%q", envelope.SchemaVersion, expectedVersion)
+	}
+
+	return true, fmt.Sprintf("minor/patch version differs: envelope=%q expected=%q", envelope.SchemaVersion, expectedVersion)
+}
+
+// splitVersion splits a semver string into its components.
+func splitVersion(v string) []string {
+	parts := make([]string, 0, 3)
+	for _, p := range splitOnDot(v) {
+		parts = append(parts, p)
+	}
+	return parts
+}
+
+// splitOnDot splits a string on '.' characters.
+func splitOnDot(s string) []string {
+	var parts []string
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		if i == len(s) || s[i] == '.' {
+			parts = append(parts, s[start:i])
+			start = i + 1
+		}
+	}
+	return parts
 }
 
 // GenerateBacklogItemArtifact generates a backlog-item JSON artifact
