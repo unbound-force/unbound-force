@@ -475,6 +475,8 @@ This repo is primarily specifications and governance documents. Follow these con
 - Filesystem only (Markdown files deployed to target directory) (006-cobalt-crush-architecture)
 - Go 1.24+ (CLI backend), Markdown (coaching agent) + `github.com/spf13/cobra` (CLI), `github.com/charmbracelet/log` (logging), `github.com/charmbracelet/lipgloss` (terminal styling), `embed.FS` (agent embedding) (007-mx-f-architecture)
 - JSON files in `.mx-f/data/{source}/{timestamp}.json` for metrics, Markdown+YAML frontmatter in `.mx-f/impediments/` for impediments, `.mx-f/retros/` for retrospective records (007-mx-f-architecture)
+- Go 1.24+ (orchestration engine), Markdown (commands, skills) + `internal/artifacts` (envelope, FindArtifacts, WriteArtifact, ReadEnvelope — already exist from Spec 007), `internal/sync` (GHRunner), `github.com/charmbracelet/log` (008-swarm-orchestration)
+- JSON files at `.unbound-force/workflows/{workflow_id}.json` (workflow state), `.unbound-force/artifacts/{type}/{timestamp}-{hero}.json` (artifacts) (008-swarm-orchestration)
 
 ## Recent Changes
 

@@ -50,7 +50,7 @@ Heroes exchange artifacts through a defined protocol. Each artifact conforms to 
 
 **Acceptance Scenarios**:
 
-1. **Given** the artifact storage convention, **When** a hero produces an artifact, **Then** it is written to `.unbound-force/artifacts/{artifact_type}/{timestamp}-{hero}.json` in the project repository.
+1. **Given** the artifact storage convention, **When** a hero produces an artifact, **Then** it is written to `.unbound-force/artifacts/` via `WriteArtifact` and discoverable via `FindArtifacts(dir, type)` in the project repository.
 2. **Given** an artifact in storage, **When** a consuming hero looks for artifacts of a type, **Then** it discovers all artifacts of that type sorted by timestamp (most recent first).
 3. **Given** a Gaze `quality-report` artifact, **When** Mx F, Muti-Mind, and Cobalt-Crush each consume it, **Then** each extracts the information relevant to its role: Mx F extracts metrics, Muti-Mind extracts acceptance evidence, Cobalt-Crush extracts quality issues to address.
 4. **Given** a hero that expects an artifact type that does not exist (e.g., Mx F looking for Gaze reports in a project without Gaze), **When** the consumer queries, **Then** it receives an empty result set and logs a debug-level notice (not an error).
@@ -60,11 +60,11 @@ Heroes exchange artifacts through a defined protocol. Each artifact conforms to 
 
 ### User Story 3 - Swarm Plugin Integration (Priority: P2)
 
-The Unbound Force swarm integrates with the OpenCode Swarm plugin (swarmtools.ai) to enable multi-agent collaboration within a single OpenCode session. The Swarm plugin orchestrates hero agents, routes tasks to the appropriate hero, and facilitates cross-hero communication in real-time.
+The Unbound Force swarm integrates with the OpenCode Swarm plugin (`opencode-swarm-plugin`, npm package from swarmtools.ai) via Swarm skills packages. The Swarm coordinator decomposes tasks, spawns parallel workers, manages file reservations, and tracks learning — while our domain orchestration (`internal/orchestration/`) manages hero stage sequencing and artifact handoff. The integration is complementary: Swarm handles *execution coordination*, our engine handles *domain workflow*.
 
-**Why this priority**: P2 because the Swarm plugin is an enhancement over manual hero invocation. The heroes work without Swarm (each invoked independently), but Swarm enables seamless collaboration.
+**Why this priority**: P2 because the Swarm plugin is an enhancement over manual hero invocation. The heroes work without Swarm (each invoked independently via `/workflow`), but Swarm enables parallel decomposition and learning.
 
-**Independent Test**: Can be tested by configuring the Swarm plugin with all five hero agents and verifying it routes a product question to Muti-Mind, a coding task to Cobalt-Crush, a quality check to Gaze, a review request to The Divisor, and a process question to Mx F.
+**Independent Test**: Structural test: verify the SKILL.md file contains all 5 hero names, routing patterns, and the 6-stage workflow sequence. Runtime routing verification depends on the external Swarm plugin and is out of scope for automated tests.
 
 **Acceptance Scenarios**:
 
@@ -91,7 +91,7 @@ The swarm implements a learning loop where completed cycles feed back into futur
 2. **Given** the convention pack is updated based on Mx F's recommendation, **When** Cobalt-Crush writes new code, **Then** it proactively includes error wrapping without waiting for Divisor feedback.
 3. **Given** Gaze reports showing declining contract coverage over 2 sprints, **When** Mx F flags this in a retrospective, **Then** Muti-Mind factors "improve test coverage for module X" into the next sprint's prioritization.
 4. **Given** Muti-Mind's acceptance decisions showing a pattern of conditional acceptances due to missing edge case handling, **When** the pattern is surfaced, **Then** Cobalt-Crush's implementation workflow adds an explicit edge case review step after initial implementation.
-5. **Given** the learning loop has operated for 5 sprints, **When** metrics are compared between sprint 1 and sprint 5, **Then** measurable improvements are visible in at least two metrics (e.g., review iterations decreased, quality scores increased).
+5. **Given** 5 completed workflow records with decreasing review iteration counts, **When** `AnalyzeWorkflows` is called, **Then** it produces at least one `LearningFeedback` with `pattern_observed` containing the improvement trend, a non-empty `recommendation`, a valid `target_hero`, and at least one `workflow_id` in evidence.
 
 ---
 
@@ -128,24 +128,24 @@ The swarm handles failures gracefully: a hero being unavailable, producing unexp
 
 - **FR-001**: The swarm orchestration MUST define the complete feature lifecycle workflow: Muti-Mind (define) -> Cobalt-Crush (implement) -> Gaze (validate) -> The Divisor (review) -> Muti-Mind (accept) -> Mx F (measure).
 - **FR-002**: Each workflow stage MUST produce and/or consume artifacts conforming to the inter-hero artifact envelope (Spec 002).
-- **FR-003**: Artifact storage MUST follow the convention: `.unbound-force/artifacts/{artifact_type}/{timestamp}-{hero}.json`.
+- **FR-003**: Artifacts MUST be stored in `.unbound-force/artifacts/` using the existing `WriteArtifact` / `FindArtifacts` API from `internal/artifacts`. Discovery is by artifact type via `FindArtifacts(dir, type)`, not by directory structure. Workflow state is stored separately at `.unbound-force/workflows/{workflow_id}.json`.
 - **FR-004**: Artifact discovery MUST support querying by type, hero, and time range, returning results sorted by timestamp.
-- **FR-005**: The orchestration MUST define a Swarm plugin configuration that maps hero agents to their roles and routing rules.
-- **FR-006**: The Swarm plugin configuration MUST support natural language routing: product questions -> Muti-Mind, coding tasks -> Cobalt-Crush, quality checks -> Gaze, review requests -> The Divisor, process questions -> Mx F.
+- **FR-005**: The orchestration MUST provide Swarm skills packages that teach the Swarm coordinator (`opencode-swarm-plugin`) about Unbound Force heroes, their roles, and routing rules. The domain orchestration engine lives in `internal/orchestration/` and is invoked via OpenCode commands (`/workflow start`, `/workflow status`, `/workflow list`). Swarm handles execution coordination (parallelism, checkpointing, file reservations). No separate CLI binary for v1.0.0.
+- **FR-006**: The Swarm skills packages MUST enable natural language routing: product questions -> Muti-Mind, coding tasks -> Cobalt-Crush, quality checks -> Gaze, review requests -> The Divisor, process questions -> Mx F. Routing is handled by the Swarm coordinator via skills, not a static config file.
 - **FR-007**: The learning loop MUST define how Mx F's coaching records feed back into: Muti-Mind's prioritization, Cobalt-Crush's convention packs, Gaze's testing strategy, and The Divisor's review criteria.
 - **FR-008**: The orchestration MUST define failure modes and fallback behavior for: hero unavailable, artifact missing, maximum iteration reached, acceptance rejected, and inter-hero contradiction.
 - **FR-009**: Each hero MUST function independently (per Org Constitution Principle II) — the swarm orchestration is additive, not required.
 - **FR-010**: Concurrent workflows on different feature branches MUST be isolated — artifacts MUST include branch/backlog-item context.
 - **FR-011**: The orchestration MUST define escalation protocols for unresolvable conflicts: surface to human operator with full context from all involved heroes.
-- **FR-012**: The workflow MUST be executable both through the Swarm plugin (automated routing) and manually (hero-by-hero invocation via individual `/commands`).
+- **FR-012**: The workflow MUST be executable both through the Swarm plugin (automated routing via `/swarm "task"`) and manually (hero-by-hero invocation via individual `/commands`). OpenCode commands `/workflow start`, `/workflow status`, and `/workflow list` provide the hero lifecycle orchestration interface. `/swarm` and `/workflow` are complementary — Swarm decomposes and parallelizes, `/workflow` manages hero stage sequencing.
 - **FR-013**: The orchestration MUST produce a `workflow-record` artifact that captures the complete lifecycle of a feature: all stages, all artifacts produced, all decisions made, total elapsed time.
 - **FR-014**: The workflow-record MUST be consumable by Mx F for lifecycle metrics and by Muti-Mind for velocity tracking.
 
 ### Key Entities
 
-- **Workflow Instance**: A single execution of the feature lifecycle. Attributes: workflow_id, feature_branch, backlog_item_id, stages[], current_stage, started_at, completed_at, status (active/completed/failed/escalated).
+- **Workflow Instance**: A single execution of the feature lifecycle. Persisted as JSON at `.unbound-force/workflows/{workflow_id}.json`. Attributes: workflow_id, feature_branch, backlog_item_id, stages[], current_stage, started_at, completed_at, status (active/completed/failed/escalated).
 - **Workflow Stage**: One step in the lifecycle. Attributes: stage_name (define/implement/validate/review/accept/measure), hero, status (pending/active/completed/skipped/failed), artifacts_produced[], artifacts_consumed[], started_at, completed_at.
-- **Swarm Plugin Configuration**: Routing rules for the Swarm plugin. Attributes: heroes[] (name, agent_file, role, routing_patterns[]), default_hero, escalation_rules.
+- **Swarm Skills Package**: Domain expertise packages for the Swarm coordinator (`opencode-swarm-plugin`). Teaches the coordinator about hero roles and routing. Loaded via Swarm's `skills_use()` tool. Attributes: skill_name, heroes[] (name, agent_file, role, routing_patterns[]), workflow_stages[], escalation_rules. Swarm manages its own coordination (`.hive/`, file reservations, checkpointing) independently of our workflow state (`.unbound-force/workflows/`).
 - **Learning Feedback**: A recommendation from one hero to another based on pattern analysis. Attributes: source_hero, target_hero, pattern_observed, recommendation, supporting_data{}, status (proposed/accepted/rejected/implemented).
 - **Workflow Record**: The complete history of a feature lifecycle. Attributes: workflow_id, backlog_item_id, stages[], artifacts[], decisions[], total_elapsed_time, outcome (shipped/rejected/abandoned).
 
@@ -162,11 +162,21 @@ The swarm handles failures gracefully: a hero being unavailable, producing unexp
 - **SC-007**: Concurrent workflows on different branches produce isolated artifacts with no cross-contamination.
 - **SC-008**: The orchestration handles the acceptance-rejection failure mode correctly: creates a new backlog item, preserves the original item state.
 
+## Clarifications
+
+### Session 2026-03-20
+
+- Q: What is the concrete implementation scope for Spec 008? → A: Full orchestration engine. New Go package `internal/orchestration/` that drives the workflow programmatically, manages stage transitions, produces workflow-records automatically. Includes Swarm plugin configuration, artifact wiring, and ensuring all heroes produce/consume artifacts to `.unbound-force/artifacts/`.
+- Q: How should the orchestration engine be invoked? → A: OpenCode commands only for now (`/workflow start`, `/workflow status`, `/workflow list` as Markdown command files). No new CLI binary. The Go package `internal/orchestration/` provides the engine; commands invoke it via the Task tool. A CLI entry point may be added in a future spec when complexity warrants it.
+- Q: Where should workflow state be persisted? → A: JSON files at `.unbound-force/workflows/{workflow_id}.json`. One file per workflow instance. Consistent with project-wide JSON storage pattern. Git-trackable, machine-parseable, no external dependencies.
+- Q: How should Unbound Force integrate with Swarm? → A: Complementary layers. `internal/orchestration/` handles domain workflow (hero stages, artifact handoff, stage transitions). Swarm (opencode-swarm-plugin, npm package) handles execution coordination (parallelism, checkpointing, file reservations). We provide Swarm skills packages that teach the coordinator about Unbound Force heroes and their roles. `.hive/` (Swarm's git-backed tracking) and `.unbound-force/workflows/` (our lifecycle state) are complementary.
+- Q: How should we resolve the `/swarm` command naming conflict? → A: Use `/workflow` for our orchestration commands (`/workflow start`, `/workflow status`, `/workflow list`). Swarm keeps its own `/swarm "task"` command for parallel task decomposition. Clear separation: `/swarm` = execution coordination, `/workflow` = hero lifecycle orchestration.
+
 ## Dependencies
 
 ### Prerequisites
 
-- **Spec 001** (Org Constitution): Defines the three principles that govern swarm behavior (Autonomous Collaboration, Composability First, Observable Quality).
+- **Spec 001** (Org Constitution): Defines the four principles that govern swarm behavior (Autonomous Collaboration, Composability First, Observable Quality, Testability).
 - **Spec 002** (Hero Interface Contract): Defines the artifact envelope and inter-hero protocol used by the orchestration.
 - **Specs 004-007** (Hero Architectures): Defines each hero's capabilities, artifact types, and integration points.
 
