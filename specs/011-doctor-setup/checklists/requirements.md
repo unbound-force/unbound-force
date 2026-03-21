@@ -36,8 +36,15 @@
   `npm install -g`) and file paths (`opencode.json`,
   `.hive/`) because these are part of the user-facing
   interface being specified, not implementation details.
-  The spec does not prescribe programming language,
-  internal architecture, or data structures.
+- The Dependencies section bridges spec and plan by
+  naming the orchestration engine and external tools.
+  Implementation-specific library references (lipgloss,
+  etc.) were moved to plan.md during review council
+  iteration.
 - Assumptions section documents reasonable defaults for
   platform support, output format conventions, and
   external dependency contracts.
+- SC-001 and SC-002 were revised during review council
+  iteration to be objectively verifiable (removed
+  subjective "30 seconds" and unfalsifiable "2 minutes
+  network speed permitting" criteria).

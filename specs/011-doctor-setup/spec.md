@@ -1,3 +1,14 @@
+---
+spec_id: "011"
+title: "Doctor and Setup Commands"
+phase: 3
+status: complete
+depends_on:
+  - "[[specs/001-org-constitution/spec]]"
+  - "[[specs/003-specification-framework/spec]]"
+  - "[[specs/008-swarm-orchestration/spec]]"
+---
+
 # Feature Specification: Doctor and Setup Commands
 
 **Feature Branch**: `011-doctor-setup`
@@ -171,6 +182,12 @@ is installed, configured, and functional afterward.
    command reports the npm error, suggests manual install
    steps, and does not proceed to `swarm setup`.
 
+6. **Given** no `opencode.json` exists in the project
+   directory, **When** the developer runs `unbound setup`,
+   **Then** a minimal `opencode.json` is created with
+   `$schema` and the `plugin` array containing
+   `opencode-swarm-plugin`.
+
 ---
 
 ### User Story 4 - Colored Terminal Output with Install Guidance (Priority: P2)
@@ -291,6 +308,13 @@ against the expected JSON structure.
   install script. Swarm install is unaffected since it uses
   npm.
 
+- What happens when nvm is detected but cannot be invoked
+  as a subprocess (nvm is a bash function, not a binary)?
+  Setup MUST invoke nvm through a bash shell:
+  `bash -c "source $NVM_DIR/nvm.sh && nvm install 22"`.
+  If this invocation fails, setup MUST print the manual
+  command and skip Node.js installation.
+
 - What happens when multiple managers exist for the same
   tool category (e.g., both nvm and fnm for Node.js)?
   The command SHOULD prefer the manager whose environment
@@ -305,6 +329,14 @@ against the expected JSON structure.
   manager-specific upgrade hint (e.g.,
   `goenv install 1.24.3`). `unbound setup` attempts the
   install through that manager.
+
+- What happens when the commands are run on Windows?
+  Both `unbound doctor` and `unbound setup` MUST detect
+  Windows as the runtime platform and exit immediately
+  with a "platform not supported" message and exit code 1.
+  Windows is not supported because the version manager
+  detection heuristics (goenv shims, nvm bash functions,
+  Homebrew symlinks) are Unix-specific.
 
 ## Clarifications
 
@@ -353,8 +385,9 @@ against the expected JSON structure.
   include: `goenv` (Go), `nvm`/`fnm` (Node.js), `pyenv`
   (Python), `mise` (polyglot), Homebrew, and `bun`.
   Detection is performed by checking for each manager's
-  binary in PATH and, where applicable, its environment
-  variables (e.g., `GOENV_ROOT`, `NVM_DIR`, `FNM_DIR`).
+  presence in the system PATH and, where applicable, its
+  environment variables (e.g., `GOENV_ROOT`, `NVM_DIR`,
+  `FNM_DIR`).
   Detected managers MUST be used to tailor install hints in
   doctor output and install methods in setup execution.
 
@@ -510,6 +543,10 @@ against the expected JSON structure.
   array if it is not already present, preserving all
   existing configuration.
 
+- **FR-027a**: `unbound setup` MUST write `opencode.json`
+  atomically using write-to-temp-then-rename to prevent
+  data loss if the process is interrupted.
+
 - **FR-028**: `unbound setup` MUST create a minimal
   `opencode.json` with `$schema` if no `opencode.json`
   exists.
@@ -540,6 +577,26 @@ against the expected JSON structure.
   showing what was done (installed, skipped, failed) and
   suggesting next steps (including `unbound doctor` for
   verification).
+
+- **FR-035**: `unbound setup` MUST support a `--dry-run`
+  flag that prints all actions that would be taken without
+  executing any installs, config modifications, or
+  subprocess calls. Each action MUST show what command would
+  be run and why (e.g., "Would install: brew install
+  anomalyco/tap/opencode (opencode not found in PATH)").
+
+- **FR-036**: Before executing any `curl | bash` install
+  script, `unbound setup` MUST display a warning showing
+  the URL being fetched and require the user to confirm
+  with `--yes` flag or interactive confirmation. If neither
+  `--yes` nor a TTY is available (e.g., CI), the step MUST
+  be skipped with a warning and manual instructions.
+
+- **FR-037**: `unbound doctor` and `unbound setup` MUST
+  detect Windows as the runtime platform and print
+  "Platform not supported: doctor and setup require macOS
+  or Linux" with exit code 1. Windows is not a supported
+  platform for these commands.
 
 ### Key Entities
 
@@ -574,15 +631,18 @@ against the expected JSON structure.
 
 ### Measurable Outcomes
 
-- **SC-001**: A developer with no prior Unbound Force
-  experience can run `unbound doctor` and understand within
-  30 seconds what is missing and how to install each
-  dependency.
+- **SC-001**: Every check result with severity Warn or Fail
+  includes a non-empty `install_hint` field containing a
+  copy-pasteable command. The text output groups checks by
+  category with headers and includes a summary line showing
+  total/passed/warned/failed counts.
 
 - **SC-002**: Running `unbound setup` on a machine with
   Node.js installed but no Swarm results in a fully
-  functional Swarm environment in under 2 minutes
-  (network speed permitting).
+  functional Swarm environment: Swarm plugin installed,
+  `swarm setup` completed, `opencode.json` configured with
+  plugin entry, and `.hive/` initialized. All non-network
+  setup steps complete in under 5 seconds.
 
 - **SC-003**: `unbound doctor` correctly identifies and
   reports all 8 checked binaries (go, opencode, gaze, mxf,
@@ -633,12 +693,28 @@ against the expected JSON structure.
 
 ### Dependencies
 
-- Existing `internal/orchestration.DetectHeroes()` function
-  (reused for hero availability checks).
-
-- `charmbracelet/lipgloss` library (already an indirect
-  dependency, promoted to direct for colored output).
+- The existing hero detection logic from the orchestration
+  engine (reused for hero availability checks).
 
 - The `swarm` CLI binary and its `doctor`, `setup`, and
   `init` subcommands (external dependency, not modified by
   this spec).
+
+- Homebrew, npm/bun, and platform install scripts as
+  external install mechanisms (not controlled by this spec).
+
+### Dependency Contracts
+
+External contracts this feature depends on. Changes to
+these contracts may require updates to doctor/setup.
+
+| Contract | Assumed Format | Source |
+|----------|---------------|--------|
+| `go version` output | `go version goX.Y.Z <platform>` | Go toolchain |
+| `node --version` output | `vX.Y.Z` | Node.js |
+| `swarm doctor` output | Text to stdout, exit 0 = healthy | Swarm plugin |
+| `swarm setup` | Subcommand exists, configures plugin | Swarm plugin |
+| `swarm init` | Subcommand exists, creates `.hive/` | Swarm plugin |
+| `opencode.json` schema | `plugin` key accepts `[]string` | OpenCode |
+| `npm install -g` | Installs global package | npm/Node.js |
+| `brew install` | Installs formula/cask | Homebrew |

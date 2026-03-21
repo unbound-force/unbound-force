@@ -6,12 +6,17 @@
       "command": [
         "graphthulhu",
         "serve",
-        "--backend", "obsidian",
-        "--vault", ".",
+        "--backend",
+        "obsidian",
+        "--vault",
+        ".",
         "--include-hidden",
         "--read-only"
       ],
       "enabled": true
     }
-  }
+  },
+  "plugin": [
+    "opencode-swarm-plugin"
+  ]
 }
