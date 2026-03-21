@@ -1,11 +1,15 @@
 package orchestration
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/unbound-force/unbound-force/internal/artifacts"
 )
 
 // newTestOrchestrator creates an Orchestrator with temp directories
@@ -263,7 +267,33 @@ func TestOrchestrator_Complete_ProducesRecord(t *testing.T) {
 	}
 
 	if len(paths) == 0 {
-		t.Error("expected at least one workflow-record artifact")
+		t.Fatal("expected at least one workflow-record artifact")
+	}
+
+	// Read and validate the artifact envelope
+	data, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatalf("read artifact file: %v", err)
+	}
+
+	var env artifacts.Envelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+
+	if env.Hero == "" {
+		t.Error("envelope Hero should not be empty")
+	}
+	if env.ArtifactType != "workflow-record" {
+		t.Errorf("ArtifactType = %q, want %q", env.ArtifactType, "workflow-record")
+	}
+
+	var record WorkflowRecord
+	if err := json.Unmarshal(env.Payload, &record); err != nil {
+		t.Fatalf("unmarshal payload into WorkflowRecord: %v", err)
+	}
+	if record.Outcome != "shipped" {
+		t.Errorf("record.Outcome = %q, want %q", record.Outcome, "shipped")
 	}
 }
 
@@ -485,13 +515,13 @@ func TestOrchestrator_Advance_MaxIterations_Escalates(t *testing.T) {
 
 	foundEscalationWarning := false
 	for _, w := range result.Warnings {
-		if w != "" {
+		if strings.Contains(w, "escalat") {
 			foundEscalationWarning = true
 			break
 		}
 	}
 	if !foundEscalationWarning {
-		t.Error("expected escalation warning")
+		t.Error("expected escalation warning containing 'escalat'")
 	}
 }
 
@@ -533,8 +563,8 @@ func TestOrchestrator_HandleAcceptanceRejection(t *testing.T) {
 			if stage.Status != StatusFailed {
 				t.Errorf("accept stage status = %q, want %q", stage.Status, StatusFailed)
 			}
-			if stage.Error == "" {
-				t.Error("accept stage error should contain rejection rationale")
+			if !strings.Contains(stage.Error, decision.Rationale) {
+				t.Errorf("accept stage error = %q, want it to contain rationale %q", stage.Error, decision.Rationale)
 			}
 			break
 		}
@@ -571,8 +601,95 @@ func TestOrchestrator_HandleContradiction(t *testing.T) {
 	if stage.Status != StatusFailed {
 		t.Errorf("current stage status = %q, want %q", stage.Status, StatusFailed)
 	}
-	if stage.Error == "" {
-		t.Error("current stage error should contain contradiction details")
+	if !strings.Contains(stage.Error, conflict) {
+		t.Errorf("current stage error = %q, want it to contain conflict %q", stage.Error, conflict)
+	}
+}
+
+func TestOrchestrator_Skip_ValidStage(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	result, err := orch.Start("feat/skip", "BI-090")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	wfID := result.Workflow.WorkflowID
+
+	// Skip stage 2 (validate)
+	if err := orch.Skip(wfID, 2, "not needed for this feature"); err != nil {
+		t.Fatalf("Skip failed: %v", err)
+	}
+
+	wf, err := orch.Status(wfID)
+	if err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+
+	if wf.Stages[2].Status != StatusSkipped {
+		t.Errorf("stage 2 status = %q, want %q", wf.Stages[2].Status, StatusSkipped)
+	}
+	if wf.Stages[2].SkipReason != "not needed for this feature" {
+		t.Errorf("stage 2 skip_reason = %q, want %q", wf.Stages[2].SkipReason, "not needed for this feature")
+	}
+}
+
+func TestOrchestrator_Advance_NonActiveWorkflow(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	result, err := orch.Start("feat/done", "BI-091")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	wfID := result.Workflow.WorkflowID
+
+	// Advance through all stages to complete the workflow
+	for i := 0; i < 6; i++ {
+		_, err = orch.Advance(wfID)
+		if err != nil {
+			t.Fatalf("Advance %d failed: %v", i+1, err)
+		}
+	}
+
+	// Verify workflow is completed
+	wf, err := orch.Status(wfID)
+	if err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+	if wf.Status != StatusCompleted {
+		t.Fatalf("Status = %q, want %q", wf.Status, StatusCompleted)
+	}
+
+	// Advance on a completed workflow should return an error
+	_, err = orch.Advance(wfID)
+	if err == nil {
+		t.Fatal("Advance on completed workflow should return an error")
+	}
+	if !strings.Contains(err.Error(), "not active") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "not active")
+	}
+}
+
+func TestSanitizeBranch(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"feat/login", "feat-login"},
+		{"fix bug", "fix-bug"},
+		{"", ""},
+		{"clean", "clean"},
+		{"feat/~special^chars", "feat--special-chars"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := sanitizeBranch(tt.input)
+			if got != tt.want {
+				t.Errorf("sanitizeBranch(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 

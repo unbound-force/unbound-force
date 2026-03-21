@@ -22,3 +22,6 @@ bin/
 
 # GoReleaser build output
 dist/
+
+# Workflow state (orchestration engine)
+.unbound-force/

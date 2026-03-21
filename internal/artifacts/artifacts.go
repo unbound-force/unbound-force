@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/unbound-force/unbound-force/internal/backlog"
@@ -188,8 +189,8 @@ func CheckSchemaVersion(envelope *Envelope, expectedVersion string) (compatible 
 		return true, ""
 	}
 
-	envParts := splitVersion(envelope.SchemaVersion)
-	expParts := splitVersion(expectedVersion)
+	envParts := strings.Split(envelope.SchemaVersion, ".")
+	expParts := strings.Split(expectedVersion, ".")
 
 	if len(envParts) < 1 || len(expParts) < 1 {
 		return false, fmt.Sprintf("invalid version format: envelope=%q expected=%q", envelope.SchemaVersion, expectedVersion)
@@ -200,28 +201,6 @@ func CheckSchemaVersion(envelope *Envelope, expectedVersion string) (compatible 
 	}
 
 	return true, fmt.Sprintf("minor/patch version differs: envelope=%q expected=%q", envelope.SchemaVersion, expectedVersion)
-}
-
-// splitVersion splits a semver string into its components.
-func splitVersion(v string) []string {
-	parts := make([]string, 0, 3)
-	for _, p := range splitOnDot(v) {
-		parts = append(parts, p)
-	}
-	return parts
-}
-
-// splitOnDot splits a string on '.' characters.
-func splitOnDot(s string) []string {
-	var parts []string
-	start := 0
-	for i := 0; i <= len(s); i++ {
-		if i == len(s) || s[i] == '.' {
-			parts = append(parts, s[start:i])
-			start = i + 1
-		}
-	}
-	return parts
 }
 
 // GenerateBacklogItemArtifact generates a backlog-item JSON artifact

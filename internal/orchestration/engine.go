@@ -78,8 +78,9 @@ func (o *Orchestrator) NewWorkflow(branch, backlogItemID string) *WorkflowInstan
 	}
 
 	stageHeroes := StageHeroMap()
-	stages := make([]WorkflowStage, len(StageOrder))
-	for i, stageName := range StageOrder {
+	order := StageOrder()
+	stages := make([]WorkflowStage, len(order))
+	for i, stageName := range order {
 		hero := stageHeroes[stageName]
 		stage := WorkflowStage{
 			StageName: stageName,
@@ -216,11 +217,10 @@ func (o *Orchestrator) Advance(workflowID string) (*WorkflowResult, error) {
 			return nil, fmt.Errorf("save workflow before complete: %w", err)
 		}
 
-		record, err := o.Complete(workflowID)
+		_, err := o.Complete(workflowID)
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("complete failed: %v", err))
+			return nil, fmt.Errorf("complete workflow: %w", err)
 		}
-		_ = record // record is written as artifact by Complete
 
 		// Reload to get the completed state
 		wf, err = o.store().Load(workflowID)
@@ -413,8 +413,16 @@ func (o *Orchestrator) HandleContradiction(workflowID, conflict string) error {
 }
 
 // sanitizeBranch converts a branch name to a safe workflow ID component.
-// Replaces slashes and special characters with hyphens.
+// Uses a restrictive allowlist: only letters, digits, and hyphens are kept.
+// All other characters are replaced with hyphens.
 func sanitizeBranch(branch string) string {
-	r := strings.NewReplacer("/", "-", " ", "-", ".", "-")
-	return r.Replace(branch)
+	var b strings.Builder
+	for _, c := range branch {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' {
+			b.WriteRune(c)
+		} else {
+			b.WriteRune('-')
+		}
+	}
+	return b.String()
 }

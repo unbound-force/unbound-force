@@ -28,7 +28,7 @@ func TestAnalyzeWorkflows_FrequentDivisorFindings(t *testing.T) {
 		},
 	}
 
-	feedback, err := AnalyzeWorkflows(records)
+	feedback, err := AnalyzeWorkflows(records, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("AnalyzeWorkflows failed: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestAnalyzeWorkflows_NoPatterns(t *testing.T) {
 		},
 	}
 
-	feedback, err := AnalyzeWorkflows(records)
+	feedback, err := AnalyzeWorkflows(records, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("AnalyzeWorkflows failed: %v", err)
 	}

@@ -17,14 +17,17 @@ const (
 	StageMeasure   = "measure"
 )
 
-// StageOrder is the canonical sequence of workflow stages.
-var StageOrder = []string{
-	StageDefine,
-	StageImplement,
-	StageValidate,
-	StageReview,
-	StageAccept,
-	StageMeasure,
+// StageOrder returns the canonical sequence of workflow stages.
+// Returned as a fresh slice to prevent mutation of the canonical order.
+func StageOrder() []string {
+	return []string{
+		StageDefine,
+		StageImplement,
+		StageValidate,
+		StageReview,
+		StageAccept,
+		StageMeasure,
+	}
 }
 
 // Status constants for workflow and stage state transitions.

@@ -22,7 +22,7 @@ const minPatternOccurrences = 3
 //     across workflows → recommend convention pack update
 //   - Velocity trends: decreasing review iteration counts →
 //     positive feedback on improvement
-func AnalyzeWorkflows(records []WorkflowRecord) ([]LearningFeedback, error) {
+func AnalyzeWorkflows(records []WorkflowRecord, now time.Time) ([]LearningFeedback, error) {
 	if len(records) < minPatternOccurrences {
 		return nil, nil
 	}
@@ -30,11 +30,11 @@ func AnalyzeWorkflows(records []WorkflowRecord) ([]LearningFeedback, error) {
 	var feedback []LearningFeedback
 
 	// Pattern 1: Frequent review stage failures/iterations
-	reviewPatterns := analyzeReviewPatterns(records)
+	reviewPatterns := analyzeReviewPatterns(records, now)
 	feedback = append(feedback, reviewPatterns...)
 
 	// Pattern 2: Velocity improvement trends
-	velocityPatterns := analyzeVelocityPatterns(records)
+	velocityPatterns := analyzeVelocityPatterns(records, now)
 	feedback = append(feedback, velocityPatterns...)
 
 	return feedback, nil
@@ -44,7 +44,7 @@ func AnalyzeWorkflows(records []WorkflowRecord) ([]LearningFeedback, error) {
 // across workflow records. If the review stage consistently has
 // errors or high iteration counts, it generates feedback targeting
 // cobalt-crush to update coding conventions.
-func analyzeReviewPatterns(records []WorkflowRecord) []LearningFeedback {
+func analyzeReviewPatterns(records []WorkflowRecord, now time.Time) []LearningFeedback {
 	// Count review stage errors by error message pattern
 	errorCounts := make(map[string]int)
 	var workflowIDs []string
@@ -70,7 +70,7 @@ func analyzeReviewPatterns(records []WorkflowRecord) []LearningFeedback {
 				Recommendation:  fmt.Sprintf("update convention pack to address recurring %q findings proactively", category),
 				SupportingData:  map[string]string{"category": category, "count": fmt.Sprintf("%d", count)},
 				Status:          "proposed",
-				CreatedAt:       time.Now().UTC(),
+				CreatedAt:       now,
 				WorkflowIDs:     dedup(workflowIDs),
 			})
 		}
@@ -81,7 +81,7 @@ func analyzeReviewPatterns(records []WorkflowRecord) []LearningFeedback {
 
 // analyzeVelocityPatterns checks if review iteration counts are
 // decreasing over time, indicating the team is improving.
-func analyzeVelocityPatterns(records []WorkflowRecord) []LearningFeedback {
+func analyzeVelocityPatterns(records []WorkflowRecord, now time.Time) []LearningFeedback {
 	if len(records) < minPatternOccurrences {
 		return nil
 	}
@@ -115,7 +115,7 @@ func analyzeVelocityPatterns(records []WorkflowRecord) []LearningFeedback {
 			Recommendation:  "current coding practices are improving review outcomes — continue current approach",
 			SupportingData:  map[string]string{"trend": "improving", "workflows": fmt.Sprintf("%d", len(records))},
 			Status:          "proposed",
-			CreatedAt:       time.Now().UTC(),
+			CreatedAt:       now,
 			WorkflowIDs:     workflowIDs,
 		},
 	}
