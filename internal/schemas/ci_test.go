@@ -1,9 +1,11 @@
 package schemas_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/unbound-force/unbound-force/internal/schemas"
@@ -135,7 +137,38 @@ func TestSchemaRegistry_DirectoryStructure(t *testing.T) {
 	}
 }
 
+// TestSchemaRegistry_NoDrift generates schemas to a temp directory
+// and compares them against the committed versions. Any difference
+// indicates the Go structs changed without regenerating schemas.
+func TestSchemaRegistry_NoDrift(t *testing.T) {
+	// Generate schemas to temp dir
+	tmpDir := t.TempDir()
+	if err := schemas.GenerateAll(tmpDir); err != nil {
+		t.Fatalf("GenerateAll: %v", err)
+	}
+
+	// Compare each generated schema against committed version
+	repoDir := repoSchemasDir()
+	for _, typeName := range schemas.RegisteredTypeNames() {
+		generated := filepath.Join(tmpDir, typeName, "v1.0.0.schema.json")
+		committed := filepath.Join(repoDir, typeName, "v1.0.0.schema.json")
+
+		genBytes, err := os.ReadFile(generated)
+		if err != nil {
+			t.Fatalf("read generated %s: %v", typeName, err)
+		}
+		comBytes, err := os.ReadFile(committed)
+		if err != nil {
+			t.Fatalf("read committed %s: %v", typeName, err)
+		}
+
+		if !bytes.Equal(genBytes, comBytes) {
+			t.Errorf("schema drift detected for %q: committed schema differs from generated. Run GenerateAll to update.", typeName)
+		}
+	}
+}
+
 // isSchemaFile returns true if the path ends with .schema.json.
 func isSchemaFile(path string) bool {
-	return len(path) > 12 && path[len(path)-12:] == ".schema.json"
+	return strings.HasSuffix(path, ".schema.json")
 }

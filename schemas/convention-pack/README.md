@@ -1,9 +1,14 @@
 # Convention Pack Schema
 
-The convention pack schema defines the structural validation rules
-for convention packs — Markdown files with YAML frontmatter that
+Convention packs are Markdown files with YAML frontmatter that
 configure coding conventions shared between Cobalt-Crush (developer)
 and The Divisor (reviewer).
+
+Unlike JSON Schema-based artifact types, convention packs use
+**Markdown structural validation** implemented in
+`internal/schemas/packvalidator.go`. There is no JSON Schema for
+this type — validation checks YAML frontmatter fields and required
+H2 sections directly.
 
 ## Producer
 
@@ -15,7 +20,12 @@ customized by developers.
 - **Cobalt-Crush** — applies convention rules during implementation
 - **The Divisor** — enforces convention rules during review
 
-## Required Frontmatter Fields
+## Validation
+
+Convention pack validation is performed by `ValidatePack()` in
+`internal/schemas/packvalidator.go`, which checks:
+
+### Required Frontmatter Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -23,13 +33,13 @@ customized by developers.
 | `language` | string | Target programming language |
 | `version` | string | Pack version (semver) |
 
-## Optional Frontmatter Fields
+### Optional Frontmatter Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `framework` | string | Target framework (e.g., `cobra`, `react`) |
 
-## Required H2 Sections
+### Required H2 Sections
 
 Every convention pack MUST contain these sections:
 

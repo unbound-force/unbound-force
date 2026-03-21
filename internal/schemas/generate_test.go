@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/unbound-force/unbound-force/internal/schemas"
@@ -127,6 +128,9 @@ func TestValidateArtifact_InvalidArtifact(t *testing.T) {
 	err = schemas.ValidateArtifact(schemaPath, artifactPath)
 	if err == nil {
 		t.Fatal("expected validation error for artifact missing 'hero' field, got nil")
+	}
+	if !strings.Contains(err.Error(), "hero") && !strings.Contains(err.Error(), "required") {
+		t.Errorf("error should mention missing required field, got: %v", err)
 	}
 
 	t.Logf("correctly rejected invalid artifact: %v", err)
