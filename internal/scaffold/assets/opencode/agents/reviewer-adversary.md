@@ -52,7 +52,7 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 #### 2. Error Handling and Resilience
 
 - Do all functions that return `error` handle it? Are errors wrapped with `fmt.Errorf("context: %w", err)`?
-- What happens when the target directory for `unbound init` doesn't exist or isn't writable?
+- What happens when the target directory for `uf init` doesn't exist or isn't writable?
 - What happens when embedded assets are corrupt or the embed directive is misconfigured?
 - What happens when file permissions prevent writing scaffolded files?
 - Are there panics that should be errors? Unchecked type assertions?
@@ -84,7 +84,7 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 
 **File and path safety**
 
-- Does `unbound init` validate the target directory before writing? Could a crafted working directory cause writes outside the intended scope?
+- Does `uf init` validate the target directory before writing? Could a crafted working directory cause writes outside the intended scope?
 - Are paths constructed with `filepath.Join` -- never raw string concatenation?
 - Are newly created files written with appropriate permissions (0o644 for files, 0o755 for directories)?
 - Does the scaffold engine follow symlinks? If so, is there a guard against symlink loops or escape outside the target directory?
@@ -92,7 +92,7 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 **Embedded asset safety**
 
 - Are embedded file contents (via `embed.FS`) free of credentials, API keys, or internal hostnames?
-- Could a malicious asset in `internal/scaffold/assets/` be injected into downstream repos via `unbound init`?
+- Could a malicious asset in `internal/scaffold/assets/` be injected into downstream repos via `uf init`?
 - Is the version marker injection safe against content injection (e.g., frontmatter containing `---` patterns that confuse the parser)?
 
 **Dependency vulnerabilities**

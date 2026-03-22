@@ -642,8 +642,8 @@ func TestRun_SchemaDistribution(t *testing.T) {
 }
 
 func TestInsertMarkerAfterFrontmatter(t *testing.T) {
-	mdMarker := "<!-- scaffolded by unbound v1.0.0 -->"
-	hashMarker := "# scaffolded by unbound v1.0.0"
+	mdMarker := "<!-- scaffolded by uf v1.0.0 -->"
+	hashMarker := "# scaffolded by uf v1.0.0"
 
 	tests := []struct {
 		name     string
@@ -731,7 +731,7 @@ func TestPrintSummary_Output(t *testing.T) {
 		output := buf.String()
 
 		// Verify total count line
-		if !strings.Contains(output, "unbound init: 4 files processed") {
+		if !strings.Contains(output, "uf init: 4 files processed") {
 			t.Errorf("expected total count of 4, got output:\n%s", output)
 		}
 
@@ -776,7 +776,7 @@ func TestPrintSummary_Output(t *testing.T) {
 		printSummary(&buf, true, false, true, r)
 		output := buf.String()
 
-		if !strings.Contains(output, "unbound init (divisor): 2 files processed") {
+		if !strings.Contains(output, "uf init (divisor): 2 files processed") {
 			t.Errorf("expected divisor label, got output:\n%s", output)
 		}
 		if !strings.Contains(output, "Run /review-council") {
@@ -818,7 +818,7 @@ func TestPrintSummary_Output(t *testing.T) {
 		printSummary(&buf, false, false, true, r)
 		output := buf.String()
 
-		if !strings.Contains(output, "unbound init: 2 files processed") {
+		if !strings.Contains(output, "uf init: 2 files processed") {
 			t.Errorf("expected total count of 2, got output:\n%s", output)
 		}
 		if !strings.Contains(output, "overwritten: 2") {
@@ -847,7 +847,7 @@ func TestRun_PrintSummaryIntegration(t *testing.T) {
 	}
 
 	output := buf.String()
-	expected := fmt.Sprintf("unbound init: %d files processed", len(result.Created))
+	expected := fmt.Sprintf("uf init: %d files processed", len(result.Created))
 	if !strings.Contains(output, expected) {
 		t.Errorf("expected summary to contain %q, got:\n%s", expected, output)
 	}
@@ -865,7 +865,7 @@ func TestRun_PrintSummaryIntegration(t *testing.T) {
 // binary. These are local-only tooling files (e.g., installed by
 // the Gaze scaffold) that are specific to this repository.
 var knownNonEmbeddedFiles = map[string]bool{
-	// Agents — local-only tooling, not scaffolded by unbound init
+	// Agents — local-only tooling, not scaffolded by uf init
 	".opencode/agents/gaze-reporter.md":       true,
 	".opencode/agents/gaze-test-generator.md": true,
 	".opencode/agents/reviewer-testing.md":    true,
@@ -887,7 +887,7 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".opencode/command/muti-mind.sync-push.md":        true,
 	".opencode/command/muti-mind.sync-status.md":      true,
 	".opencode/command/muti-mind.sync.md":             true,
-	// OpenSpec skill commands — local workflow tooling, not scaffolded by unbound init
+	// OpenSpec skill commands — local workflow tooling, not scaffolded by uf init
 	".opencode/command/opsx-apply.md":   true,
 	".opencode/command/opsx-archive.md": true,
 	".opencode/command/opsx-explore.md": true,
@@ -1283,5 +1283,56 @@ func TestAssetPaths_KnownPrefixes(t *testing.T) {
 			t.Errorf("asset %q does not match any known prefix %v — update mapAssetPath and knownAssetPrefixes",
 				p, knownAssetPrefixes)
 		}
+	}
+}
+
+// TestScaffoldOutput_NoBareUnboundReferences is a regression guard
+// for FR-015/SC-003: scaffolded files must not contain bare
+// `unbound init`, `unbound doctor`, `unbound setup`, or
+// `unbound version` CLI references.
+func TestScaffoldOutput_NoBareUnboundReferences(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	_, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Bare patterns that must NOT appear in scaffolded output.
+	// These are the old CLI command names before the rename.
+	barePatterns := []string{
+		"unbound init",
+		"unbound doctor",
+		"unbound setup",
+		"unbound version",
+	}
+
+	// Walk all generated files and search for bare patterns.
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info.IsDir() {
+			return walkErr
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Errorf("read %s: %v", path, readErr)
+			return nil
+		}
+		text := string(content)
+		relPath, _ := filepath.Rel(dir, path)
+
+		for _, pattern := range barePatterns {
+			if strings.Contains(text, pattern) {
+				t.Errorf("scaffolded file %s contains bare %q reference (FR-015 violation)", relPath, pattern)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk error: %v", err)
 	}
 }

@@ -197,7 +197,7 @@ func Run(opts Options) error {
 		results = append(results, stepResult{name: ".hive/", action: "skipped", detail: "no swarm"})
 	}
 
-	// Step 8: Run unbound init (FR-033).
+	// Step 8: Run uf init (FR-033).
 	results = append(results, runUnboundInit(&opts))
 
 	// Print results.
@@ -222,11 +222,11 @@ func Run(opts Options) error {
 				failCount++
 			}
 		}
-		fmt.Fprintln(opts.Stdout, "Setup partially complete. Fix the errors above, then re-run `unbound setup`.")
+		fmt.Fprintln(opts.Stdout, "Setup partially complete. Fix the errors above, then re-run `uf setup`.")
 		return fmt.Errorf("%d step(s) failed", failCount)
 	}
 
-	fmt.Fprintln(opts.Stdout, "Setup complete! Run `unbound doctor` to verify.")
+	fmt.Fprintln(opts.Stdout, "Setup complete! Run `uf doctor` to verify.")
 
 	// Ollama tip: suggest installation for enhanced semantic memory.
 	if _, ollamaErr := opts.LookPath("ollama"); ollamaErr != nil {
@@ -511,15 +511,15 @@ func initializeHive(opts *Options) stepResult {
 	return stepResult{name: ".hive/", action: "initialized"}
 }
 
-// runUnboundInit runs `unbound init` if .opencode/ doesn't exist per FR-033.
+// runUnboundInit runs `uf init` if .opencode/ doesn't exist per FR-033.
 func runUnboundInit(opts *Options) stepResult {
 	ocDir := filepath.Join(opts.TargetDir, ".opencode")
 	if info, err := os.Stat(ocDir); err == nil && info.IsDir() {
-		return stepResult{name: "unbound init", action: "already scaffolded"}
+		return stepResult{name: "uf init", action: "already scaffolded"}
 	}
 
 	if opts.DryRun {
-		return stepResult{name: "unbound init", action: "dry-run", detail: "Would run: unbound init"}
+		return stepResult{name: "uf init", action: "dry-run", detail: "Would run: uf init"}
 	}
 
 	// Call scaffold.Run() directly (same binary, no subprocess needed).
@@ -531,11 +531,11 @@ func runUnboundInit(opts *Options) stepResult {
 		Stdout:    opts.Stdout,
 	})
 	if err != nil {
-		return stepResult{name: "unbound init", action: "failed", detail: "scaffold failed", err: err}
+		return stepResult{name: "uf init", action: "failed", detail: "scaffold failed", err: err}
 	}
 
 	return stepResult{
-		name:   "unbound init",
+		name:   "uf init",
 		action: "scaffolded",
 		detail: fmt.Sprintf("%d files", len(result.Created)+len(result.Updated)),
 	}

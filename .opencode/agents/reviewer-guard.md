@@ -75,7 +75,7 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 
 - Does this change make the Unbound Force ecosystem more coherent for teams deploying heroes?
 - Are existing workflows (Speckit pipeline, OpenSpec tactical, constitution checks) preserved without regression?
-- Does the `unbound init` scaffold still produce correct output after the change?
+- Does the `uf init` scaffold still produce correct output after the change?
 - Do the embedded assets still match their canonical sources (drift detection test)?
 
 ---

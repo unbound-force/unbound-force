@@ -65,7 +65,7 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 - Are all configuration files (`opencode.json`, `.specify/config.yaml`, `openspec/config.yaml`) valid and consistent?
 - Are there hardcoded paths, hostnames, or environment-specific values that should be parameterized?
 - Are secrets properly externalized (never in source, referenced via environment variables or secret stores)?
-- Does `unbound init` work correctly across target environments (macOS, Linux, Windows)?
+- Does `uf init` work correctly across target environments (macOS, Linux, Windows)?
 - Are file permissions set correctly for scaffolded files (0o644 for files, 0o755 for executables)?
 - Are there assumptions about the user's shell, PATH, or installed tools that should be documented?
 
@@ -74,7 +74,7 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 - Does the CLI provide meaningful exit codes (0 for success, non-zero for distinct failure modes)?
 - Are error messages actionable -- do they tell the user what went wrong AND what to do about it?
 - Is there structured output available (JSON flag or machine-parseable format) for CI integration?
-- Are version and build metadata embedded in the binary for troubleshooting (`unbound version`)?
+- Are version and build metadata embedded in the binary for troubleshooting (`uf version`)?
 - Is there a verbose/debug mode for diagnosing scaffold failures?
 - Do long-running operations provide progress feedback?
 
@@ -82,10 +82,10 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 
 - When the scaffold format changes, is there a migration path for existing users?
 - Are version markers in scaffolded files used to detect and handle version skew?
-- Does `unbound init --force` correctly handle all re-scaffold scenarios (new files, changed files, removed files)?
+- Does `uf init --force` correctly handle all re-scaffold scenarios (new files, changed files, removed files)?
 - Are breaking changes to templates, commands, or schema documented in release notes?
 - Is there backward compatibility for older scaffold versions?
-- Are hero repos that depend on `unbound init` output resilient to scaffold updates?
+- Are hero repos that depend on `uf init` output resilient to scaffold updates?
 
 #### 6. Operational Documentation
 
@@ -100,7 +100,7 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 - Are there destructive operations (file overwrites, force flags) that lack confirmation or undo?
 - Does the scaffold engine handle partial failures gracefully (no corrupted half-state)?
 - Are there file backup mechanisms before overwriting user-owned files?
-- Can a failed `unbound init` be safely re-run?
+- Can a failed `uf init` be safely re-run?
 
 ---
 

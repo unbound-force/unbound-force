@@ -162,4 +162,4 @@ get_feature_paths() {
 check_file() { [[ -f "$1" ]] && echo "  ✓ $2" || echo "  ✗ $2"; }
 check_dir() { [[ -d "$1" && -n $(ls -A "$1" 2>/dev/null) ]] && echo "  ✓ $2" || echo "  ✗ $2"; }
 
-# scaffolded by unbound vdev
+# scaffolded by uf vdev

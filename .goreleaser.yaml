@@ -1,9 +1,9 @@
 version: 2
 
 builds:
-  - id: unbound
-    main: ./cmd/unbound
-    binary: unbound
+  - id: unbound-force
+    main: ./cmd/unbound-force
+    binary: unbound-force
     env:
       - CGO_ENABLED=0
     goos:
@@ -44,7 +44,7 @@ archives:
         formats:
           - zip
     name_template: >-
-      unbound_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+      unbound-force_{{ .Version }}_{{ .Os }}_{{ .Arch }}
 
 checksum:
   name_template: checksums.txt
@@ -66,7 +66,7 @@ changelog:
       - '^chore:'
 
 homebrew_casks:
-  - name: unbound
+  - name: unbound-force
     description: "Unbound Force specification framework toolkit"
     homepage: "https://github.com/unbound-force/unbound-force"
     directory: Casks
@@ -80,7 +80,9 @@ homebrew_casks:
       post:
         install: |
           if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/unbound"]
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/unbound-force"]
+            # Create uf symlink alias for daily-use convenience (FR-002/FR-009).
+            system_command "/bin/ln", args: ["-sf", "#{staged_path}/unbound-force", "#{HOMEBREW_PREFIX}/bin/uf"]
           end
     repository:
       owner: unbound-force

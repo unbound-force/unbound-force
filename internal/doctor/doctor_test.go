@@ -1064,8 +1064,8 @@ func TestCheckSwarmPlugin_MissingPluginConfig(t *testing.T) {
 			if r.Severity != Warn {
 				t.Errorf("plugin config severity = %v, want Warn", r.Severity)
 			}
-			if !strings.Contains(r.InstallHint, "unbound setup") {
-				t.Errorf("install hint = %q, want 'unbound setup'", r.InstallHint)
+			if !strings.Contains(r.InstallHint, "uf setup") {
+				t.Errorf("install hint = %q, want 'uf setup'", r.InstallHint)
 			}
 			return
 		}
@@ -1156,8 +1156,8 @@ func TestCheckSwarmPlugin_DoctorFails(t *testing.T) {
 			if r.Severity != Warn {
 				t.Errorf("swarm doctor severity = %v, want Warn", r.Severity)
 			}
-			if !strings.Contains(r.InstallHint, "unbound setup") {
-				t.Errorf("install hint = %q, want 'unbound setup'", r.InstallHint)
+			if !strings.Contains(r.InstallHint, "uf setup") {
+				t.Errorf("install hint = %q, want 'uf setup'", r.InstallHint)
 			}
 			// Verify stderr is embedded.
 			if !strings.Contains(group.Embed, "Plugin not configured") {
@@ -2189,4 +2189,61 @@ func TestCheckOllama_NotInstalled(t *testing.T) {
 		}
 	}
 	t.Error("ollama result not found in Core Tools")
+}
+
+// TestDoctorHints_NoBareUnboundReferences is a regression guard
+// for FR-006: all doctor InstallHint fields must reference `uf`
+// or `unbound-force`, not bare `unbound `.
+func TestDoctorHints_NoBareUnboundReferences(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create minimal scaffolded files so all check groups execute.
+	createFile(t, dir, ".opencode/agents/test.md", "---\ndescription: test\n---\n# Agent")
+	createFile(t, dir, ".opencode/command/test.md", "# Command")
+	createFile(t, dir, ".opencode/unbound/packs/go.md", "# Go")
+	createFile(t, dir, ".specify/config.yaml", "# config")
+	createFile(t, dir, "AGENTS.md", "# Agents")
+	createFile(t, dir, "opencode.json", `{"mcpServers":{}}`)
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		Format:    "text",
+		Stdout:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"go":       "/usr/local/go/bin/go",
+			"opencode": "/usr/local/bin/opencode",
+		}),
+		ExecCmd: stubExecCmd(
+			map[string]string{
+				"go version": "go version go1.24.3 darwin/arm64",
+			},
+			nil,
+		),
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+	}
+
+	report, _ := Run(opts)
+	if report == nil {
+		t.Fatal("Run returned nil report")
+	}
+
+	// Check all InstallHint fields across all groups.
+	for _, g := range report.Groups {
+		for _, r := range g.Results {
+			if r.InstallHint == "" {
+				continue
+			}
+			// Check for bare "unbound " that is NOT "unbound-force".
+			hint := r.InstallHint
+			// Remove all "unbound-force" occurrences to isolate bare "unbound ".
+			cleaned := strings.ReplaceAll(hint, "unbound-force", "")
+			if strings.Contains(cleaned, "unbound ") || strings.Contains(cleaned, "unbound\t") {
+				t.Errorf("InstallHint for %q contains bare 'unbound' reference: %q (FR-006 violation)",
+					r.Name, r.InstallHint)
+			}
+		}
+	}
 }

@@ -4,7 +4,7 @@
 # project. All fields are optional -- missing fields use
 # sensible defaults.
 #
-# This file is user-owned: `unbound init` will not overwrite
+# This file is user-owned: `uf init` will not overwrite
 # it if it already exists.
 
 # Primary programming language (e.g., go, typescript, python)

@@ -317,9 +317,9 @@ func detectLang(targetDir string) string {
 func versionMarker(version string, ext string) string {
 	switch ext {
 	case ".yaml", ".yml", ".sh":
-		return fmt.Sprintf("# scaffolded by unbound v%s", version)
+		return fmt.Sprintf("# scaffolded by uf v%s", version)
 	default:
-		return fmt.Sprintf("<!-- scaffolded by unbound v%s -->", version)
+		return fmt.Sprintf("<!-- scaffolded by uf v%s -->", version)
 	}
 }
 
@@ -373,9 +373,9 @@ const (
 func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *Result) {
 	total := len(r.Created) + len(r.Skipped) + len(r.Overwritten) + len(r.Updated)
 
-	label := "unbound init"
+	label := "uf init"
 	if divisorOnly {
-		label = "unbound init (divisor)"
+		label = "uf init (divisor)"
 	}
 	fmt.Fprintf(w, "\n%s: %d files processed\n\n", label, total)
 

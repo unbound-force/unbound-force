@@ -119,7 +119,7 @@ Before submitting for review and after receiving review feedback:
 
 5. **Re-validate after fixes**: After addressing findings, re-run Gaze validation (if available) to verify no regressions before re-submitting.
 
-6. **No Divisor available**: If The Divisor is not installed, note this: "Automated review is not available — The Divisor is not installed. Recommend running `unbound init --divisor` to deploy the review council." Proceed with implementation using pre-review self-checks.
+6. **No Divisor available**: If The Divisor is not installed, note this: "Automated review is not available — The Divisor is not installed. Recommend running `uf init --divisor` to deploy the review council." Proceed with implementation using pre-review self-checks.
 
 ## Speckit Integration
 

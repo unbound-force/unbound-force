@@ -9,7 +9,7 @@ handoffs:
     agent: speckit.checklist
     prompt: Create a checklist for the following domain...
 ---
-<!-- scaffolded by unbound vdev -->
+<!-- scaffolded by uf vdev -->
 
 ## User Input
 

@@ -46,12 +46,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload generated cask as release artifact
-        # GoReleaser writes dist/homebrew/Casks/unbound.rb with skip_upload: true.
+        # GoReleaser writes dist/homebrew/Casks/unbound-force.rb with skip_upload: true.
         # Upload it so the sign-macos job can download and patch darwin checksums.
         run: |
           gh release upload "${GITHUB_REF_NAME}" \
             --repo "$GITHUB_REPOSITORY" \
-            dist/homebrew/Casks/unbound.rb \
+            dist/homebrew/Casks/unbound-force.rb \
             --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -89,12 +89,12 @@ jobs:
       - name: Download darwin archives
         run: |
           set -euo pipefail
-          gh release download "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --pattern "unbound_*_darwin_*.tar.gz" --dir ./artifacts
+          gh release download "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --pattern "unbound-force_*_darwin_*.tar.gz" --dir ./artifacts
 
           # Verify both expected archives were downloaded
           VERSION="${GITHUB_REF_NAME#v}"
           for arch in amd64 arm64; do
-            if [ ! -f "./artifacts/unbound_${VERSION}_darwin_${arch}.tar.gz" ]; then
+            if [ ! -f "./artifacts/unbound-force_${VERSION}_darwin_${arch}.tar.gz" ]; then
               echo "::error::Expected darwin_${arch} archive not found after download"
               exit 1
             fi
@@ -106,7 +106,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ./signed
-          for archive in ./artifacts/unbound_*_darwin_*.tar.gz; do
+          for archive in ./artifacts/unbound-force_*_darwin_*.tar.gz; do
             echo "==> Processing $(basename "$archive")"
             workdir=$(mktemp -d)
 
@@ -116,23 +116,23 @@ jobs:
             # Sign with codesign
             codesign --force --timestamp --options runtime \
               --sign "$MACOS_SIGN_IDENTITY" \
-              "$workdir/unbound"
+              "$workdir/unbound-force"
 
             # Verify signature
-            codesign --verify --verbose=2 "$workdir/unbound"
+            codesign --verify --verbose=2 "$workdir/unbound-force"
 
             # Zip for notarytool (requires .zip, not .tar.gz)
-            ditto -c -k "$workdir/unbound" "$workdir/unbound.zip"
+            ditto -c -k "$workdir/unbound-force" "$workdir/unbound-force.zip"
 
             # Submit for notarization and wait
-            xcrun notarytool submit "$workdir/unbound.zip" \
+            xcrun notarytool submit "$workdir/unbound-force.zip" \
               --key "$RUNNER_TEMP/notary_key.p8" \
               --key-id "$MACOS_NOTARY_KEY_ID" \
               --issuer "$MACOS_NOTARY_ISSUER_ID" \
               --wait --timeout 20m
 
             # Re-archive signed binary with original archive name
-            tar -czf "./signed/$(basename "$archive")" -C "$workdir" unbound
+            tar -czf "./signed/$(basename "$archive")" -C "$workdir" unbound-force
 
             rm -rf "$workdir"
             echo "==> Done: $(basename "$archive")"
@@ -172,22 +172,22 @@ jobs:
 
           # Verify signed archives exist before computing checksums
           for arch in arm64 amd64; do
-            if [ ! -f "./signed/unbound_${VERSION}_darwin_${arch}.tar.gz" ]; then
+            if [ ! -f "./signed/unbound-force_${VERSION}_darwin_${arch}.tar.gz" ]; then
               echo "::error::Signed darwin_${arch} archive not found"
               exit 1
             fi
           done
 
           # Compute signed checksums
-          ARM64_SHA=$(shasum -a 256 "./signed/unbound_${VERSION}_darwin_arm64.tar.gz" | awk '{print $1}')
-          AMD64_SHA=$(shasum -a 256 "./signed/unbound_${VERSION}_darwin_amd64.tar.gz" | awk '{print $1}')
+          ARM64_SHA=$(shasum -a 256 "./signed/unbound-force_${VERSION}_darwin_arm64.tar.gz" | awk '{print $1}')
+          AMD64_SHA=$(shasum -a 256 "./signed/unbound-force_${VERSION}_darwin_amd64.tar.gz" | awk '{print $1}')
 
           echo "darwin_arm64 SHA256: $ARM64_SHA"
           echo "darwin_amd64 SHA256: $AMD64_SHA"
 
           # Download the GoReleaser-generated cask (uploaded by the release job)
-          gh release download "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --pattern "unbound.rb" --dir ./cask-staging
-          CASK_FILE="./cask-staging/unbound.rb"
+          gh release download "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --pattern "unbound-force.rb" --dir ./cask-staging
+          CASK_FILE="./cask-staging/unbound-force.rb"
 
           # Patch darwin checksums with signed values
           awk -v amd64="$AMD64_SHA" -v arm64="$ARM64_SHA" '
@@ -207,14 +207,14 @@ jobs:
 
           # Push to the Homebrew tap
           git clone "https://x-access-token:${HOMEBREW_TAP_GITHUB_TOKEN}@github.com/unbound-force/homebrew-tap.git" tap
-          cp "$CASK_FILE" tap/Casks/unbound.rb
+          cp "$CASK_FILE" tap/Casks/unbound-force.rb
 
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/unbound.rb
+          git add Casks/unbound-force.rb
           git diff --cached --quiet && { echo "No cask changes needed"; exit 0; }
-          git commit -m "feat: update unbound cask to v${VERSION} (signed)"
+          git commit -m "feat: update unbound-force cask to v${VERSION} (signed)"
           git push
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

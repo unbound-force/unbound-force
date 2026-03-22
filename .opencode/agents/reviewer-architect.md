@@ -42,7 +42,7 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 #### 1. Architectural Alignment
 
 - Does the change respect the project structure?
-  - `cmd/unbound/` for CLI only (Cobra commands, flag handling)
+  - `cmd/unbound-force/` for CLI only (Cobra commands, flag handling)
   - `internal/scaffold/` for core scaffold engine (embed.FS, file ownership, version markers)
   - `internal/scaffold/assets/` for embedded canonical copies of all scaffolded files
   - `.specify/` for Speckit artifacts (templates, scripts, config, constitution)
@@ -61,7 +61,7 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 - **File ownership model**: Are user-owned files (templates, scripts, agents, config) correctly skipped on re-run? Are tool-owned files (commands, OpenSpec schema) correctly updated on content diff?
 - **Testable CLI pattern**: Do commands delegate to functions with params structs that include `io.Writer` for stdout?
 - **Drift detection**: Does `TestEmbeddedAssetsMatchSource` cover all embedded assets? Are new assets added to both canonical and embedded locations?
-- **Version markers**: Do scaffolded files receive `<!-- scaffolded by unbound vX.Y.Z -->` after YAML frontmatter?
+- **Version markers**: Do scaffolded files receive `<!-- scaffolded by uf vX.Y.Z -->` after YAML frontmatter?
 
 #### 3. Go Coding Conventions
 

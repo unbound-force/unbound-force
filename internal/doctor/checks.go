@@ -369,7 +369,7 @@ func checkSwarmPlugin(opts *Options) CheckGroup {
 				Name:        "swarm doctor",
 				Severity:    Warn,
 				Message:     "swarm doctor reported issues",
-				InstallHint: "Run: unbound setup",
+				InstallHint: "Run: uf setup",
 			})
 		}
 	} else {
@@ -401,7 +401,7 @@ func checkSwarmPlugin(opts *Options) CheckGroup {
 			Name:        "plugin config",
 			Severity:    Warn,
 			Message:     "opencode.json not found",
-			InstallHint: "Run: unbound setup",
+			InstallHint: "Run: uf setup",
 		})
 	} else {
 		var ocMap map[string]json.RawMessage
@@ -433,7 +433,7 @@ func checkSwarmPlugin(opts *Options) CheckGroup {
 						Name:        "plugin config",
 						Severity:    Warn,
 						Message:     "opencode-swarm-plugin not in plugin array",
-						InstallHint: "Fix: unbound setup",
+						InstallHint: "Fix: uf setup",
 					})
 				}
 			} else {
@@ -441,7 +441,7 @@ func checkSwarmPlugin(opts *Options) CheckGroup {
 					Name:        "plugin config",
 					Severity:    Warn,
 					Message:     "plugin array could not be parsed",
-					InstallHint: "Fix: unbound setup",
+					InstallHint: "Fix: uf setup",
 				})
 			}
 		} else {
@@ -449,7 +449,7 @@ func checkSwarmPlugin(opts *Options) CheckGroup {
 				Name:        "plugin config",
 				Severity:    Warn,
 				Message:     "no plugin key in opencode.json",
-				InstallHint: "Fix: unbound setup",
+				InstallHint: "Fix: uf setup",
 			})
 		}
 	}
@@ -457,7 +457,7 @@ func checkSwarmPlugin(opts *Options) CheckGroup {
 	return group
 }
 
-// checkScaffoldedFiles verifies that unbound init files exist
+// checkScaffoldedFiles verifies that uf init files exist
 // per FR-006.
 func checkScaffoldedFiles(opts *Options) CheckGroup {
 	group := CheckGroup{
@@ -490,7 +490,7 @@ func checkScaffoldedFiles(opts *Options) CheckGroup {
 			Name:        ".specify/",
 			Severity:    Fail,
 			Message:     "not found",
-			InstallHint: "Run: unbound init",
+			InstallHint: "Run: uf init",
 		})
 	}
 
@@ -507,7 +507,7 @@ func checkScaffoldedFiles(opts *Options) CheckGroup {
 			Name:        "AGENTS.md",
 			Severity:    Fail,
 			Message:     "not found",
-			InstallHint: "Run: unbound init",
+			InstallHint: "Run: uf init",
 		})
 	}
 
@@ -523,7 +523,7 @@ func checkDirWithCount(dir, name, label, ext string) CheckResult {
 			Name:        name,
 			Severity:    Fail,
 			Message:     "not found",
-			InstallHint: "Run: unbound init",
+			InstallHint: "Run: uf init",
 		}
 	}
 
@@ -539,7 +539,7 @@ func checkDirWithCount(dir, name, label, ext string) CheckResult {
 			Name:        name,
 			Severity:    Warn,
 			Message:     "directory exists but no " + label,
-			InstallHint: "Run: unbound init",
+			InstallHint: "Run: uf init",
 		}
 	}
 
@@ -606,7 +606,7 @@ func checkHeroAvailability(opts *Options) CheckGroup {
 				Name:        displayName,
 				Severity:    Warn,
 				Message:     "not available",
-				InstallHint: "Run: unbound init",
+				InstallHint: "Run: uf init",
 			})
 		}
 	}
@@ -743,7 +743,7 @@ func validateAgents(agentDir string, opts *Options) CheckResult {
 			Name:        "agents",
 			Severity:    Warn,
 			Message:     "agents directory not found",
-			InstallHint: "Run: unbound init",
+			InstallHint: "Run: uf init",
 		}
 	}
 
@@ -783,7 +783,7 @@ func validateAgents(agentDir string, opts *Options) CheckResult {
 			Name:        "agents",
 			Severity:    Warn,
 			Message:     "no agent files found",
-			InstallHint: "Run: unbound init",
+			InstallHint: "Run: uf init",
 		}
 	}
 

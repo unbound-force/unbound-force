@@ -10,8 +10,8 @@ Unbound Force is an organization of AI agent personas (heroes) that collaborate 
 |------|------|--------|
 | **Gaze** | Tester (Quality Sentinel) | Implemented |
 | **Muti-Mind** | Product Owner (Vision Keeper) | Implemented |
-| **Cobalt-Crush** | Developer (Engineering Core) | Implemented (embedded in `unbound`) |
-| **The Divisor** | PR Reviewer (Council) | Implemented (embedded in `unbound`) |
+| **Cobalt-Crush** | Developer (Engineering Core) | Implemented (embedded in `unbound-force`) |
+| **The Divisor** | PR Reviewer (Council) | Implemented (embedded in `unbound-force`) |
 | **Mx F** | Manager (Flow Facilitator) | Implemented (`mxf` CLI + coaching agent) |
 
 ## Constitution
@@ -27,14 +27,14 @@ All hero repositories must maintain constitutions that align with (and never con
 
 ## Specification Framework
 
-This repo distributes a unified two-tier specification framework via the `unbound` CLI:
+This repo distributes a unified two-tier specification framework via the `unbound-force` CLI (alias: `uf`):
 
 ```bash
 # Install
-brew install unbound-force/tap/unbound
+brew install unbound-force/tap/unbound-force
 
 # Scaffold into any repository
-unbound init
+uf init
 ```
 
 The framework provides:
@@ -44,7 +44,7 @@ The framework provides:
 - **Workflow orchestration**: Hero lifecycle commands (`/workflow start`, `/workflow status`, `/workflow list`, `/workflow advance`) for managing the 6-stage feature lifecycle
 - **Constitution governance bridge**: Every proposal includes alignment assessment against the four org principles
 
-`unbound init` scaffolds 47 files into your repository: templates, scripts, commands, agents, Divisor review personas, convention packs, and the custom `unbound-force` OpenSpec schema. Use `unbound init --divisor` to deploy only the PR review agents and convention packs. Use `--lang` to override language auto-detection for convention pack selection. User-owned files are skipped on re-run; tool-owned files are auto-updated when content changes.
+`uf init` scaffolds 47 files into your repository: templates, scripts, commands, agents, Divisor review personas, convention packs, and the custom `unbound-force` OpenSpec schema. Use `uf init --divisor` to deploy only the PR review agents and convention packs. Use `--lang` to override language auto-detection for convention pack selection. User-owned files are skipped on re-run; tool-owned files are auto-updated when content changes.
 
 See [AGENTS.md](AGENTS.md) for full workflow documentation and boundary guidelines.
 
@@ -53,7 +53,7 @@ See [AGENTS.md](AGENTS.md) for full workflow documentation and boundary guidelin
 This repo contains architectural design specs for all heroes and shared standards:
 
 - **`specs/`** -- 10 architectural specifications organized in three phases
-- **`cmd/unbound/`** -- Go CLI binary for framework distribution
+- **`cmd/unbound-force/`** -- Go CLI binary for framework distribution
 - **`internal/scaffold/`** -- Scaffold engine with embedded assets
 - **`.specify/memory/constitution.md`** -- The org constitution (highest authority)
 - **`openspec/`** -- OpenSpec tactical workflow configuration and schema

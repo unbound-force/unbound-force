@@ -10,7 +10,7 @@ tools:
   bash: false
   webfetch: false
 ---
-<!-- scaffolded by unbound vdev -->
+<!-- scaffolded by uf vdev -->
 
 # Constitution Alignment Checker
 

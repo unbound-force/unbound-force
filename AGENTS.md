@@ -110,7 +110,7 @@ unbound-force/
 │           ├── default-custom.md    # Default custom rules (user-owned)
 │           ├── typescript.md        # TypeScript convention pack (tool-owned)
 │           └── typescript-custom.md # TypeScript custom rules (user-owned)
-├── cmd/unbound/
+├── cmd/unbound-force/
 │   └── main.go                      # Cobra CLI entry point
 ├── cmd/mutimind/
 │   └── main.go                      # Muti-Mind backend CLI entry point
@@ -140,7 +140,9 @@ unbound-force/
 │   ├── 008-swarm-orchestration/     # End-to-end workflow & Swarm plugin
 │   ├── 009-shared-data-model/       # JSON schemas for inter-hero artifacts
 │   ├── 010-knowledge-graph-integration/ # MCP knowledge graph via graphthulhu
-│   └── 011-doctor-setup/            # Environment health checking & automated setup
+│   ├── 011-doctor-setup/            # Environment health checking & automated setup
+│   ├── 012-swarm-delegation/        # Swarm delegation workflow
+│   └── 013-binary-rename/           # CLI binary rename (unbound → unbound-force/uf)
 ├── schemas/                         # JSON Schema registry for inter-hero artifacts
 │   ├── envelope/                    # Artifact envelope schema + samples
 │   ├── quality-report/              # Gaze quality report payload schema
@@ -192,12 +194,14 @@ Depends on all Phase 1 specs.
 - **008-swarm-orchestration**: Feature lifecycle workflow, artifact handoff, Swarm plugin, learning loop
 - **009-shared-data-model**: JSON schemas for all artifact types, versioning, schema registry
 
-### Phase 3: Infrastructure (010)
+### Phase 3: Infrastructure (010-013)
 
-Meta-repo operational spec (not a hero architecture).
+Meta-repo operational specs (not hero architectures).
 
 - **010-knowledge-graph-integration**: MCP knowledge graph via graphthulhu, Obsidian backend, spec search/traversal
-- **011-doctor-setup**: Environment health checking (`unbound doctor`) and automated tool chain setup (`unbound setup`)
+- **011-doctor-setup**: Environment health checking (`uf doctor`) and automated tool chain setup (`uf setup`)
+- **012-swarm-delegation**: Swarm delegation workflow with execution mode awareness
+- **013-binary-rename**: CLI binary rename (`unbound` → `unbound-force` with `uf` alias)
 
 ### Dependency Graph
 
@@ -220,6 +224,8 @@ Phase 2 (Cross-Cutting) — depends on Phase 1
 Phase 3 (Infrastructure) — meta-repo operational
   010-knowledge-graph-integration
   011-doctor-setup (depends on 001, 003, 008)
+  012-swarm-delegation
+  013-binary-rename (depends on 003, 011)
 ```
 
 ## Inter-Hero Artifact Types
@@ -250,8 +256,8 @@ All artifacts use the standard envelope format: `hero`, `version`, `timestamp`, 
 
 This repo uses a unified two-tier specification framework
 distributed via the `unbound` CLI binary. Install with
-`brew install unbound-force/tap/unbound` and run
-`unbound init` to scaffold into any repository.
+`brew install unbound-force/tap/unbound-force` and run
+`uf init` to scaffold into any repository.
 
 ### Dual-Tier Overview
 
@@ -403,7 +409,7 @@ section and recommend the correct directory.
 Single binary CLI with layered internal packages:
 
 ```text
-cmd/unbound/           CLI layer (Cobra commands, flag handling)
+cmd/unbound-force/     CLI layer (Cobra commands, flag handling)
 internal/
   scaffold/            Core scaffold engine (embed.FS, file ownership, version markers)
 ```
@@ -500,6 +506,7 @@ This repo is primarily specifications and governance documents. Follow these con
 
 ## Recent Changes
 
+- 013-binary-rename: Renamed CLI binary from `unbound` to `unbound-force` with `uf` symlink alias to resolve NLnet Labs Unbound DNS resolver name collision. Directory rename `cmd/unbound/` → `cmd/unbound-force/`, Cobra root command `Use` field updated, Makefile `install` target creates both binaries, GoReleaser config updated (build id, binary name, archive template, cask name, quarantine hook, `uf` symlink via post-install hook), release workflow updated (20+ references), scaffold engine `versionMarker()` and `printSummary()` updated to `uf`, all embedded asset markers changed from `scaffolded by unbound` to `scaffolded by uf`, doctor hint strings updated (`uf init`/`uf setup`), setup progress messages updated, scaffold assets updated (reviewer-adversary, reviewer-guard, reviewer-sre, reviewer-architect, cobalt-crush-dev, specify/config.yaml), living documentation updated (AGENTS.md, README.md, unbound-force.md), 3 new regression tests (TestRootCmd_HelpOutput, TestScaffoldOutput_NoBareUnboundReferences, TestDoctorHints_NoBareUnboundReferences). Completed specs (001-012) and archived OpenSpec changes preserved as historical records. All 5 user stories and 35 tasks completed.
 - 012-swarm-delegation: Added swarm delegation workflow -- execution mode awareness (`ModeHuman`/`ModeSwarm`) on each `WorkflowStage`, automatic checkpoint pausing at swarm→human boundaries (`StatusAwaitingHuman`), resume via `Advance()`, `StageExecutionModeMap()` with default assignments (define=human, implement=swarm, validate=swarm, review=swarm, accept=human, reflect=swarm), renamed `StageMeasure` to `StageReflect` with enriched reflect stage documentation (metrics + learning + retrospective), `WorkflowStore.Latest()` discovers both active and awaiting_human workflows, backward compatible with legacy JSON (empty execution_mode treated as human), workflow-record schema v1.1.0 with `execution_mode` field, updated `/workflow` command docs with `[human]`/`[swarm]` indicators and `⏸` awaiting_human display, SKILL.md updated with execution modes section and reflect stage documentation. All 4 user stories and 42 tasks completed.
 - 011-doctor-setup: Implemented Doctor and Setup commands -- two new packages `internal/doctor/` (5 files: models.go, doctor.go, environ.go, checks.go, format.go) and `internal/setup/` (1 file: setup.go). `unbound doctor` checks 7 groups (Detected Environment, Core Tools, Swarm Plugin, Scaffolded Files, Hero Availability, MCP Server Config, Agent/Skill Integrity) with environment-aware install hints, colored text output (lipgloss), and JSON output (`--format=json`). `unbound setup` installs missing tools through detected version managers (goenv, nvm, fnm, mise, bun, Homebrew), configures opencode.json atomically, initializes .hive/, and runs unbound init. Supports `--dry-run` and `--yes` flags. Platform guard rejects Windows. All external dependencies injected for testability. Reuses `orchestration.DetectHeroes()` for hero availability. Promoted lipgloss from indirect to direct dependency. All 5 user stories and 79 tasks completed.
 - 009-shared-data-model: Implemented shared data model -- Go package `internal/schemas/` with JSON Schema generation from Go structs (`invopop/jsonschema`), runtime validation (`santhosh-tekuri/jsonschema/v6`), convention pack structural validation, schema versioning with semver compatibility checking. Schema registry at `schemas/` with 9 artifact type directories (envelope, quality-report, review-verdict, backlog-item, acceptance-decision, metrics-snapshot, coaching-record, workflow-record, convention-pack), each containing v1.0.0.schema.json, samples/, and README.md. Type aliases reuse existing Go structs (MetricsSnapshot, WorkflowRecord, AcceptanceDecision); new structs defined for QualityReportPayload and ReviewVerdictPayload. CI tests validate all schemas are draft 2020-12, all samples pass validation, and directory structure is complete. All 5 user stories and 20 tasks completed.

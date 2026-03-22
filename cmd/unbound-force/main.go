@@ -19,11 +19,11 @@ var (
 
 func main() {
 	root := &cobra.Command{
-		Use:     "unbound",
-		Short:   "Unbound Force specification framework toolkit",
+		Use:     "unbound-force",
+		Short:   "Unbound Force specification framework toolkit (alias: uf)",
 		Version: fmt.Sprintf("%s (commit %s, built %s)", version, commit, date),
 	}
-	root.SetVersionTemplate("unbound version {{.Version}}\n")
+	root.SetVersionTemplate("unbound-force version {{.Version}}\n")
 
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newVersionCmd())
@@ -59,10 +59,10 @@ func runInit(p initParams) error {
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print the unbound version",
+		Short: "Print the unbound-force version",
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"unbound v%s (commit %s, built %s)\n",
+				"unbound-force v%s (commit %s, built %s)\n",
 				version, commit, date)
 		},
 	}

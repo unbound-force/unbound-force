@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestRunInit_FreshDir(t *testing.T) {
@@ -151,14 +153,14 @@ func TestVersionCmd_Output(t *testing.T) {
 	}
 
 	output := buf.String()
-	expected := "unbound v"
+	expected := "unbound-force v"
 	if !strings.HasPrefix(output, expected) {
 		t.Errorf("expected output to start with %q, got %q", expected, output)
 	}
 
-	// Verify format: "unbound vVERSION (commit COMMIT, built DATE)\n"
+	// Verify format: "unbound-force vVERSION (commit COMMIT, built DATE)\n"
 	if !strings.Contains(output, "(commit ") || !strings.Contains(output, "built ") {
-		t.Errorf("expected format 'unbound vX (commit Y, built Z)', got %q", output)
+		t.Errorf("expected format 'unbound-force vX (commit Y, built Z)', got %q", output)
 	}
 
 	// Verify the actual variable values are interpolated
@@ -171,5 +173,39 @@ func TestVersionCmd_Output(t *testing.T) {
 	}
 	if !strings.Contains(output, "built unknown") {
 		t.Errorf("expected 'built unknown' in output, got %q", output)
+	}
+}
+
+// TestRootCmd_HelpOutput is a regression guard for FR-004: the help
+// output must show the alias relationship and correct usage line.
+func TestRootCmd_HelpOutput(t *testing.T) {
+	root := &cobra.Command{
+		Use:   "unbound-force",
+		Short: "Unbound Force specification framework toolkit (alias: uf)",
+	}
+	root.AddCommand(newInitCmd())
+	root.AddCommand(newVersionCmd())
+	root.AddCommand(newDoctorCmd())
+	root.AddCommand(newSetupCmd())
+
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"--help"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("root --help error: %v", err)
+	}
+
+	output := buf.String()
+
+	// FR-004: help output must indicate the alias relationship.
+	if !strings.Contains(output, "(alias: uf)") {
+		t.Errorf("expected help output to contain '(alias: uf)', got:\n%s", output)
+	}
+
+	// Usage line must show unbound-force [command].
+	if !strings.Contains(output, "unbound-force [command]") {
+		t.Errorf("expected help output to contain 'unbound-force [command]', got:\n%s", output)
 	}
 }
