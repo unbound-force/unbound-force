@@ -6,6 +6,7 @@
       "stage_name": "define",
       "hero": "muti-mind",
       "status": "completed",
+      "execution_mode": "human",
       "artifacts_produced": ["backlog-item"],
       "started_at": "2026-03-20T09:00:00Z",
       "completed_at": "2026-03-20T10:00:00Z"
@@ -14,6 +15,7 @@
       "stage_name": "implement",
       "hero": "cobalt-crush",
       "status": "completed",
+      "execution_mode": "swarm",
       "artifacts_consumed": ["backlog-item"],
       "started_at": "2026-03-20T10:00:00Z",
       "completed_at": "2026-03-21T08:00:00Z"
@@ -22,6 +24,7 @@
       "stage_name": "validate",
       "hero": "gaze",
       "status": "completed",
+      "execution_mode": "swarm",
       "artifacts_produced": ["quality-report"],
       "started_at": "2026-03-21T08:00:00Z",
       "completed_at": "2026-03-21T08:30:00Z"
@@ -30,6 +33,7 @@
       "stage_name": "review",
       "hero": "the-divisor",
       "status": "completed",
+      "execution_mode": "swarm",
       "artifacts_produced": ["review-verdict"],
       "artifacts_consumed": ["quality-report"],
       "started_at": "2026-03-21T08:30:00Z",
@@ -39,15 +43,17 @@
       "stage_name": "accept",
       "hero": "muti-mind",
       "status": "completed",
+      "execution_mode": "human",
       "artifacts_produced": ["acceptance-decision"],
       "artifacts_consumed": ["review-verdict", "quality-report"],
       "started_at": "2026-03-21T09:00:00Z",
       "completed_at": "2026-03-21T09:15:00Z"
     },
     {
-      "stage_name": "measure",
+      "stage_name": "reflect",
       "hero": "mx-f",
       "status": "completed",
+      "execution_mode": "swarm",
       "artifacts_produced": ["metrics-snapshot"],
       "started_at": "2026-03-21T09:15:00Z",
       "completed_at": "2026-03-21T09:30:00Z"

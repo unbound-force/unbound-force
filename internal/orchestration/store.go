@@ -91,16 +91,21 @@ func (s *WorkflowStore) List(statusFilter string) ([]WorkflowInstance, error) {
 	return workflows, nil
 }
 
-// Latest returns the most recent active workflow for a given branch.
-// Returns nil if no active workflow exists for the branch.
+// Latest returns the most recent in-progress workflow for a given branch.
+// An in-progress workflow is one with StatusActive or StatusAwaitingHuman.
+// Returns nil if no in-progress workflow exists for the branch.
+// Per research.md R3: awaiting_human workflows are still "in progress"
+// from the operator's perspective and must be discoverable.
 func (s *WorkflowStore) Latest(branch string) (*WorkflowInstance, error) {
-	workflows, err := s.List(StatusActive)
+	// List all workflows (unfiltered) and find the first matching branch
+	// with an in-progress status. Results are sorted by started_at descending.
+	workflows, err := s.List("")
 	if err != nil {
-		return nil, fmt.Errorf("list active workflows: %w", err)
+		return nil, fmt.Errorf("list workflows: %w", err)
 	}
 
 	for _, wf := range workflows {
-		if wf.FeatureBranch == branch {
+		if wf.FeatureBranch == branch && (wf.Status == StatusActive || wf.Status == StatusAwaitingHuman) {
 			result := wf // copy to avoid returning pointer to loop variable
 			return &result, nil
 		}

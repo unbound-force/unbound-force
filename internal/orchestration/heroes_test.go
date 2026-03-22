@@ -117,12 +117,37 @@ func TestStageHeroMap(t *testing.T) {
 		StageValidate:  "gaze",
 		StageReview:    "divisor",
 		StageAccept:    "muti-mind",
-		StageMeasure:   "mx-f",
+		StageReflect:   "mx-f",
 	}
 
 	for stage, hero := range expected {
 		if m[stage] != hero {
 			t.Errorf("StageHeroMap[%q] = %q, want %q", stage, m[stage], hero)
+		}
+	}
+}
+
+func TestStageExecutionModeMap(t *testing.T) {
+	m := StageExecutionModeMap()
+
+	if len(m) != 6 {
+		t.Fatalf("StageExecutionModeMap has %d entries, want 6", len(m))
+	}
+
+	// Per FR-002: define=human, implement=swarm, validate=swarm,
+	// review=swarm, accept=human, reflect=swarm.
+	expected := map[string]string{
+		StageDefine:    ModeHuman,
+		StageImplement: ModeSwarm,
+		StageValidate:  ModeSwarm,
+		StageReview:    ModeSwarm,
+		StageAccept:    ModeHuman,
+		StageReflect:   ModeSwarm,
+	}
+
+	for stage, mode := range expected {
+		if m[stage] != mode {
+			t.Errorf("StageExecutionModeMap[%q] = %q, want %q", stage, m[stage], mode)
 		}
 	}
 }

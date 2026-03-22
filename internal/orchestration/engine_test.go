@@ -132,8 +132,8 @@ func TestOrchestrator_Start_MissingHeroes(t *testing.T) {
 	if !skippedStages[StageReview] {
 		t.Error("review stage should be skipped (divisor unavailable)")
 	}
-	if !skippedStages[StageMeasure] {
-		t.Error("measure stage should be skipped (mx-f unavailable)")
+	if !skippedStages[StageReflect] {
+		t.Error("reflect stage should be skipped (mx-f unavailable)")
 	}
 
 	if len(result.Warnings) < 3 {
@@ -151,15 +151,31 @@ func TestOrchestrator_Advance_ThroughAllStages(t *testing.T) {
 
 	wfID := result.Workflow.WorkflowID
 
-	// Advance through all 6 stages (first is already active from Start)
-	for i := 0; i < 6; i++ {
+	// With execution modes, the workflow pauses at the review→accept
+	// boundary (swarm→human). The advance sequence is:
+	//   1: define(human) → implement(swarm)
+	//   2: implement(swarm) → validate(swarm)
+	//   3: validate(swarm) → review(swarm)
+	//   4: review(swarm) → awaiting_human (checkpoint before accept)
+	//   5: resume → accept(human) activates
+	//   6: accept(human) → reflect(swarm)
+	//   7: reflect(swarm) → completed
+	awaitingHumanCount := 0
+	for i := 0; i < 7; i++ {
 		result, err = orch.Advance(wfID)
 		if err != nil {
 			t.Fatalf("Advance %d failed: %v", i+1, err)
 		}
+		if result.Workflow.Status == StatusAwaitingHuman {
+			awaitingHumanCount++
+		}
 	}
 
-	// After 6 advances, workflow should be completed
+	if awaitingHumanCount != 1 {
+		t.Errorf("expected workflow to pass through awaiting_human exactly once, got %d", awaitingHumanCount)
+	}
+
+	// After 7 advances, workflow should be completed
 	wf := result.Workflow
 	if wf.Status != StatusCompleted {
 		t.Errorf("Status = %q, want %q", wf.Status, StatusCompleted)
@@ -170,6 +186,12 @@ func TestOrchestrator_Advance_ThroughAllStages(t *testing.T) {
 		if stage.Status != StatusCompleted {
 			t.Errorf("stage %q status = %q, want %q", stage.StageName, stage.Status, StatusCompleted)
 		}
+	}
+
+	// Final stage should be "reflect" (not "measure")
+	lastStage := wf.Stages[len(wf.Stages)-1]
+	if lastStage.StageName != StageReflect {
+		t.Errorf("last stage = %q, want %q", lastStage.StageName, StageReflect)
 	}
 }
 
@@ -184,7 +206,7 @@ func TestOrchestrator_Advance_SkipsUnavailable(t *testing.T) {
 
 	wfID := result.Workflow.WorkflowID
 
-	// Advance: define -> implement -> (skip validate, review, measure) -> accept -> complete
+	// Advance: define → implement (skip validate, review, reflect) → accept → complete
 	// Stage 0 (define) is active, advance completes it and moves to stage 1 (implement)
 	result, err = orch.Advance(wfID)
 	if err != nil {
@@ -194,19 +216,28 @@ func TestOrchestrator_Advance_SkipsUnavailable(t *testing.T) {
 		t.Errorf("after advance 1, stage 1 (implement) should be active, got %q", result.Workflow.Stages[1].Status)
 	}
 
-	// Advance: implement -> accept (skipping validate, review)
+	// Advance: implement (swarm) → accept (human) — triggers checkpoint
 	result, err = orch.Advance(wfID)
 	if err != nil {
 		t.Fatalf("Advance 2 failed: %v", err)
 	}
-	if result.Workflow.Stages[4].Status != StatusActive {
-		t.Errorf("after advance 2, stage 4 (accept) should be active, got %q", result.Workflow.Stages[4].Status)
+	if result.Workflow.Status != StatusAwaitingHuman {
+		t.Errorf("after advance 2, status = %q, want %q", result.Workflow.Status, StatusAwaitingHuman)
 	}
 
-	// Advance: accept -> complete (skipping measure)
+	// Advance: resume from checkpoint → accept activates
 	result, err = orch.Advance(wfID)
 	if err != nil {
-		t.Fatalf("Advance 3 failed: %v", err)
+		t.Fatalf("Advance 3 (resume) failed: %v", err)
+	}
+	if result.Workflow.Stages[4].Status != StatusActive {
+		t.Errorf("after advance 3, stage 4 (accept) should be active, got %q", result.Workflow.Stages[4].Status)
+	}
+
+	// Advance: accept → complete (reflect skipped)
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance 4 failed: %v", err)
 	}
 
 	if result.Workflow.Status != StatusCompleted {
@@ -251,8 +282,8 @@ func TestOrchestrator_Complete_ProducesRecord(t *testing.T) {
 
 	wfID := result.Workflow.WorkflowID
 
-	// Advance through all stages
-	for i := 0; i < 6; i++ {
+	// Advance through all stages (7 advances with checkpoint)
+	for i := 0; i < 7; i++ {
 		_, err = orch.Advance(wfID)
 		if err != nil {
 			t.Fatalf("Advance %d failed: %v", i+1, err)
@@ -343,7 +374,7 @@ func TestGenerateWorkflowRecord_CompletedWorkflow(t *testing.T) {
 				ArtifactsProduced: []string{"quality-report.json"}},
 			{StageName: StageReview, Hero: "divisor", Status: StatusCompleted},
 			{StageName: StageAccept, Hero: "muti-mind", Status: StatusCompleted},
-			{StageName: StageMeasure, Hero: "mx-f", Status: StatusCompleted},
+			{StageName: StageReflect, Hero: "mx-f", Status: StatusCompleted},
 		},
 	}
 
@@ -403,7 +434,7 @@ func TestGenerateWorkflowRecord_RejectedWorkflow(t *testing.T) {
 			{StageName: StageValidate, Hero: "gaze", Status: StatusCompleted},
 			{StageName: StageReview, Hero: "divisor", Status: StatusCompleted},
 			{StageName: StageAccept, Hero: "muti-mind", Status: StatusFailed},
-			{StageName: StageMeasure, Hero: "mx-f", Status: StatusSkipped},
+			{StageName: StageReflect, Hero: "mx-f", Status: StatusSkipped},
 		},
 	}
 
@@ -644,8 +675,8 @@ func TestOrchestrator_Advance_NonActiveWorkflow(t *testing.T) {
 
 	wfID := result.Workflow.WorkflowID
 
-	// Advance through all stages to complete the workflow
-	for i := 0; i < 6; i++ {
+	// Advance through all stages to complete the workflow (7 with checkpoint)
+	for i := 0; i < 7; i++ {
 		_, err = orch.Advance(wfID)
 		if err != nil {
 			t.Fatalf("Advance %d failed: %v", i+1, err)
@@ -690,6 +721,283 @@ func TestSanitizeBranch(t *testing.T) {
 				t.Errorf("sanitizeBranch(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+// --- User Story 1: Swarm Delegation After Clarify ---
+
+func TestOrchestrator_NewWorkflow_SetsExecutionModes(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	wf := orch.NewWorkflow("feat/modes", "BI-100")
+
+	expectedModes := StageExecutionModeMap()
+	for _, stage := range wf.Stages {
+		want := expectedModes[stage.StageName]
+		if stage.ExecutionMode != want {
+			t.Errorf("stage %q ExecutionMode = %q, want %q", stage.StageName, stage.ExecutionMode, want)
+		}
+	}
+}
+
+func TestOrchestrator_Advance_PausesAtHumanCheckpoint(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	result, err := orch.Start("feat/checkpoint", "BI-101")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	wfID := result.Workflow.WorkflowID
+
+	// Advance 1: complete define (human) → implement (swarm) activates
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance 1 (define→implement) failed: %v", err)
+	}
+	if result.Workflow.Status != StatusActive {
+		t.Errorf("after advance 1, status = %q, want %q", result.Workflow.Status, StatusActive)
+	}
+
+	// Advance 2: complete implement (swarm) → validate (swarm) activates
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance 2 (implement→validate) failed: %v", err)
+	}
+	if result.Workflow.Status != StatusActive {
+		t.Errorf("after advance 2, status = %q, want %q", result.Workflow.Status, StatusActive)
+	}
+
+	// Advance 3: complete validate (swarm) → review (swarm) activates
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance 3 (validate→review) failed: %v", err)
+	}
+	if result.Workflow.Status != StatusActive {
+		t.Errorf("after advance 3, status = %q, want %q", result.Workflow.Status, StatusActive)
+	}
+
+	// Advance 4: complete review (swarm) → next is accept (human)
+	// This should trigger awaiting_human checkpoint
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance 4 (review→checkpoint) failed: %v", err)
+	}
+	if result.Workflow.Status != StatusAwaitingHuman {
+		t.Errorf("after advance 4, status = %q, want %q", result.Workflow.Status, StatusAwaitingHuman)
+	}
+
+	// Accept stage should still be pending (not activated)
+	wf, err := orch.Status(wfID)
+	if err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+	if wf.Stages[4].Status != StatusPending {
+		t.Errorf("accept stage status = %q, want %q", wf.Stages[4].Status, StatusPending)
+	}
+}
+
+func TestOrchestrator_Advance_ResumesFromCheckpoint(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	result, err := orch.Start("feat/resume", "BI-102")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	wfID := result.Workflow.WorkflowID
+
+	// Advance through define, implement, validate, review to reach checkpoint
+	for i := 0; i < 4; i++ {
+		result, err = orch.Advance(wfID)
+		if err != nil {
+			t.Fatalf("Advance %d failed: %v", i+1, err)
+		}
+	}
+
+	// Verify we're at the checkpoint
+	if result.Workflow.Status != StatusAwaitingHuman {
+		t.Fatalf("expected awaiting_human, got %q", result.Workflow.Status)
+	}
+
+	// Advance from checkpoint — should resume and activate accept
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance from checkpoint failed: %v", err)
+	}
+
+	if result.Workflow.Status != StatusActive {
+		t.Errorf("after resume, status = %q, want %q", result.Workflow.Status, StatusActive)
+	}
+
+	// Accept stage should now be active
+	wf, err := orch.Status(wfID)
+	if err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+	if wf.Stages[4].Status != StatusActive {
+		t.Errorf("accept stage status = %q, want %q", wf.Stages[4].Status, StatusActive)
+	}
+}
+
+func TestOrchestrator_Advance_SwarmToSwarmNoPause(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	result, err := orch.Start("feat/swarm-flow", "BI-103")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	wfID := result.Workflow.WorkflowID
+
+	// Advance 1: define (human) → implement (swarm) — no checkpoint
+	// (human→swarm does not trigger checkpoint)
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance 1 failed: %v", err)
+	}
+	if result.Workflow.Status == StatusAwaitingHuman {
+		t.Error("human→swarm transition should NOT trigger awaiting_human")
+	}
+
+	// Advance 2: implement (swarm) → validate (swarm) — no checkpoint
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance 2 failed: %v", err)
+	}
+	if result.Workflow.Status == StatusAwaitingHuman {
+		t.Error("swarm→swarm (implement→validate) should NOT trigger awaiting_human")
+	}
+
+	// Advance 3: validate (swarm) → review (swarm) — no checkpoint
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance 3 failed: %v", err)
+	}
+	if result.Workflow.Status == StatusAwaitingHuman {
+		t.Error("swarm→swarm (validate→review) should NOT trigger awaiting_human")
+	}
+}
+
+// --- User Story 2: Execution Mode Per Stage ---
+
+func TestOrchestrator_Advance_LegacyWorkflowNoCheckpoints(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	result, err := orch.Start("feat/legacy", "BI-200")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	wfID := result.Workflow.WorkflowID
+
+	// Simulate a legacy workflow by clearing all execution_mode fields.
+	// Per FR-010: empty execution mode is treated as "human" for backward
+	// compatibility, so no checkpoint pausing should occur.
+	wf, err := orch.store().Load(wfID)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	for i := range wf.Stages {
+		wf.Stages[i].ExecutionMode = ""
+	}
+	if err := orch.store().Save(wf); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Advance through all 6 stages — no awaiting_human should occur
+	// because all stages are effectively human-mode (empty = human).
+	for i := 0; i < 6; i++ {
+		result, err = orch.Advance(wfID)
+		if err != nil {
+			t.Fatalf("Advance %d failed: %v", i+1, err)
+		}
+		if result.Workflow.Status == StatusAwaitingHuman {
+			t.Fatalf("legacy workflow should NOT trigger awaiting_human at advance %d", i+1)
+		}
+	}
+
+	if result.Workflow.Status != StatusCompleted {
+		t.Errorf("Status = %q, want %q", result.Workflow.Status, StatusCompleted)
+	}
+}
+
+func TestOrchestrator_Advance_AllSwarmSkipped_NoCheckpoint(t *testing.T) {
+	// Only muti-mind available — all swarm-mode heroes are unavailable.
+	// Per FR-014: when all swarm-mode stages between two human checkpoints
+	// are skipped, the workflow transitions directly to the next human-mode
+	// stage without entering awaiting_human.
+	orch := newTestOrchestrator(t, []string{"muti-mind-po.md"}, map[string]bool{})
+
+	result, err := orch.Start("feat/no-swarm", "BI-201")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	wfID := result.Workflow.WorkflowID
+
+	// Only define and accept are available (both human-mode).
+	// implement, validate, review, reflect are all skipped.
+	// Advance from define (human) → accept (human) should NOT trigger
+	// awaiting_human because the completed stage is human-mode.
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance 1 failed: %v", err)
+	}
+	if result.Workflow.Status == StatusAwaitingHuman {
+		t.Error("human→human transition (all swarm skipped) should NOT trigger awaiting_human")
+	}
+	if result.Workflow.Stages[4].Status != StatusActive {
+		t.Errorf("accept stage status = %q, want %q", result.Workflow.Stages[4].Status, StatusActive)
+	}
+
+	// Advance from accept → complete (reflect skipped)
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance 2 failed: %v", err)
+	}
+	if result.Workflow.Status != StatusCompleted {
+		t.Errorf("Status = %q, want %q", result.Workflow.Status, StatusCompleted)
+	}
+}
+
+func TestOrchestrator_Advance_EscalationWithExecutionModes(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	result, err := orch.Start("feat/esc-modes", "BI-202")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	wfID := result.Workflow.WorkflowID
+
+	// Manually set up: stages 0-2 completed, stage 3 (review) pending,
+	// iteration count at max. Verify escalation fires regardless of
+	// execution mode.
+	wf, err := orch.store().Load(wfID)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	wf.IterationCount = MaxIterations
+	now := time.Date(2026, 3, 20, 15, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		wf.Stages[i].Status = StatusCompleted
+		wf.Stages[i].CompletedAt = &now
+	}
+	wf.Stages[3].Status = StatusPending // review
+	wf.CurrentStage = 2                 // currently at validate (completed)
+	if err := orch.store().Save(wf); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Advance should trigger escalation at review regardless of execution mode
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if result.Workflow.Status != StatusEscalated {
+		t.Errorf("Status = %q, want %q", result.Workflow.Status, StatusEscalated)
 	}
 }
 

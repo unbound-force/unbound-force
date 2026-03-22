@@ -1,7 +1,7 @@
 // Package orchestration implements the swarm orchestration engine
 // for the Unbound Force hero lifecycle workflow. It manages the
 // 6-stage feature lifecycle (define, implement, validate, review,
-// accept, measure), hero availability detection, workflow state
+// accept, reflect), hero availability detection, workflow state
 // persistence, and learning feedback extraction.
 package orchestration
 
@@ -14,7 +14,7 @@ const (
 	StageValidate  = "validate"
 	StageReview    = "review"
 	StageAccept    = "accept"
-	StageMeasure   = "measure"
+	StageReflect   = "reflect"
 )
 
 // StageOrder returns the canonical sequence of workflow stages.
@@ -26,18 +26,26 @@ func StageOrder() []string {
 		StageValidate,
 		StageReview,
 		StageAccept,
-		StageMeasure,
+		StageReflect,
 	}
 }
 
 // Status constants for workflow and stage state transitions.
 const (
-	StatusPending   = "pending"
-	StatusActive    = "active"
-	StatusCompleted = "completed"
-	StatusSkipped   = "skipped"
-	StatusFailed    = "failed"
-	StatusEscalated = "escalated"
+	StatusPending       = "pending"
+	StatusActive        = "active"
+	StatusCompleted     = "completed"
+	StatusSkipped       = "skipped"
+	StatusFailed        = "failed"
+	StatusEscalated     = "escalated"
+	StatusAwaitingHuman = "awaiting_human"
+)
+
+// Execution mode constants indicate whether a stage is driven by
+// a human operator or by the swarm autonomously.
+const (
+	ModeHuman = "human"
+	ModeSwarm = "swarm"
 )
 
 // Outcome constants for workflow records.
@@ -68,6 +76,7 @@ type WorkflowStage struct {
 	StageName         string     `json:"stage_name"`
 	Hero              string     `json:"hero"`
 	Status            string     `json:"status"`
+	ExecutionMode     string     `json:"execution_mode,omitempty"`
 	ArtifactsProduced []string   `json:"artifacts_produced,omitempty"`
 	ArtifactsConsumed []string   `json:"artifacts_consumed,omitempty"`
 	StartedAt         *time.Time `json:"started_at,omitempty"`

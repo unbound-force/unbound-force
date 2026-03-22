@@ -76,12 +76,12 @@ This skill teaches the Swarm coordinator about the Unbound Force hero team, thei
 The hero lifecycle follows 6 stages in sequence:
 
 ```
-1. define      (Muti-Mind)     → Backlog item + spec
-2. implement   (Cobalt-Crush)  → Code + tests
-3. validate    (Gaze)          → Quality report
-4. review      (The Divisor)   → Review verdict
-5. accept      (Muti-Mind)     → Acceptance decision
-6. measure     (Mx F)          → Metrics snapshot
+1. define      (Muti-Mind)     → Backlog item + spec          [human]
+2. implement   (Cobalt-Crush)  → Code + tests                 [swarm]
+3. validate    (Gaze)          → Quality report                [swarm]
+4. review      (The Divisor)   → Review verdict                [swarm]
+5. accept      (Muti-Mind)     → Acceptance decision           [human]
+6. reflect     (Mx F)          → Metrics snapshot + learning   [swarm]
 ```
 
 ### Stage Transitions
@@ -90,6 +90,48 @@ The hero lifecycle follows 6 stages in sequence:
 - Stages can be **skipped** if the hero is unavailable
 - The review → implement loop allows up to 3 iterations
 - After 3 iterations, the workflow **escalates** to human review
+- At swarm→human boundaries, the workflow **pauses** with `awaiting_human` status
+
+### Reflect Stage
+
+The final stage (owned by Mx F) runs autonomously after the human accepts the increment. It produces a richer output than simple metrics collection:
+
+1. **Metrics snapshot**: Velocity, quality trends, CI health — collected via `mxf collect` and `mxf metrics`
+2. **Learning feedback**: Cross-hero pattern analysis via `AnalyzeWorkflows` — detects recurring review findings, quality regressions, and convention pack update opportunities across 3+ completed workflows
+3. **Retrospective summary**: Incorporates empirical data from:
+   - **Quality report** (from validate stage) — Gaze's CRAP scores, coverage data, testability findings
+   - **Review verdict** (from review stage) — The Divisor's multi-persona findings, severity distribution, recurring patterns
+
+The reflect stage explicitly **consumes** artifacts produced by the validate and review stages. When sufficient workflow history exists (3+ completed workflows), it triggers `AnalyzeWorkflows` to produce `LearningFeedback` artifacts with actionable recommendations (e.g., convention pack updates for recurring review findings).
+
+## Execution Modes
+
+Each workflow stage has an execution mode that determines who drives it:
+
+| Stage | Mode | Driver |
+|-------|------|--------|
+| define | `[human]` | Human operator specifies and clarifies the feature |
+| implement | `[swarm]` | Swarm runs Cobalt-Crush autonomously |
+| validate | `[swarm]` | Swarm runs Gaze autonomously |
+| review | `[swarm]` | Swarm runs The Divisor autonomously |
+| accept | `[human]` | Human reviews and makes acceptance decision |
+| reflect | `[swarm]` | Swarm runs Mx F autonomously |
+
+### Swarm Delegation Pattern
+
+The workflow supports autonomous swarm delegation with human checkpoints:
+
+1. **Human defines** the feature (define stage) and hands off with `/workflow advance`
+2. **Swarm runs autonomously** through implement → validate → review
+3. **Workflow pauses** at the swarm→human boundary with `awaiting_human` status
+4. **Human resumes** with `/workflow advance`, reviews the increment, and accepts
+5. **Swarm runs reflect** autonomously after acceptance — collecting metrics, running learning analysis, and producing a retrospective summary
+
+The complete workflow requires exactly **2 human decision points**: one to hand off after define, and one to accept the increment. Everything else runs autonomously.
+
+### Legacy Workflows
+
+Workflows created before execution mode support (without `execution_mode` fields) are treated as all-human for backward compatibility. They advance one stage at a time with no automatic checkpoint pausing.
 
 ## Escalation Rules
 

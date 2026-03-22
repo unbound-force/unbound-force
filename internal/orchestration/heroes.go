@@ -22,7 +22,7 @@ var heroSpecs = []heroSpec{
 	{Name: "gaze", Role: StageValidate, Binary: "gaze"},
 	{Name: "divisor", Role: StageReview, AgentFile: "divisor-guard.md"}, // any divisor-*.md
 	{Name: "muti-mind", Role: StageAccept, AgentFile: "muti-mind-po.md"},
-	{Name: "mx-f", Role: StageMeasure, AgentFile: "mx-f-coach.md", Binary: "mxf"},
+	{Name: "mx-f", Role: StageReflect, AgentFile: "mx-f-coach.md", Binary: "mxf"},
 }
 
 // DetectHeroes checks for hero availability by looking for agent files
@@ -86,7 +86,22 @@ func StageHeroMap() map[string]string {
 		StageValidate:  "gaze",
 		StageReview:    "divisor",
 		StageAccept:    "muti-mind",
-		StageMeasure:   "mx-f",
+		StageReflect:   "mx-f",
+	}
+}
+
+// StageExecutionModeMap returns the default execution mode for each stage.
+// Human-mode stages require explicit operator action; swarm-mode stages
+// run autonomously. Per FR-002: define=human, implement=swarm,
+// validate=swarm, review=swarm, accept=human, reflect=swarm.
+func StageExecutionModeMap() map[string]string {
+	return map[string]string{
+		StageDefine:    ModeHuman,
+		StageImplement: ModeSwarm,
+		StageValidate:  ModeSwarm,
+		StageReview:    ModeSwarm,
+		StageAccept:    ModeHuman,
+		StageReflect:   ModeSwarm,
 	}
 }
 

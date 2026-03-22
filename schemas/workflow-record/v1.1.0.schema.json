@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/unbound-force/unbound-force/internal/orchestration/workflow-record",
+  "$id": "https://github.com/unbound-force/unbound-force/internal/orchestration/workflow-record/v1.1.0",
   "properties": {
     "workflow_id": {
       "type": "string"
@@ -21,7 +21,9 @@
             "type": "string"
           },
           "execution_mode": {
-            "type": "string"
+            "type": "string",
+            "enum": ["human", "swarm"],
+            "description": "Who drives this stage: human operator or swarm autonomously"
           },
           "artifacts_produced": {
             "items": {

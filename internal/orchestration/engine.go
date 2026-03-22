@@ -78,14 +78,16 @@ func (o *Orchestrator) NewWorkflow(branch, backlogItemID string) *WorkflowInstan
 	}
 
 	stageHeroes := StageHeroMap()
+	stageModes := StageExecutionModeMap()
 	order := StageOrder()
 	stages := make([]WorkflowStage, len(order))
 	for i, stageName := range order {
 		hero := stageHeroes[stageName]
 		stage := WorkflowStage{
-			StageName: stageName,
-			Hero:      hero,
-			Status:    StatusPending,
+			StageName:     stageName,
+			Hero:          hero,
+			Status:        StatusPending,
+			ExecutionMode: stageModes[stageName],
 		}
 
 		if !heroAvail[hero] {
@@ -159,26 +161,36 @@ func (o *Orchestrator) Advance(workflowID string) (*WorkflowResult, error) {
 		return nil, fmt.Errorf("load workflow: %w", err)
 	}
 
-	if wf.Status != StatusActive {
+	// Accept both active and awaiting_human workflows. Reject completed,
+	// failed, and escalated workflows. Per FR-005 and research.md R1:
+	// Advance() serves as both the normal transition and the resume API.
+	if wf.Status != StatusActive && wf.Status != StatusAwaitingHuman {
 		return nil, fmt.Errorf("workflow %q is not active (status: %s)", workflowID, wf.Status)
 	}
 
-	// Complete the current stage
-	current := wf.CurrentStage
-	if current >= 0 && current < len(wf.Stages) && wf.Stages[current].Status == StatusActive {
-		now := o.now()
-		wf.Stages[current].Status = StatusCompleted
-		wf.Stages[current].CompletedAt = &now
+	// Resume path: when the workflow is paused at a human checkpoint,
+	// skip the current-stage-completion logic and proceed directly to
+	// finding and activating the next pending human-mode stage.
+	resuming := wf.Status == StatusAwaitingHuman
 
-		// Record artifacts consumed from previous stage's hero.
-		// This is metadata tracking — not actual hero invocation.
-		if current > 0 {
-			prevStage := wf.Stages[current-1]
-			if len(prevStage.ArtifactsProduced) > 0 {
-				wf.Stages[current].ArtifactsConsumed = append(
-					wf.Stages[current].ArtifactsConsumed,
-					prevStage.ArtifactsProduced...,
-				)
+	// Complete the current stage (skip when resuming from checkpoint)
+	current := wf.CurrentStage
+	if !resuming {
+		if current >= 0 && current < len(wf.Stages) && wf.Stages[current].Status == StatusActive {
+			now := o.now()
+			wf.Stages[current].Status = StatusCompleted
+			wf.Stages[current].CompletedAt = &now
+
+			// Record artifacts consumed from previous stage's hero.
+			// This is metadata tracking — not actual hero invocation.
+			if current > 0 {
+				prevStage := wf.Stages[current-1]
+				if len(prevStage.ArtifactsProduced) > 0 {
+					wf.Stages[current].ArtifactsConsumed = append(
+						wf.Stages[current].ArtifactsConsumed,
+						prevStage.ArtifactsProduced...,
+					)
+				}
 			}
 		}
 	}
@@ -191,11 +203,36 @@ func (o *Orchestrator) Advance(workflowID string) (*WorkflowResult, error) {
 			continue
 		}
 		if wf.Stages[i].Status == StatusPending {
+			// Checkpoint detection: when completing a swarm-mode stage
+			// and the next non-skipped stage is human-mode, pause the
+			// workflow at the boundary instead of activating the next
+			// stage. Per FR-004 and research.md R1.
+			// Skip checkpoint detection when resuming from an existing
+			// checkpoint — the human has explicitly chosen to advance.
+			completedMode := effectiveMode(wf.Stages[current].ExecutionMode)
+			nextMode := effectiveMode(wf.Stages[i].ExecutionMode)
+			if !resuming && completedMode == ModeSwarm && nextMode == ModeHuman {
+				wf.Status = StatusAwaitingHuman
+				nextFound = true
+				if err := o.store().Save(wf); err != nil {
+					return nil, fmt.Errorf("save workflow at checkpoint: %w", err)
+				}
+				return &WorkflowResult{
+					Workflow:  wf,
+					StagesRun: stagesRun,
+				}, nil
+			}
+
 			now := o.now()
 			wf.Stages[i].Status = StatusActive
 			wf.Stages[i].StartedAt = &now
 			wf.CurrentStage = i
 			nextFound = true
+
+			// When resuming from a checkpoint, restore active status.
+			if resuming {
+				wf.Status = StatusActive
+			}
 
 			// Track review iterations
 			if wf.Stages[i].StageName == StageReview {
@@ -410,6 +447,16 @@ func (o *Orchestrator) HandleContradiction(workflowID, conflict string) error {
 	}
 
 	return o.store().Save(wf)
+}
+
+// effectiveMode returns the execution mode for a stage, defaulting to
+// ModeHuman when the field is empty. This provides backward compatibility
+// for legacy workflow JSON files that lack execution_mode fields (FR-010).
+func effectiveMode(mode string) string {
+	if mode == "" {
+		return ModeHuman
+	}
+	return mode
 }
 
 // sanitizeBranch converts a branch name to a safe workflow ID component.

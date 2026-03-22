@@ -155,6 +155,39 @@ func TestWorkflowStore_Latest_ByBranch(t *testing.T) {
 	}
 }
 
+func TestWorkflowStore_Latest_FindsAwaitingHuman(t *testing.T) {
+	dir := t.TempDir()
+	store := &WorkflowStore{Dir: dir}
+
+	now := time.Date(2026, 3, 22, 14, 0, 0, 0, time.UTC)
+
+	// Save a workflow with StatusAwaitingHuman
+	wf := &WorkflowInstance{
+		WorkflowID:    "wf-awaiting-001",
+		FeatureBranch: "feat/paused",
+		StartedAt:     now,
+		Status:        StatusAwaitingHuman,
+	}
+	if err := store.Save(wf); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Latest() should find it even though it's not StatusActive
+	latest, err := store.Latest("feat/paused")
+	if err != nil {
+		t.Fatalf("Latest failed: %v", err)
+	}
+	if latest == nil {
+		t.Fatal("expected non-nil latest for awaiting_human workflow")
+	}
+	if latest.WorkflowID != "wf-awaiting-001" {
+		t.Errorf("WorkflowID = %q, want %q", latest.WorkflowID, "wf-awaiting-001")
+	}
+	if latest.Status != StatusAwaitingHuman {
+		t.Errorf("Status = %q, want %q", latest.Status, StatusAwaitingHuman)
+	}
+}
+
 func TestWorkflowStore_Load_MissingFile(t *testing.T) {
 	dir := t.TempDir()
 	store := &WorkflowStore{Dir: dir}
