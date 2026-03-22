@@ -503,6 +503,8 @@ This repo is primarily specifications and governance documents. Follow these con
 - Go 1.24+ + `github.com/spf13/cobra` (CLI), `github.com/charmbracelet/lipgloss` (terminal styling), `gopkg.in/yaml.v3` (frontmatter parsing) (011-doctor-setup)
 - N/A (reads filesystem and subprocess output, writes only to `opencode.json`) (011-doctor-setup)
 - Go 1.24 + `github.com/spf13/cobra` (012-swarm-delegation)
+- Go 1.24+ (same as graphthulhu) + `github.com/modelcontextprotocol/go-sdk/mcp` (014-dewey-architecture)
+- SQLite for persistent indexes (knowledge (014-dewey-architecture)
 
 ## Recent Changes
 
