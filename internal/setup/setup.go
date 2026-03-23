@@ -197,7 +197,10 @@ func Run(opts Options) error {
 		results = append(results, stepResult{name: ".hive/", action: "skipped", detail: "no swarm"})
 	}
 
-	// Step 8: Run uf init (FR-033).
+	// Step 8: Install Dewey (after Swarm, before uf init).
+	results = append(results, installDewey(&opts, env))
+
+	// Step 9: Run uf init (FR-033).
 	results = append(results, runUnboundInit(&opts))
 
 	// Print results.
@@ -232,8 +235,8 @@ func Run(opts Options) error {
 	if _, ollamaErr := opts.LookPath("ollama"); ollamaErr != nil {
 		fmt.Fprintln(opts.Stdout)
 		fmt.Fprintln(opts.Stdout, "Tip: Install Ollama for enhanced semantic memory:")
-		fmt.Fprintln(opts.Stdout, "  brew install ollama && ollama pull mxbai-embed-large")
-		fmt.Fprintln(opts.Stdout, "  (Without Ollama, semantic memory uses full-text search)")
+		fmt.Fprintln(opts.Stdout, "  brew install ollama && ollama pull granite-embedding:30m")
+		fmt.Fprintln(opts.Stdout, "  (Without Ollama, Dewey uses full-text search only)")
 	}
 
 	return nil
@@ -416,9 +419,20 @@ func installSwarmPlugin(opts *Options, env doctor.DetectedEnvironment) stepResul
 }
 
 // runSwarmSetup runs `swarm setup` per FR-026.
+// swarm setup may prompt for user input, so it requires either
+// the --yes flag or an interactive terminal. Without these,
+// CombinedOutput() would hang waiting for stdin that never arrives.
 func runSwarmSetup(opts *Options) stepResult {
 	if opts.DryRun {
 		return stepResult{name: "swarm setup", action: "dry-run", detail: "Would run: swarm setup"}
+	}
+
+	if !opts.YesFlag && !opts.IsTTY() {
+		return stepResult{
+			name:   "swarm setup",
+			action: "skipped",
+			detail: "interactive — run `swarm setup` manually or use --yes",
+		}
 	}
 
 	if _, err := opts.ExecCmd("swarm", "setup"); err != nil {
@@ -495,6 +509,8 @@ func configureOpencodeJSON(opts *Options) stepResult {
 }
 
 // initializeHive runs `swarm init` if .hive/ doesn't exist per FR-029.
+// swarm init may prompt for user input, so it requires either
+// the --yes flag or an interactive terminal.
 func initializeHive(opts *Options) stepResult {
 	hivePath := filepath.Join(opts.TargetDir, ".hive")
 	if info, err := os.Stat(hivePath); err == nil && info.IsDir() {
@@ -505,10 +521,82 @@ func initializeHive(opts *Options) stepResult {
 		return stepResult{name: ".hive/", action: "dry-run", detail: "Would run: swarm init"}
 	}
 
+	if !opts.YesFlag && !opts.IsTTY() {
+		return stepResult{
+			name:   ".hive/",
+			action: "skipped",
+			detail: "interactive — run `swarm init` manually or use --yes",
+		}
+	}
+
 	if _, err := opts.ExecCmd("swarm", "init"); err != nil {
 		return stepResult{name: ".hive/", action: "failed", detail: "swarm init failed", err: err}
 	}
 	return stepResult{name: ".hive/", action: "initialized"}
+}
+
+// installDewey installs Dewey and pulls the embedding model.
+// Position: after Swarm plugin, before uf init.
+// Design decision: Dewey is optional (Constitution Principle II —
+// Composability First), so installation failures produce warnings
+// rather than hard failures. Note: brew install and ollama pull are
+// non-interactive (no stdin prompts), so no interactive guard is
+// needed here (unlike swarm setup which may prompt for input).
+func installDewey(opts *Options, env doctor.DetectedEnvironment) stepResult {
+	if _, err := opts.LookPath("dewey"); err == nil {
+		// Dewey already installed — check embedding model.
+		return pullEmbeddingModel(opts)
+	}
+
+	if opts.DryRun {
+		if doctor.HasManager(env, doctor.ManagerHomebrew) {
+			return stepResult{name: "Dewey", action: "dry-run", detail: "Would install: brew install unbound-force/tap/dewey"}
+		}
+		return stepResult{name: "Dewey", action: "skipped", detail: "Homebrew not available"}
+	}
+
+	if !doctor.HasManager(env, doctor.ManagerHomebrew) {
+		return stepResult{
+			name:   "Dewey",
+			action: "skipped",
+			detail: "Homebrew not available. Install from https://github.com/unbound-force/dewey",
+		}
+	}
+
+	if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/dewey"); err != nil {
+		return stepResult{name: "Dewey", action: "failed", detail: "brew install failed", err: err}
+	}
+
+	// After installing, pull the embedding model.
+	modelResult := pullEmbeddingModel(opts)
+	if modelResult.action == "failed" {
+		return stepResult{name: "Dewey", action: "installed", detail: "via Homebrew (embedding model pull failed)"}
+	}
+
+	return stepResult{name: "Dewey", action: "installed", detail: "via Homebrew"}
+}
+
+// pullEmbeddingModel pulls the granite-embedding:30m model via Ollama.
+func pullEmbeddingModel(opts *Options) stepResult {
+	if _, err := opts.LookPath("ollama"); err != nil {
+		return stepResult{name: "Dewey", action: "already installed", detail: "embedding model requires ollama"}
+	}
+
+	if opts.DryRun {
+		return stepResult{name: "Dewey", action: "dry-run", detail: "Would run: ollama pull granite-embedding:30m"}
+	}
+
+	// Check if model is already pulled.
+	output, err := opts.ExecCmd("ollama", "list")
+	if err == nil && strings.Contains(string(output), "granite-embedding") {
+		return stepResult{name: "Dewey", action: "already installed", detail: "embedding model ready"}
+	}
+
+	if _, err := opts.ExecCmd("ollama", "pull", "granite-embedding:30m"); err != nil {
+		return stepResult{name: "Dewey", action: "failed", detail: "ollama pull failed", err: err}
+	}
+
+	return stepResult{name: "Dewey", action: "installed", detail: "embedding model pulled"}
 }
 
 // runUnboundInit runs `uf init` if .opencode/ doesn't exist per FR-033.

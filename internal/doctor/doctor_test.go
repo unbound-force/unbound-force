@@ -352,11 +352,11 @@ func TestCheckCoreTools(t *testing.T) {
 	opts := &Options{
 		TargetDir: t.TempDir(),
 		LookPath: stubLookPath(map[string]string{
-			"go":          "/home/user/.goenv/shims/go",
-			"gaze":        "/opt/homebrew/bin/gaze",
-			"graphthulhu": "/opt/homebrew/bin/graphthulhu",
-			"node":        "/home/user/.nvm/versions/node/v22.15.0/bin/node",
-			"swarm":       "/usr/local/bin/swarm",
+			"go":    "/home/user/.goenv/shims/go",
+			"gaze":  "/opt/homebrew/bin/gaze",
+			"dewey": "/opt/homebrew/bin/dewey",
+			"node":  "/home/user/.nvm/versions/node/v22.15.0/bin/node",
+			"swarm": "/usr/local/bin/swarm",
 		}),
 		ExecCmd: stubExecCmd(
 			map[string]string{
@@ -437,14 +437,8 @@ func TestCheckCoreTools(t *testing.T) {
 		t.Error("mxf check not found")
 	}
 
-	// graphthulhu: found -> Pass
-	if r, ok := results["graphthulhu"]; ok {
-		if r.Severity != Pass {
-			t.Errorf("graphthulhu severity = %v, want Pass", r.Severity)
-		}
-	} else {
-		t.Error("graphthulhu check not found")
-	}
+	// dewey is checked in the dedicated "Dewey Knowledge Layer" group,
+	// not in Core Tools. See TestCheckDewey_* tests.
 
 	// node: found via nvm, version 22.15.0
 	if r, ok := results["node"]; ok {
@@ -625,9 +619,9 @@ func TestCheckMCPConfig(t *testing.T) {
 
 	ocJSON := `{
   "mcpServers": {
-    "knowledge-graph": {
-      "command": "graphthulhu",
-      "args": ["--port", "3000"]
+    "dewey": {
+      "command": "dewey",
+      "args": ["serve", "--vault", "."]
     }
   }
 }`
@@ -635,7 +629,7 @@ func TestCheckMCPConfig(t *testing.T) {
 
 	opts := &Options{
 		TargetDir: dir,
-		LookPath:  stubLookPathSimple(map[string]bool{"graphthulhu": true}),
+		LookPath:  stubLookPathSimple(map[string]bool{"dewey": true}),
 		ReadFile:  os.ReadFile,
 	}
 
@@ -649,8 +643,8 @@ func TestCheckMCPConfig(t *testing.T) {
 	if r := results["opencode.json"]; r.Severity != Pass {
 		t.Errorf("opencode.json severity = %v, want Pass", r.Severity)
 	}
-	if r := results["knowledge-graph"]; r.Severity != Pass {
-		t.Errorf("knowledge-graph severity = %v, want Pass", r.Severity)
+	if r := results["dewey"]; r.Severity != Pass {
+		t.Errorf("dewey severity = %v, want Pass", r.Severity)
 	}
 }
 
@@ -804,11 +798,12 @@ func TestDoctorRun(t *testing.T) {
 		t.Log("Run returned nil error (all checks passed or only warnings)")
 	}
 
-	// Verify 7 groups in correct order.
+	// Verify 8 groups in correct order.
 	expectedGroups := []string{
 		"Detected Environment",
 		"Core Tools",
 		"Swarm Plugin",
+		"Dewey Knowledge Layer",
 		"Scaffolded Files",
 		"Hero Availability",
 		"MCP Server Config",
@@ -966,8 +961,8 @@ func TestDoctorRun_NonGitDir(t *testing.T) {
 	}
 
 	// All checks should still execute.
-	if len(report.Groups) != 7 {
-		t.Errorf("expected 7 groups, got %d", len(report.Groups))
+	if len(report.Groups) != 8 {
+		t.Errorf("expected 8 groups, got %d", len(report.Groups))
 	}
 }
 
@@ -1617,7 +1612,7 @@ func TestHomebrewInstallCmd(t *testing.T) {
 		{"opencode", "brew install anomalyco/tap/opencode"},
 		{"gaze", "brew install unbound-force/tap/gaze"},
 		{"mxf", "brew install unbound-force/tap/mxf"},
-		{"graphthulhu", "brew install unbound-force/tap/graphthulhu"},
+		{"dewey", "brew install unbound-force/tap/dewey"},
 		{"node", "brew install node"},
 		{"gh", "brew install gh"},
 		{"swarm", "npm install -g opencode-swarm-plugin@latest"},
@@ -1889,6 +1884,181 @@ func TestCheckMCPConfig_MissingServerBinary(t *testing.T) {
 	}
 }
 
+// --- Dewey Knowledge Layer tests ---
+
+func TestCheckDewey_AllPresent(t *testing.T) {
+	dir := t.TempDir()
+	// Create .dewey/ workspace directory.
+	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+		t.Fatalf("mkdir .dewey: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd: stubExecCmd(
+			map[string]string{
+				"ollama list": "NAME                    ID              SIZE      MODIFIED\ngranite-embedding:30m   abc123          63 MB     2 days ago\n",
+			},
+			nil,
+		),
+		ReadFile: os.ReadFile,
+	}
+
+	group := checkDewey(opts)
+
+	if group.Name != "Dewey Knowledge Layer" {
+		t.Errorf("group name = %q, want Dewey Knowledge Layer", group.Name)
+	}
+
+	results := make(map[string]CheckResult)
+	for _, r := range group.Results {
+		results[r.Name] = r
+	}
+
+	if r := results["dewey binary"]; r.Severity != Pass {
+		t.Errorf("dewey binary severity = %v, want Pass", r.Severity)
+	}
+	if r := results["embedding model"]; r.Severity != Pass {
+		t.Errorf("embedding model severity = %v, want Pass", r.Severity)
+	}
+	if r := results["workspace"]; r.Severity != Pass {
+		t.Errorf("workspace severity = %v, want Pass", r.Severity)
+	}
+}
+
+func TestCheckDewey_BinaryMissing(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPathSimple(map[string]bool{}),
+		ExecCmd:   stubExecCmd(nil, nil),
+		ReadFile:  os.ReadFile,
+	}
+
+	group := checkDewey(opts)
+
+	if len(group.Results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(group.Results))
+	}
+
+	// Binary not found -- severity MUST be Pass (Dewey is optional per Constitution Principle II).
+	r := group.Results[0]
+	if r.Name != "dewey binary" {
+		t.Errorf("first result name = %q, want dewey binary", r.Name)
+	}
+	if r.Severity != Pass {
+		t.Errorf("dewey binary severity = %v, want Pass (optional tool)", r.Severity)
+	}
+	if !strings.Contains(r.InstallHint, "brew install unbound-force/tap/dewey") {
+		t.Errorf("install hint = %q, want brew install command", r.InstallHint)
+	}
+
+	// Remaining checks skipped -- severity MUST be Pass (skipped, not failed).
+	if !strings.Contains(group.Results[1].Message, "skipped") {
+		t.Errorf("embedding model should be skipped, got %q", group.Results[1].Message)
+	}
+	if group.Results[1].Severity != Pass {
+		t.Errorf("embedding model severity = %v, want Pass (skipped)", group.Results[1].Severity)
+	}
+	if !strings.Contains(group.Results[2].Message, "skipped") {
+		t.Errorf("workspace should be skipped, got %q", group.Results[2].Message)
+	}
+	if group.Results[2].Severity != Pass {
+		t.Errorf("workspace severity = %v, want Pass (skipped)", group.Results[2].Severity)
+	}
+}
+
+func TestCheckDewey_ModelMissing(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd: stubExecCmd(
+			map[string]string{
+				"ollama list": "NAME                    ID              SIZE      MODIFIED\nllama3:latest           abc123          4.7 GB    1 day ago\n",
+			},
+			nil,
+		),
+		ReadFile: os.ReadFile,
+	}
+
+	group := checkDewey(opts)
+
+	results := make(map[string]CheckResult)
+	for _, r := range group.Results {
+		results[r.Name] = r
+	}
+
+	if r := results["embedding model"]; r.Severity != Warn {
+		t.Errorf("embedding model severity = %v, want Warn", r.Severity)
+	}
+	if r := results["embedding model"]; !strings.Contains(r.Message, "graph-only") {
+		t.Errorf("embedding model message = %q, want 'graph-only'", r.Message)
+	}
+}
+
+func TestCheckDewey_WorkspaceMissing(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd: stubExecCmd(
+			map[string]string{
+				"ollama list": "NAME                    ID              SIZE      MODIFIED\ngranite-embedding:30m   abc123          63 MB     2 days ago\n",
+			},
+			nil,
+		),
+		ReadFile: os.ReadFile,
+	}
+
+	group := checkDewey(opts)
+
+	results := make(map[string]CheckResult)
+	for _, r := range group.Results {
+		results[r.Name] = r
+	}
+
+	if r := results["workspace"]; r.Severity != Warn {
+		t.Errorf("workspace severity = %v, want Warn", r.Severity)
+	}
+	if r := results["workspace"]; !strings.Contains(r.InstallHint, "dewey init") {
+		t.Errorf("workspace hint = %q, want 'dewey init'", r.InstallHint)
+	}
+}
+
+func TestCheckDewey_OllamaNotAvailable(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd: stubExecCmd(
+			nil,
+			map[string]error{"ollama list": fmt.Errorf("ollama not found")},
+		),
+		ReadFile: os.ReadFile,
+	}
+
+	group := checkDewey(opts)
+
+	results := make(map[string]CheckResult)
+	for _, r := range group.Results {
+		results[r.Name] = r
+	}
+
+	// Embedding model check should warn when ollama is unavailable.
+	if r := results["embedding model"]; r.Severity != Warn {
+		t.Errorf("embedding model severity = %v, want Warn", r.Severity)
+	}
+	if r := results["embedding model"]; !strings.Contains(r.Message, "not available") {
+		t.Errorf("embedding model message = %q, want 'not available'", r.Message)
+	}
+}
+
 func TestCheckHeroAvailability_NoneAvailable(t *testing.T) {
 	dir := t.TempDir()
 
@@ -2074,7 +2244,7 @@ func TestFormatJSON_EmptyReport(t *testing.T) {
 func TestCheckOllama_InstalledWithModel(t *testing.T) {
 	dir := t.TempDir()
 
-	ollamaListOutput := "NAME                    ID              SIZE    MODIFIED\nmxbai-embed-large:latest abc123  1.2 GB  2 days ago\nllama3:latest            def456  4.7 GB  1 week ago\n"
+	ollamaListOutput := "NAME                    ID              SIZE    MODIFIED\ngranite-embedding:30m    abc123  63 MB   2 days ago\nllama3:latest            def456  4.7 GB  1 week ago\n"
 
 	opts := &Options{
 		TargetDir: dir,
@@ -2104,8 +2274,8 @@ func TestCheckOllama_InstalledWithModel(t *testing.T) {
 			if r.Severity != Pass {
 				t.Errorf("ollama severity = %v, want Pass", r.Severity)
 			}
-			if !strings.Contains(r.Message, "mxbai-embed-large model ready") {
-				t.Errorf("ollama message = %q, want 'mxbai-embed-large model ready'", r.Message)
+			if !strings.Contains(r.Message, "granite-embedding:30m model ready") {
+				t.Errorf("ollama message = %q, want 'granite-embedding:30m model ready'", r.Message)
 			}
 			return
 		}
@@ -2145,8 +2315,8 @@ func TestCheckOllama_InstalledWithoutModel(t *testing.T) {
 			if r.Severity != Pass {
 				t.Errorf("ollama severity = %v, want Pass", r.Severity)
 			}
-			if r.InstallHint != "ollama pull mxbai-embed-large" {
-				t.Errorf("ollama install hint = %q, want 'ollama pull mxbai-embed-large'", r.InstallHint)
+			if r.InstallHint != "ollama pull granite-embedding:30m" {
+				t.Errorf("ollama install hint = %q, want 'ollama pull granite-embedding:30m'", r.InstallHint)
 			}
 			return
 		}

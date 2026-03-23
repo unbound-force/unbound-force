@@ -262,8 +262,8 @@ func homebrewInstallCmd(toolName string) string {
 		return "brew install unbound-force/tap/gaze"
 	case "mxf":
 		return "brew install unbound-force/tap/mxf"
-	case "graphthulhu":
-		return "brew install unbound-force/tap/graphthulhu"
+	case "dewey":
+		return "brew install unbound-force/tap/dewey"
 	case "node":
 		return "brew install node"
 	case "gh":
@@ -271,7 +271,7 @@ func homebrewInstallCmd(toolName string) string {
 	case "swarm":
 		return "npm install -g opencode-swarm-plugin@latest"
 	case "ollama":
-		return "brew install ollama && ollama pull mxbai-embed-large"
+		return "brew install ollama && ollama pull granite-embedding:30m"
 	default:
 		return "brew install " + toolName
 	}
@@ -294,7 +294,7 @@ func genericInstallCmd(toolName string) string {
 	case "gh":
 		return "Download from https://cli.github.com/"
 	case "ollama":
-		return "brew install ollama && ollama pull mxbai-embed-large"
+		return "brew install ollama && ollama pull granite-embedding:30m"
 	default:
 		return "Install " + toolName
 	}
@@ -324,8 +324,8 @@ func installURL(toolName string) string {
 		return "https://go.dev/dl/"
 	case "gh":
 		return "https://cli.github.com/"
-	case "graphthulhu":
-		return "https://github.com/skridlevsky/graphthulhu"
+	case "dewey":
+		return "https://github.com/unbound-force/dewey"
 	case "ollama":
 		return "https://ollama.com"
 	default:

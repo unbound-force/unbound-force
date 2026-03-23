@@ -92,6 +92,7 @@ func TestSetupRun_AllMissing(t *testing.T) {
 	var buf bytes.Buffer
 	opts := Options{
 		TargetDir: dir,
+		YesFlag:   true, // Allow non-interactive swarm setup in test
 		Stdout:    &buf,
 		Stderr:    &buf,
 		LookPath: stubLookPath(map[string]string{
@@ -151,6 +152,7 @@ func TestSetupRun_AllPresent(t *testing.T) {
 	rec := &cmdRecorder{
 		outputs: map[string]string{
 			"node --version": "v22.15.0",
+			"ollama list":    "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
 		},
 	}
 
@@ -166,6 +168,8 @@ func TestSetupRun_AllPresent(t *testing.T) {
 			"node":     "/usr/local/bin/node",
 			"npm":      "/usr/local/bin/npm",
 			"swarm":    "/usr/local/bin/swarm",
+			"dewey":    "/usr/local/bin/dewey",
+			"ollama":   "/usr/local/bin/ollama",
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -415,8 +419,8 @@ func TestSetupRun_OpencodeJsonManipulation(t *testing.T) {
 	// Create opencode.json with existing MCP servers, no plugin key.
 	createFile(t, dir, "opencode.json", `{
   "mcpServers": {
-    "knowledge-graph": {
-      "command": "graphthulhu"
+    "dewey": {
+      "command": "dewey"
     }
   }
 }`)
@@ -1090,6 +1094,156 @@ func TestFormatSetupText(t *testing.T) {
 	}
 }
 
+// --- Dewey installation tests ---
+
+func TestSetupRun_DeweyInstall(t *testing.T) {
+	dir := t.TempDir()
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		YesFlag:   true,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+			"node": "/usr/local/bin/node",
+			"npm":  "/usr/local/bin/npm",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Verify Dewey was installed via brew.
+	deweyCalled := false
+	for _, call := range rec.calls {
+		if call == "brew install unbound-force/tap/dewey" {
+			deweyCalled = true
+		}
+	}
+	if !deweyCalled {
+		t.Errorf("expected brew install dewey, got calls: %v", rec.calls)
+	}
+}
+
+func TestSetupRun_DeweyAlreadyInstalled(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+			"ollama list":    "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":     "/opt/homebrew/bin/brew",
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"swarm":    "/usr/local/bin/swarm",
+			"dewey":    "/usr/local/bin/dewey",
+			"ollama":   "/usr/local/bin/ollama",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Verify no brew install dewey was called.
+	for _, call := range rec.calls {
+		if call == "brew install unbound-force/tap/dewey" {
+			t.Error("should not install dewey when already present")
+		}
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "already") {
+		t.Error("expected 'already installed' for Dewey")
+	}
+}
+
+func TestSetupRun_DeweyEmbeddingModelPull(t *testing.T) {
+	dir := t.TempDir()
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+			"ollama list":    "NAME                    ID              SIZE\nllama3:latest           abc123          4.7 GB\n",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		YesFlag:   true,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":   "/opt/homebrew/bin/brew",
+			"node":   "/usr/local/bin/node",
+			"npm":    "/usr/local/bin/npm",
+			"dewey":  "/usr/local/bin/dewey",
+			"ollama": "/usr/local/bin/ollama",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Verify ollama pull was called for granite-embedding:30m.
+	pullCalled := false
+	for _, call := range rec.calls {
+		if call == "ollama pull granite-embedding:30m" {
+			pullCalled = true
+		}
+	}
+	if !pullCalled {
+		t.Errorf("expected ollama pull granite-embedding:30m, got calls: %v", rec.calls)
+	}
+}
+
 func TestSetupRun_OllamaTip(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
@@ -1140,8 +1294,8 @@ func TestSetupRun_OllamaTip(t *testing.T) {
 	if !strings.Contains(output, "ollama") {
 		t.Error("expected 'ollama' in tip message")
 	}
-	if !strings.Contains(output, "mxbai-embed-large") {
-		t.Error("expected 'mxbai-embed-large' in tip message")
+	if !strings.Contains(output, "granite-embedding:30m") {
+		t.Error("expected 'granite-embedding:30m' in tip message")
 	}
 }
 

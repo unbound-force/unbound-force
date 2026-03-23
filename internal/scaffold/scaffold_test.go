@@ -1286,6 +1286,55 @@ func TestAssetPaths_KnownPrefixes(t *testing.T) {
 	}
 }
 
+// TestScaffoldOutput_NoGraphthulhuReferences is a regression guard
+// for FR-001/FR-002/SC-001: scaffolded files must not contain any
+// graphthulhu or knowledge-graph references. Dewey replaces
+// graphthulhu as the knowledge layer.
+func TestScaffoldOutput_NoGraphthulhuReferences(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	_, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Stale patterns that must NOT appear in scaffolded output.
+	stalePatterns := []string{
+		"graphthulhu",
+		"knowledge-graph_",
+		"knowledge-graph",
+	}
+
+	// Walk all generated files and search for stale patterns.
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info.IsDir() {
+			return walkErr
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Errorf("read %s: %v", path, readErr)
+			return nil
+		}
+		text := string(content)
+		relPath, _ := filepath.Rel(dir, path)
+
+		for _, pattern := range stalePatterns {
+			if strings.Contains(text, pattern) {
+				t.Errorf("scaffolded file %s contains stale %q reference (SC-001 violation)", relPath, pattern)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk error: %v", err)
+	}
+}
+
 // TestScaffoldOutput_NoBareUnboundReferences is a regression guard
 // for FR-015/SC-003: scaffolded files must not contain bare
 // `unbound init`, `unbound doctor`, `unbound setup`, or

@@ -20,7 +20,7 @@ Before writing code, read the following in order:
 3. **Active spec and plan** — Check `specs/` for the current feature branch's `spec.md`, `plan.md`, and `tasks.md`. Read the user story acceptance criteria you are implementing.
 4. **Convention packs** — Read all `*.md` files from `.opencode/unbound/packs/` to load the active coding conventions. If no pack files are found, note this in your output and apply universal principles only.
 5. **Feedback artifacts** — Check `.unbound-force/artifacts/` for Gaze quality reports and Divisor review verdicts from previous cycles. Read these to learn from past feedback.
-6. **Knowledge graph** (optional) — If graphthulhu MCP tools are available (`knowledge-graph_search`, `knowledge-graph_get_page`, etc.), use them to search for related specs, past review patterns, and architectural decisions. If MCP tools are unavailable, rely on reading project files directly.
+6. **Knowledge graph** (optional) — If Dewey MCP tools are available (`dewey_search`, `dewey_get_page`, etc.), use them to search for related specs, past review patterns, and architectural decisions. If MCP tools are unavailable, rely on reading project files directly.
 
 ## Engineering Philosophy
 
@@ -174,6 +174,28 @@ SHOULD call `swarm_progress()` at milestones (25%, 50%,
 If you are invoked directly (not via `swarm_spawn_subtask`),
 ignore this section. These protocols only apply when
 Swarm is coordinating parallel workers.
+
+## Knowledge Retrieval
+
+When Dewey MCP tools are available, use them for context retrieval. If Dewey is unavailable, fall back to direct file operations.
+
+**Tier 3 (Full Dewey)** — semantic + structured search:
+- `dewey_semantic_search` for conceptual queries:
+  - "how does cobra.Command work?"
+  - "patterns for MCP tool registration"
+  - "similar implementations in other repos"
+- `dewey_search` for keyword queries across specs and code
+- `dewey_traverse` for navigating spec dependencies and architectural decisions
+
+**Tier 2 (Graph-only, no embedding model)** — structured search only:
+- `dewey_search` for keyword queries
+- `dewey_traverse` for relationship navigation
+- Semantic search unavailable — use exact keyword matches
+
+**Tier 1 (No Dewey)** — direct file access:
+- Use Read tool for direct file access
+- Use Grep for keyword search across the codebase
+- Reference convention packs for standards
 
 ## Decision Framework
 

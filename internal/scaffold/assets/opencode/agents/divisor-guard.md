@@ -25,6 +25,7 @@ Before reviewing, read:
 2. `.specify/memory/constitution.md` -- Project constitution (core principles)
 3. The relevant `spec.md`, `plan.md`, and `tasks.md` under `specs/` for the current work
 4. All `*.md` files from `.opencode/unbound/packs/` -- active convention pack. If no pack files are found, note this in your findings and proceed with universal checks only.
+5. **Knowledge graph** (optional) — If Dewey MCP tools are available, use `dewey_semantic_search` to find cross-repo review patterns, recurring intent drift findings, and convention violations. Use `dewey_search` and `dewey_traverse` for structured queries. If only graph tools are available (no embedding model), use `dewey_search` and `dewey_traverse` only. If Dewey is unavailable, rely on reading files directly and using Grep for keyword search.
 
 ---
 

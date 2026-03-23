@@ -18,7 +18,7 @@ Before coaching, read the following:
 3. **`.mx-f/data/`** — Collected metrics data (velocity, cycle time, CI pass rate, review iterations, backlog health)
 4. **`.mx-f/impediments/`** — Active impediments and their status
 5. **`.mx-f/retros/`** — Previous retrospective records and action items
-6. **Knowledge graph** (optional) — If graphthulhu MCP tools are available (`knowledge-graph_search`, `knowledge-graph_get_page`), use them to find related specs, past decisions, and process history. If unavailable, rely on reading files directly.
+6. **Knowledge graph** (optional) — If Dewey MCP tools are available (`dewey_search`, `dewey_get_page`), use them to find related specs, past decisions, and process history. If unavailable, rely on reading files directly.
 
 ## Coaching Framework
 
@@ -82,6 +82,28 @@ When facilitating a retrospective, follow this 5-phase format:
   - A measurable success criterion
 - Auto-assign AI-NNN IDs
 - Remind: previous stale action items need attention
+
+## Knowledge Retrieval
+
+When Dewey MCP tools are available, use them for context retrieval. If Dewey is unavailable, fall back to direct file operations.
+
+**Tier 3 (Full Dewey)** — semantic + structured search:
+- `dewey_semantic_search` for conceptual queries:
+  - "velocity trends across repos"
+  - "retrospective outcomes for similar features"
+  - "coaching patterns that improved quality"
+- `dewey_search` for keyword queries across metrics and retrospective records
+- `dewey_traverse` for navigating cross-repo process patterns and impediment history
+
+**Tier 2 (Graph-only, no embedding model)** — structured search only:
+- `dewey_search` for keyword queries
+- `dewey_traverse` for relationship navigation
+- Semantic search unavailable — use exact keyword matches
+
+**Tier 1 (No Dewey)** — direct file access:
+- Use Read tool for direct file access to `.mx-f/data/` and `.mx-f/retros/`
+- Use Grep for keyword search across the codebase
+- Reference convention packs for standards
 
 ## Boundary Rules
 

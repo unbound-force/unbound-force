@@ -157,7 +157,7 @@ Do NOT use `git diff` or review code files. Your scope is exclusively the specif
 
 #### 5. Dependency and Risk Analysis
 
-- Are external dependencies (Cobra, GoReleaser, OpenSpec CLI, graphthulhu) documented with their failure modes?
+- Are external dependencies (Cobra, GoReleaser, OpenSpec CLI, Dewey) documented with their failure modes?
 - Are Go version constraints documented and enforced?
 - Are there assumptions about the adopter's environment (Go installation, Node.js version, Homebrew) that should be explicit?
 - Are hero repo dependencies on this meta repo's standards documented? What happens if a standard changes -- is there a migration path?

@@ -27,6 +27,7 @@ Before reviewing, read:
 2. `.specify/memory/constitution.md` -- Constitution (if present)
 3. The relevant spec, plan, and tasks files under `specs/` for the current work
 4. `.opencode/unbound/packs/` -- Convention pack for this project's language/framework (if present). Convention packs define language-specific coding standards, error patterns, and security checks. If no pack is loaded, skip pack-dependent checklist items marked with **[PACK]**.
+5. **Knowledge graph** (optional) — If Dewey MCP tools are available, use `dewey_semantic_search` to find recurring security findings, resilience patterns, and constraint violations across repos. Use `dewey_search` and `dewey_traverse` for structured queries. If only graph tools are available (no embedding model), use `dewey_search` and `dewey_traverse` only. If Dewey is unavailable, rely on reading files directly and using Grep for keyword search.
 
 ---
 

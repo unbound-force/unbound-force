@@ -158,7 +158,7 @@ unbound-force/
 ├── scripts/
 │   └── validate-hero-contract.sh    # Contract compliance validation
 ├── go.mod                           # Go module definition
-├── opencode.json                    # MCP server configuration (knowledge graph)
+├── opencode.json                    # MCP server configuration (Dewey)
 ├── .goreleaser.yaml                 # GoReleaser release configuration
 ├── unbound-force.md                 # Hero descriptions and team vision
 ├── AGENTS.md                        # This file
@@ -489,8 +489,8 @@ This repo is primarily specifications and governance documents. Follow these con
 - OpenCode + Speckit + OpenSpec (development workflow)
 - Node.js >= 20.19.0 (OpenSpec CLI, `@fission-ai/openspec`)
 - Go 1.24+ (for tooling/MCP if any, though primarily OpenCode agents/commands) + OpenCode runtime, GitHub CLI (`gh`) or GitHub API (004-muti-mind-architecture)
-- Local Markdown files (YAML frontmatter) in `.muti-mind/backlog/` indexed by graphthulhu (004-muti-mind-architecture)
-- Go 1.24+ (CLI backend), OpenCode Agents (AI runtime) + `github.com/spf13/cobra`, `github.com/charmbracelet/log`, OpenCode Runtime, `graphthulhu` MCP Server (004-muti-mind-architecture)
+- Local Markdown files (YAML frontmatter) in `.muti-mind/backlog/` indexed by Dewey (004-muti-mind-architecture)
+- Go 1.24+ (CLI backend), OpenCode Agents (AI runtime) + `github.com/spf13/cobra`, `github.com/charmbracelet/log`, OpenCode Runtime, Dewey MCP Server (004-muti-mind-architecture)
 - Local Markdown files with YAML frontmatter in `.muti-mind/backlog/` (004-muti-mind-architecture)
 - Go 1.24+ (CLI/scaffold engine), Markdown (agents, packs, commands) + `github.com/spf13/cobra` (CLI), `embed.FS` (asset embedding), `github.com/charmbracelet/log` (logging) (005-the-divisor-architecture)
 - Filesystem only (embedded assets deployed to target directory) (005-the-divisor-architecture)
@@ -503,11 +503,13 @@ This repo is primarily specifications and governance documents. Follow these con
 - Go 1.24+ + `github.com/spf13/cobra` (CLI), `github.com/charmbracelet/lipgloss` (terminal styling), `gopkg.in/yaml.v3` (frontmatter parsing) (011-doctor-setup)
 - N/A (reads filesystem and subprocess output, writes only to `opencode.json`) (011-doctor-setup)
 - Go 1.24 + `github.com/spf13/cobra` (012-swarm-delegation)
-- Go 1.24+ (same as graphthulhu) + `github.com/modelcontextprotocol/go-sdk/mcp` (014-dewey-architecture)
+- Go 1.24+ + `github.com/modelcontextprotocol/go-sdk/mcp` (014-dewey-architecture)
 - SQLite for persistent indexes (knowledge (014-dewey-architecture)
+- N/A (configuration and documentation changes; Dewey MCP tools: `dewey_search`, `dewey_semantic_search`, `dewey_traverse`, `dewey_get_page`, `dewey_find_by_tag`, `dewey_query_properties`, `dewey_find_connections`, `dewey_similar`, `dewey_semantic_search_filtered`) (015-dewey-integration)
 
 ## Recent Changes
 
+- 015-dewey-integration: Integrated Dewey as the semantic knowledge layer replacing graphthulhu. Updated `opencode.json` MCP config (live + scaffold) from `knowledge-graph`/`graphthulhu` to `dewey`. Replaced all `knowledge-graph_*` tool references with `dewey_*` across agent files and commands. Added "Knowledge Retrieval" sections with role-specific Dewey usage and 3-tier graceful degradation pattern (Full Dewey, Graph-only, No Dewey) to all 5 hero agent files and 5 Divisor persona files. Added "Dewey Knowledge Layer" health check group to `uf doctor` (dewey binary, embedding model, workspace). Added Dewey installation step to `uf setup` (Homebrew install, embedding model pull). Updated embedding model from `mxbai-embed-large` to `granite-embedding:30m`. Added `TestScaffoldOutput_NoGraphthulhuReferences` regression test. All 5 user stories and 40 tasks completed.
 - 013-binary-rename: Renamed CLI binary from `unbound` to `unbound-force` with `uf` symlink alias to resolve NLnet Labs Unbound DNS resolver name collision. Directory rename `cmd/unbound/` → `cmd/unbound-force/`, Cobra root command `Use` field updated, Makefile `install` target creates both binaries, GoReleaser config updated (build id, binary name, archive template, cask name, quarantine hook, `uf` symlink via post-install hook), release workflow updated (20+ references), scaffold engine `versionMarker()` and `printSummary()` updated to `uf`, all embedded asset markers changed from `scaffolded by unbound` to `scaffolded by uf`, doctor hint strings updated (`uf init`/`uf setup`), setup progress messages updated, scaffold assets updated (reviewer-adversary, reviewer-guard, reviewer-sre, reviewer-architect, cobalt-crush-dev, specify/config.yaml), living documentation updated (AGENTS.md, README.md, unbound-force.md), 3 new regression tests (TestRootCmd_HelpOutput, TestScaffoldOutput_NoBareUnboundReferences, TestDoctorHints_NoBareUnboundReferences). Completed specs (001-012) and archived OpenSpec changes preserved as historical records. All 5 user stories and 35 tasks completed.
 - 012-swarm-delegation: Added swarm delegation workflow -- execution mode awareness (`ModeHuman`/`ModeSwarm`) on each `WorkflowStage`, automatic checkpoint pausing at swarm→human boundaries (`StatusAwaitingHuman`), resume via `Advance()`, `StageExecutionModeMap()` with default assignments (define=human, implement=swarm, validate=swarm, review=swarm, accept=human, reflect=swarm), renamed `StageMeasure` to `StageReflect` with enriched reflect stage documentation (metrics + learning + retrospective), `WorkflowStore.Latest()` discovers both active and awaiting_human workflows, backward compatible with legacy JSON (empty execution_mode treated as human), workflow-record schema v1.1.0 with `execution_mode` field, updated `/workflow` command docs with `[human]`/`[swarm]` indicators and `⏸` awaiting_human display, SKILL.md updated with execution modes section and reflect stage documentation. All 4 user stories and 42 tasks completed.
 - 011-doctor-setup: Implemented Doctor and Setup commands -- two new packages `internal/doctor/` (5 files: models.go, doctor.go, environ.go, checks.go, format.go) and `internal/setup/` (1 file: setup.go). `unbound doctor` checks 7 groups (Detected Environment, Core Tools, Swarm Plugin, Scaffolded Files, Hero Availability, MCP Server Config, Agent/Skill Integrity) with environment-aware install hints, colored text output (lipgloss), and JSON output (`--format=json`). `unbound setup` installs missing tools through detected version managers (goenv, nvm, fnm, mise, bun, Homebrew), configures opencode.json atomically, initializes .hive/, and runs unbound init. Supports `--dry-run` and `--yes` flags. Platform guard rejects Windows. All external dependencies injected for testability. Reuses `orchestration.DetectHeroes()` for hero availability. Promoted lipgloss from indirect to direct dependency. All 5 user stories and 79 tasks completed.
