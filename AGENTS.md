@@ -387,6 +387,24 @@ spec directory under `specs/`.
 4. Archive the OpenSpec proposal with `/opsx:archive`.
 5. Continue with the Speckit pipeline from the new spec.
 
+### Branch Conventions
+
+Both tiers enforce branch-based workflows:
+
+- **Speckit** branches: `NNN-<short-name>`
+  (e.g., `013-binary-rename`). Created automatically by
+  `/speckit.specify`. Validated by `check-prerequisites.sh`
+  at every pipeline step (hard gate).
+- **OpenSpec** branches: `opsx/<change-name>`
+  (e.g., `opsx/doctor-ux-improvement`). Created by
+  `/opsx-propose`. Validated by `/opsx-apply` before
+  implementation (hard gate).
+
+The `opsx/` prefix namespace ensures OpenSpec branches
+are visually distinct from Speckit branches in
+`git branch` output and do not collide with the
+`NNN-*` numbering pattern.
+
 ### Directory Boundary Enforcement
 
 These boundaries are enforced by convention and code
