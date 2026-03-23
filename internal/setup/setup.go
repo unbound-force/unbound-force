@@ -166,20 +166,24 @@ func Run(opts Options) error {
 	results = append(results, nodeResult)
 	nodeAvailable := nodeResult.err == nil && nodeResult.action != "failed"
 
-	// Steps 4-7: Swarm-related (require Node.js).
+	// Steps 4-8: Swarm-related (require Node.js).
 	if nodeAvailable {
-		// Step 4: Install Swarm plugin (FR-025).
+		// Step 4: Ensure bun is available (prerequisite for swarm setup).
+		bunResult := ensureBun(&opts, env)
+		results = append(results, bunResult)
+
+		// Step 5: Install Swarm plugin (FR-025).
 		swarmResult := installSwarmPlugin(&opts, env)
 		results = append(results, swarmResult)
 
 		if swarmResult.err == nil && swarmResult.action != "failed" && swarmResult.action != "skipped" {
-			// Step 5: Run swarm setup (FR-026).
+			// Step 6: Run swarm setup (FR-026).
 			results = append(results, runSwarmSetup(&opts))
 
-			// Step 6: Configure opencode.json (FR-027/027a/028).
+			// Step 7: Configure opencode.json (FR-027/027a/028).
 			results = append(results, configureOpencodeJSON(&opts))
 
-			// Step 7: Initialize .hive/ (FR-029).
+			// Step 8: Initialize .hive/ (FR-029).
 			results = append(results, initializeHive(&opts))
 		} else if swarmResult.action == "already installed" {
 			// Swarm already installed — still configure.
@@ -197,10 +201,10 @@ func Run(opts Options) error {
 		results = append(results, stepResult{name: ".hive/", action: "skipped", detail: "no swarm"})
 	}
 
-	// Step 8: Install Dewey (after Swarm, before uf init).
+	// Step 9: Install Dewey (after Swarm, before uf init).
 	results = append(results, installDewey(&opts, env))
 
-	// Step 9: Run uf init (FR-033).
+	// Step 10: Run uf init (FR-033).
 	results = append(results, runUnboundInit(&opts))
 
 	// Print results.
@@ -416,6 +420,23 @@ func installSwarmPlugin(opts *Options, env doctor.DetectedEnvironment) stepResul
 		return stepResult{name: "Swarm plugin", action: "failed", detail: "npm install failed", err: err}
 	}
 	return stepResult{name: "Swarm plugin", action: "installed", detail: "via npm"}
+}
+
+// ensureBun installs bun if not present. Bun is a prerequisite
+// for swarm setup -- the swarm plugin requires bun at runtime.
+func ensureBun(opts *Options, env doctor.DetectedEnvironment) stepResult {
+	if _, err := opts.LookPath("bun"); err == nil {
+		return stepResult{name: "Bun", action: "already installed"}
+	}
+
+	if opts.DryRun {
+		return stepResult{name: "Bun", action: "dry-run", detail: "Would install: npm install -g bun"}
+	}
+
+	if _, err := opts.ExecCmd("npm", "install", "-g", "bun"); err != nil {
+		return stepResult{name: "Bun", action: "failed", detail: "npm install -g bun failed", err: err}
+	}
+	return stepResult{name: "Bun", action: "installed", detail: "via npm"}
 }
 
 // runSwarmSetup runs `swarm setup` per FR-026.

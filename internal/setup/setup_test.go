@@ -113,11 +113,12 @@ func TestSetupRun_AllMissing(t *testing.T) {
 	}
 
 	// Verify install order: opencode (brew), gaze (brew), node version check,
-	// swarm (npm), swarm setup, opencode.json, swarm init.
+	// bun (npm), swarm (npm), swarm setup, opencode.json, swarm init.
 	expectedCmds := []string{
 		"brew install anomalyco/tap/opencode",
 		"brew install unbound-force/tap/gaze",
 		"node --version",
+		"npm install -g bun",
 		"npm install -g opencode-swarm-plugin@latest",
 		"swarm setup",
 		"swarm init",
@@ -167,6 +168,7 @@ func TestSetupRun_AllPresent(t *testing.T) {
 			"gaze":     "/usr/local/bin/gaze",
 			"node":     "/usr/local/bin/node",
 			"npm":      "/usr/local/bin/npm",
+			"bun":      "/home/user/.bun/bin/bun",
 			"swarm":    "/usr/local/bin/swarm",
 			"dewey":    "/usr/local/bin/dewey",
 			"ollama":   "/usr/local/bin/ollama",
