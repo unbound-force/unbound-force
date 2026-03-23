@@ -28,20 +28,26 @@ func FormatJSON(report *Report, w io.Writer) error {
 func FormatText(report *Report, w io.Writer) error {
 	renderer := lipgloss.NewRenderer(w)
 
-	// Define styles per research.md R2.
-	passStyle := renderer.NewStyle().Foreground(lipgloss.Color("2"))
-	warnStyle := renderer.NewStyle().Foreground(lipgloss.Color("3"))
-	failStyle := renderer.NewStyle().Foreground(lipgloss.Color("1"))
-	dimStyle := renderer.NewStyle().Foreground(lipgloss.Color("8"))
-	boldStyle := renderer.NewStyle().Bold(true)
+	// Bright, distinctive colors for visual scanning
+	// (gcal-organizer style).
+	passStyle := renderer.NewStyle().Foreground(lipgloss.Color("10"))
+	warnStyle := renderer.NewStyle().Foreground(lipgloss.Color("11"))
+	failStyle := renderer.NewStyle().Foreground(lipgloss.Color("9"))
+	dimStyle := renderer.NewStyle().Foreground(lipgloss.Color("241"))
+	titleStyle := renderer.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	boxStyle := renderer.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("63")).
+		Padding(0, 1)
 
 	// Detect color support — if no color, use plain indicators.
 	hasColor := renderer.ColorProfile() != termenv.Ascii
 
-	// Header.
-	fmt.Fprintln(w, boldStyle.Render("Unbound Force Doctor"))
-	fmt.Fprintln(w, "====================")
+	// Header with stethoscope emoji.
+	fmt.Fprintln(w, titleStyle.Render("🩺 Unbound Force Doctor"))
 	fmt.Fprintln(w)
+
+	boldStyle := renderer.NewStyle().Bold(true)
 
 	for _, group := range report.Groups {
 		fmt.Fprintln(w, boldStyle.Render(group.Name))
@@ -55,12 +61,12 @@ func FormatText(report *Report, w io.Writer) error {
 			}
 			fmt.Fprintf(w, "  %s %s %s\n", indicator, name, msg)
 
-			// Install hint on indented line below per cli-schema.md.
+			// Fix hint on indented line below in subtle gray.
 			if r.InstallHint != "" {
-				fmt.Fprintf(w, "                     Install: %s\n", r.InstallHint)
+				fmt.Fprintln(w, dimStyle.Render("     Fix: "+r.InstallHint))
 			}
 			if r.InstallURL != "" {
-				fmt.Fprintf(w, "                     Docs: %s\n", r.InstallURL)
+				fmt.Fprintln(w, dimStyle.Render("     Docs: "+r.InstallURL))
 			}
 		}
 
@@ -77,10 +83,19 @@ func FormatText(report *Report, w io.Writer) error {
 		fmt.Fprintln(w)
 	}
 
-	// Summary line.
-	summaryLine := fmt.Sprintf("Summary: %d passed, %d warnings, %d failed",
+	// Boxed summary with emoji counters.
+	summaryContent := fmt.Sprintf("  ✅ %d passed  ⚠️  %d warnings  ❌ %d failed",
 		report.Summary.Passed, report.Summary.Warned, report.Summary.Failed)
-	fmt.Fprintln(w, summaryLine)
+	fmt.Fprintln(w, boxStyle.Render(summaryContent))
+
+	// Contextual completion message.
+	if report.Summary.Failed == 0 && report.Summary.Warned == 0 {
+		fmt.Fprintln(w, passStyle.Render("🎉 Everything looks good!"))
+	} else if report.Summary.Failed > 0 {
+		fmt.Fprintln(w, dimStyle.Render("  Run 'uf doctor' after fixes."))
+	} else {
+		fmt.Fprintln(w, dimStyle.Render("  All critical checks passed."))
+	}
 
 	return nil
 }
@@ -105,18 +120,18 @@ func formatIndicator(r CheckResult, hasColor bool, pass, warn, fail, dim lipglos
 		}
 	}
 
-	// Colored symbols per cli-schema.md.
+	// Emoji indicators for visual scanning (gcal-organizer style).
 	switch r.Severity {
 	case Pass:
-		// Optional-absent items show gray circle per data-model.md.
+		// Optional-absent items show gray ⊘ per data-model.md.
 		if r.InstallHint != "" {
-			return dim.Render("○")
+			return dim.Render("⊘")
 		}
-		return pass.Render("✓")
+		return pass.Render("✅")
 	case Warn:
-		return warn.Render("!")
+		return warn.Render("⚠️ ")
 	case Fail:
-		return fail.Render("✗")
+		return fail.Render("❌")
 	default:
 		return "?"
 	}

@@ -1227,14 +1227,17 @@ func TestFormatText_NoColors(t *testing.T) {
 
 	// When writing to a buffer (not a TTY), lipgloss should detect
 	// no color support. Check for plain text indicators.
-	if !strings.Contains(output, "[PASS]") && !strings.Contains(output, "✓") {
+	if !strings.Contains(output, "[PASS]") && !strings.Contains(output, "✅") {
 		t.Error("expected pass indicator in output")
 	}
 	if !strings.Contains(output, "Unbound Force Doctor") {
 		t.Error("expected header in output")
 	}
-	if !strings.Contains(output, "Summary:") {
-		t.Error("expected summary in output")
+	if !strings.Contains(output, "🩺") {
+		t.Error("expected stethoscope emoji in header")
+	}
+	if !strings.Contains(output, "passed") && !strings.Contains(output, "failed") {
+		t.Error("expected summary counters in output")
 	}
 }
 
@@ -1291,11 +1294,11 @@ func TestFormatText_InstallHints(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "Install: brew install anomalyco/tap/opencode") {
-		t.Error("expected install hint in output")
+	if !strings.Contains(output, "Fix: brew install anomalyco/tap/opencode") {
+		t.Error("expected fix hint in output")
 	}
 	if !strings.Contains(output, "Docs: https://opencode.ai/docs") {
-		t.Error("expected install URL in output")
+		t.Error("expected docs URL in output")
 	}
 }
 
