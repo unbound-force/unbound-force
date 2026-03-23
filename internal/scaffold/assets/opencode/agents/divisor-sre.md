@@ -27,6 +27,7 @@ Before reviewing, read:
 4. Release pipeline configs if they exist (e.g., `.goreleaser.yaml`, `.github/workflows/`, `Makefile`, CI configs)
 5. Dependency manifests if they exist (e.g., `go.mod`, `package.json`, `requirements.txt`, `Cargo.toml`)
 6. All `*.md` files from `.opencode/unbound/packs/` -- active convention pack. If no pack files are found, note this in your findings and proceed with universal checks only.
+7. **Knowledge graph** (optional) — If Dewey MCP tools are available, use `dewey_semantic_search` to find operational patterns, deployment issues, and dependency health findings across repos. Use `dewey_search` and `dewey_traverse` for structured queries. If only graph tools are available (no embedding model), use `dewey_search` and `dewey_traverse` only. If Dewey is unavailable, rely on reading files directly and using Grep for keyword search.
 
 ---
 

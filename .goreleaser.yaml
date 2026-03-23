@@ -75,7 +75,7 @@ homebrew_casks:
     # with signed values, then pushes the complete cask to homebrew-tap.
     skip_upload: true
     dependencies:
-      - cask: graphthulhu
+      - cask: dewey
     hooks:
       post:
         install: |

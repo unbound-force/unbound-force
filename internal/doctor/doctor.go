@@ -108,6 +108,7 @@ func Run(opts Options) (*Report, error) {
 		checkDetectedEnvironment(env),
 		checkCoreTools(&opts, env),
 		checkSwarmPlugin(&opts),
+		checkDewey(&opts),
 		checkScaffoldedFiles(&opts),
 		checkHeroAvailability(&opts),
 		checkMCPConfig(&opts),

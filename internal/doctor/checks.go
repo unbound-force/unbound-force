@@ -101,9 +101,6 @@ var coreToolSpecs = []toolSpec{
 		recommended: true,
 	},
 	{
-		name: "graphthulhu",
-	},
-	{
 		name:         "node",
 		versionCmd:   []string{"node", "--version"},
 		versionParse: parseNodeVersion,
@@ -133,7 +130,7 @@ func checkCoreTools(opts *Options, env DetectedEnvironment) CheckGroup {
 		group.Results = append(group.Results, result)
 
 		// Ollama post-check: when ollama is found, verify
-		// the mxbai-embed-large model is pulled.
+		// the granite-embedding:30m model is pulled.
 		if spec.name == "ollama" && result.Severity == Pass && result.Message != "not found" {
 			result = checkOllamaModel(opts, result)
 			// Replace the last result with the enriched one.
@@ -144,24 +141,24 @@ func checkCoreTools(opts *Options, env DetectedEnvironment) CheckGroup {
 	return group
 }
 
-// checkOllamaModel checks whether the mxbai-embed-large model
+// checkOllamaModel checks whether the granite-embedding:30m model
 // is available in the local Ollama installation. Enriches the
 // existing CheckResult with model status.
 func checkOllamaModel(opts *Options, base CheckResult) CheckResult {
 	output, err := opts.ExecCmd("ollama", "list")
 	if err != nil {
 		// ollama list failed — keep existing result, add hint.
-		base.InstallHint = "ollama pull mxbai-embed-large"
+		base.InstallHint = "ollama pull granite-embedding:30m"
 		return base
 	}
 
-	if strings.Contains(string(output), "mxbai-embed-large") {
-		base.Message = base.Message + " (mxbai-embed-large model ready)"
+	if strings.Contains(string(output), "granite-embedding") {
+		base.Message = base.Message + " (granite-embedding:30m model ready)"
 		return base
 	}
 
 	// Model not pulled.
-	base.InstallHint = "ollama pull mxbai-embed-large"
+	base.InstallHint = "ollama pull granite-embedding:30m"
 	base.Message = base.Message + " (model not pulled)"
 	return base
 }
@@ -879,6 +876,92 @@ func validateSkills(skillDir string, opts *Options) []CheckResult {
 	}
 
 	return results
+}
+
+// checkDewey checks the Dewey knowledge layer components:
+// binary, embedding model, and workspace directory.
+// Design decision: Dewey checks are a separate group (not part of
+// Core Tools) because Dewey has multiple interdependent components
+// that should be reported together. When the dewey binary is absent,
+// remaining checks are skipped per the contract.
+func checkDewey(opts *Options) CheckGroup {
+	group := CheckGroup{
+		Name:    "Dewey Knowledge Layer",
+		Results: []CheckResult{},
+	}
+
+	// Check 1: dewey binary.
+	deweyPath, err := opts.LookPath("dewey")
+	if err != nil {
+		group.Results = append(group.Results, CheckResult{
+			Name:        "dewey binary",
+			Severity:    Pass,
+			Message:     "not found",
+			InstallHint: "brew install unbound-force/tap/dewey",
+		})
+		// Skip remaining checks when dewey is not installed.
+		group.Results = append(group.Results, CheckResult{
+			Name:     "embedding model",
+			Severity: Pass,
+			Message:  "skipped: dewey not installed",
+		})
+		group.Results = append(group.Results, CheckResult{
+			Name:     "workspace",
+			Severity: Pass,
+			Message:  "skipped: dewey not installed",
+		})
+		return group
+	}
+
+	group.Results = append(group.Results, CheckResult{
+		Name:     "dewey binary",
+		Severity: Pass,
+		Message:  "found",
+		Detail:   deweyPath,
+	})
+
+	// Check 2: embedding model via Ollama.
+	ollamaOutput, ollamaErr := opts.ExecCmd("ollama", "list")
+	if ollamaErr != nil {
+		group.Results = append(group.Results, CheckResult{
+			Name:        "embedding model",
+			Severity:    Warn,
+			Message:     "could not check (ollama not available)",
+			InstallHint: "ollama pull granite-embedding:30m",
+		})
+	} else if strings.Contains(string(ollamaOutput), "granite-embedding") {
+		group.Results = append(group.Results, CheckResult{
+			Name:     "embedding model",
+			Severity: Pass,
+			Message:  "granite-embedding:30m installed",
+		})
+	} else {
+		group.Results = append(group.Results, CheckResult{
+			Name:        "embedding model",
+			Severity:    Warn,
+			Message:     "not pulled (graph-only mode available)",
+			InstallHint: "ollama pull granite-embedding:30m",
+		})
+	}
+
+	// Check 3: .dewey/ workspace directory.
+	deweyDir := filepath.Join(opts.TargetDir, ".dewey")
+	if info, statErr := os.Stat(deweyDir); statErr == nil && info.IsDir() {
+		group.Results = append(group.Results, CheckResult{
+			Name:     "workspace",
+			Severity: Pass,
+			Message:  "initialized",
+		})
+	} else {
+		group.Results = append(group.Results, CheckResult{
+			Name:        "workspace",
+			Severity:    Warn,
+			Message:     "not initialized",
+			InstallHint: "dewey init",
+		})
+	}
+
+	return group
 }
 
 // parseFrontmatter extracts YAML frontmatter from a Markdown file.

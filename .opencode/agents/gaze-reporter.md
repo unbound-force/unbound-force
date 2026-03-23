@@ -350,6 +350,28 @@ format. If the file cannot be read, use the Quick Reference Example
 above as your formatting guide and include:
 `> ⚠️ Could not load full formatting reference.`
 
+## Knowledge Retrieval
+
+When Dewey MCP tools are available, use them for context retrieval. If Dewey is unavailable, fall back to direct file operations.
+
+**Tier 3 (Full Dewey)** — semantic + structured search:
+- `dewey_semantic_search` for conceptual queries:
+  - "test quality patterns in Go projects"
+  - "common CRAP score issues"
+  - "quality baselines from other repos"
+- `dewey_search` for keyword queries across test files and specs
+- `dewey_traverse` for navigating quality report history and known failure modes
+
+**Tier 2 (Graph-only, no embedding model)** — structured search only:
+- `dewey_search` for keyword queries
+- `dewey_traverse` for relationship navigation
+- Semantic search unavailable — use exact keyword matches
+
+**Tier 1 (No Dewey)** — direct file access:
+- Use Read tool for direct file access
+- Use Grep for keyword search across the codebase
+- Reference convention packs for standards
+
 ## Graceful Degradation
 
 If any individual command fails:
