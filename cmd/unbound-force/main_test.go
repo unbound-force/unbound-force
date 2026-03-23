@@ -30,9 +30,9 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 
 	// Verify the summary includes a non-trivial file count
-	// 48 = 33 original + 12 Divisor files + 1 Cobalt-Crush agent + 1 Mx F coach + 1 speckit-workflow skill
-	if !strings.Contains(output, "48 files processed") {
-		t.Errorf("expected '48 files processed' in output, got:\n%s", output)
+	// 49 = 33 original + 12 Divisor files + 1 Cobalt-Crush agent + 1 Mx F coach + 1 speckit-workflow skill + 1 cobalt-crush command
+	if !strings.Contains(output, "49 files processed") {
+		t.Errorf("expected '49 files processed' in output, got:\n%s", output)
 	}
 
 	// Verify a user-owned file was created
