@@ -108,6 +108,15 @@ type stepResult struct {
 	err    error
 }
 
+// graniteModel is the enterprise-grade embedding model used by both
+// Dewey and Swarm. IBM Granite, Apache 2.0, permissibly licensed
+// training data. Setting these env vars aligns Swarm's Hivemind
+// with Dewey's embedding model.
+const (
+	graniteModel    = "granite-embedding:30m"
+	graniteEmbedDim = "256"
+)
+
 // Run executes the full setup workflow per FR-021/030/032/034/035.
 func Run(opts Options) error {
 	opts.defaults()
@@ -116,6 +125,12 @@ func Run(opts Options) error {
 	if runtime.GOOS == "windows" {
 		return fmt.Errorf("Platform not supported: doctor and setup require macOS or Linux")
 	}
+
+	// Set Ollama env vars so Swarm's Hivemind uses the same
+	// enterprise-grade embedding model as Dewey. These are
+	// inherited by child processes (swarm setup, swarm init).
+	os.Setenv("OLLAMA_MODEL", graniteModel)
+	os.Setenv("OLLAMA_EMBED_DIM", graniteEmbedDim)
 
 	// Detect environment (reuse from doctor package).
 	doctorOpts := &doctor.Options{
@@ -239,9 +254,16 @@ func Run(opts Options) error {
 	if _, ollamaErr := opts.LookPath("ollama"); ollamaErr != nil {
 		fmt.Fprintln(opts.Stdout)
 		fmt.Fprintln(opts.Stdout, "Tip: Install Ollama for enhanced semantic memory:")
-		fmt.Fprintln(opts.Stdout, "  brew install ollama && ollama pull granite-embedding:30m")
+		fmt.Fprintln(opts.Stdout, "  brew install ollama && ollama pull "+graniteModel)
 		fmt.Fprintln(opts.Stdout, "  (Without Ollama, Dewey uses full-text search only)")
 	}
+
+	// Embedding model alignment note.
+	fmt.Fprintln(opts.Stdout)
+	fmt.Fprintln(opts.Stdout, "Note: Swarm and Dewey are configured to use "+graniteModel+".")
+	fmt.Fprintln(opts.Stdout, "  Add to your shell profile for consistent behavior:")
+	fmt.Fprintln(opts.Stdout, "  export OLLAMA_MODEL="+graniteModel)
+	fmt.Fprintln(opts.Stdout, "  export OLLAMA_EMBED_DIM="+graniteEmbedDim)
 
 	return nil
 }
@@ -597,14 +619,16 @@ func installDewey(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	return stepResult{name: "Dewey", action: "installed", detail: "via Homebrew"}
 }
 
-// pullEmbeddingModel pulls the granite-embedding:30m model via Ollama.
+// pullEmbeddingModel pulls the enterprise-grade embedding model
+// via Ollama. Used by both Dewey and Swarm for consistent
+// semantic search across the toolchain.
 func pullEmbeddingModel(opts *Options) stepResult {
 	if _, err := opts.LookPath("ollama"); err != nil {
 		return stepResult{name: "Dewey", action: "already installed", detail: "embedding model requires ollama"}
 	}
 
 	if opts.DryRun {
-		return stepResult{name: "Dewey", action: "dry-run", detail: "Would run: ollama pull granite-embedding:30m"}
+		return stepResult{name: "Dewey", action: "dry-run", detail: "Would run: ollama pull " + graniteModel}
 	}
 
 	// Check if model is already pulled.
@@ -613,7 +637,7 @@ func pullEmbeddingModel(opts *Options) stepResult {
 		return stepResult{name: "Dewey", action: "already installed", detail: "embedding model ready"}
 	}
 
-	if _, err := opts.ExecCmd("ollama", "pull", "granite-embedding:30m"); err != nil {
+	if _, err := opts.ExecCmd("ollama", "pull", graniteModel); err != nil {
 		return stepResult{name: "Dewey", action: "failed", detail: "ollama pull failed", err: err}
 	}
 

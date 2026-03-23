@@ -478,6 +478,22 @@ golangci-lint run
 
 Always run tests with `-race -count=1`. CI enforces this.
 
+### Embedding Model Alignment
+
+Both Dewey and Swarm use IBM Granite Embedding
+(`granite-embedding:30m`, Apache 2.0) for semantic
+search. To ensure Swarm's Hivemind uses the same model,
+add these to your shell profile:
+
+```bash
+export OLLAMA_MODEL=granite-embedding:30m
+export OLLAMA_EMBED_DIM=256
+```
+
+`uf setup` sets these automatically for child processes.
+Setting them in your shell profile ensures consistency
+when running Swarm commands directly.
+
 ## Writing Style for Specs
 
 This repo is primarily specifications and governance documents. Follow these conventions:
