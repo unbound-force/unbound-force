@@ -113,7 +113,7 @@ func TestSetupRun_AllMissing(t *testing.T) {
 	}
 
 	// Verify install order: opencode (brew), gaze (brew), node version check,
-	// bun (npm), swarm (npm), swarm setup, opencode.json, swarm init.
+	// bun (npm), swarm (npm), swarm setup, swarm init, ollama (brew).
 	expectedCmds := []string{
 		"brew install anomalyco/tap/opencode",
 		"brew install unbound-force/tap/gaze",
@@ -122,6 +122,7 @@ func TestSetupRun_AllMissing(t *testing.T) {
 		"npm install -g opencode-swarm-plugin@latest",
 		"swarm setup",
 		"swarm init",
+		"brew install ollama",
 	}
 
 	for _, expected := range expectedCmds {
@@ -1246,7 +1247,7 @@ func TestSetupRun_DeweyEmbeddingModelPull(t *testing.T) {
 	}
 }
 
-func TestSetupRun_OllamaTip(t *testing.T) {
+func TestSetupRun_OllamaInstall(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -1275,7 +1276,7 @@ func TestSetupRun_OllamaTip(t *testing.T) {
 			"opencode": "/usr/local/bin/opencode",
 			"gaze":     "/usr/local/bin/gaze",
 			"swarm":    "/usr/local/bin/swarm",
-			// ollama NOT in PATH
+			// ollama NOT in PATH -- should be installed via brew
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -1289,15 +1290,22 @@ func TestSetupRun_OllamaTip(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
+	// Verify Ollama was installed via Homebrew (no tip, actual install).
+	found := false
+	for _, call := range rec.calls {
+		if call == "brew install ollama" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected 'brew install ollama' in recorded commands")
+	}
+
+	// Verify no Ollama tip in output (removed -- now installed automatically).
 	output := buf.String()
-	if !strings.Contains(output, "Tip") {
-		t.Error("expected Ollama tip when ollama not installed")
-	}
-	if !strings.Contains(output, "ollama") {
-		t.Error("expected 'ollama' in tip message")
-	}
-	if !strings.Contains(output, "granite-embedding:30m") {
-		t.Error("expected 'granite-embedding:30m' in tip message")
+	if strings.Contains(output, "Tip: Install Ollama") {
+		t.Error("Ollama tip should be removed -- Ollama is now installed automatically")
 	}
 }
 
@@ -1347,5 +1355,109 @@ func TestSetupRun_NoOllamaTip(t *testing.T) {
 	output := buf.String()
 	if strings.Contains(output, "Tip") {
 		t.Error("should NOT show Ollama tip when ollama is installed")
+	}
+}
+
+func TestSetupRun_OllamaNoHomebrew(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
+
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			// No brew, no ollama — Homebrew not available
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"swarm":    "/usr/local/bin/swarm",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Verify no brew install ollama was attempted.
+	for _, call := range rec.calls {
+		if call == "brew install ollama" {
+			t.Error("should NOT attempt brew install ollama when Homebrew is not available")
+		}
+	}
+
+	// Verify output contains download link.
+	output := buf.String()
+	if !strings.Contains(output, "ollama.com/download") {
+		t.Error("expected download link in output when Homebrew is not available")
+	}
+}
+
+func TestSetupRun_OllamaBrewFails(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+		},
+		errors: map[string]error{
+			"brew install ollama": fmt.Errorf("brew: formula not found"),
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		YesFlag:   true,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":     "/opt/homebrew/bin/brew",
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
+			"bun":      "/home/user/.bun/bin/bun",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"swarm":    "/usr/local/bin/swarm",
+			// ollama NOT in PATH
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	// Setup may or may not return error depending on how failures are counted.
+	// The important thing is the Ollama step produced a "failed" result.
+	_ = err
+
+	output := buf.String()
+	if !strings.Contains(output, "failed") && !strings.Contains(output, "FAIL") {
+		t.Error("expected failure indication in output when brew install ollama fails")
 	}
 }

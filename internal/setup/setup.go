@@ -216,10 +216,13 @@ func Run(opts Options) error {
 		results = append(results, stepResult{name: ".hive/", action: "skipped", detail: "no swarm"})
 	}
 
-	// Step 9: Install Dewey (after Swarm, before uf init).
+	// Step 9: Install Ollama (prerequisite for Dewey + Swarm embeddings).
+	results = append(results, installOllama(&opts, env))
+
+	// Step 10: Install Dewey (after Ollama, before uf init).
 	results = append(results, installDewey(&opts, env))
 
-	// Step 10: Run uf init (FR-033).
+	// Step 11: Run uf init (FR-033).
 	results = append(results, runUnboundInit(&opts))
 
 	// Print results.
@@ -249,14 +252,6 @@ func Run(opts Options) error {
 	}
 
 	fmt.Fprintln(opts.Stdout, "Setup complete! Run `uf doctor` to verify.")
-
-	// Ollama tip: suggest installation for enhanced semantic memory.
-	if _, ollamaErr := opts.LookPath("ollama"); ollamaErr != nil {
-		fmt.Fprintln(opts.Stdout)
-		fmt.Fprintln(opts.Stdout, "Tip: Install Ollama for enhanced semantic memory:")
-		fmt.Fprintln(opts.Stdout, "  brew install ollama && ollama pull "+graniteModel)
-		fmt.Fprintln(opts.Stdout, "  (Without Ollama, Dewey uses full-text search only)")
-	}
 
 	// Embedding model alignment note.
 	fmt.Fprintln(opts.Stdout)
@@ -578,6 +573,36 @@ func initializeHive(opts *Options) stepResult {
 	return stepResult{name: ".hive/", action: "initialized"}
 }
 
+// installOllama installs Ollama if missing. Ollama is the local
+// model runtime used by both Dewey (semantic search embeddings)
+// and Swarm (semantic memory). Follows the installGaze() pattern:
+// Homebrew only, skip with download link if no Homebrew.
+func installOllama(opts *Options, env doctor.DetectedEnvironment) stepResult {
+	if _, err := opts.LookPath("ollama"); err == nil {
+		return stepResult{name: "Ollama", action: "already installed"}
+	}
+
+	if opts.DryRun {
+		if doctor.HasManager(env, doctor.ManagerHomebrew) {
+			return stepResult{name: "Ollama", action: "dry-run", detail: "Would install: brew install ollama"}
+		}
+		return stepResult{name: "Ollama", action: "dry-run", detail: "Would install: download from https://ollama.com/download"}
+	}
+
+	if !doctor.HasManager(env, doctor.ManagerHomebrew) {
+		return stepResult{
+			name:   "Ollama",
+			action: "skipped",
+			detail: "Homebrew not available. Download from https://ollama.com/download",
+		}
+	}
+
+	if _, err := opts.ExecCmd("brew", "install", "ollama"); err != nil {
+		return stepResult{name: "Ollama", action: "failed", detail: "brew install failed", err: err}
+	}
+	return stepResult{name: "Ollama", action: "installed", detail: "via Homebrew"}
+}
+
 // installDewey installs Dewey and pulls the embedding model.
 // Position: after Swarm plugin, before uf init.
 // Design decision: Dewey is optional (Constitution Principle II —
@@ -613,7 +638,7 @@ func installDewey(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	// After installing, pull the embedding model.
 	modelResult := pullEmbeddingModel(opts)
 	if modelResult.action == "failed" {
-		return stepResult{name: "Dewey", action: "installed", detail: "via Homebrew (embedding model pull failed)"}
+		return stepResult{name: "Dewey", action: "installed", detail: "via Homebrew (model pull failed — run 'ollama serve' then 'ollama pull " + graniteModel + "')"}
 	}
 
 	return stepResult{name: "Dewey", action: "installed", detail: "via Homebrew"}
@@ -624,7 +649,7 @@ func installDewey(opts *Options, env doctor.DetectedEnvironment) stepResult {
 // semantic search across the toolchain.
 func pullEmbeddingModel(opts *Options) stepResult {
 	if _, err := opts.LookPath("ollama"); err != nil {
-		return stepResult{name: "Dewey", action: "already installed", detail: "embedding model requires ollama"}
+		return stepResult{name: "Dewey", action: "skipped", detail: "embedding model requires ollama (install from https://ollama.com/download)"}
 	}
 
 	if opts.DryRun {
@@ -638,7 +663,12 @@ func pullEmbeddingModel(opts *Options) stepResult {
 	}
 
 	if _, err := opts.ExecCmd("ollama", "pull", graniteModel); err != nil {
-		return stepResult{name: "Dewey", action: "failed", detail: "ollama pull failed", err: err}
+		return stepResult{
+			name:   "Dewey",
+			action: "failed",
+			detail: "ollama pull failed — ensure the Ollama server is running (ollama serve), then run: ollama pull " + graniteModel,
+			err:    err,
+		}
 	}
 
 	return stepResult{name: "Dewey", action: "installed", detail: "embedding model pulled"}
