@@ -176,29 +176,38 @@ func Run(opts Options) error {
 	// Step 2: Install Gaze (FR-023).
 	results = append(results, installGaze(&opts, env))
 
-	// Step 3: Ensure Node.js (FR-024).
+	// Step 3: Install Mx F Manager hero.
+	results = append(results, installMxF(&opts, env))
+
+	// Step 4: Install GitHub CLI.
+	results = append(results, installGH(&opts, env))
+
+	// Step 5: Ensure Node.js (FR-024).
 	nodeResult := ensureNodeJS(&opts, env)
 	results = append(results, nodeResult)
 	nodeAvailable := nodeResult.err == nil && nodeResult.action != "failed"
 
-	// Steps 4-8: Swarm-related (require Node.js).
+	// Steps 5-11: Node.js-dependent tools (inside nodeAvailable block).
 	if nodeAvailable {
-		// Step 4: Ensure bun is available (prerequisite for swarm setup).
+		// Step 6: Ensure bun is available (prerequisite for swarm setup).
 		bunResult := ensureBun(&opts, env)
 		results = append(results, bunResult)
 
-		// Step 5: Install Swarm plugin (FR-025).
+		// Step 7: Install OpenSpec CLI.
+		results = append(results, installOpenSpec(&opts, env))
+
+		// Step 8: Install Swarm plugin (FR-025).
 		swarmResult := installSwarmPlugin(&opts, env)
 		results = append(results, swarmResult)
 
 		if swarmResult.err == nil && swarmResult.action != "failed" && swarmResult.action != "skipped" {
-			// Step 6: Run swarm setup (FR-026).
+			// Step 9: Run swarm setup (FR-026).
 			results = append(results, runSwarmSetup(&opts))
 
-			// Step 7: Configure opencode.json (FR-027/027a/028).
+			// Step 10: Configure opencode.json (FR-027/027a/028).
 			results = append(results, configureOpencodeJSON(&opts))
 
-			// Step 8: Initialize .hive/ (FR-029).
+			// Step 11: Initialize .hive/ (FR-029).
 			results = append(results, initializeHive(&opts))
 		} else if swarmResult.action == "already installed" {
 			// Swarm already installed — still configure.
@@ -210,19 +219,31 @@ func Run(opts Options) error {
 			results = append(results, stepResult{name: ".hive/", action: "skipped", detail: "no swarm"})
 		}
 	} else {
+		results = append(results, stepResult{name: "OpenSpec CLI", action: "skipped", detail: "no Node.js"})
 		results = append(results, stepResult{name: "Swarm plugin", action: "skipped", detail: "no Node.js"})
 		results = append(results, stepResult{name: "swarm setup", action: "skipped", detail: "no swarm"})
 		results = append(results, stepResult{name: "opencode.json", action: "skipped", detail: "no swarm"})
 		results = append(results, stepResult{name: ".hive/", action: "skipped", detail: "no swarm"})
 	}
 
-	// Step 9: Install Ollama (prerequisite for Dewey + Swarm embeddings).
+	// Step 12: Install Ollama (prerequisite for Dewey + Swarm embeddings).
 	results = append(results, installOllama(&opts, env))
 
-	// Step 10: Install Dewey (after Ollama, before uf init).
+	// Step 13: Install Dewey (after Ollama, before uf init).
 	results = append(results, installDewey(&opts, env))
 
-	// Step 11: Run uf init (FR-033).
+	// Step 14: Initialize .dewey/ workspace.
+	deweyInitResult := initDewey(&opts)
+	results = append(results, deweyInitResult)
+
+	// Step 15: Build Dewey index (skip if init failed).
+	if deweyInitResult.action != "failed" {
+		results = append(results, indexDewey(&opts))
+	} else {
+		results = append(results, stepResult{name: "dewey index", action: "skipped", detail: "dewey init failed"})
+	}
+
+	// Step 16: Run uf init (FR-033).
 	results = append(results, runUnboundInit(&opts))
 
 	// Print results.
@@ -297,6 +318,100 @@ func installOpenCode(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		return stepResult{name: "OpenCode", action: "failed", detail: "curl install failed", err: err}
 	}
 	return stepResult{name: "OpenCode", action: "installed", detail: "via curl"}
+}
+
+// installMxF installs the Mx F Manager hero if missing.
+// Follows the installGaze() pattern: Homebrew only, skip with
+// GitHub releases link if no Homebrew.
+func installMxF(opts *Options, env doctor.DetectedEnvironment) stepResult {
+	if _, err := opts.LookPath("mxf"); err == nil {
+		return stepResult{name: "Mx F", action: "already installed"}
+	}
+
+	if opts.DryRun {
+		if doctor.HasManager(env, doctor.ManagerHomebrew) {
+			return stepResult{name: "Mx F", action: "dry-run", detail: "Would install: brew install unbound-force/tap/mxf"}
+		}
+		return stepResult{name: "Mx F", action: "dry-run", detail: "Would install: download from GitHub releases"}
+	}
+
+	if !doctor.HasManager(env, doctor.ManagerHomebrew) {
+		return stepResult{
+			name:   "Mx F",
+			action: "skipped",
+			detail: "Homebrew not available. Download from https://github.com/unbound-force/unbound-force/releases",
+		}
+	}
+
+	if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/mxf"); err != nil {
+		return stepResult{name: "Mx F", action: "failed", detail: "brew install failed", err: err}
+	}
+	return stepResult{name: "Mx F", action: "installed", detail: "via Homebrew"}
+}
+
+// installGH installs the GitHub CLI if missing.
+// Follows the installGaze() pattern: Homebrew only, skip with
+// download link if no Homebrew.
+func installGH(opts *Options, env doctor.DetectedEnvironment) stepResult {
+	if _, err := opts.LookPath("gh"); err == nil {
+		return stepResult{name: "GitHub CLI", action: "already installed"}
+	}
+
+	if opts.DryRun {
+		if doctor.HasManager(env, doctor.ManagerHomebrew) {
+			return stepResult{name: "GitHub CLI", action: "dry-run", detail: "Would install: brew install gh"}
+		}
+		return stepResult{name: "GitHub CLI", action: "dry-run", detail: "Would install: download from https://cli.github.com"}
+	}
+
+	if !doctor.HasManager(env, doctor.ManagerHomebrew) {
+		return stepResult{
+			name:   "GitHub CLI",
+			action: "skipped",
+			detail: "Homebrew not available. Download from https://cli.github.com",
+		}
+	}
+
+	if _, err := opts.ExecCmd("brew", "install", "gh"); err != nil {
+		return stepResult{name: "GitHub CLI", action: "failed", detail: "brew install failed", err: err}
+	}
+	return stepResult{name: "GitHub CLI", action: "installed", detail: "via Homebrew"}
+}
+
+// installOpenSpec installs the OpenSpec CLI if missing.
+// Follows the installSwarmPlugin() pattern with bun preference:
+// try bun first, fall back to npm.
+func installOpenSpec(opts *Options, env doctor.DetectedEnvironment) stepResult {
+	if _, err := opts.LookPath("openspec"); err == nil {
+		return stepResult{name: "OpenSpec CLI", action: "already installed"}
+	}
+
+	if opts.DryRun {
+		if doctor.HasManager(env, doctor.ManagerBun) {
+			return stepResult{name: "OpenSpec CLI", action: "dry-run", detail: "Would install: bun add -g @fission-ai/openspec@latest"}
+		}
+		return stepResult{name: "OpenSpec CLI", action: "dry-run", detail: "Would install: npm install -g @fission-ai/openspec@latest"}
+	}
+
+	// Prefer bun, fall back to npm (enhanced from installSwarmPlugin pattern
+	// — falls through to npm on bun failure for resilience).
+	if doctor.HasManager(env, doctor.ManagerBun) {
+		if _, bunErr := opts.ExecCmd("bun", "add", "-g", "@fission-ai/openspec@latest"); bunErr == nil {
+			return stepResult{name: "OpenSpec CLI", action: "installed", detail: "via bun"}
+		}
+		// bun failed — fall through to npm (log for diagnostics).
+		fmt.Fprintln(opts.Stderr, "  bun install failed, trying npm...")
+	}
+
+	if _, err := opts.ExecCmd("npm", "install", "-g", "@fission-ai/openspec@latest"); err != nil {
+		return stepResult{
+			name:   "OpenSpec CLI",
+			action: "failed",
+			detail: "npm install failed — fix npm permissions (see https://docs.npmjs.com/resolving-eacces-permissions-errors) or install via bun",
+			err:    err,
+		}
+	}
+	return stepResult{name: "OpenSpec CLI", action: "installed", detail: "via npm"}
 }
 
 // installGaze installs Gaze if missing per FR-023.
@@ -573,6 +688,56 @@ func initializeHive(opts *Options) stepResult {
 	return stepResult{name: ".hive/", action: "initialized"}
 }
 
+// initDewey runs `dewey init` if `.dewey/` doesn't exist.
+// Follows the runSwarmSetup() precedent: takes only opts (no env),
+// since no Homebrew/version manager logic is needed.
+func initDewey(opts *Options) stepResult {
+	deweyDir := filepath.Join(opts.TargetDir, ".dewey")
+	if info, err := os.Stat(deweyDir); err == nil && info.IsDir() {
+		return stepResult{name: ".dewey/", action: "already initialized"}
+	}
+
+	if _, err := opts.LookPath("dewey"); err != nil {
+		return stepResult{name: ".dewey/", action: "skipped", detail: "dewey not installed"}
+	}
+
+	if opts.DryRun {
+		return stepResult{name: ".dewey/", action: "dry-run", detail: "Would run: dewey init"}
+	}
+
+	if _, err := opts.ExecCmd("dewey", "init"); err != nil {
+		return stepResult{name: ".dewey/", action: "failed", detail: "dewey init failed", err: err}
+	}
+	return stepResult{name: ".dewey/", action: "initialized"}
+}
+
+// indexDewey runs `dewey index` if `.dewey/` exists.
+// Follows the runSwarmSetup() precedent: takes only opts (no env).
+func indexDewey(opts *Options) stepResult {
+	deweyDir := filepath.Join(opts.TargetDir, ".dewey")
+	if _, err := os.Stat(deweyDir); os.IsNotExist(err) {
+		return stepResult{name: "dewey index", action: "skipped", detail: "no .dewey/ workspace"}
+	}
+
+	if _, err := opts.LookPath("dewey"); err != nil {
+		return stepResult{name: "dewey index", action: "skipped", detail: "dewey not installed"}
+	}
+
+	if opts.DryRun {
+		return stepResult{name: "dewey index", action: "dry-run", detail: "Would run: dewey index"}
+	}
+
+	if _, err := opts.ExecCmd("dewey", "index"); err != nil {
+		return stepResult{
+			name:   "dewey index",
+			action: "failed",
+			detail: "dewey index failed — ensure Ollama server is running (ollama serve)",
+			err:    err,
+		}
+	}
+	return stepResult{name: "dewey index", action: "completed"}
+}
+
 // installOllama installs Ollama if missing. Ollama is the local
 // model runtime used by both Dewey (semantic search embeddings)
 // and Swarm (semantic memory). Follows the installGaze() pattern:
@@ -675,6 +840,10 @@ func pullEmbeddingModel(opts *Options) stepResult {
 }
 
 // runUnboundInit runs `uf init` if .opencode/ doesn't exist per FR-033.
+// Note: scaffold.Run() calls initSubTools() which attempts dewey init + dewey index.
+// When called from uf setup, steps 14-15 (initDewey/indexDewey) already ran, so
+// initSubTools' .dewey/ existence check causes it to skip — no double execution.
+// When called standalone (uf init), initSubTools runs dewey init for the first time.
 func runUnboundInit(opts *Options) stepResult {
 	ocDir := filepath.Join(opts.TargetDir, ".opencode")
 	if info, err := os.Stat(ocDir); err == nil && info.IsDir() {
@@ -689,9 +858,12 @@ func runUnboundInit(opts *Options) stepResult {
 	// Design decision: Direct function call avoids subprocess overhead
 	// and ensures consistent behavior. Per DRY principle, reuse the
 	// existing scaffold engine rather than shelling out.
+	// Forward LookPath/ExecCmd to maintain the testability injection chain.
 	result, err := scaffold.Run(scaffold.Options{
 		TargetDir: opts.TargetDir,
 		Stdout:    opts.Stdout,
+		LookPath:  opts.LookPath,
+		ExecCmd:   opts.ExecCmd,
 	})
 	if err != nil {
 		return stepResult{name: "uf init", action: "failed", detail: "scaffold failed", err: err}

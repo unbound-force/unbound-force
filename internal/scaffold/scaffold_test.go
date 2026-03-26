@@ -728,7 +728,7 @@ func TestPrintSummary_Output(t *testing.T) {
 			Skipped:     []string{".specify/config.yaml"},
 		}
 
-		printSummary(&buf, false, false, true, r)
+		printSummary(&buf, false, false, true, r, nil)
 		output := buf.String()
 
 		// Verify total count line
@@ -758,12 +758,12 @@ func TestPrintSummary_Output(t *testing.T) {
 			t.Errorf("expected '-' prefix for skipped files")
 		}
 
-		// Verify trailing hint lines
-		if !strings.Contains(output, "Run /speckit.specify") {
-			t.Errorf("expected speckit.specify hint line")
+		// Verify next-step guidance (no sub-tool results = suggest uf setup first)
+		if !strings.Contains(output, "Next steps:") {
+			t.Errorf("expected 'Next steps:' section")
 		}
-		if !strings.Contains(output, "Run /opsx:propose") {
-			t.Errorf("expected opsx:propose hint line")
+		if !strings.Contains(output, "uf setup") {
+			t.Errorf("expected 'uf setup' hint when no sub-tool results")
 		}
 	})
 
@@ -774,7 +774,7 @@ func TestPrintSummary_Output(t *testing.T) {
 			Created: []string{".opencode/agents/divisor-guard.md", ".opencode/command/review-council.md"},
 		}
 
-		printSummary(&buf, true, false, true, r)
+		printSummary(&buf, true, false, true, r, nil)
 		output := buf.String()
 
 		if !strings.Contains(output, "uf init (divisor): 2 files processed") {
@@ -798,7 +798,7 @@ func TestPrintSummary_Output(t *testing.T) {
 			Created: []string{".opencode/agents/divisor-guard.md"},
 		}
 
-		printSummary(&buf, true, false, false, r)
+		printSummary(&buf, true, false, false, r, nil)
 		output := buf.String()
 
 		if !strings.Contains(output, "language not detected") {
@@ -816,7 +816,7 @@ func TestPrintSummary_Output(t *testing.T) {
 			Skipped:     []string{},
 		}
 
-		printSummary(&buf, false, false, true, r)
+		printSummary(&buf, false, false, true, r, nil)
 		output := buf.String()
 
 		if !strings.Contains(output, "uf init: 2 files processed") {
@@ -1385,4 +1385,262 @@ func TestScaffoldOutput_NoBareUnboundReferences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walk error: %v", err)
 	}
+}
+
+// --- Sub-tool initialization tests ---
+
+// stubScaffoldLookPath returns a function that simulates exec.LookPath.
+func stubScaffoldLookPath(found map[string]string) func(string) (string, error) {
+	return func(name string) (string, error) {
+		if path, ok := found[name]; ok {
+			return path, nil
+		}
+		return "", fmt.Errorf("executable %q not found", name)
+	}
+}
+
+// scaffoldCmdRecorder records ExecCmd calls for scaffold tests.
+type scaffoldCmdRecorder struct {
+	calls  []string
+	errors map[string]error
+}
+
+func (r *scaffoldCmdRecorder) execCmd(name string, args ...string) ([]byte, error) {
+	key := name
+	if len(args) > 0 {
+		key = name + " " + strings.Join(args, " ")
+	}
+	r.calls = append(r.calls, key)
+
+	if err, ok := r.errors[key]; ok {
+		return nil, err
+	}
+	return []byte(""), nil
+}
+
+func TestInitSubTools_DeweyAvailable(t *testing.T) {
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Should have 2 results: dewey init + dewey index.
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d: %v", len(results), results)
+	}
+
+	if results[0].name != ".dewey/" || results[0].action != "initialized" {
+		t.Errorf("expected .dewey/ initialized, got %s %s", results[0].name, results[0].action)
+	}
+	if results[1].name != "dewey index" || results[1].action != "completed" {
+		t.Errorf("expected dewey index completed, got %s %s", results[1].name, results[1].action)
+	}
+
+	// Verify commands were called.
+	expectedCalls := []string{"dewey init", "dewey index"}
+	for _, expected := range expectedCalls {
+		found := false
+		for _, call := range rec.calls {
+			if call == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected command %q, got calls: %v", expected, rec.calls)
+		}
+	}
+}
+
+func TestInitSubTools_DeweyNotAvailable(t *testing.T) {
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{}), // No dewey
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Should have no results — dewey not available.
+	if len(results) != 0 {
+		t.Errorf("expected 0 results, got %d: %v", len(results), results)
+	}
+
+	// No commands should have been called.
+	if len(rec.calls) != 0 {
+		t.Errorf("expected no commands, got: %v", rec.calls)
+	}
+}
+
+func TestInitSubTools_DeweyAlreadyInitialized(t *testing.T) {
+	dir := t.TempDir()
+	// Create .dewey/ directory — already initialized.
+	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Should have no results — .dewey/ already exists.
+	if len(results) != 0 {
+		t.Errorf("expected 0 results, got %d: %v", len(results), results)
+	}
+
+	// dewey init should NOT have been called.
+	for _, call := range rec.calls {
+		if call == "dewey init" {
+			t.Error("dewey init should NOT be called when .dewey/ already exists")
+		}
+	}
+}
+
+func TestInitSubTools_DeweyInitFails(t *testing.T) {
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{
+		errors: map[string]error{
+			"dewey init": fmt.Errorf("init failed"),
+		},
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Should have 1 result: dewey init failed (index skipped).
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d: %v", len(results), results)
+	}
+
+	if results[0].name != ".dewey/" || results[0].action != "failed" {
+		t.Errorf("expected .dewey/ failed, got %s %s", results[0].name, results[0].action)
+	}
+
+	// dewey index should NOT have been called.
+	for _, call := range rec.calls {
+		if call == "dewey index" {
+			t.Error("dewey index should NOT be called when dewey init fails")
+		}
+	}
+}
+
+func TestInitSubTools_DivisorOnly(t *testing.T) {
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir:   dir,
+		DivisorOnly: true,
+		LookPath:    stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd:     rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Should return nil — DivisorOnly skips all sub-tool init.
+	if results != nil {
+		t.Errorf("expected nil results in DivisorOnly mode, got %v", results)
+	}
+
+	// No commands should have been called.
+	if len(rec.calls) != 0 {
+		t.Errorf("expected no commands in DivisorOnly mode, got: %v", rec.calls)
+	}
+}
+
+func TestPrintSummary_NextSteps(t *testing.T) {
+	t.Run("with_sub_tools", func(t *testing.T) {
+		var buf bytes.Buffer
+
+		r := &Result{
+			Created: []string{".opencode/command/speckit.specify.md"},
+		}
+		subResults := []subToolResult{
+			{name: ".dewey/", action: "initialized"},
+			{name: "dewey index", action: "completed"},
+		}
+
+		printSummary(&buf, false, false, true, r, subResults)
+		output := buf.String()
+
+		// Should show sub-tool results.
+		if !strings.Contains(output, "Sub-tool initialization:") {
+			t.Errorf("expected sub-tool section, got:\n%s", output)
+		}
+		if !strings.Contains(output, ".dewey/ initialized") {
+			t.Errorf("expected dewey init result, got:\n%s", output)
+		}
+		if !strings.Contains(output, "dewey index completed") {
+			t.Errorf("expected dewey index result, got:\n%s", output)
+		}
+
+		// Should show full next steps (not uf setup first).
+		if !strings.Contains(output, "Next steps:") {
+			t.Errorf("expected 'Next steps:' section")
+		}
+		if !strings.Contains(output, "/speckit.constitution") {
+			t.Errorf("expected constitution hint")
+		}
+		if !strings.Contains(output, "uf doctor") {
+			t.Errorf("expected doctor hint")
+		}
+	})
+
+	t.Run("without_sub_tools", func(t *testing.T) {
+		var buf bytes.Buffer
+
+		r := &Result{
+			Created: []string{".opencode/command/speckit.specify.md"},
+		}
+
+		printSummary(&buf, false, false, true, r, nil)
+		output := buf.String()
+
+		// Should suggest uf setup as first step.
+		if !strings.Contains(output, "uf setup") {
+			t.Errorf("expected 'uf setup' hint when no sub-tool results, got:\n%s", output)
+		}
+	})
+
+	t.Run("sub_tool_failure", func(t *testing.T) {
+		var buf bytes.Buffer
+
+		r := &Result{
+			Created: []string{".opencode/command/speckit.specify.md"},
+		}
+		subResults := []subToolResult{
+			{name: ".dewey/", action: "failed", detail: "dewey init failed"},
+		}
+
+		printSummary(&buf, false, false, true, r, subResults)
+		output := buf.String()
+
+		// Should show failure with ✗ symbol.
+		if !strings.Contains(output, "✗") {
+			t.Errorf("expected failure symbol, got:\n%s", output)
+		}
+		if !strings.Contains(output, "failed") {
+			t.Errorf("expected 'failed' in output, got:\n%s", output)
+		}
+	})
 }
