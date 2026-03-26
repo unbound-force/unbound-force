@@ -1431,16 +1431,19 @@ func TestInitSubTools_DeweyAvailable(t *testing.T) {
 
 	results := initSubTools(opts)
 
-	// Should have 2 results: dewey init + dewey index.
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d: %v", len(results), results)
+	// Should have 3 results: config.yaml + dewey init + dewey index.
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d: %v", len(results), results)
 	}
 
-	if results[0].name != ".dewey/" || results[0].action != "initialized" {
-		t.Errorf("expected .dewey/ initialized, got %s %s", results[0].name, results[0].action)
+	if results[0].name != ".unbound-force/config.yaml" || results[0].action != "initialized" {
+		t.Errorf("expected .unbound-force/config.yaml initialized, got %s %s", results[0].name, results[0].action)
 	}
-	if results[1].name != "dewey index" || results[1].action != "completed" {
-		t.Errorf("expected dewey index completed, got %s %s", results[1].name, results[1].action)
+	if results[1].name != ".dewey/" || results[1].action != "initialized" {
+		t.Errorf("expected .dewey/ initialized, got %s %s", results[1].name, results[1].action)
+	}
+	if results[2].name != "dewey index" || results[2].action != "completed" {
+		t.Errorf("expected dewey index completed, got %s %s", results[2].name, results[2].action)
 	}
 
 	// Verify commands were called.
@@ -1471,9 +1474,12 @@ func TestInitSubTools_DeweyNotAvailable(t *testing.T) {
 
 	results := initSubTools(opts)
 
-	// Should have no results — dewey not available.
-	if len(results) != 0 {
-		t.Errorf("expected 0 results, got %d: %v", len(results), results)
+	// Should have 1 result: config.yaml initialized (dewey not available).
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d: %v", len(results), results)
+	}
+	if len(results) > 0 && results[0].name != ".unbound-force/config.yaml" {
+		t.Errorf("expected config.yaml result, got %s", results[0].name)
 	}
 
 	// No commands should have been called.
@@ -1499,9 +1505,12 @@ func TestInitSubTools_DeweyAlreadyInitialized(t *testing.T) {
 
 	results := initSubTools(opts)
 
-	// Should have no results — .dewey/ already exists.
-	if len(results) != 0 {
-		t.Errorf("expected 0 results, got %d: %v", len(results), results)
+	// Should have 1 result: config.yaml initialized (.dewey/ already exists).
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d: %v", len(results), results)
+	}
+	if len(results) > 0 && results[0].name != ".unbound-force/config.yaml" {
+		t.Errorf("expected config.yaml result, got %s", results[0].name)
 	}
 
 	// dewey init should NOT have been called.
@@ -1528,13 +1537,16 @@ func TestInitSubTools_DeweyInitFails(t *testing.T) {
 
 	results := initSubTools(opts)
 
-	// Should have 1 result: dewey init failed (index skipped).
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d: %v", len(results), results)
+	// Should have 2 results: config.yaml initialized + dewey init failed (index skipped).
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d: %v", len(results), results)
 	}
 
-	if results[0].name != ".dewey/" || results[0].action != "failed" {
-		t.Errorf("expected .dewey/ failed, got %s %s", results[0].name, results[0].action)
+	if results[0].name != ".unbound-force/config.yaml" || results[0].action != "initialized" {
+		t.Errorf("expected config.yaml initialized, got %s %s", results[0].name, results[0].action)
+	}
+	if results[1].name != ".dewey/" || results[1].action != "failed" {
+		t.Errorf("expected .dewey/ failed, got %s %s", results[1].name, results[1].action)
 	}
 
 	// dewey index should NOT have been called.
@@ -1644,4 +1656,90 @@ func TestPrintSummary_NextSteps(t *testing.T) {
 			t.Errorf("expected 'failed' in output, got:\n%s", output)
 		}
 	})
+}
+
+// --- Workflow config file scaffold tests ---
+
+func TestInitSubTools_CreatesWorkflowConfig(t *testing.T) {
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{}), // No dewey
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Should have 1 result: config.yaml initialized.
+	foundConfig := false
+	for _, r := range results {
+		if r.name == ".unbound-force/config.yaml" && r.action == "initialized" {
+			foundConfig = true
+		}
+	}
+	if !foundConfig {
+		t.Errorf("expected .unbound-force/config.yaml initialized, got %v", results)
+	}
+
+	// Verify file exists with commented content.
+	configPath := filepath.Join(dir, ".unbound-force", "config.yaml")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config.yaml: %v", err)
+	}
+
+	text := string(content)
+	if !strings.Contains(text, "# workflow:") {
+		t.Error("config.yaml should contain commented-out workflow section")
+	}
+	if !strings.Contains(text, "#   execution_modes:") {
+		t.Error("config.yaml should contain commented-out execution_modes")
+	}
+	if !strings.Contains(text, "#     define: swarm") {
+		t.Error("config.yaml should contain commented-out define: swarm example")
+	}
+	if !strings.Contains(text, "#   spec_review: false") {
+		t.Error("config.yaml should contain commented-out spec_review")
+	}
+}
+
+func TestInitSubTools_PreservesExistingConfig(t *testing.T) {
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	// Create existing config with custom content.
+	ufDir := filepath.Join(dir, ".unbound-force")
+	if err := os.MkdirAll(ufDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	customContent := "workflow:\n  execution_modes:\n    define: swarm\n"
+	if err := os.WriteFile(filepath.Join(ufDir, "config.yaml"), []byte(customContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Should NOT have a config result — file already exists.
+	for _, r := range results {
+		if r.name == ".unbound-force/config.yaml" {
+			t.Errorf("expected no config result (file exists), got %s %s", r.name, r.action)
+		}
+	}
+
+	// Verify file was NOT overwritten.
+	content, err := os.ReadFile(filepath.Join(ufDir, "config.yaml"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if string(content) != customContent {
+		t.Error("existing config.yaml should not have been overwritten")
+	}
 }

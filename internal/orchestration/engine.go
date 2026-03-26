@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/log"
 	"github.com/unbound-force/unbound-force/internal/artifacts"
 	"github.com/unbound-force/unbound-force/internal/sync"
 )
@@ -141,8 +142,36 @@ func (o *Orchestrator) NewWorkflow(branch, backlogItemID string, overrides map[s
 // Start creates a new workflow, activates the first non-skipped stage,
 // saves it, and returns the result with any warnings. Optional overrides
 // and specReview are forwarded to NewWorkflow (pass nil, false for defaults).
+//
+// Before creating the workflow, Start loads project-level config from
+// .unbound-force/config.yaml (same directory as workflow JSON files).
+// Merge order: config execution modes (base) → CLI overrides (wins).
+// Spec review uses OR logic: config OR CLI (either true = enabled).
+// If config load fails, a warning is logged and empty defaults are used.
 func (o *Orchestrator) Start(branch, backlogItemID string, overrides map[string]string, specReview bool) (*WorkflowResult, error) {
-	wf, err := o.NewWorkflow(branch, backlogItemID, overrides, specReview)
+	// Load project-level config (base overrides).
+	cfg, cfgErr := LoadWorkflowConfig(o.WorkflowDir)
+	if cfgErr != nil {
+		log.Warn("workflow config error, using defaults", "err", cfgErr)
+	}
+
+	// Merge: config execution modes (base) < CLI overrides (wins).
+	// Initialize merged map from config; apply CLI overrides on top.
+	var merged map[string]string
+	if len(cfg.Workflow.ExecutionModes) > 0 || len(overrides) > 0 {
+		merged = make(map[string]string)
+		for k, v := range cfg.Workflow.ExecutionModes {
+			merged[k] = v
+		}
+		for k, v := range overrides {
+			merged[k] = v
+		}
+	}
+
+	// Spec review: config OR CLI (either true = enabled).
+	review := cfg.Workflow.SpecReview || specReview
+
+	wf, err := o.NewWorkflow(branch, backlogItemID, merged, review)
 	if err != nil {
 		return nil, fmt.Errorf("create workflow: %w", err)
 	}

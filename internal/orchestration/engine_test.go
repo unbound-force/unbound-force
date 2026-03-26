@@ -1275,3 +1275,134 @@ func findJSONFiles(dir string) ([]string, error) {
 	})
 	return paths, err
 }
+
+// writeWorkflowConfig creates a config.yaml in the given directory.
+func writeWorkflowConfig(t *testing.T, dir, content string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create workflow dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+}
+
+// --- Project-level config file integration ---
+
+func TestOrchestrator_Start_ReadsProjectConfig(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	// Write config with define=swarm in the workflow directory.
+	writeWorkflowConfig(t, orch.WorkflowDir, `workflow:
+  execution_modes:
+    define: swarm
+`)
+
+	// Start with no CLI overrides — config should apply.
+	result, err := orch.Start("feat/config-test", "BI-400", nil, false)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Define stage should have execution_mode=swarm (from config).
+	wf := result.Workflow
+	if wf.Stages[0].ExecutionMode != ModeSwarm {
+		t.Errorf("define ExecutionMode = %q, want %q (from config)",
+			wf.Stages[0].ExecutionMode, ModeSwarm)
+	}
+
+	// Other stages should retain defaults.
+	defaults := StageExecutionModeMap()
+	for _, stage := range wf.Stages[1:] {
+		want := defaults[stage.StageName]
+		if stage.ExecutionMode != want {
+			t.Errorf("stage %q ExecutionMode = %q, want default %q",
+				stage.StageName, stage.ExecutionMode, want)
+		}
+	}
+}
+
+func TestOrchestrator_Start_CLIOverridesConfig(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	// Config sets define=swarm.
+	writeWorkflowConfig(t, orch.WorkflowDir, `workflow:
+  execution_modes:
+    define: swarm
+`)
+
+	// CLI overrides define back to human — CLI wins.
+	result, err := orch.Start("feat/cli-wins", "BI-401",
+		map[string]string{StageDefine: ModeHuman}, false)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	if result.Workflow.Stages[0].ExecutionMode != ModeHuman {
+		t.Errorf("define ExecutionMode = %q, want %q (CLI overrides config)",
+			result.Workflow.Stages[0].ExecutionMode, ModeHuman)
+	}
+}
+
+func TestOrchestrator_Start_ConfigMissing_UsesDefaults(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	// No config.yaml — Start should use all defaults.
+	result, err := orch.Start("feat/no-config", "BI-402", nil, false)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	defaults := StageExecutionModeMap()
+	for _, stage := range result.Workflow.Stages {
+		want := defaults[stage.StageName]
+		if stage.ExecutionMode != want {
+			t.Errorf("stage %q ExecutionMode = %q, want default %q",
+				stage.StageName, stage.ExecutionMode, want)
+		}
+	}
+}
+
+func TestOrchestrator_Start_ConfigMalformed_WarnsAndUsesDefaults(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	// Write malformed YAML.
+	writeWorkflowConfig(t, orch.WorkflowDir, `workflow: [invalid yaml {{`)
+
+	// Start should succeed with defaults (warning logged, no error).
+	result, err := orch.Start("feat/bad-config", "BI-403", nil, false)
+	if err != nil {
+		t.Fatalf("Start failed: %v (expected success with defaults)", err)
+	}
+
+	// All stages should use defaults.
+	defaults := StageExecutionModeMap()
+	for _, stage := range result.Workflow.Stages {
+		want := defaults[stage.StageName]
+		if stage.ExecutionMode != want {
+			t.Errorf("stage %q ExecutionMode = %q, want default %q",
+				stage.StageName, stage.ExecutionMode, want)
+		}
+	}
+}
+
+func TestOrchestrator_Start_ConfigSpecReview(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	// Config enables spec_review.
+	writeWorkflowConfig(t, orch.WorkflowDir, `workflow:
+  execution_modes:
+    define: swarm
+  spec_review: true
+`)
+
+	// CLI specReview=false, but config=true → OR logic → enabled.
+	result, err := orch.Start("feat/config-review", "BI-404", nil, false)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	if !result.Workflow.SpecReviewEnabled {
+		t.Error("SpecReviewEnabled = false, want true (config OR CLI)")
+	}
+}
