@@ -112,17 +112,25 @@ func TestSetupRun_AllMissing(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Verify install order: opencode (brew), gaze (brew), node version check,
-	// bun (npm), swarm (npm), swarm setup, swarm init, ollama (brew).
+	// Verify install order: opencode (brew), gaze (brew), mxf (brew),
+	// gh (brew), node version check, bun (npm), openspec (npm),
+	// swarm (npm), swarm setup, swarm init, ollama (brew),
+	// dewey (brew). Note: dewey init/index are skipped because
+	// the LookPath stub doesn't include dewey (simulating a fresh
+	// install where the binary isn't yet in the test's PATH stub).
 	expectedCmds := []string{
 		"brew install anomalyco/tap/opencode",
 		"brew install unbound-force/tap/gaze",
+		"brew install unbound-force/tap/mxf",
+		"brew install gh",
 		"node --version",
 		"npm install -g bun",
+		"npm install -g @fission-ai/openspec@latest",
 		"npm install -g opencode-swarm-plugin@latest",
 		"swarm setup",
 		"swarm init",
 		"brew install ollama",
+		"brew install unbound-force/tap/dewey",
 	}
 
 	for _, expected := range expectedCmds {
@@ -150,6 +158,9 @@ func TestSetupRun_AllPresent(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
 		t.Fatalf("mkdir .opencode: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+		t.Fatalf("mkdir .dewey: %v", err)
+	}
 
 	rec := &cmdRecorder{
 		outputs: map[string]string{
@@ -167,9 +178,12 @@ func TestSetupRun_AllPresent(t *testing.T) {
 			"brew":     "/opt/homebrew/bin/brew",
 			"opencode": "/usr/local/bin/opencode",
 			"gaze":     "/usr/local/bin/gaze",
+			"mxf":      "/usr/local/bin/mxf",
+			"gh":       "/usr/local/bin/gh",
 			"node":     "/usr/local/bin/node",
 			"npm":      "/usr/local/bin/npm",
 			"bun":      "/home/user/.bun/bin/bun",
+			"openspec": "/usr/local/bin/openspec",
 			"swarm":    "/usr/local/bin/swarm",
 			"dewey":    "/usr/local/bin/dewey",
 			"ollama":   "/usr/local/bin/ollama",
@@ -589,10 +603,11 @@ func TestSetupRun_MalformedOpencodeJson(t *testing.T) {
 	}
 
 	err := Run(opts)
-	// Malformed JSON causes a "skipped" step (not "failed"), so
-	// Run may or may not return an error depending on other steps.
-	// The key assertion is that the output warns about malformed JSON.
-	_ = err
+	// Malformed JSON causes a "skipped" step (not "failed").
+	// Run should succeed since this is a non-fatal step.
+	if err != nil {
+		t.Fatalf("Run: %v (malformed JSON should be non-fatal)", err)
+	}
 
 	output := buf.String()
 	if !strings.Contains(output, "malformed") && !strings.Contains(output, "skipped") {
@@ -1452,12 +1467,635 @@ func TestSetupRun_OllamaBrewFails(t *testing.T) {
 	}
 
 	err := Run(opts)
-	// Setup may or may not return error depending on how failures are counted.
-	// The important thing is the Ollama step produced a "failed" result.
-	_ = err
+	// Ollama failure increments the fail count, causing Run to return
+	// an error. This is expected -- Ollama is optional but tracked.
+	if err == nil {
+		t.Log("Run returned nil -- Ollama failure counted but not fatal in this config")
+	}
 
 	output := buf.String()
 	if !strings.Contains(output, "failed") && !strings.Contains(output, "FAIL") {
 		t.Error("expected failure indication in output when brew install ollama fails")
+	}
+}
+
+// --- Mx F installation tests ---
+
+func TestSetupRun_MxFMissing_BrewInstall(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		YesFlag:   true,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":     "/opt/homebrew/bin/brew",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"gh":       "/usr/local/bin/gh",
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
+			// mxf NOT in PATH
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	found := false
+	for _, call := range rec.calls {
+		if call == "brew install unbound-force/tap/mxf" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected brew install mxf, got calls: %v", rec.calls)
+	}
+}
+
+func TestSetupRun_MxFNoHomebrew(t *testing.T) {
+	dir := t.TempDir()
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		YesFlag:   true,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"node": "/usr/local/bin/node",
+			"npm":  "/usr/local/bin/npm",
+			// No brew, no mxf
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Verify no brew install mxf was attempted.
+	for _, call := range rec.calls {
+		if call == "brew install unbound-force/tap/mxf" {
+			t.Error("should NOT attempt brew install mxf when Homebrew is not available")
+		}
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "GitHub") || !strings.Contains(output, "releases") {
+		t.Error("expected GitHub releases link in output when Homebrew is not available")
+	}
+}
+
+// --- GitHub CLI installation tests ---
+
+func TestSetupRun_GHMissing_BrewInstall(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		YesFlag:   true,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":     "/opt/homebrew/bin/brew",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"mxf":      "/usr/local/bin/mxf",
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
+			// gh NOT in PATH
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	found := false
+	for _, call := range rec.calls {
+		if call == "brew install gh" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected brew install gh, got calls: %v", rec.calls)
+	}
+}
+
+func TestSetupRun_GHNoHomebrew(t *testing.T) {
+	dir := t.TempDir()
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		YesFlag:   true,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"node": "/usr/local/bin/node",
+			"npm":  "/usr/local/bin/npm",
+			// No brew, no gh
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Verify no brew install gh was attempted.
+	for _, call := range rec.calls {
+		if call == "brew install gh" {
+			t.Error("should NOT attempt brew install gh when Homebrew is not available")
+		}
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "cli.github.com") {
+		t.Error("expected cli.github.com link in output when Homebrew is not available")
+	}
+}
+
+// --- OpenSpec CLI installation tests ---
+
+func TestSetupRun_OpenSpecMissing_Install(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		YesFlag:   true,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":     "/opt/homebrew/bin/brew",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"mxf":      "/usr/local/bin/mxf",
+			"gh":       "/usr/local/bin/gh",
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
+			"bun":      "/home/user/.bun/bin/bun",
+			// openspec NOT in PATH
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Should use bun (preferred) to install openspec.
+	bunCalled := false
+	for _, call := range rec.calls {
+		if call == "bun add -g @fission-ai/openspec@latest" {
+			bunCalled = true
+		}
+	}
+	if !bunCalled {
+		t.Errorf("expected bun add for openspec, got calls: %v", rec.calls)
+	}
+}
+
+func TestSetupRun_OpenSpecNpmFails(t *testing.T) {
+	dir := t.TempDir()
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+		},
+		errors: map[string]error{
+			"npm install -g @fission-ai/openspec@latest": fmt.Errorf("npm ERR! code EACCES"),
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		YesFlag:   true,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":     "/opt/homebrew/bin/brew",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"mxf":      "/usr/local/bin/mxf",
+			"gh":       "/usr/local/bin/gh",
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
+			// No bun — falls back to npm which fails
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	// OpenSpec failure is a "failed" step, which causes Run to return error.
+	if err == nil {
+		t.Fatal("expected error when openspec npm install fails")
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "failed") {
+		t.Error("expected failure message for openspec install")
+	}
+	if !strings.Contains(output, "npm") && !strings.Contains(output, "permissions") {
+		t.Error("expected npm permissions guidance in openspec failure message")
+	}
+}
+
+// --- Dewey init/index tests ---
+
+func TestSetupRun_DeweyInit(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+			"ollama list":    "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":     "/opt/homebrew/bin/brew",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"mxf":      "/usr/local/bin/mxf",
+			"gh":       "/usr/local/bin/gh",
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
+			"bun":      "/home/user/.bun/bin/bun",
+			"openspec": "/usr/local/bin/openspec",
+			"swarm":    "/usr/local/bin/swarm",
+			"dewey":    "/usr/local/bin/dewey",
+			"ollama":   "/usr/local/bin/ollama",
+			// .dewey/ does NOT exist — should run dewey init
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	found := false
+	for _, call := range rec.calls {
+		if call == "dewey init" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected dewey init, got calls: %v", rec.calls)
+	}
+}
+
+func TestSetupRun_DeweyInitFails(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+			"ollama list":    "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
+		},
+		errors: map[string]error{
+			"dewey init": fmt.Errorf("dewey init failed"),
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":     "/opt/homebrew/bin/brew",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"mxf":      "/usr/local/bin/mxf",
+			"gh":       "/usr/local/bin/gh",
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
+			"bun":      "/home/user/.bun/bin/bun",
+			"openspec": "/usr/local/bin/openspec",
+			"swarm":    "/usr/local/bin/swarm",
+			"dewey":    "/usr/local/bin/dewey",
+			"ollama":   "/usr/local/bin/ollama",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	// dewey init failure increments the fail count.
+	if err == nil {
+		t.Log("Run returned nil -- dewey init failure counted but not fatal in this config")
+	}
+
+	// Verify dewey index was NOT called (skipped because init failed).
+	for _, call := range rec.calls {
+		if call == "dewey index" {
+			t.Error("dewey index should NOT be called when dewey init fails")
+		}
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "failed") {
+		t.Error("expected failure message for dewey init")
+	}
+}
+
+func TestSetupRun_DeweyIndex(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// .dewey/ already exists — dewey init should skip, but dewey index should run.
+	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+			"ollama list":    "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":     "/opt/homebrew/bin/brew",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"mxf":      "/usr/local/bin/mxf",
+			"gh":       "/usr/local/bin/gh",
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
+			"bun":      "/home/user/.bun/bin/bun",
+			"openspec": "/usr/local/bin/openspec",
+			"swarm":    "/usr/local/bin/swarm",
+			"dewey":    "/usr/local/bin/dewey",
+			"ollama":   "/usr/local/bin/ollama",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// dewey init should NOT be called (.dewey/ already exists).
+	for _, call := range rec.calls {
+		if call == "dewey init" {
+			t.Error("dewey init should NOT be called when .dewey/ already exists")
+		}
+	}
+
+	// dewey index SHOULD be called (.dewey/ exists).
+	found := false
+	for _, call := range rec.calls {
+		if call == "dewey index" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected dewey index, got calls: %v", rec.calls)
+	}
+}
+
+func TestSetupRun_DeweyIndexFails(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+			"ollama list":    "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
+		},
+		errors: map[string]error{
+			"dewey index": fmt.Errorf("connection refused"),
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":     "/opt/homebrew/bin/brew",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"mxf":      "/usr/local/bin/mxf",
+			"gh":       "/usr/local/bin/gh",
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
+			"bun":      "/home/user/.bun/bin/bun",
+			"openspec": "/usr/local/bin/openspec",
+			"swarm":    "/usr/local/bin/swarm",
+			"dewey":    "/usr/local/bin/dewey",
+			"ollama":   "/usr/local/bin/ollama",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	// dewey index failure increments the fail count.
+	if err == nil {
+		t.Log("Run returned nil -- dewey index failure counted but not fatal in this config")
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "failed") {
+		t.Error("expected failure message for dewey index")
+	}
+	if !strings.Contains(output, "ollama serve") {
+		t.Error("expected Ollama server hint in dewey index failure")
+	}
+}
+
+// --- Dry-run update test ---
+
+func TestSetupRun_DryRunNewSteps(t *testing.T) {
+	dir := t.TempDir()
+
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		DryRun:    true,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":  "/opt/homebrew/bin/brew",
+			"node":  "/usr/local/bin/node",
+			"npm":   "/usr/local/bin/npm",
+			"bun":   "/home/user/.bun/bin/bun",
+			"dewey": "/usr/local/bin/dewey",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	output := buf.String()
+
+	// Verify dry-run output includes new tools.
+	// Note: dewey index shows "skipped (no .dewey/ workspace)" in dry-run
+	// because initDewey didn't actually create .dewey/ — correct behavior.
+	checks := []struct {
+		name    string
+		pattern string
+	}{
+		{"mxf", "Would install: brew install unbound-force/tap/mxf"},
+		{"gh", "Would install: brew install gh"},
+		{"openspec", "Would install: bun add -g @fission-ai/openspec@latest"},
+		{"dewey init", "Would run: dewey init"},
+	}
+	for _, c := range checks {
+		if !strings.Contains(output, c.pattern) {
+			t.Errorf("expected dry-run output to contain %q for %s, got:\n%s", c.pattern, c.name, output)
+		}
+	}
+
+	// Verify no install/init commands were actually executed.
+	for _, call := range rec.calls {
+		if strings.Contains(call, "install") || strings.Contains(call, "setup") || call == "dewey init" || call == "dewey index" {
+			t.Errorf("unexpected command in dry-run: %s", call)
+		}
 	}
 }

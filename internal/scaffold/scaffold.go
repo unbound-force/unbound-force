@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -25,12 +26,14 @@ var assets embed.FS
 
 // Options configures a scaffold run.
 type Options struct {
-	TargetDir   string    // Root dir to scaffold into (default: cwd)
-	Force       bool      // Overwrite existing files when true
-	DivisorOnly bool      // Deploy only Divisor agents, command, and packs
-	Lang        string    // Language for convention pack selection (auto-detect if empty)
-	Version     string    // Version string for marker comment (default: "dev")
-	Stdout      io.Writer // Writer for summary output (default: os.Stdout)
+	TargetDir   string                                  // Root dir to scaffold into (default: cwd)
+	Force       bool                                    // Overwrite existing files when true
+	DivisorOnly bool                                    // Deploy only Divisor agents, command, and packs
+	Lang        string                                  // Language for convention pack selection (auto-detect if empty)
+	Version     string                                  // Version string for marker comment (default: "dev")
+	Stdout      io.Writer                               // Writer for summary output (default: os.Stdout)
+	LookPath    func(string) (string, error)            // Finds a binary in PATH (default: exec.LookPath)
+	ExecCmd     func(string, ...string) ([]byte, error) // Runs a command (default: exec.Command wrapper)
 }
 
 // Result tracks the disposition of each scaffolded file.
@@ -41,9 +44,23 @@ type Result struct {
 	Updated     []string // Tool-owned files overwritten via overwrite-on-diff
 }
 
+// defaultExecCmd is the production implementation of ExecCmd.
+func defaultExecCmd(name string, args ...string) ([]byte, error) {
+	return exec.Command(name, args...).CombinedOutput()
+}
+
 // Run walks the embedded assets and writes them to the target directory.
 // It applies file ownership rules and version markers.
 func Run(opts Options) (*Result, error) {
+	// Default LookPath and ExecCmd FIRST — before any code path
+	// that calls initSubTools() can execute.
+	if opts.LookPath == nil {
+		opts.LookPath = exec.LookPath
+	}
+	if opts.ExecCmd == nil {
+		opts.ExecCmd = defaultExecCmd
+	}
+
 	if opts.TargetDir == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -164,7 +181,7 @@ func Run(opts Options) (*Result, error) {
 	})
 
 	if err != nil {
-		printSummary(opts.Stdout, opts.DivisorOnly, langExplicit, langDetected, result)
+		printSummary(opts.Stdout, opts.DivisorOnly, langExplicit, langDetected, result, nil)
 		return result, err
 	}
 
@@ -181,7 +198,10 @@ func Run(opts Options) (*Result, error) {
 		}
 	}
 
-	printSummary(opts.Stdout, opts.DivisorOnly, langExplicit, langDetected, result)
+	// Initialize sub-tools after file scaffolding, before summary.
+	subResults := initSubTools(&opts)
+
+	printSummary(opts.Stdout, opts.DivisorOnly, langExplicit, langDetected, result, subResults)
 	return result, nil
 }
 
@@ -358,19 +378,64 @@ func insertMarkerAfterFrontmatter(content []byte, marker string) []byte {
 	return []byte(before + marker + "\n" + after)
 }
 
+// subToolResult tracks the outcome of a sub-tool initialization step.
+type subToolResult struct {
+	name   string
+	action string // "initialized", "completed", "failed", "skipped"
+	detail string
+}
+
+// initSubTools initializes sub-tools after file scaffolding.
+// Errors are captured and reported as warnings in printSummary,
+// not hard failures (per Constitution Principle II — Composability First).
+// Skips in DivisorOnly mode (deploying reviewer assets to an
+// external repo should not initialize Dewey).
+func initSubTools(opts *Options) []subToolResult {
+	if opts.DivisorOnly {
+		return nil
+	}
+
+	var results []subToolResult
+
+	// Dewey: init + index if binary available and workspace absent.
+	if _, err := opts.LookPath("dewey"); err == nil {
+		deweyDir := filepath.Join(opts.TargetDir, ".dewey")
+		if _, statErr := os.Stat(deweyDir); os.IsNotExist(statErr) {
+			if _, initErr := opts.ExecCmd("dewey", "init"); initErr != nil {
+				results = append(results, subToolResult{
+					name: ".dewey/", action: "failed",
+					detail: "dewey init failed"})
+				return results // skip index if init failed
+			}
+			results = append(results, subToolResult{
+				name: ".dewey/", action: "initialized"})
+
+			if _, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
+				results = append(results, subToolResult{
+					name: "dewey index", action: "failed",
+					detail: "dewey index failed"})
+			} else {
+				results = append(results, subToolResult{
+					name: "dewey index", action: "completed"})
+			}
+		}
+	}
+
+	return results
+}
+
 // Next-step hint commands shown after scaffold summary.
 const (
-	hintStrategic = "Run /speckit.specify to start a strategic spec."
-	hintTactical  = "Run /opsx:propose to start a tactical change."
-	hintDivisor   = "Run /review-council to start a code review."
+	hintDivisor = "Run /review-council to start a code review."
 )
 
 // printSummary writes a human-readable summary of the scaffold
 // result to the given writer. When divisorOnly is true, shows
 // Divisor-specific hints instead of the standard hints.
 // langExplicit indicates --lang was set; langDetected indicates
-// auto-detection found a language.
-func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *Result) {
+// auto-detection found a language. subResults reports sub-tool
+// initialization outcomes (may be nil).
+func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *Result, subResults []subToolResult) {
 	total := len(r.Created) + len(r.Skipped) + len(r.Overwritten) + len(r.Updated)
 
 	label := "uf init"
@@ -404,6 +469,23 @@ func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *
 		}
 	}
 
+	// Sub-tool initialization results.
+	if len(subResults) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Sub-tool initialization:")
+		for _, sr := range subResults {
+			symbol := "✓"
+			if sr.action == "failed" {
+				symbol = "✗"
+			}
+			line := fmt.Sprintf("  %s %s %s", symbol, sr.name, sr.action)
+			if sr.detail != "" {
+				line += " (" + sr.detail + ")"
+			}
+			fmt.Fprintln(w, line)
+		}
+	}
+
 	fmt.Fprintln(w)
 	if divisorOnly && !langExplicit && !langDetected {
 		fmt.Fprintln(w, "  note: language not detected; deployed default convention pack only. Use --lang to specify.")
@@ -412,8 +494,40 @@ func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *
 	if divisorOnly {
 		fmt.Fprintln(w, hintDivisor)
 	} else {
-		fmt.Fprintln(w, hintStrategic)
-		fmt.Fprintln(w, hintTactical)
+		// Show context-aware next steps.
+		fmt.Fprintln(w, "Next steps:")
+		// Check if key tools are available to determine guidance.
+		hasDewey := false
+		if r != nil {
+			// Use the opts passed to Run() — we check via the
+			// presence of sub-tool results and file creation.
+			// Since printSummary doesn't have direct access to
+			// LookPath, we infer from subResults and created files.
+			for _, sr := range subResults {
+				if sr.name == ".dewey/" && (sr.action == "initialized" || sr.action == "completed") {
+					hasDewey = true
+				}
+			}
+			// If no sub-tool results but .dewey/ wasn't created,
+			// tools may still be available — check if dewey was
+			// already initialized (subResults would be empty).
+			if len(subResults) == 0 {
+				// No sub-tool actions means either DivisorOnly (handled above)
+				// or dewey was already initialized or not available.
+				// Default to showing uf setup as first step.
+				hasDewey = false
+			}
+		}
+		if !hasDewey && len(subResults) == 0 {
+			fmt.Fprintln(w, "  1. Run uf setup to install the full toolchain")
+			fmt.Fprintln(w, "  2. Run /speckit.constitution to create your project constitution")
+			fmt.Fprintln(w, "  3. Run uf doctor to verify your environment")
+		} else {
+			fmt.Fprintln(w, "  1. Run /speckit.constitution to create your project constitution")
+			fmt.Fprintln(w, "  2. Run uf doctor to verify your environment")
+			fmt.Fprintln(w, "  3. Run /speckit.specify to start a strategic spec")
+			fmt.Fprintln(w, "  4. Run /opsx:propose to start a tactical change")
+		}
 	}
 }
 
