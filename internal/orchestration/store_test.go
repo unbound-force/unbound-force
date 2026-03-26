@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -195,6 +196,53 @@ func TestWorkflowStore_Load_MissingFile(t *testing.T) {
 	_, err := store.Load("nonexistent-workflow")
 	if err == nil {
 		t.Error("expected error for missing workflow file")
+	}
+}
+
+func TestWorkflowStore_Load_LegacyJSON_SpecReviewDefaultsFalse(t *testing.T) {
+	dir := t.TempDir()
+	store := &WorkflowStore{Dir: dir}
+
+	// Write a legacy workflow JSON that does NOT contain the
+	// spec_review_enabled field. This simulates a workflow created
+	// before Spec 016. Loading it must default SpecReviewEnabled to
+	// false (Go zero value for bool), ensuring backward compatibility.
+	legacyJSON := `{
+		"workflow_id": "wf-legacy-001",
+		"feature_branch": "feat/old-feature",
+		"backlog_item_id": "BI-099",
+		"stages": [
+			{"stage_name": "define", "hero": "muti-mind", "status": "completed"},
+			{"stage_name": "implement", "hero": "cobalt-crush", "status": "pending"}
+		],
+		"current_stage": 0,
+		"started_at": "2026-03-20T14:30:00Z",
+		"status": "active",
+		"available_heroes": ["muti-mind", "cobalt-crush"],
+		"iteration_count": 0
+	}`
+
+	wfPath := filepath.Join(dir, "wf-legacy-001.json")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	if err := os.WriteFile(wfPath, []byte(legacyJSON), 0644); err != nil {
+		t.Fatalf("write legacy JSON failed: %v", err)
+	}
+
+	loaded, err := store.Load("wf-legacy-001")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if loaded.SpecReviewEnabled {
+		t.Error("SpecReviewEnabled should default to false for legacy JSON without the field")
+	}
+	if loaded.WorkflowID != "wf-legacy-001" {
+		t.Errorf("WorkflowID = %q, want %q", loaded.WorkflowID, "wf-legacy-001")
+	}
+	if loaded.Status != StatusActive {
+		t.Errorf("Status = %q, want %q", loaded.Status, StatusActive)
 	}
 }
 

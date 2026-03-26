@@ -98,6 +98,88 @@ When Dewey MCP tools are available, use them for context retrieval. If Dewey is 
 - Use Grep for keyword search across the codebase
 - Reference convention packs for standards
 
+## Autonomous Specification Workflow
+
+When the define stage runs in swarm mode (`execution_mode: swarm`),
+you autonomously draft a feature specification without human
+interaction. Follow this step-by-step workflow:
+
+### Step 1: Accept Seed Description
+
+Receive the seed description (one-sentence feature intent) from
+the Swarm coordinator. This is your primary input. Example:
+"add CSV export to the dashboard."
+
+### Step 2: Query Dewey for Cross-Repo Context
+
+Use Dewey's semantic search to retrieve relevant context before
+drafting. Query each context type:
+
+- **Related specs**: `dewey_semantic_search "CSV export patterns"`
+  to find similar features in the spec history.
+- **Related issues**: `dewey_semantic_search_filtered source_type=github`
+  to find GitHub issues related to the feature domain.
+- **Toolstack docs**: `dewey_semantic_search "dashboard architecture"`
+  to understand the existing system design.
+- **Convention packs**: `dewey_search "convention pack"` to find
+  coding standards that constrain the implementation.
+
+If Dewey returns no results for a query, note the gap and proceed
+with available context. Do NOT ask the human for clarification.
+
+### Step 3: Draft Specification Using Speckit Template
+
+Use the speckit template at `.specify/templates/spec-template.md`
+to produce a structured specification. Include:
+- User stories with Given/When/Then acceptance scenarios
+- Functional requirements (FR-NNN) with MUST/SHOULD/MAY
+- Success criteria (SC-NNN) with measurable outcomes
+- Edge cases section addressing failure modes
+
+### Step 4: Self-Clarify via Dewey
+
+Instead of asking the human to resolve ambiguities, query Dewey:
+- "What authentication method does this project use?"
+- "What database does the dashboard connect to?"
+- "Are there existing export formats in the codebase?"
+
+For each ambiguity, either resolve it from Dewey's response or
+document it as an assumption in the spec's Assumptions section.
+Do NOT block the workflow waiting for human input.
+
+### Step 5: Reference Learning Feedback
+
+If 3 or more completed workflow records exist (check
+`.unbound-force/artifacts/` for `workflow-record` artifacts),
+analyze them for patterns:
+- Features with vague acceptance criteria that were rejected
+- Common review findings that could be prevented in the spec
+- Estimation patterns (effort vs. actual complexity)
+
+Reference relevant lessons in the spec to produce more precise
+criteria. Example: "Past features with vague performance criteria
+were rejected 60% of the time — this spec includes explicit
+latency bounds."
+
+### Step 6: Produce Spec Artifact
+
+Write the specification to `specs/NNN-feature-name/spec.md`
+(following the speckit numbering convention). The spec is the
+primary output of the autonomous define stage.
+
+### Tier 1 Fallback (Dewey Unavailable)
+
+When Dewey is unavailable (MCP tools return errors or are not
+configured), fall back to local context:
+1. Read backlog items from `.muti-mind/backlog/` using the Read tool
+2. Read convention packs from `.opencode/unbound/packs/`
+3. Read recent specs from `specs/` for structural patterns
+4. Produce a less contextual but still valid specification
+
+The spec will lack cross-repo context and semantic search results,
+but will still follow the speckit template and include acceptance
+criteria based on the seed description and local context.
+
 ## Speckit Integration
 You are responsible for driving the `speckit` pipeline. When it's time to refine a feature:
 1. Initiate the `/speckit.specify` and `/speckit.clarify` OpenCode commands with the backlog item context as input.

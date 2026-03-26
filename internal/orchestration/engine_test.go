@@ -67,7 +67,7 @@ var allBinaries = map[string]bool{"gaze": true, "mxf": true}
 func TestOrchestrator_Start_AllHeroes(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/health-check", "BI-042")
+	result, err := orch.Start("feat/health-check", "BI-042", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestOrchestrator_Start_MissingHeroes(t *testing.T) {
 	// Only muti-mind and cobalt-crush available
 	orch := newTestOrchestrator(t, []string{"muti-mind-po.md", "cobalt-crush-dev.md"}, map[string]bool{})
 
-	result, err := orch.Start("feat/test", "BI-001")
+	result, err := orch.Start("feat/test", "BI-001", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestOrchestrator_Start_MissingHeroes(t *testing.T) {
 func TestOrchestrator_Advance_ThroughAllStages(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/full", "BI-010")
+	result, err := orch.Start("feat/full", "BI-010", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestOrchestrator_Advance_SkipsUnavailable(t *testing.T) {
 	// Only muti-mind and cobalt-crush available
 	orch := newTestOrchestrator(t, []string{"muti-mind-po.md", "cobalt-crush-dev.md"}, map[string]bool{})
 
-	result, err := orch.Start("feat/partial", "BI-020")
+	result, err := orch.Start("feat/partial", "BI-020", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestOrchestrator_Advance_SkipsUnavailable(t *testing.T) {
 func TestOrchestrator_Escalate(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/escalate", "BI-030")
+	result, err := orch.Start("feat/escalate", "BI-030", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestOrchestrator_Escalate(t *testing.T) {
 func TestOrchestrator_Complete_ProducesRecord(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/record", "BI-040")
+	result, err := orch.Start("feat/record", "BI-040", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestOrchestrator_Complete_ProducesRecord(t *testing.T) {
 func TestOrchestrator_Start_NoHeroes(t *testing.T) {
 	orch := newTestOrchestrator(t, nil, map[string]bool{})
 
-	result, err := orch.Start("feat/empty", "BI-050")
+	result, err := orch.Start("feat/empty", "BI-050", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -449,11 +449,11 @@ func TestOrchestrator_ConcurrentWorkflows_Isolated(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
 	// Start two workflows on different branches
-	result1, err := orch.Start("feat/alpha", "BI-100")
+	result1, err := orch.Start("feat/alpha", "BI-100", nil, false)
 	if err != nil {
 		t.Fatalf("Start alpha failed: %v", err)
 	}
-	result2, err := orch.Start("feat/beta", "BI-200")
+	result2, err := orch.Start("feat/beta", "BI-200", nil, false)
 	if err != nil {
 		t.Fatalf("Start beta failed: %v", err)
 	}
@@ -506,7 +506,7 @@ func TestOrchestrator_ConcurrentWorkflows_Isolated(t *testing.T) {
 func TestOrchestrator_Advance_MaxIterations_Escalates(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/max-iter", "BI-060")
+	result, err := orch.Start("feat/max-iter", "BI-060", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -559,7 +559,7 @@ func TestOrchestrator_Advance_MaxIterations_Escalates(t *testing.T) {
 func TestOrchestrator_HandleAcceptanceRejection(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/reject", "BI-070")
+	result, err := orch.Start("feat/reject", "BI-070", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -605,7 +605,7 @@ func TestOrchestrator_HandleAcceptanceRejection(t *testing.T) {
 func TestOrchestrator_HandleContradiction(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/conflict", "BI-080")
+	result, err := orch.Start("feat/conflict", "BI-080", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -640,7 +640,7 @@ func TestOrchestrator_HandleContradiction(t *testing.T) {
 func TestOrchestrator_Skip_ValidStage(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/skip", "BI-090")
+	result, err := orch.Start("feat/skip", "BI-090", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -668,7 +668,7 @@ func TestOrchestrator_Skip_ValidStage(t *testing.T) {
 func TestOrchestrator_Advance_NonActiveWorkflow(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/done", "BI-091")
+	result, err := orch.Start("feat/done", "BI-091", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -729,7 +729,10 @@ func TestSanitizeBranch(t *testing.T) {
 func TestOrchestrator_NewWorkflow_SetsExecutionModes(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	wf := orch.NewWorkflow("feat/modes", "BI-100")
+	wf, err := orch.NewWorkflow("feat/modes", "BI-100", nil, false)
+	if err != nil {
+		t.Fatalf("NewWorkflow failed: %v", err)
+	}
 
 	expectedModes := StageExecutionModeMap()
 	for _, stage := range wf.Stages {
@@ -743,7 +746,7 @@ func TestOrchestrator_NewWorkflow_SetsExecutionModes(t *testing.T) {
 func TestOrchestrator_Advance_PausesAtHumanCheckpoint(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/checkpoint", "BI-101")
+	result, err := orch.Start("feat/checkpoint", "BI-101", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -800,7 +803,7 @@ func TestOrchestrator_Advance_PausesAtHumanCheckpoint(t *testing.T) {
 func TestOrchestrator_Advance_ResumesFromCheckpoint(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/resume", "BI-102")
+	result, err := orch.Start("feat/resume", "BI-102", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -843,7 +846,7 @@ func TestOrchestrator_Advance_ResumesFromCheckpoint(t *testing.T) {
 func TestOrchestrator_Advance_SwarmToSwarmNoPause(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/swarm-flow", "BI-103")
+	result, err := orch.Start("feat/swarm-flow", "BI-103", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -884,7 +887,7 @@ func TestOrchestrator_Advance_SwarmToSwarmNoPause(t *testing.T) {
 func TestOrchestrator_Advance_LegacyWorkflowNoCheckpoints(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/legacy", "BI-200")
+	result, err := orch.Start("feat/legacy", "BI-200", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -929,7 +932,7 @@ func TestOrchestrator_Advance_AllSwarmSkipped_NoCheckpoint(t *testing.T) {
 	// stage without entering awaiting_human.
 	orch := newTestOrchestrator(t, []string{"muti-mind-po.md"}, map[string]bool{})
 
-	result, err := orch.Start("feat/no-swarm", "BI-201")
+	result, err := orch.Start("feat/no-swarm", "BI-201", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -964,7 +967,7 @@ func TestOrchestrator_Advance_AllSwarmSkipped_NoCheckpoint(t *testing.T) {
 func TestOrchestrator_Advance_EscalationWithExecutionModes(t *testing.T) {
 	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
 
-	result, err := orch.Start("feat/esc-modes", "BI-202")
+	result, err := orch.Start("feat/esc-modes", "BI-202", nil, false)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -998,6 +1001,263 @@ func TestOrchestrator_Advance_EscalationWithExecutionModes(t *testing.T) {
 
 	if result.Workflow.Status != StatusEscalated {
 		t.Errorf("Status = %q, want %q", result.Workflow.Status, StatusEscalated)
+	}
+}
+
+// --- Spec 016: Autonomous Define ---
+
+func TestOrchestrator_Advance_SpecReviewCheckpoint(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	// Start with define=swarm and spec review enabled.
+	result, err := orch.Start("feat/spec-review", "BI-300",
+		map[string]string{StageDefine: ModeSwarm}, true)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	wfID := result.Workflow.WorkflowID
+
+	// Advance: complete define (swarm) → spec review checkpoint fires
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if result.Workflow.Status != StatusAwaitingHuman {
+		t.Errorf("status = %q, want %q (spec review checkpoint)", result.Workflow.Status, StatusAwaitingHuman)
+	}
+
+	// Implement stage should still be pending (not activated)
+	wf, err := orch.Status(wfID)
+	if err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+	if wf.Stages[1].Status != StatusPending {
+		t.Errorf("implement stage status = %q, want %q", wf.Stages[1].Status, StatusPending)
+	}
+
+	// Resume from spec review checkpoint → implement activates
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance (resume) failed: %v", err)
+	}
+	if result.Workflow.Status != StatusActive {
+		t.Errorf("after resume, status = %q, want %q", result.Workflow.Status, StatusActive)
+	}
+	wf, err = orch.Status(wfID)
+	if err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+	if wf.Stages[1].Status != StatusActive {
+		t.Errorf("implement stage status = %q, want %q", wf.Stages[1].Status, StatusActive)
+	}
+}
+
+func TestOrchestrator_Advance_SpecReviewCheckpoint_DefineHuman(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	// Start with define=human (default) and spec review enabled.
+	// The checkpoint should be silently skipped because the human
+	// was already involved in the define stage.
+	result, err := orch.Start("feat/spec-review-human", "BI-301", nil, true)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	wfID := result.Workflow.WorkflowID
+
+	// Advance: complete define (human) → implement (swarm) activates directly
+	// No spec review checkpoint because define is human-mode.
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if result.Workflow.Status != StatusActive {
+		t.Errorf("status = %q, want %q (no checkpoint for human define)", result.Workflow.Status, StatusActive)
+	}
+
+	// Implement stage should be active (not pending)
+	wf, err := orch.Status(wfID)
+	if err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+	if wf.Stages[1].Status != StatusActive {
+		t.Errorf("implement stage status = %q, want %q", wf.Stages[1].Status, StatusActive)
+	}
+}
+
+func TestOrchestrator_Advance_SpecReviewDisabled(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	// Start with define=swarm but spec review DISABLED.
+	// The workflow should proceed directly to implement without pausing.
+	result, err := orch.Start("feat/no-spec-review", "BI-302",
+		map[string]string{StageDefine: ModeSwarm}, false)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	wfID := result.Workflow.WorkflowID
+
+	// Advance: complete define (swarm) → implement (swarm) activates directly
+	// No spec review checkpoint because specReview is false.
+	result, err = orch.Advance(wfID)
+	if err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if result.Workflow.Status != StatusActive {
+		t.Errorf("status = %q, want %q (no checkpoint when spec review disabled)", result.Workflow.Status, StatusActive)
+	}
+
+	wf, err := orch.Status(wfID)
+	if err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+	if wf.Stages[1].Status != StatusActive {
+		t.Errorf("implement stage status = %q, want %q", wf.Stages[1].Status, StatusActive)
+	}
+}
+
+func TestOrchestrator_NewWorkflow_WithOverrides(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	wf, err := orch.NewWorkflow("feat/override", "BI-303",
+		map[string]string{StageDefine: ModeSwarm}, false)
+	if err != nil {
+		t.Fatalf("NewWorkflow failed: %v", err)
+	}
+
+	// Define should be swarm (overridden)
+	if wf.Stages[0].ExecutionMode != ModeSwarm {
+		t.Errorf("define ExecutionMode = %q, want %q", wf.Stages[0].ExecutionMode, ModeSwarm)
+	}
+
+	// All other stages should retain defaults
+	defaults := StageExecutionModeMap()
+	for _, stage := range wf.Stages[1:] {
+		want := defaults[stage.StageName]
+		if stage.ExecutionMode != want {
+			t.Errorf("stage %q ExecutionMode = %q, want default %q", stage.StageName, stage.ExecutionMode, want)
+		}
+	}
+}
+
+func TestOrchestrator_NewWorkflow_DefaultOverrides(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	wf, err := orch.NewWorkflow("feat/defaults", "BI-304", nil, false)
+	if err != nil {
+		t.Fatalf("NewWorkflow failed: %v", err)
+	}
+
+	// All stages should match StageExecutionModeMap() defaults
+	defaults := StageExecutionModeMap()
+	for _, stage := range wf.Stages {
+		want := defaults[stage.StageName]
+		if stage.ExecutionMode != want {
+			t.Errorf("stage %q ExecutionMode = %q, want default %q", stage.StageName, stage.ExecutionMode, want)
+		}
+	}
+
+	// SpecReviewEnabled should be false
+	if wf.SpecReviewEnabled {
+		t.Error("SpecReviewEnabled should be false with nil overrides")
+	}
+}
+
+// --- Spec 016 US1: Configurable Define Stage ---
+
+func TestOrchestrator_Advance_AutonomousDefine_ThroughAllStages(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	// Start with define=swarm, spec review disabled.
+	// The workflow should pass through awaiting_human exactly once
+	// (before accept), and all 6 stages should complete.
+	result, err := orch.Start("feat/auto-define", "BI-310",
+		map[string]string{StageDefine: ModeSwarm}, false)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	wfID := result.Workflow.WorkflowID
+
+	// With define=swarm: all stages are swarm except accept=human.
+	// Advance sequence:
+	//   1: define(swarm) → implement(swarm) — no checkpoint
+	//   2: implement(swarm) → validate(swarm) — no checkpoint
+	//   3: validate(swarm) → review(swarm) — no checkpoint
+	//   4: review(swarm) → awaiting_human (checkpoint before accept)
+	//   5: resume → accept(human) activates
+	//   6: accept(human) → reflect(swarm)
+	//   7: reflect(swarm) → completed
+	awaitingHumanCount := 0
+	for i := 0; i < 7; i++ {
+		result, err = orch.Advance(wfID)
+		if err != nil {
+			t.Fatalf("Advance %d failed: %v", i+1, err)
+		}
+		if result.Workflow.Status == StatusAwaitingHuman {
+			awaitingHumanCount++
+		}
+	}
+
+	if awaitingHumanCount != 1 {
+		t.Errorf("expected exactly 1 awaiting_human checkpoint, got %d", awaitingHumanCount)
+	}
+
+	if result.Workflow.Status != StatusCompleted {
+		t.Errorf("Status = %q, want %q", result.Workflow.Status, StatusCompleted)
+	}
+
+	// All stages should be completed
+	for _, stage := range result.Workflow.Stages {
+		if stage.Status != StatusCompleted {
+			t.Errorf("stage %q status = %q, want %q", stage.StageName, stage.Status, StatusCompleted)
+		}
+	}
+}
+
+func TestOrchestrator_NewWorkflow_InvalidOverrideValue(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	_, err := orch.NewWorkflow("feat/bad-mode", "BI-311",
+		map[string]string{StageDefine: "auto"}, false)
+	if err == nil {
+		t.Fatal("expected error for invalid override value")
+	}
+	if !strings.Contains(err.Error(), ModeHuman) || !strings.Contains(err.Error(), ModeSwarm) {
+		t.Errorf("error = %q, want it to mention %q and %q", err.Error(), ModeHuman, ModeSwarm)
+	}
+}
+
+func TestOrchestrator_NewWorkflow_InvalidOverrideKey(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	_, err := orch.NewWorkflow("feat/bad-stage", "BI-312",
+		map[string]string{"nonexistent": ModeSwarm}, false)
+	if err == nil {
+		t.Fatal("expected error for invalid stage name in overrides")
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("error = %q, want it to mention the invalid stage name", err.Error())
+	}
+}
+
+func TestOrchestrator_Start_InvalidOverride_ReturnsError(t *testing.T) {
+	orch := newTestOrchestrator(t, allAgentFiles, allBinaries)
+
+	// Verify that Start() propagates the validation error from NewWorkflow()
+	// (not a nil-pointer panic or silent success).
+	_, err := orch.Start("feat/bad-start", "BI-313",
+		map[string]string{StageDefine: "invalid"}, false)
+	if err == nil {
+		t.Fatal("expected error from Start() with invalid override")
+	}
+	if !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("error = %q, want it to contain 'invalid'", err.Error())
 	}
 }
 

@@ -898,6 +898,7 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".opencode/command/workflow-status.md":  true,
 	".opencode/command/workflow-list.md":    true,
 	".opencode/command/workflow-advance.md": true,
+	".opencode/command/workflow-seed.md":    true,
 	// Swarm skills — Spec 008, local-only
 	".opencode/skill/unbound-force-heroes/SKILL.md": true,
 }

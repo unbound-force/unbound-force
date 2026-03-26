@@ -142,7 +142,8 @@ unbound-force/
 │   ├── 010-knowledge-graph-integration/ # MCP knowledge graph via graphthulhu
 │   ├── 011-doctor-setup/            # Environment health checking & automated setup
 │   ├── 012-swarm-delegation/        # Swarm delegation workflow
-│   └── 013-binary-rename/           # CLI binary rename (unbound → unbound-force/uf)
+│   ├── 013-binary-rename/           # CLI binary rename (unbound → unbound-force/uf)
+│   └── 016-autonomous-define/       # Autonomous define with Dewey
 ├── schemas/                         # JSON Schema registry for inter-hero artifacts
 │   ├── envelope/                    # Artifact envelope schema + samples
 │   ├── quality-report/              # Gaze quality report payload schema
@@ -187,12 +188,13 @@ Each hero's design. Can proceed in parallel once Phase 0 is done.
 - **006-cobalt-crush-architecture**: Dev persona, coding standards, Gaze/Divisor feedback loops
 - **007-mx-f-architecture**: Metrics platform, coaching engine, impediment tracking, sprint management
 
-### Phase 2: Cross-Cutting (008-009)
+### Phase 2: Cross-Cutting (008-009, 016)
 
 Depends on all Phase 1 specs.
 
 - **008-swarm-orchestration**: Feature lifecycle workflow, artifact handoff, Swarm plugin, learning loop
 - **009-shared-data-model**: JSON schemas for all artifact types, versioning, schema registry
+- **016-autonomous-define**: Autonomous define with Dewey -- configurable execution modes, seed command, spec review checkpoint
 
 ### Phase 3: Infrastructure (010-013)
 
@@ -220,6 +222,7 @@ Phase 1 (Heroes) — all depend on 001 + 002
 Phase 2 (Cross-Cutting) — depends on Phase 1
   008-swarm-orchestration
   009-shared-data-model
+  016-autonomous-define (depends on 012, 014, 015)
 
 Phase 3 (Infrastructure) — meta-repo operational
   010-knowledge-graph-integration
@@ -540,9 +543,11 @@ This repo is primarily specifications and governance documents. Follow these con
 - Go 1.24+ + `github.com/modelcontextprotocol/go-sdk/mcp` (014-dewey-architecture)
 - SQLite for persistent indexes (knowledge (014-dewey-architecture)
 - N/A (configuration and documentation changes; Dewey MCP tools: `dewey_search`, `dewey_semantic_search`, `dewey_traverse`, `dewey_get_page`, `dewey_find_by_tag`, `dewey_query_properties`, `dewey_find_connections`, `dewey_similar`, `dewey_semantic_search_filtered`) (015-dewey-integration)
+- JSON workflow files at `.unbound-force/workflows/` (016-autonomous-define)
 
 ## Recent Changes
 
+- 016-autonomous-define: Enabled autonomous define stage -- configurable execution mode overrides on `NewWorkflow()` (accepts `overrides map[string]string` for per-stage mode customization, validated against `StageOrder()` and `ModeHuman`/`ModeSwarm`), `SpecReviewEnabled` field on `WorkflowInstance` (instance-only, not on `WorkflowRecord`), spec review checkpoint in `Advance()` (fires when define=swarm + specReview=true, silently skipped when define=human), `Start()` updated to forward overrides and specReview, `/workflow seed` command (creates backlog item + starts workflow with define=swarm in one operation), `--define-mode` and `--spec-review` flags on `/workflow start`, Muti-Mind autonomous specification workflow instructions (6-step Dewey-powered spec drafting with Tier 1 fallback), SKILL.md updated with seed workflow section and comparison table, workflow command docs updated for spec review checkpoint output. All 5 user stories and 28 tasks completed.
 - setup-init-full-stack: Extended `uf setup` to install ALL ecosystem tools and `uf init` to initialize sub-tools automatically. `uf setup` now installs 3 new tools (Mx F via `brew install unbound-force/tap/mxf`, GitHub CLI via `brew install gh`, OpenSpec CLI via `bun add -g @fission-ai/openspec@latest` with npm fallback) and runs 2 new initialization steps (`dewey init` to create `.dewey/` workspace, `dewey index` to build initial search index). Step count increased from 11 to 16. `uf init` now initializes Dewey workspace after scaffolding via `initSubTools()` (idempotent — skips if `.dewey/` exists or if called after `uf setup`). `scaffold.Options` expanded with `LookPath` and `ExecCmd` fields for testability. `printSummary` updated with context-aware next-step guidance (constitution, doctor, speckit, opsx when tools available; `uf setup` when tools missing). `runUnboundInit` forwards `LookPath`/`ExecCmd` to scaffold for injection chain. All changes follow existing patterns (installGaze for Homebrew tools, installSwarmPlugin for npm/bun tools, runSwarmSetup for subprocess init). 43 tasks completed.
 - 015-dewey-integration: Integrated Dewey as the semantic knowledge layer replacing graphthulhu. Updated `opencode.json` MCP config (live + scaffold) from `knowledge-graph`/`graphthulhu` to `dewey`. Replaced all `knowledge-graph_*` tool references with `dewey_*` across agent files and commands. Added "Knowledge Retrieval" sections with role-specific Dewey usage and 3-tier graceful degradation pattern (Full Dewey, Graph-only, No Dewey) to all 5 hero agent files and 5 Divisor persona files. Added "Dewey Knowledge Layer" health check group to `uf doctor` (dewey binary, embedding model, workspace). Added Dewey installation step to `uf setup` (Homebrew install, embedding model pull). Updated embedding model from `mxbai-embed-large` to `granite-embedding:30m`. Added `TestScaffoldOutput_NoGraphthulhuReferences` regression test. All 5 user stories and 40 tasks completed.
 - 013-binary-rename: Renamed CLI binary from `unbound` to `unbound-force` with `uf` symlink alias to resolve NLnet Labs Unbound DNS resolver name collision. Directory rename `cmd/unbound/` → `cmd/unbound-force/`, Cobra root command `Use` field updated, Makefile `install` target creates both binaries, GoReleaser config updated (build id, binary name, archive template, cask name, quarantine hook, `uf` symlink via post-install hook), release workflow updated (20+ references), scaffold engine `versionMarker()` and `printSummary()` updated to `uf`, all embedded asset markers changed from `scaffolded by unbound` to `scaffolded by uf`, doctor hint strings updated (`uf init`/`uf setup`), setup progress messages updated, scaffold assets updated (reviewer-adversary, reviewer-guard, reviewer-sre, reviewer-architect, cobalt-crush-dev, specify/config.yaml), living documentation updated (AGENTS.md, README.md, unbound-force.md), 3 new regression tests (TestRootCmd_HelpOutput, TestScaffoldOutput_NoBareUnboundReferences, TestDoctorHints_NoBareUnboundReferences). Completed specs (001-012) and archived OpenSpec changes preserved as historical records. All 5 user stories and 35 tasks completed.

@@ -129,6 +129,40 @@ The workflow supports autonomous swarm delegation with human checkpoints:
 
 The complete workflow requires exactly **2 human decision points**: one to hand off after define, and one to accept the increment. Everything else runs autonomously.
 
+### Seed Workflow (Autonomous Define)
+
+The define stage can be configured as `[swarm]` so Muti-Mind
+autonomously drafts specifications using Dewey context. This
+reduces the workflow to a single human checkpoint (accept).
+
+**Seed command**: Start a workflow with one sentence:
+```
+/workflow seed "add CSV export to the dashboard"
+```
+
+The seed command creates a backlog item and starts a workflow
+with `define=swarm`. Muti-Mind queries Dewey for cross-repo
+context, drafts the spec, and the swarm continues through
+implement → validate → review. The human reviews only at accept.
+
+**Configurable define mode**: Use `/workflow start` with the
+`--define-mode` flag for explicit control:
+```
+/workflow start BI-042 --define-mode=swarm
+```
+
+**Optional spec review checkpoint**: For high-stakes features,
+add `--spec-review` to pause after the spec is drafted:
+```
+/workflow seed "migrate credentials to OAuth2" --spec-review
+```
+
+| Workflow | Human Checkpoints | Commands |
+|----------|:-----------------:|---------|
+| **Default** (define=human) | 2 | specify + clarify + advance, then accept |
+| **Autonomous** (define=swarm) | 1 | seed, then accept |
+| **Autonomous + spec review** | 2 | seed, review spec, then accept |
+
 ### Legacy Workflows
 
 Workflows created before execution mode support (without `execution_mode` fields) are treated as all-human for backward compatibility. They advance one stage at a time with no automatic checkpoint pausing.
@@ -143,7 +177,8 @@ Workflows created before execution mode support (without `execution_mode` fields
 
 ## Workflow Commands
 
-- `/workflow start [backlog-item-id]` — Begin a new hero lifecycle workflow
+- `/workflow start [backlog-item-id] [--define-mode=human|swarm] [--spec-review]` — Begin a new hero lifecycle workflow
+- `/workflow seed <description> [--spec-review]` — Seed a new feature with one sentence (define=swarm)
 - `/workflow status [workflow-id]` — Check current workflow state
 - `/workflow list [--status active|completed|all]` — List all workflows
 - `/workflow advance` — Advance to the next stage

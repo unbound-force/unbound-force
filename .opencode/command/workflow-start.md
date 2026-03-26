@@ -10,8 +10,20 @@ Begin a new hero lifecycle workflow for the current feature branch.
 ## Usage
 
 ```
-/workflow start [backlog-item-id]
+/workflow start [backlog-item-id] [--define-mode=human|swarm] [--spec-review]
 ```
+
+### Flags
+
+- `--define-mode`: Set the define stage execution mode.
+  Accepts `human` (default) or `swarm`. When set to `swarm`,
+  Muti-Mind autonomously drafts the specification using
+  Dewey context without human interaction.
+- `--spec-review`: Enable the spec review checkpoint between
+  define and implement. When enabled AND define is in swarm
+  mode, the workflow pauses after Muti-Mind completes the
+  spec, allowing the human to review before implementation
+  begins. Disabled by default.
 
 ## Behavior
 
@@ -59,6 +71,37 @@ Available heroes:
 
 Stage 1/6: define (Muti-Mind) [human]
   Next: Run /speckit.specify to create the feature spec.
+```
+
+## Autonomous Define Example
+
+```
+> /workflow start BI-042 --define-mode=swarm
+
+Workflow started: wf-feat-csv-export-20260326T143000
+
+Available heroes:
+  ✓ Muti-Mind (define) [swarm]
+  ✓ Cobalt-Crush (implement) [swarm]
+  ✓ Gaze (validate) [swarm]
+  ✓ The Divisor (review) [swarm]
+  ✓ Muti-Mind (accept) [human]
+  ✓ Mx F (reflect) [swarm]
+
+Stage 1/6: define (Muti-Mind) [swarm]
+  Muti-Mind is drafting the specification autonomously...
+```
+
+## Autonomous Define with Spec Review Example
+
+```
+> /workflow start BI-042 --define-mode=swarm --spec-review
+
+Workflow started: wf-feat-oauth2-20260326T150000
+
+Stage 1/6: define (Muti-Mind) [swarm]
+  Muti-Mind is drafting the specification autonomously...
+  Spec review checkpoint enabled — workflow will pause after define.
 ```
 
 ## Directory Structure

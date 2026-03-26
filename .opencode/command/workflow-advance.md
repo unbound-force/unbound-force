@@ -78,6 +78,28 @@ Awaiting human action at: accept (Muti-Mind) [human]
 Run /workflow advance to resume and accept the increment.
 ```
 
+### Spec Review Checkpoint (autonomous define)
+
+When the workflow pauses after an autonomous define stage
+with spec review enabled:
+
+```
+Specification drafted: wf-feat-csv-export-20260326T143000
+
+Muti-Mind has drafted the specification.
+Review at: specs/NNN-feature-name/spec.md
+
+Awaiting spec review. Run /workflow advance to approve.
+```
+
+After the human advances past the spec review checkpoint:
+
+```
+Spec approved. Continuing to implement...
+
+Stage 2/6: implement (Cobalt-Crush) [swarm]
+```
+
 ### Resumed from Checkpoint
 
 ```

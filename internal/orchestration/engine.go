@@ -63,7 +63,28 @@ func (o *Orchestrator) lookPath() func(string) (string, error) {
 
 // NewWorkflow creates a new WorkflowInstance with 6 stages,
 // detects available heroes, and marks unavailable stages as skipped.
-func (o *Orchestrator) NewWorkflow(branch, backlogItemID string) *WorkflowInstance {
+// Optional overrides map stage names to execution modes ("human" or
+// "swarm"), applied on top of StageExecutionModeMap() defaults.
+// specReview enables the spec review checkpoint between define and
+// implement (FR-010, FR-013). Returns an error if override keys or
+// values are invalid.
+func (o *Orchestrator) NewWorkflow(branch, backlogItemID string, overrides map[string]string, specReview bool) (*WorkflowInstance, error) {
+	// Validate override keys and values before building the workflow.
+	// Per FR-004: invalid modes are rejected with a clear error message.
+	order := StageOrder()
+	validStages := make(map[string]bool, len(order))
+	for _, s := range order {
+		validStages[s] = true
+	}
+	for key, val := range overrides {
+		if !validStages[key] {
+			return nil, fmt.Errorf("invalid stage name %q in overrides: valid stages are %v", key, order)
+		}
+		if val != ModeHuman && val != ModeSwarm {
+			return nil, fmt.Errorf("invalid execution mode %q for stage %q: must be %q or %q", val, key, ModeHuman, ModeSwarm)
+		}
+	}
+
 	now := o.now()
 	id := fmt.Sprintf("wf-%s-%s", sanitizeBranch(branch), now.Format("20060102T150405"))
 
@@ -79,7 +100,12 @@ func (o *Orchestrator) NewWorkflow(branch, backlogItemID string) *WorkflowInstan
 
 	stageHeroes := StageHeroMap()
 	stageModes := StageExecutionModeMap()
-	order := StageOrder()
+
+	// Apply overrides on top of defaults.
+	for key, val := range overrides {
+		stageModes[key] = val
+	}
+
 	stages := make([]WorkflowStage, len(order))
 	for i, stageName := range order {
 		hero := stageHeroes[stageName]
@@ -99,22 +125,27 @@ func (o *Orchestrator) NewWorkflow(branch, backlogItemID string) *WorkflowInstan
 	}
 
 	return &WorkflowInstance{
-		WorkflowID:      id,
-		FeatureBranch:   branch,
-		BacklogItemID:   backlogItemID,
-		Stages:          stages,
-		CurrentStage:    0,
-		StartedAt:       now,
-		Status:          StatusActive,
-		AvailableHeroes: availableNames,
-		IterationCount:  0,
-	}
+		WorkflowID:        id,
+		FeatureBranch:     branch,
+		BacklogItemID:     backlogItemID,
+		Stages:            stages,
+		CurrentStage:      0,
+		StartedAt:         now,
+		Status:            StatusActive,
+		AvailableHeroes:   availableNames,
+		IterationCount:    0,
+		SpecReviewEnabled: specReview,
+	}, nil
 }
 
 // Start creates a new workflow, activates the first non-skipped stage,
-// saves it, and returns the result with any warnings.
-func (o *Orchestrator) Start(branch, backlogItemID string) (*WorkflowResult, error) {
-	wf := o.NewWorkflow(branch, backlogItemID)
+// saves it, and returns the result with any warnings. Optional overrides
+// and specReview are forwarded to NewWorkflow (pass nil, false for defaults).
+func (o *Orchestrator) Start(branch, backlogItemID string, overrides map[string]string, specReview bool) (*WorkflowResult, error) {
+	wf, err := o.NewWorkflow(branch, backlogItemID, overrides, specReview)
+	if err != nil {
+		return nil, fmt.Errorf("create workflow: %w", err)
+	}
 
 	var warnings []string
 	for _, stage := range wf.Stages {
@@ -193,6 +224,27 @@ func (o *Orchestrator) Advance(workflowID string) (*WorkflowResult, error) {
 				}
 			}
 		}
+	}
+
+	// Spec review checkpoint: after completing the define stage in swarm
+	// mode with spec review enabled, pause for human review of the
+	// autonomously-drafted specification. Per FR-010, FR-011: the
+	// checkpoint fires based on define=swarm (not implement's mode),
+	// since the purpose is reviewing the spec Muti-Mind just drafted.
+	// When define is human-mode, the checkpoint is silently skipped
+	// because the human was already involved in the define stage.
+	if !resuming && current >= 0 && current < len(wf.Stages) &&
+		wf.Stages[current].StageName == StageDefine &&
+		wf.SpecReviewEnabled &&
+		effectiveMode(wf.Stages[current].ExecutionMode) == ModeSwarm {
+		wf.Status = StatusAwaitingHuman
+		if err := o.store().Save(wf); err != nil {
+			return nil, fmt.Errorf("save workflow at spec review checkpoint: %w", err)
+		}
+		return &WorkflowResult{
+			Workflow:  wf,
+			StagesRun: 1,
+		}, nil
 	}
 
 	// Find the next non-skipped stage

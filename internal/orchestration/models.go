@@ -59,16 +59,17 @@ const (
 // lifecycle for a feature. Persisted as JSON at
 // .unbound-force/workflows/{workflow_id}.json.
 type WorkflowInstance struct {
-	WorkflowID      string          `json:"workflow_id"`
-	FeatureBranch   string          `json:"feature_branch"`
-	BacklogItemID   string          `json:"backlog_item_id"`
-	Stages          []WorkflowStage `json:"stages"`
-	CurrentStage    int             `json:"current_stage"`
-	StartedAt       time.Time       `json:"started_at"`
-	CompletedAt     *time.Time      `json:"completed_at,omitempty"`
-	Status          string          `json:"status"`
-	AvailableHeroes []string        `json:"available_heroes"`
-	IterationCount  int             `json:"iteration_count"`
+	WorkflowID        string          `json:"workflow_id"`
+	FeatureBranch     string          `json:"feature_branch"`
+	BacklogItemID     string          `json:"backlog_item_id"`
+	Stages            []WorkflowStage `json:"stages"`
+	CurrentStage      int             `json:"current_stage"`
+	StartedAt         time.Time       `json:"started_at"`
+	CompletedAt       *time.Time      `json:"completed_at,omitempty"`
+	Status            string          `json:"status"`
+	AvailableHeroes   []string        `json:"available_heroes"`
+	IterationCount    int             `json:"iteration_count"`
+	SpecReviewEnabled bool            `json:"spec_review_enabled,omitempty"`
 }
 
 // WorkflowStage represents one step in the hero lifecycle.

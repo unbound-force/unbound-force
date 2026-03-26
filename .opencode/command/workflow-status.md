@@ -89,3 +89,25 @@ Stages:
 
 Run /workflow advance to resume.
 ```
+
+### Awaiting Spec Review (autonomous define)
+
+When the workflow is paused at the spec review checkpoint
+after an autonomous define stage:
+
+```
+Workflow: wf-feat-csv-export-20260326T143000
+Branch: feat/csv-export
+Status: awaiting_human
+
+Stages:
+  ⏸ define      (muti-mind)     completed  10m   [swarm]  ← spec ready for review
+  ○ implement   (cobalt-crush)  pending          [swarm]
+  ○ validate    (gaze)          pending          [swarm]
+  ○ review      (divisor)       pending          [swarm]
+  ○ accept      (muti-mind)     pending          [human]
+  ○ reflect     (mx-f)          pending          [swarm]
+
+Spec review: specs/NNN-csv-export/spec.md
+Run /workflow advance to approve the spec and continue.
+```
