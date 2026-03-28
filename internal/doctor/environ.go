@@ -271,7 +271,7 @@ func homebrewInstallCmd(toolName string) string {
 	case "swarm":
 		return "npm install -g opencode-swarm-plugin@latest"
 	case "ollama":
-		return "brew install ollama && ollama pull granite-embedding:30m"
+		return "brew install --cask ollama-app && ollama pull granite-embedding:30m"
 	default:
 		return "brew install " + toolName
 	}
@@ -294,7 +294,7 @@ func genericInstallCmd(toolName string) string {
 	case "gh":
 		return "Download from https://cli.github.com/"
 	case "ollama":
-		return "brew install ollama && ollama pull granite-embedding:30m"
+		return "brew install --cask ollama-app && ollama pull granite-embedding:30m"
 	default:
 		return "Install " + toolName
 	}

@@ -749,7 +749,7 @@ func installOllama(opts *Options, env doctor.DetectedEnvironment) stepResult {
 
 	if opts.DryRun {
 		if doctor.HasManager(env, doctor.ManagerHomebrew) {
-			return stepResult{name: "Ollama", action: "dry-run", detail: "Would install: brew install ollama"}
+			return stepResult{name: "Ollama", action: "dry-run", detail: "Would install: brew install --cask ollama-app"}
 		}
 		return stepResult{name: "Ollama", action: "dry-run", detail: "Would install: download from https://ollama.com/download"}
 	}
@@ -762,7 +762,7 @@ func installOllama(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		}
 	}
 
-	if _, err := opts.ExecCmd("brew", "install", "ollama"); err != nil {
+	if _, err := opts.ExecCmd("brew", "install", "--cask", "ollama-app"); err != nil {
 		return stepResult{name: "Ollama", action: "failed", detail: "brew install failed", err: err}
 	}
 	return stepResult{name: "Ollama", action: "installed", detail: "via Homebrew"}

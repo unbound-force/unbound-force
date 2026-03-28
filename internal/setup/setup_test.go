@@ -129,7 +129,7 @@ func TestSetupRun_AllMissing(t *testing.T) {
 		"npm install -g opencode-swarm-plugin@latest",
 		"swarm setup",
 		"swarm init",
-		"brew install ollama",
+		"brew install --cask ollama-app",
 		"brew install unbound-force/tap/dewey",
 	}
 
@@ -1308,13 +1308,13 @@ func TestSetupRun_OllamaInstall(t *testing.T) {
 	// Verify Ollama was installed via Homebrew (no tip, actual install).
 	found := false
 	for _, call := range rec.calls {
-		if call == "brew install ollama" {
+		if call == "brew install --cask ollama-app" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("expected 'brew install ollama' in recorded commands")
+		t.Error("expected 'brew install --cask ollama-app' in recorded commands")
 	}
 
 	// Verify no Ollama tip in output (removed -- now installed automatically).
@@ -1410,10 +1410,10 @@ func TestSetupRun_OllamaNoHomebrew(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Verify no brew install ollama was attempted.
+	// Verify no brew install ollama-app was attempted.
 	for _, call := range rec.calls {
-		if call == "brew install ollama" {
-			t.Error("should NOT attempt brew install ollama when Homebrew is not available")
+		if call == "brew install --cask ollama-app" {
+			t.Error("should NOT attempt brew install --cask ollama-app when Homebrew is not available")
 		}
 	}
 
@@ -1439,7 +1439,7 @@ func TestSetupRun_OllamaBrewFails(t *testing.T) {
 			"node --version": "v22.15.0",
 		},
 		errors: map[string]error{
-			"brew install ollama": fmt.Errorf("brew: formula not found"),
+			"brew install --cask ollama-app": fmt.Errorf("brew: cask not found"),
 		},
 	}
 
