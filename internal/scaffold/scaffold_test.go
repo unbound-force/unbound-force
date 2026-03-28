@@ -1706,6 +1706,333 @@ func TestInitSubTools_CreatesWorkflowConfig(t *testing.T) {
 	}
 }
 
+// --- Dewey auto-sources tests ---
+
+func TestGenerateDeweySources_SiblingsDetected(t *testing.T) {
+	// Create a parent dir with the "current" project and 3 sibling repos.
+	parentDir := t.TempDir()
+	currentDir := filepath.Join(parentDir, "my-project")
+	if err := os.MkdirAll(filepath.Join(currentDir, ".dewey"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Write default sources.yaml (single source entry).
+	defaultSources := "sources:\n  - id: disk-local\n    type: disk\n    config:\n      path: \".\"\n"
+	if err := os.WriteFile(filepath.Join(currentDir, ".dewey", "sources.yaml"), []byte(defaultSources), 0o644); err != nil {
+		t.Fatalf("write sources.yaml: %v", err)
+	}
+
+	// Create 3 sibling repos with .git/ directories.
+	for _, name := range []string{"gaze", "dewey", "website"} {
+		sibDir := filepath.Join(parentDir, name)
+		if err := os.MkdirAll(filepath.Join(sibDir, ".git"), 0o755); err != nil {
+			t.Fatalf("mkdir sibling %s: %v", name, err)
+		}
+	}
+
+	// Create a non-repo directory (no .git/) — should be ignored.
+	if err := os.MkdirAll(filepath.Join(parentDir, "not-a-repo"), 0o755); err != nil {
+		t.Fatalf("mkdir not-a-repo: %v", err)
+	}
+
+	// Stub ExecCmd to return a GitHub SSH remote.
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+	opts := &Options{
+		TargetDir: currentDir,
+		ExecCmd: func(name string, args ...string) ([]byte, error) {
+			key := name
+			if len(args) > 0 {
+				key = name + " " + strings.Join(args, " ")
+			}
+			if key == "git remote get-url origin" {
+				return []byte("git@github.com:unbound-force/my-project.git\n"), nil
+			}
+			return rec.execCmd(name, args...)
+		},
+	}
+
+	result := generateDeweySources(opts)
+
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.action != "completed" {
+		t.Errorf("expected action 'completed', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "4 repos detected") {
+		t.Errorf("expected '4 repos detected' in detail, got %q", result.detail)
+	}
+
+	// Read the generated sources.yaml and verify content.
+	content, err := os.ReadFile(filepath.Join(currentDir, ".dewey", "sources.yaml"))
+	if err != nil {
+		t.Fatalf("read sources.yaml: %v", err)
+	}
+	text := string(content)
+
+	// Verify per-repo disk sources.
+	if !strings.Contains(text, "- id: disk-local") {
+		t.Error("expected disk-local source")
+	}
+	if !strings.Contains(text, "- id: disk-gaze") {
+		t.Error("expected disk-gaze source")
+	}
+	if !strings.Contains(text, "- id: disk-dewey") {
+		t.Error("expected disk-dewey source")
+	}
+	if !strings.Contains(text, "- id: disk-website") {
+		t.Error("expected disk-website source")
+	}
+
+	// Verify disk-org source.
+	if !strings.Contains(text, "- id: disk-org") {
+		t.Error("expected disk-org source")
+	}
+
+	// Verify GitHub source with repos list.
+	if !strings.Contains(text, "- id: github-unbound-force") {
+		t.Error("expected github-unbound-force source")
+	}
+	if !strings.Contains(text, "org: unbound-force") {
+		t.Error("expected org: unbound-force in GitHub config")
+	}
+	// Verify repos list includes current + siblings.
+	if !strings.Contains(text, "        - my-project") {
+		t.Error("expected my-project in repos list")
+	}
+	if !strings.Contains(text, "        - gaze") {
+		t.Error("expected gaze in repos list")
+	}
+
+	// Verify non-repo directory was NOT included.
+	if strings.Contains(text, "not-a-repo") {
+		t.Error("non-repo directory should not appear in sources")
+	}
+
+	// Verify sibling paths use relative notation.
+	if !strings.Contains(text, "path: \"../gaze\"") {
+		t.Error("expected relative path for gaze sibling")
+	}
+}
+
+func TestGenerateDeweySources_NoSiblings(t *testing.T) {
+	// Create a parent dir with only the current project.
+	parentDir := t.TempDir()
+	currentDir := filepath.Join(parentDir, "lonely-project")
+	if err := os.MkdirAll(filepath.Join(currentDir, ".dewey"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Write default sources.yaml.
+	defaultSources := "sources:\n  - id: disk-local\n    type: disk\n    config:\n      path: \".\"\n"
+	if err := os.WriteFile(filepath.Join(currentDir, ".dewey", "sources.yaml"), []byte(defaultSources), 0o644); err != nil {
+		t.Fatalf("write sources.yaml: %v", err)
+	}
+
+	// No ExecCmd stub needed — extractGitHubOrg will fail gracefully.
+	opts := &Options{
+		TargetDir: currentDir,
+		ExecCmd: func(name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("no remote")
+		},
+	}
+
+	result := generateDeweySources(opts)
+
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.action != "completed" {
+		t.Errorf("expected action 'completed', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "1 repos detected") {
+		t.Errorf("expected '1 repos detected', got %q", result.detail)
+	}
+
+	// Read generated sources.yaml.
+	content, err := os.ReadFile(filepath.Join(currentDir, ".dewey", "sources.yaml"))
+	if err != nil {
+		t.Fatalf("read sources.yaml: %v", err)
+	}
+	text := string(content)
+
+	// Should have disk-local + disk-org only.
+	if !strings.Contains(text, "- id: disk-local") {
+		t.Error("expected disk-local source")
+	}
+	if !strings.Contains(text, "- id: disk-org") {
+		t.Error("expected disk-org source")
+	}
+
+	// Should NOT have GitHub source (no remote).
+	if strings.Contains(text, "type: github") {
+		t.Error("should not have GitHub source when no remote")
+	}
+}
+
+func TestGenerateDeweySources_AlreadyCustomized(t *testing.T) {
+	parentDir := t.TempDir()
+	currentDir := filepath.Join(parentDir, "my-project")
+	if err := os.MkdirAll(filepath.Join(currentDir, ".dewey"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Write a customized sources.yaml with 3 source entries.
+	customSources := `sources:
+  - id: disk-local
+    type: disk
+    config:
+      path: "."
+  - id: disk-other
+    type: disk
+    config:
+      path: "../other"
+  - id: github-myorg
+    type: github
+    config:
+      org: myorg
+`
+	sourcesPath := filepath.Join(currentDir, ".dewey", "sources.yaml")
+	if err := os.WriteFile(sourcesPath, []byte(customSources), 0o644); err != nil {
+		t.Fatalf("write sources.yaml: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: currentDir,
+		ExecCmd: func(name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("should not be called")
+		},
+	}
+
+	result := generateDeweySources(opts)
+
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.action != "skipped" {
+		t.Errorf("expected action 'skipped', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "already customized") {
+		t.Errorf("expected 'already customized' in detail, got %q", result.detail)
+	}
+
+	// Verify file was NOT overwritten.
+	content, err := os.ReadFile(sourcesPath)
+	if err != nil {
+		t.Fatalf("read sources.yaml: %v", err)
+	}
+	if string(content) != customSources {
+		t.Error("customized sources.yaml should not have been overwritten")
+	}
+}
+
+func TestExtractGitHubOrg_SSH(t *testing.T) {
+	opts := &Options{
+		ExecCmd: func(name string, args ...string) ([]byte, error) {
+			return []byte("git@github.com:unbound-force/repo.git\n"), nil
+		},
+	}
+
+	org := extractGitHubOrg(opts)
+	if org != "unbound-force" {
+		t.Errorf("expected 'unbound-force', got %q", org)
+	}
+}
+
+func TestExtractGitHubOrg_HTTPS(t *testing.T) {
+	opts := &Options{
+		ExecCmd: func(name string, args ...string) ([]byte, error) {
+			return []byte("https://github.com/unbound-force/repo.git\n"), nil
+		},
+	}
+
+	org := extractGitHubOrg(opts)
+	if org != "unbound-force" {
+		t.Errorf("expected 'unbound-force', got %q", org)
+	}
+}
+
+func TestExtractGitHubOrg_NonGitHub(t *testing.T) {
+	opts := &Options{
+		ExecCmd: func(name string, args ...string) ([]byte, error) {
+			return []byte("https://gitlab.com/myorg/repo.git\n"), nil
+		},
+	}
+
+	org := extractGitHubOrg(opts)
+	if org != "" {
+		t.Errorf("expected empty string for non-GitHub remote, got %q", org)
+	}
+}
+
+func TestExtractGitHubOrg_NoRemote(t *testing.T) {
+	opts := &Options{
+		ExecCmd: func(name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("fatal: No such remote 'origin'")
+		},
+	}
+
+	org := extractGitHubOrg(opts)
+	if org != "" {
+		t.Errorf("expected empty string when no remote, got %q", org)
+	}
+}
+
+func TestIsDefaultSourcesConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{
+			name:     "default single source",
+			input:    "sources:\n  - id: disk-local\n    type: disk\n    config:\n      path: \".\"\n",
+			expected: true,
+		},
+		{
+			name:     "empty file",
+			input:    "",
+			expected: true,
+		},
+		{
+			name:     "no sources at all",
+			input:    "# empty config\n",
+			expected: true,
+		},
+		{
+			name: "customized with 3 sources",
+			input: `sources:
+  - id: disk-local
+    type: disk
+  - id: disk-other
+    type: disk
+  - id: github-org
+    type: github
+`,
+			expected: false,
+		},
+		{
+			name: "customized with 2 sources",
+			input: `sources:
+  - id: disk-local
+    type: disk
+  - id: disk-other
+    type: disk
+`,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isDefaultSourcesConfig([]byte(tt.input))
+			if got != tt.expected {
+				t.Errorf("isDefaultSourcesConfig() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestInitSubTools_PreservesExistingConfig(t *testing.T) {
 	dir := t.TempDir()
 	rec := &scaffoldCmdRecorder{errors: map[string]error{}}

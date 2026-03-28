@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -447,6 +448,13 @@ func initSubTools(opts *Options) []subToolResult {
 			results = append(results, subToolResult{
 				name: ".dewey/", action: "initialized"})
 
+			// Auto-detect sibling repos for Dewey sources config.
+			// Runs after dewey init creates default sources.yaml
+			// and before dewey index ingests all sources.
+			if sr := generateDeweySources(opts); sr != nil {
+				results = append(results, *sr)
+			}
+
 			if _, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
 				results = append(results, subToolResult{
 					name: "dewey index", action: "failed",
@@ -589,4 +597,190 @@ func assetPaths() ([]string, error) {
 // Used by the drift detection test.
 func assetContent(relPath string) ([]byte, error) {
 	return assets.ReadFile("assets/" + relPath)
+}
+
+// generateDeweySources detects sibling repos and generates a
+// multi-repo Dewey sources configuration. Called from initSubTools
+// after `dewey init` creates the default sources.yaml and before
+// `dewey index`. Skips if sources.yaml doesn't exist, or if the
+// user has already customized it (> 1 source entry).
+//
+// Design decision: user-owned after creation. Once the user adds
+// sources, uf init never overwrites. Detection uses simple
+// `- id:` counting per Composability First — no YAML parsing
+// dependency needed.
+func generateDeweySources(opts *Options) *subToolResult {
+	sourcesPath := filepath.Join(opts.TargetDir, ".dewey", "sources.yaml")
+
+	// Skip if sources.yaml doesn't exist (dewey init didn't run
+	// or was cleaned up).
+	data, err := os.ReadFile(sourcesPath)
+	if err != nil {
+		return nil
+	}
+
+	// Skip if user has customized the file (more than the default
+	// single-source config).
+	if !isDefaultSourcesConfig(data) {
+		return &subToolResult{
+			name:   "dewey sources",
+			action: "skipped",
+			detail: "already customized",
+		}
+	}
+
+	// Detect sibling repos: directories with .git/ in the parent dir.
+	parentDir := filepath.Dir(opts.TargetDir)
+	currentName := filepath.Base(opts.TargetDir)
+	entries, readErr := os.ReadDir(parentDir)
+	if readErr != nil {
+		return nil
+	}
+
+	var siblings []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if e.Name() == currentName {
+			continue
+		}
+		// Check for .git/ directory — indicates a git repo.
+		gitDir := filepath.Join(parentDir, e.Name(), ".git")
+		if info, statErr := os.Stat(gitDir); statErr == nil && info.IsDir() {
+			siblings = append(siblings, e.Name())
+		}
+	}
+	sort.Strings(siblings)
+
+	// Extract GitHub org from git remote URL.
+	org := extractGitHubOrg(opts)
+
+	// Generate and write the multi-repo sources config.
+	if writeErr := writeSourcesConfig(sourcesPath, currentName, siblings, parentDir, org); writeErr != nil {
+		return &subToolResult{
+			name:   "dewey sources",
+			action: "failed",
+			detail: writeErr.Error(),
+		}
+	}
+
+	repoCount := 1 + len(siblings) // current + siblings
+	return &subToolResult{
+		name:   "dewey sources",
+		action: "completed",
+		detail: fmt.Sprintf("%d repos detected", repoCount),
+	}
+}
+
+// isDefaultSourcesConfig returns true if the sources.yaml content
+// has exactly 1 source entry (the default from `dewey init`).
+// Uses simple `- id:` occurrence counting — if the user has added
+// sources (> 1 entry), we treat the file as customized and skip
+// overwriting.
+func isDefaultSourcesConfig(data []byte) bool {
+	return strings.Count(string(data), "- id:") <= 1
+}
+
+// extractGitHubOrg parses the GitHub organization name from the
+// current repo's git remote URL. Supports both SSH and HTTPS
+// formats. Returns empty string on any failure (non-GitHub remote,
+// no remote configured, exec error) — graceful degradation per
+// Constitution Principle II (Composability First).
+func extractGitHubOrg(opts *Options) string {
+	output, err := opts.ExecCmd("git", "remote", "get-url", "origin")
+	if err != nil {
+		return ""
+	}
+
+	url := strings.TrimSpace(string(output))
+
+	// SSH format: git@github.com:ORG/repo.git
+	if strings.HasPrefix(url, "git@github.com:") {
+		trimmed := strings.TrimPrefix(url, "git@github.com:")
+		trimmed = strings.TrimSuffix(trimmed, ".git")
+		parts := strings.SplitN(trimmed, "/", 2)
+		if len(parts) >= 1 && parts[0] != "" {
+			return parts[0]
+		}
+		return ""
+	}
+
+	// HTTPS format: https://github.com/ORG/repo.git
+	if strings.Contains(url, "github.com/") {
+		idx := strings.Index(url, "github.com/")
+		trimmed := url[idx+len("github.com/"):]
+		trimmed = strings.TrimSuffix(trimmed, ".git")
+		parts := strings.SplitN(trimmed, "/", 2)
+		if len(parts) >= 1 && parts[0] != "" {
+			return parts[0]
+		}
+		return ""
+	}
+
+	// Not a GitHub remote — omit GitHub source.
+	return ""
+}
+
+// writeSourcesConfig generates a multi-repo Dewey sources.yaml
+// with per-repo disk sources, a disk-org source for the parent
+// directory, and optionally a GitHub API source if the org name
+// was detected. The generated YAML is hand-crafted (not marshalled)
+// to produce clean, commented output.
+func writeSourcesConfig(path, currentName string, siblings []string, parentDir, org string) error {
+	var b strings.Builder
+
+	b.WriteString("# Auto-generated by uf init. Customize as needed.\n")
+	b.WriteString("# This file is user-owned -- uf init will not\n")
+	b.WriteString("# overwrite it after initial creation.\n")
+	b.WriteString("\n")
+	b.WriteString("sources:\n")
+
+	// Per-repo disk sources (fine-grained provenance).
+	b.WriteString("  # Per-repo disk sources (fine-grained provenance)\n")
+
+	// Current repo first.
+	b.WriteString("  - id: disk-local\n")
+	b.WriteString("    type: disk\n")
+	b.WriteString(fmt.Sprintf("    name: %s\n", currentName))
+	b.WriteString("    config:\n")
+	b.WriteString("      path: \".\"\n")
+
+	// Sibling repos.
+	for _, sib := range siblings {
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("  - id: disk-%s\n", sib))
+		b.WriteString("    type: disk\n")
+		b.WriteString(fmt.Sprintf("    name: %s\n", sib))
+		b.WriteString("    config:\n")
+		b.WriteString(fmt.Sprintf("      path: \"../%s\"\n", sib))
+	}
+
+	// Org-level disk source.
+	b.WriteString("\n")
+	b.WriteString("  # Org-level files (design papers, plans)\n")
+	b.WriteString("  - id: disk-org\n")
+	b.WriteString("    type: disk\n")
+	b.WriteString("    name: org-workspace\n")
+	b.WriteString("    config:\n")
+	b.WriteString("      path: \"../\"\n")
+
+	// GitHub API source (optional — only if org was detected).
+	if org != "" {
+		b.WriteString("\n")
+		b.WriteString("  # GitHub API (issues, PRs, READMEs)\n")
+		b.WriteString(fmt.Sprintf("  - id: github-%s\n", org))
+		b.WriteString("    type: github\n")
+		b.WriteString(fmt.Sprintf("    name: %s org\n", org))
+		b.WriteString("    config:\n")
+		b.WriteString(fmt.Sprintf("      org: %s\n", org))
+		b.WriteString("      repos:\n")
+		b.WriteString(fmt.Sprintf("        - %s\n", currentName))
+		for _, sib := range siblings {
+			b.WriteString(fmt.Sprintf("        - %s\n", sib))
+		}
+		b.WriteString("    refresh_interval: daily\n")
+	}
+
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
