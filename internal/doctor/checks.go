@@ -662,10 +662,14 @@ func checkMCPConfig(opts *Options) CheckGroup {
 		Message:  "valid",
 	})
 
-	// Check MCP servers — look for mcpServers key.
-	mcpRaw, ok := ocMap["mcpServers"]
+	// Check MCP servers — prefer canonical "mcp" key, fall back to
+	// legacy "mcpServers" key (FR-012).
+	mcpRaw, ok := ocMap["mcp"]
 	if !ok {
-		return group
+		mcpRaw, ok = ocMap["mcpServers"]
+		if !ok {
+			return group
+		}
 	}
 
 	var servers map[string]json.RawMessage
@@ -674,36 +678,57 @@ func checkMCPConfig(opts *Options) CheckGroup {
 	}
 
 	for name, serverRaw := range servers {
-		var serverDef struct {
-			Command string   `json:"command"`
-			Args    []string `json:"args"`
-		}
-		if dErr := json.Unmarshal(serverRaw, &serverDef); dErr != nil {
-			continue
-		}
-
-		if serverDef.Command == "" {
+		// Extract the binary name from the command field.
+		// Handles both string-style ("command": "dewey") and
+		// array-style ("command": ["dewey", "serve", "--vault", "."]).
+		binary := extractMCPBinary(serverRaw)
+		if binary == "" {
 			continue
 		}
 
 		// Check if the command binary exists.
-		if _, lookErr := opts.LookPath(serverDef.Command); lookErr != nil {
+		if _, lookErr := opts.LookPath(binary); lookErr != nil {
 			group.Results = append(group.Results, CheckResult{
 				Name:        name,
 				Severity:    Warn,
-				Message:     fmt.Sprintf("%s binary not found", serverDef.Command),
-				InstallHint: installURL(serverDef.Command),
+				Message:     fmt.Sprintf("%s binary not found", binary),
+				InstallHint: installURL(binary),
 			})
 		} else {
 			group.Results = append(group.Results, CheckResult{
 				Name:     name,
 				Severity: Pass,
-				Message:  serverDef.Command + " binary found",
+				Message:  binary + " binary found",
 			})
 		}
 	}
 
 	return group
+}
+
+// extractMCPBinary extracts the binary name from an MCP server
+// definition's command field. Handles both string-style
+// ("command": "dewey") and array-style ("command": ["dewey",
+// "serve", "--vault", "."]) formats (FR-014). For array-style,
+// the first element is the binary name.
+func extractMCPBinary(serverRaw json.RawMessage) string {
+	// Try parsing with string command first (legacy format).
+	var stringDef struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(serverRaw, &stringDef); err == nil && stringDef.Command != "" {
+		return stringDef.Command
+	}
+
+	// Try parsing with array command (canonical format).
+	var arrayDef struct {
+		Command []string `json:"command"`
+	}
+	if err := json.Unmarshal(serverRaw, &arrayDef); err == nil && len(arrayDef.Command) > 0 {
+		return arrayDef.Command[0]
+	}
+
+	return ""
 }
 
 // checkAgentSkillIntegrity validates YAML frontmatter in agent

@@ -471,7 +471,9 @@ func TestSetupRun_OpencodeJsonManipulation(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Read the modified opencode.json.
+	// Setup no longer directly writes opencode.json (US4).
+	// opencode.json is now managed by uf init (via scaffold.configureOpencodeJSON).
+	// Verify the original file is unchanged by setup — uf init handles it.
 	data, readErr := os.ReadFile(filepath.Join(dir, "opencode.json"))
 	if readErr != nil {
 		t.Fatalf("read opencode.json: %v", readErr)
@@ -486,26 +488,6 @@ func TestSetupRun_OpencodeJsonManipulation(t *testing.T) {
 	// Verify MCP servers preserved.
 	if _, ok := parsed["mcpServers"]; !ok {
 		t.Error("mcpServers should be preserved")
-	}
-
-	// Verify plugin array has opencode-swarm-plugin.
-	var plugins []string
-	if pluginRaw, ok := parsed["plugin"]; ok {
-		if pErr := json.Unmarshal(pluginRaw, &plugins); pErr != nil {
-			t.Fatalf("unmarshal plugin: %v", pErr)
-		}
-	} else {
-		t.Fatal("plugin key not found")
-	}
-
-	found := false
-	for _, p := range plugins {
-		if p == "opencode-swarm-plugin" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("opencode-swarm-plugin not in plugin array")
 	}
 }
 
@@ -541,37 +523,11 @@ func TestSetupRun_NoOpencodeJson(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Verify opencode.json was created.
-	data, readErr := os.ReadFile(filepath.Join(dir, "opencode.json"))
-	if readErr != nil {
-		t.Fatalf("opencode.json not created: %v", readErr)
-	}
-
-	// Verify it has $schema and plugin array.
-	var parsed map[string]json.RawMessage
-	if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
-		t.Fatalf("invalid JSON: %v", jsonErr)
-	}
-
-	if _, ok := parsed["$schema"]; !ok {
-		t.Error("$schema not found in created opencode.json")
-	}
-
-	var plugins []string
-	if pluginRaw, ok := parsed["plugin"]; ok {
-		if pErr := json.Unmarshal(pluginRaw, &plugins); pErr != nil {
-			t.Fatalf("unmarshal plugin: %v", pErr)
-		}
-	}
-	found := false
-	for _, p := range plugins {
-		if p == "opencode-swarm-plugin" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("opencode-swarm-plugin not in plugin array")
-	}
+	// Setup no longer directly creates opencode.json (US4).
+	// opencode.json is now created by uf init (via scaffold.configureOpencodeJSON)
+	// which runs as the final step of setup. The file may or may not exist
+	// depending on whether dewey/swarm are available in the test environment.
+	// We just verify setup completes successfully without error.
 }
 
 func TestSetupRun_MalformedOpencodeJson(t *testing.T) {
@@ -603,15 +559,11 @@ func TestSetupRun_MalformedOpencodeJson(t *testing.T) {
 	}
 
 	err := Run(opts)
-	// Malformed JSON causes a "skipped" step (not "failed").
-	// Run should succeed since this is a non-fatal step.
+	// Setup no longer directly touches opencode.json (US4).
+	// Malformed JSON is handled by uf init (scaffold.configureOpencodeJSON)
+	// which runs as the final step. Run should succeed.
 	if err != nil {
 		t.Fatalf("Run: %v (malformed JSON should be non-fatal)", err)
-	}
-
-	output := buf.String()
-	if !strings.Contains(output, "malformed") && !strings.Contains(output, "skipped") {
-		t.Error("expected malformed JSON warning in output")
 	}
 }
 

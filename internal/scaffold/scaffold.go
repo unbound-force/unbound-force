@@ -3,6 +3,7 @@ package scaffold
 import (
 	"bytes"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -30,11 +31,14 @@ type Options struct {
 	TargetDir   string                                  // Root dir to scaffold into (default: cwd)
 	Force       bool                                    // Overwrite existing files when true
 	DivisorOnly bool                                    // Deploy only Divisor agents, command, and packs
+	DryRun      bool                                    // When true, configureOpencodeJSON() skips writing
 	Lang        string                                  // Language for convention pack selection (auto-detect if empty)
 	Version     string                                  // Version string for marker comment (default: "dev")
 	Stdout      io.Writer                               // Writer for summary output (default: os.Stdout)
 	LookPath    func(string) (string, error)            // Finds a binary in PATH (default: exec.LookPath)
 	ExecCmd     func(string, ...string) ([]byte, error) // Runs a command (default: exec.Command wrapper)
+	ReadFile    func(string) ([]byte, error)            // Reads a file (default: os.ReadFile)
+	WriteFile   func(string, []byte, os.FileMode) error // Writes a file (default: os.WriteFile)
 }
 
 // Result tracks the disposition of each scaffolded file.
@@ -60,6 +64,12 @@ func Run(opts Options) (*Result, error) {
 	}
 	if opts.ExecCmd == nil {
 		opts.ExecCmd = defaultExecCmd
+	}
+	if opts.ReadFile == nil {
+		opts.ReadFile = os.ReadFile
+	}
+	if opts.WriteFile == nil {
+		opts.WriteFile = os.WriteFile
 	}
 
 	if opts.TargetDir == "" {
@@ -380,10 +390,217 @@ func insertMarkerAfterFrontmatter(content []byte, marker string) []byte {
 }
 
 // subToolResult tracks the outcome of a sub-tool initialization step.
+// Action values: "initialized", "completed", "failed", "skipped",
+// "created", "configured", "already configured", "overwritten",
+// "error", "dry-run".
 type subToolResult struct {
 	name   string
-	action string // "initialized", "completed", "failed", "skipped"
+	action string
 	detail string
+}
+
+// configureOpencodeJSON creates or updates opencode.json with the Dewey
+// MCP server entry (when dewey is in PATH) and the Swarm plugin entry
+// (when .hive/ exists). Idempotent by default; Force overwrites stale
+// mcp.dewey entries. Returns a subToolResult describing the outcome.
+//
+// Design decision: Uses map[string]json.RawMessage to preserve unknown
+// user keys (custom MCP servers, custom config). Per SOLID Open/Closed
+// Principle — the function adds managed entries without disturbing
+// user-owned entries.
+func configureOpencodeJSON(opts *Options) []subToolResult {
+	// Default file I/O for direct callers (tests) that bypass Run()/initSubTools().
+	if opts.ReadFile == nil {
+		opts.ReadFile = os.ReadFile
+	}
+	if opts.WriteFile == nil {
+		opts.WriteFile = os.WriteFile
+	}
+
+	if opts.DryRun {
+		return []subToolResult{{
+			name:   "opencode.json",
+			action: "dry-run",
+		}}
+	}
+
+	// Detect what needs to be configured.
+	hasDewey := false
+	if _, err := opts.LookPath("dewey"); err == nil {
+		hasDewey = true
+	}
+	hiveDir := filepath.Join(opts.TargetDir, ".hive")
+	hasHive := false
+	if info, err := os.Stat(hiveDir); err == nil && info.IsDir() {
+		hasHive = true
+	}
+
+	// Nothing to configure — skip.
+	if !hasDewey && !hasHive {
+		return []subToolResult{{
+			name:   "opencode.json",
+			action: "skipped",
+			detail: "nothing to configure",
+		}}
+	}
+
+	ocPath := filepath.Join(opts.TargetDir, "opencode.json")
+	data, readErr := opts.ReadFile(ocPath)
+
+	var ocMap map[string]json.RawMessage
+	fileExisted := false
+
+	if readErr != nil {
+		if !os.IsNotExist(readErr) {
+			// Non-"not found" read error (e.g., permission denied).
+			return []subToolResult{{
+				name:   "opencode.json",
+				action: "error",
+				detail: fmt.Sprintf("read failed: %v", readErr),
+			}}
+		}
+		// File does not exist — create a new map.
+		ocMap = map[string]json.RawMessage{
+			"$schema": json.RawMessage(`"https://opencode.ai/config.json"`),
+		}
+	} else {
+		fileExisted = true
+		if jsonErr := json.Unmarshal(data, &ocMap); jsonErr != nil {
+			return []subToolResult{{
+				name:   "opencode.json",
+				action: "error",
+				detail: "malformed JSON",
+			}}
+		}
+	}
+
+	// Track whether we made any changes.
+	changed := false
+	forceOverwritten := false
+
+	// --- MCP dewey entry ---
+	if hasDewey {
+		deweyEntry := json.RawMessage(`{
+    "type": "local",
+    "command": ["dewey", "serve", "--vault", "."],
+    "enabled": true
+  }`)
+
+		// Check for existing mcp.dewey or legacy mcpServers.dewey.
+		alreadyHasDewey := false
+
+		// Check canonical "mcp" key.
+		if mcpRaw, ok := ocMap["mcp"]; ok {
+			var mcpMap map[string]json.RawMessage
+			if json.Unmarshal(mcpRaw, &mcpMap) == nil {
+				if _, hasDeweyKey := mcpMap["dewey"]; hasDeweyKey {
+					alreadyHasDewey = true
+				}
+			}
+		}
+
+		// Check legacy "mcpServers" key.
+		if !alreadyHasDewey {
+			if mcpServersRaw, ok := ocMap["mcpServers"]; ok {
+				var mcpServersMap map[string]json.RawMessage
+				if json.Unmarshal(mcpServersRaw, &mcpServersMap) == nil {
+					if _, hasDeweyKey := mcpServersMap["dewey"]; hasDeweyKey {
+						alreadyHasDewey = true
+					}
+				}
+			}
+		}
+
+		if !alreadyHasDewey || opts.Force {
+			// Get or create the mcp map.
+			var mcpMap map[string]json.RawMessage
+			if mcpRaw, ok := ocMap["mcp"]; ok {
+				if json.Unmarshal(mcpRaw, &mcpMap) != nil {
+					mcpMap = make(map[string]json.RawMessage)
+				}
+			} else {
+				mcpMap = make(map[string]json.RawMessage)
+			}
+
+			if opts.Force && alreadyHasDewey {
+				forceOverwritten = true
+			}
+
+			mcpMap["dewey"] = deweyEntry
+			mcpJSON, _ := json.Marshal(mcpMap)
+			ocMap["mcp"] = json.RawMessage(mcpJSON)
+			changed = true
+		}
+	}
+
+	// --- Swarm plugin entry ---
+	if hasHive {
+		var plugins []string
+		if pluginRaw, ok := ocMap["plugin"]; ok {
+			if json.Unmarshal(pluginRaw, &plugins) != nil {
+				plugins = []string{}
+			}
+		}
+
+		// Check if already present.
+		hasSwarmPlugin := false
+		for _, p := range plugins {
+			if p == "opencode-swarm-plugin" {
+				hasSwarmPlugin = true
+				break
+			}
+		}
+
+		if !hasSwarmPlugin {
+			plugins = append(plugins, "opencode-swarm-plugin")
+			pluginJSON, _ := json.Marshal(plugins)
+			ocMap["plugin"] = json.RawMessage(pluginJSON)
+			changed = true
+		}
+	}
+
+	// Nothing changed — already configured.
+	if !changed {
+		return []subToolResult{{
+			name:   "opencode.json",
+			action: "already configured",
+		}}
+	}
+
+	// Marshal with 2-space indent + trailing newline (FR-016: deterministic output).
+	output, marshalErr := json.MarshalIndent(ocMap, "", "  ")
+	if marshalErr != nil {
+		return []subToolResult{{
+			name:   "opencode.json",
+			action: "error",
+			detail: fmt.Sprintf("marshal failed: %v", marshalErr),
+		}}
+	}
+	output = append(output, '\n')
+
+	// Write the file.
+	if writeErr := opts.WriteFile(ocPath, output, 0o644); writeErr != nil {
+		return []subToolResult{{
+			name:   "opencode.json",
+			action: "failed",
+			detail: fmt.Sprintf("write failed: %v", writeErr),
+		}}
+	}
+
+	// Determine the action based on what happened.
+	action := "created"
+	if fileExisted {
+		if forceOverwritten {
+			action = "overwritten"
+		} else {
+			action = "configured"
+		}
+	}
+
+	return []subToolResult{{
+		name:   "opencode.json",
+		action: action,
+	}}
 }
 
 // workflowConfigContent is the default content for .unbound-force/config.yaml.
@@ -414,9 +631,15 @@ func initSubTools(opts *Options) []subToolResult {
 		return nil
 	}
 
-	// Default Stdout for direct callers (tests) that bypass Run().
+	// Default Stdout and file I/O for direct callers (tests) that bypass Run().
 	if opts.Stdout == nil {
 		opts.Stdout = io.Discard
+	}
+	if opts.ReadFile == nil {
+		opts.ReadFile = os.ReadFile
+	}
+	if opts.WriteFile == nil {
+		opts.WriteFile = os.WriteFile
 	}
 
 	var results []subToolResult
@@ -449,7 +672,9 @@ func initSubTools(opts *Options) []subToolResult {
 				results = append(results, subToolResult{
 					name: ".dewey/", action: "failed",
 					detail: "dewey init failed"})
-				return results // skip index if init failed
+				// Skip index if init failed, but still configure opencode.json.
+				results = append(results, configureOpencodeJSON(opts)...)
+				return results
 			}
 			results = append(results, subToolResult{
 				name: ".dewey/", action: "initialized"})
@@ -473,7 +698,28 @@ func initSubTools(opts *Options) []subToolResult {
 		}
 	}
 
+	// Configure opencode.json with Dewey MCP server and Swarm plugin
+	// entries. Runs after all sub-tool initialization steps that may
+	// create .hive/ (swarm init runs during uf setup before uf init).
+	results = append(results, configureOpencodeJSON(opts)...)
+
 	return results
+}
+
+// subToolSymbol returns the display symbol for a sub-tool result action.
+// FR-021: created/configured/already configured/overwritten → ✓;
+// skipped/dry-run → —; error/failed → ✗.
+func subToolSymbol(action string) string {
+	switch action {
+	case "error", "failed":
+		return "✗"
+	case "skipped", "dry-run":
+		return "—"
+	default:
+		// "initialized", "completed", "created", "configured",
+		// "already configured", "overwritten"
+		return "✓"
+	}
 }
 
 // Next-step hint commands shown after scaffold summary.
@@ -526,10 +772,7 @@ func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Sub-tool initialization:")
 		for _, sr := range subResults {
-			symbol := "✓"
-			if sr.action == "failed" {
-				symbol = "✗"
-			}
+			symbol := subToolSymbol(sr.action)
 			line := fmt.Sprintf("  %s %s %s", symbol, sr.name, sr.action)
 			if sr.detail != "" {
 				line += " (" + sr.detail + ")"

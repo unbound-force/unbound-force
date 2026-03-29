@@ -7,7 +7,6 @@
 package setup
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -171,97 +170,91 @@ func Run(opts Options) error {
 	fmt.Fprintln(opts.Stdout, "Installing...")
 
 	// Step 1: Install OpenCode (FR-022).
-	fmt.Fprintf(opts.Stdout, "  [1/16] OpenCode...\n")
+	fmt.Fprintf(opts.Stdout, "  [1/15] OpenCode...\n")
 	results = append(results, installOpenCode(&opts, env))
 
 	// Step 2: Install Gaze (FR-023).
-	fmt.Fprintf(opts.Stdout, "  [2/16] Gaze...\n")
+	fmt.Fprintf(opts.Stdout, "  [2/15] Gaze...\n")
 	results = append(results, installGaze(&opts, env))
 
 	// Step 3: Install Mx F Manager hero.
-	fmt.Fprintf(opts.Stdout, "  [3/16] Mx F...\n")
+	fmt.Fprintf(opts.Stdout, "  [3/15] Mx F...\n")
 	results = append(results, installMxF(&opts, env))
 
 	// Step 4: Install GitHub CLI.
-	fmt.Fprintf(opts.Stdout, "  [4/16] GitHub CLI...\n")
+	fmt.Fprintf(opts.Stdout, "  [4/15] GitHub CLI...\n")
 	results = append(results, installGH(&opts, env))
 
 	// Step 5: Ensure Node.js (FR-024).
-	fmt.Fprintf(opts.Stdout, "  [5/16] Node.js...\n")
+	fmt.Fprintf(opts.Stdout, "  [5/15] Node.js...\n")
 	nodeResult := ensureNodeJS(&opts, env)
 	results = append(results, nodeResult)
 	nodeAvailable := nodeResult.err == nil && nodeResult.action != "failed"
 
-	// Steps 6-11: Node.js-dependent tools (inside nodeAvailable block).
+	// Steps 6-10: Node.js-dependent tools (inside nodeAvailable block).
 	if nodeAvailable {
 		// Step 6: Ensure bun is available (prerequisite for swarm setup).
-		fmt.Fprintf(opts.Stdout, "  [6/16] Bun...\n")
+		fmt.Fprintf(opts.Stdout, "  [6/15] Bun...\n")
 		bunResult := ensureBun(&opts, env)
 		results = append(results, bunResult)
 
 		// Step 7: Install OpenSpec CLI.
-		fmt.Fprintf(opts.Stdout, "  [7/16] OpenSpec CLI...\n")
+		fmt.Fprintf(opts.Stdout, "  [7/15] OpenSpec CLI...\n")
 		results = append(results, installOpenSpec(&opts, env))
 
 		// Step 8: Install Swarm plugin (FR-025).
-		fmt.Fprintf(opts.Stdout, "  [8/16] Swarm plugin...\n")
+		fmt.Fprintf(opts.Stdout, "  [8/15] Swarm plugin...\n")
 		swarmResult := installSwarmPlugin(&opts, env)
 		results = append(results, swarmResult)
 
 		if swarmResult.err == nil && swarmResult.action != "failed" && swarmResult.action != "skipped" {
 			// Step 9: Run swarm setup (FR-026).
-			fmt.Fprintf(opts.Stdout, "  [9/16] Swarm setup...\n")
+			fmt.Fprintf(opts.Stdout, "  [9/15] Swarm setup...\n")
 			results = append(results, runSwarmSetup(&opts))
 
-			// Step 10: Configure opencode.json (FR-027/027a/028).
-			fmt.Fprintf(opts.Stdout, "  [10/16] opencode.json...\n")
-			results = append(results, configureOpencodeJSON(&opts))
-
-			// Step 11: Initialize .hive/ (FR-029).
-			fmt.Fprintf(opts.Stdout, "  [11/16] .hive/...\n")
+			// Step 10: Initialize .hive/ (FR-029).
+			fmt.Fprintf(opts.Stdout, "  [10/15] .hive/...\n")
 			results = append(results, initializeHive(&opts))
 		} else if swarmResult.action == "already installed" {
-			// Swarm already installed — still configure.
-			fmt.Fprintf(opts.Stdout, "  [10/16] opencode.json...\n")
-			results = append(results, configureOpencodeJSON(&opts))
-			fmt.Fprintf(opts.Stdout, "  [11/16] .hive/...\n")
+			// Swarm already installed — still initialize .hive/.
+			fmt.Fprintf(opts.Stdout, "  [10/15] .hive/...\n")
 			results = append(results, initializeHive(&opts))
 		} else {
 			results = append(results, stepResult{name: "swarm setup", action: "skipped", detail: "no swarm"})
-			results = append(results, stepResult{name: "opencode.json", action: "skipped", detail: "no swarm"})
 			results = append(results, stepResult{name: ".hive/", action: "skipped", detail: "no swarm"})
 		}
 	} else {
 		results = append(results, stepResult{name: "OpenSpec CLI", action: "skipped", detail: "no Node.js"})
 		results = append(results, stepResult{name: "Swarm plugin", action: "skipped", detail: "no Node.js"})
 		results = append(results, stepResult{name: "swarm setup", action: "skipped", detail: "no swarm"})
-		results = append(results, stepResult{name: "opencode.json", action: "skipped", detail: "no swarm"})
 		results = append(results, stepResult{name: ".hive/", action: "skipped", detail: "no swarm"})
 	}
 
-	// Step 12: Install Ollama (prerequisite for Dewey + Swarm embeddings).
-	fmt.Fprintf(opts.Stdout, "  [12/16] Ollama...\n")
+	// Step 11: Install Ollama (prerequisite for Dewey + Swarm embeddings).
+	fmt.Fprintf(opts.Stdout, "  [11/15] Ollama...\n")
 	results = append(results, installOllama(&opts, env))
 
-	// Step 13: Install Dewey (after Ollama, before uf init).
-	fmt.Fprintf(opts.Stdout, "  [13/16] Dewey...\n")
+	// Step 12: Install Dewey (after Ollama, before uf init).
+	fmt.Fprintf(opts.Stdout, "  [12/15] Dewey...\n")
 	results = append(results, installDewey(&opts, env))
 
-	// Step 14: Initialize .dewey/ workspace.
-	fmt.Fprintf(opts.Stdout, "  [14/16] Dewey workspace...\n")
+	// Step 13: Initialize .dewey/ workspace.
+	fmt.Fprintf(opts.Stdout, "  [13/15] Dewey workspace...\n")
 	deweyInitResult := initDewey(&opts)
 	results = append(results, deweyInitResult)
 
-	// Step 15: Build Dewey index (skip if init failed).
-	fmt.Fprintf(opts.Stdout, "  [15/16] Dewey index (this may take a moment)...\n")
+	// Step 14: Build Dewey index (skip if init failed).
+	fmt.Fprintf(opts.Stdout, "  [14/15] Dewey index (this may take a moment)...\n")
 	if deweyInitResult.action != "failed" {
 		results = append(results, indexDewey(&opts))
 	} else {
 		results = append(results, stepResult{name: "dewey index", action: "skipped", detail: "dewey init failed"})
 	}
 
-	// Step 16: Run uf init (FR-033).
-	fmt.Fprintf(opts.Stdout, "  [16/16] uf init...\n")
+	// Step 15: Run uf init (FR-033).
+	// opencode.json is now configured by uf init (via scaffold.configureOpencodeJSON),
+	// not by setup directly. This eliminates the former step 10.
+	fmt.Fprintf(opts.Stdout, "  [15/15] uf init...\n")
 	results = append(results, runUnboundInit(&opts))
 
 	// Print results.
@@ -612,73 +605,6 @@ func runSwarmSetup(opts *Options) stepResult {
 	return stepResult{name: "swarm setup", action: "completed"}
 }
 
-// configureOpencodeJSON adds the Swarm plugin to opencode.json
-// per FR-027/027a/028.
-func configureOpencodeJSON(opts *Options) stepResult {
-	if opts.DryRun {
-		return stepResult{name: "opencode.json", action: "dry-run", detail: "Would configure plugin entry"}
-	}
-
-	ocPath := filepath.Join(opts.TargetDir, "opencode.json")
-	data, err := opts.ReadFile(ocPath)
-
-	var ocMap map[string]json.RawMessage
-
-	if err != nil {
-		// No opencode.json — create minimal one (FR-028).
-		ocMap = map[string]json.RawMessage{
-			"$schema": json.RawMessage(`"https://opencode.ai/config.json"`),
-		}
-	} else {
-		// Parse existing file.
-		if jsonErr := json.Unmarshal(data, &ocMap); jsonErr != nil {
-			// Malformed JSON — refuse to modify (edge case).
-			return stepResult{
-				name:   "opencode.json",
-				action: "skipped",
-				detail: "malformed JSON — fix manually",
-			}
-		}
-	}
-
-	// Check if plugin array already has the entry.
-	var plugins []string
-	if pluginRaw, ok := ocMap["plugin"]; ok {
-		if pErr := json.Unmarshal(pluginRaw, &plugins); pErr != nil {
-			plugins = []string{}
-		}
-	}
-
-	// Check if already configured.
-	for _, p := range plugins {
-		if p == "opencode-swarm-plugin" {
-			return stepResult{name: "opencode.json", action: "already configured"}
-		}
-	}
-
-	// Add the plugin.
-	plugins = append(plugins, "opencode-swarm-plugin")
-	pluginJSON, _ := json.Marshal(plugins)
-	ocMap["plugin"] = json.RawMessage(pluginJSON)
-
-	// Marshal with indentation.
-	output, marshalErr := json.MarshalIndent(ocMap, "", "  ")
-	if marshalErr != nil {
-		return stepResult{name: "opencode.json", action: "failed", detail: "marshal failed", err: marshalErr}
-	}
-	output = append(output, '\n')
-
-	// Write atomically (FR-027a): temp file + rename.
-	if writeErr := opts.WriteFile(ocPath, output, 0644); writeErr != nil {
-		return stepResult{name: "opencode.json", action: "failed", detail: "write failed", err: writeErr}
-	}
-
-	if err != nil {
-		return stepResult{name: "opencode.json", action: "created", detail: "with plugin entry"}
-	}
-	return stepResult{name: "opencode.json", action: "configured", detail: "plugin added"}
-}
-
 // initializeHive runs `swarm init` if .hive/ doesn't exist per FR-029.
 // swarm init may prompt for user input, so it requires either
 // the --yes flag or an interactive terminal.
@@ -876,12 +802,16 @@ func runUnboundInit(opts *Options) stepResult {
 	// Design decision: Direct function call avoids subprocess overhead
 	// and ensures consistent behavior. Per DRY principle, reuse the
 	// existing scaffold engine rather than shelling out.
-	// Forward LookPath/ExecCmd to maintain the testability injection chain.
+	// Forward LookPath/ExecCmd/ReadFile/WriteFile/DryRun to maintain
+	// the testability injection chain (FR-018).
 	result, err := scaffold.Run(scaffold.Options{
 		TargetDir: opts.TargetDir,
 		Stdout:    opts.Stdout,
 		LookPath:  opts.LookPath,
 		ExecCmd:   opts.ExecCmd,
+		ReadFile:  opts.ReadFile,
+		WriteFile: opts.WriteFile,
+		DryRun:    opts.DryRun,
 	})
 	if err != nil {
 		return stepResult{name: "uf init", action: "failed", detail: "scaffold failed", err: err}

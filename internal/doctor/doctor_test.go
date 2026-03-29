@@ -2420,3 +2420,144 @@ func TestDoctorHints_NoBareUnboundReferences(t *testing.T) {
 		}
 	}
 }
+
+// --- MCP Config key and command format tests (Spec 017) ---
+
+func TestCheckMCPConfig_McpKey(t *testing.T) {
+	dir := t.TempDir()
+
+	// Uses canonical "mcp" key with array-style command.
+	createFile(t, dir, "opencode.json", `{
+  "mcp": {
+    "dewey": {
+      "type": "local",
+      "command": ["dewey", "serve", "--vault", "."],
+      "enabled": true
+    }
+  }
+}`)
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPathSimple(map[string]bool{"dewey": true}),
+		ReadFile:  os.ReadFile,
+	}
+
+	group := checkMCPConfig(opts)
+
+	results := make(map[string]CheckResult)
+	for _, r := range group.Results {
+		results[r.Name] = r
+	}
+
+	if r := results["opencode.json"]; r.Severity != Pass {
+		t.Errorf("opencode.json severity = %v, want Pass", r.Severity)
+	}
+	if r, ok := results["dewey"]; !ok {
+		t.Error("dewey result not found")
+	} else if r.Severity != Pass {
+		t.Errorf("dewey severity = %v, want Pass", r.Severity)
+	}
+}
+
+func TestCheckMCPConfig_McpServersKey(t *testing.T) {
+	dir := t.TempDir()
+
+	// Uses legacy "mcpServers" key.
+	createFile(t, dir, "opencode.json", `{
+  "mcpServers": {
+    "dewey": {
+      "command": "dewey",
+      "args": ["serve", "--vault", "."]
+    }
+  }
+}`)
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPathSimple(map[string]bool{"dewey": true}),
+		ReadFile:  os.ReadFile,
+	}
+
+	group := checkMCPConfig(opts)
+
+	results := make(map[string]CheckResult)
+	for _, r := range group.Results {
+		results[r.Name] = r
+	}
+
+	if r, ok := results["dewey"]; !ok {
+		t.Error("dewey result not found — legacy mcpServers fallback failed")
+	} else if r.Severity != Pass {
+		t.Errorf("dewey severity = %v, want Pass", r.Severity)
+	}
+}
+
+func TestCheckMCPConfig_ArrayCommand(t *testing.T) {
+	dir := t.TempDir()
+
+	createFile(t, dir, "opencode.json", `{
+  "mcp": {
+    "dewey": {
+      "type": "local",
+      "command": ["dewey", "serve", "--vault", "."],
+      "enabled": true
+    }
+  }
+}`)
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPathSimple(map[string]bool{"dewey": true}),
+		ReadFile:  os.ReadFile,
+	}
+
+	group := checkMCPConfig(opts)
+
+	// Verify dewey binary was extracted from array command.
+	found := false
+	for _, r := range group.Results {
+		if r.Name == "dewey" && r.Severity == Pass {
+			found = true
+			if !strings.Contains(r.Message, "dewey binary found") {
+				t.Errorf("message = %q, want 'dewey binary found'", r.Message)
+			}
+		}
+	}
+	if !found {
+		t.Error("dewey result not found with Pass severity")
+	}
+}
+
+func TestCheckMCPConfig_StringCommand(t *testing.T) {
+	dir := t.TempDir()
+
+	// Uses string-style command (backward compat).
+	createFile(t, dir, "opencode.json", `{
+  "mcp": {
+    "dewey": {
+      "type": "local",
+      "command": "dewey",
+      "enabled": true
+    }
+  }
+}`)
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPathSimple(map[string]bool{"dewey": true}),
+		ReadFile:  os.ReadFile,
+	}
+
+	group := checkMCPConfig(opts)
+
+	found := false
+	for _, r := range group.Results {
+		if r.Name == "dewey" && r.Severity == Pass {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("dewey result not found — string command backward compat failed")
+	}
+}
