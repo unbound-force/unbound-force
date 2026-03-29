@@ -414,6 +414,11 @@ func initSubTools(opts *Options) []subToolResult {
 		return nil
 	}
 
+	// Default Stdout for direct callers (tests) that bypass Run().
+	if opts.Stdout == nil {
+		opts.Stdout = io.Discard
+	}
+
 	var results []subToolResult
 
 	// Workflow config: create .unbound-force/config.yaml if absent.
@@ -439,6 +444,7 @@ func initSubTools(opts *Options) []subToolResult {
 	if _, err := opts.LookPath("dewey"); err == nil {
 		deweyDir := filepath.Join(opts.TargetDir, ".dewey")
 		if _, statErr := os.Stat(deweyDir); os.IsNotExist(statErr) {
+			fmt.Fprintf(opts.Stdout, "  Initializing Dewey workspace...\n")
 			if _, initErr := opts.ExecCmd("dewey", "init"); initErr != nil {
 				results = append(results, subToolResult{
 					name: ".dewey/", action: "failed",
@@ -455,6 +461,7 @@ func initSubTools(opts *Options) []subToolResult {
 				results = append(results, *sr)
 			}
 
+			fmt.Fprintf(opts.Stdout, "  Indexing Dewey sources (this may take a moment)...\n")
 			if _, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
 				results = append(results, subToolResult{
 					name: "dewey index", action: "failed",

@@ -171,47 +171,60 @@ func Run(opts Options) error {
 	fmt.Fprintln(opts.Stdout, "Installing...")
 
 	// Step 1: Install OpenCode (FR-022).
+	fmt.Fprintf(opts.Stdout, "  [1/16] OpenCode...\n")
 	results = append(results, installOpenCode(&opts, env))
 
 	// Step 2: Install Gaze (FR-023).
+	fmt.Fprintf(opts.Stdout, "  [2/16] Gaze...\n")
 	results = append(results, installGaze(&opts, env))
 
 	// Step 3: Install Mx F Manager hero.
+	fmt.Fprintf(opts.Stdout, "  [3/16] Mx F...\n")
 	results = append(results, installMxF(&opts, env))
 
 	// Step 4: Install GitHub CLI.
+	fmt.Fprintf(opts.Stdout, "  [4/16] GitHub CLI...\n")
 	results = append(results, installGH(&opts, env))
 
 	// Step 5: Ensure Node.js (FR-024).
+	fmt.Fprintf(opts.Stdout, "  [5/16] Node.js...\n")
 	nodeResult := ensureNodeJS(&opts, env)
 	results = append(results, nodeResult)
 	nodeAvailable := nodeResult.err == nil && nodeResult.action != "failed"
 
-	// Steps 5-11: Node.js-dependent tools (inside nodeAvailable block).
+	// Steps 6-11: Node.js-dependent tools (inside nodeAvailable block).
 	if nodeAvailable {
 		// Step 6: Ensure bun is available (prerequisite for swarm setup).
+		fmt.Fprintf(opts.Stdout, "  [6/16] Bun...\n")
 		bunResult := ensureBun(&opts, env)
 		results = append(results, bunResult)
 
 		// Step 7: Install OpenSpec CLI.
+		fmt.Fprintf(opts.Stdout, "  [7/16] OpenSpec CLI...\n")
 		results = append(results, installOpenSpec(&opts, env))
 
 		// Step 8: Install Swarm plugin (FR-025).
+		fmt.Fprintf(opts.Stdout, "  [8/16] Swarm plugin...\n")
 		swarmResult := installSwarmPlugin(&opts, env)
 		results = append(results, swarmResult)
 
 		if swarmResult.err == nil && swarmResult.action != "failed" && swarmResult.action != "skipped" {
 			// Step 9: Run swarm setup (FR-026).
+			fmt.Fprintf(opts.Stdout, "  [9/16] Swarm setup...\n")
 			results = append(results, runSwarmSetup(&opts))
 
 			// Step 10: Configure opencode.json (FR-027/027a/028).
+			fmt.Fprintf(opts.Stdout, "  [10/16] opencode.json...\n")
 			results = append(results, configureOpencodeJSON(&opts))
 
 			// Step 11: Initialize .hive/ (FR-029).
+			fmt.Fprintf(opts.Stdout, "  [11/16] .hive/...\n")
 			results = append(results, initializeHive(&opts))
 		} else if swarmResult.action == "already installed" {
 			// Swarm already installed — still configure.
+			fmt.Fprintf(opts.Stdout, "  [10/16] opencode.json...\n")
 			results = append(results, configureOpencodeJSON(&opts))
+			fmt.Fprintf(opts.Stdout, "  [11/16] .hive/...\n")
 			results = append(results, initializeHive(&opts))
 		} else {
 			results = append(results, stepResult{name: "swarm setup", action: "skipped", detail: "no swarm"})
@@ -227,16 +240,20 @@ func Run(opts Options) error {
 	}
 
 	// Step 12: Install Ollama (prerequisite for Dewey + Swarm embeddings).
+	fmt.Fprintf(opts.Stdout, "  [12/16] Ollama...\n")
 	results = append(results, installOllama(&opts, env))
 
 	// Step 13: Install Dewey (after Ollama, before uf init).
+	fmt.Fprintf(opts.Stdout, "  [13/16] Dewey...\n")
 	results = append(results, installDewey(&opts, env))
 
 	// Step 14: Initialize .dewey/ workspace.
+	fmt.Fprintf(opts.Stdout, "  [14/16] Dewey workspace...\n")
 	deweyInitResult := initDewey(&opts)
 	results = append(results, deweyInitResult)
 
 	// Step 15: Build Dewey index (skip if init failed).
+	fmt.Fprintf(opts.Stdout, "  [15/16] Dewey index (this may take a moment)...\n")
 	if deweyInitResult.action != "failed" {
 		results = append(results, indexDewey(&opts))
 	} else {
@@ -244,6 +261,7 @@ func Run(opts Options) error {
 	}
 
 	// Step 16: Run uf init (FR-033).
+	fmt.Fprintf(opts.Stdout, "  [16/16] uf init...\n")
 	results = append(results, runUnboundInit(&opts))
 
 	// Print results.
