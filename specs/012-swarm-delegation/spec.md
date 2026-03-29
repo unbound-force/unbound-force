@@ -2,7 +2,7 @@
 spec_id: "012"
 title: "Swarm Delegation Workflow"
 phase: 2
-status: draft
+status: complete
 depends_on:
   - "[[specs/008-swarm-orchestration/spec]]"
 ---

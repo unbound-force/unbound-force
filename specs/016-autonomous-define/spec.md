@@ -2,7 +2,7 @@
 spec_id: "016"
 title: "Autonomous Define with Dewey"
 phase: 3
-status: draft
+status: complete
 depends_on:
   - "[[specs/012-swarm-delegation/spec]]"
   - "[[specs/014-dewey-architecture/spec]]"

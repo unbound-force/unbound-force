@@ -2,7 +2,7 @@
 spec_id: "013"
 title: "Binary Rename"
 phase: 3
-status: draft
+status: complete
 depends_on:
   - "[[specs/003-specification-framework/spec]]"
   - "[[specs/011-doctor-setup/spec]]"

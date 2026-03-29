@@ -38,12 +38,12 @@ Hero constitutions extend (never contradict) the org constitution. See the const
 | Hero | Role | Repo | Status |
 |------|------|------|--------|
 | Muti-Mind | Product Owner | `unbound-force/muti-mind` | Implemented (Spec 004) |
-| Cobalt-Crush | Developer | Embedded in `unbound` binary | Implemented (Spec 006) |
+| Cobalt-Crush | Developer | Embedded in `unbound-force` binary | Implemented (Spec 006) |
 | Gaze | Tester | `unbound-force/gaze` | Implemented |
-| The Divisor | PR Reviewer (Council) | Embedded in `unbound` binary | Implemented (Spec 005) |
+| The Divisor | PR Reviewer (Council) | Embedded in `unbound-force` binary | Implemented (Spec 005) |
 | Mx F | Manager | `cmd/mxf/` + OpenCode agent | Implemented (Spec 007) |
 
-Gaze is the only hero with a functional implementation. The Divisor has a prototype deployment (reviewer agents) inside the Gaze repo.
+All five heroes have implementations. Gaze has the most mature standalone implementation (Go CLI + static analysis engine). Muti-Mind has a backend CLI (`cmd/mutimind/`) and OpenCode agent. The Divisor has 5 review personas and convention packs (embedded in the `unbound-force` binary). Cobalt-Crush has a developer persona agent. Mx F has a full CLI backend (`cmd/mxf/`) with 7 subcommands and a coaching agent.
 
 ## Project Structure
 
@@ -143,6 +143,8 @@ unbound-force/
 │   ├── 011-doctor-setup/            # Environment health checking & automated setup
 │   ├── 012-swarm-delegation/        # Swarm delegation workflow
 │   ├── 013-binary-rename/           # CLI binary rename (unbound → unbound-force/uf)
+│   ├── 014-dewey-architecture/      # Dewey semantic knowledge layer design
+│   ├── 015-dewey-integration/       # Dewey integration with agents, scaffold, doctor, setup
 │   └── 016-autonomous-define/       # Autonomous define with Dewey
 ├── schemas/                         # JSON Schema registry for inter-hero artifacts
 │   ├── envelope/                    # Artifact envelope schema + samples
@@ -175,7 +177,7 @@ This repo contains **architectural design specs** that define each hero's capabi
 
 Must be finalized before hero repos are built.
 
-- **001-org-constitution**: Three core principles, governance, hero alignment
+- **001-org-constitution**: Four core principles, governance, hero alignment
 - **002-hero-interface-contract**: Standard repo structure, artifact envelope, naming conventions, hero manifest
 - **003-specification-framework**: Unified specification framework (Speckit strategic + OpenSpec tactical), define extension points
 
@@ -184,7 +186,7 @@ Must be finalized before hero repos are built.
 Each hero's design. Can proceed in parallel once Phase 0 is done.
 
 - **004-muti-mind-architecture**: AI persona, backlog CLI, priority scoring, GitHub sync, acceptance authority
-- **005-the-divisor-architecture**: Three-persona review protocol, convention packs, deployment generator
+- **005-the-divisor-architecture**: Five-persona review council, convention packs, deployment generator
 - **006-cobalt-crush-architecture**: Dev persona, coding standards, Gaze/Divisor feedback loops
 - **007-mx-f-architecture**: Metrics platform, coaching engine, impediment tracking, sprint management
 
@@ -253,12 +255,13 @@ All artifacts use the standard envelope format: `hero`, `version`, `timestamp`, 
 |------|---------|-------------|--------|
 | `unbound-force/gaze` | Go static analysis (tester hero) | v1.0.0 (Accuracy, Minimal Assumptions, Actionable Output) | Active, 5 specs complete |
 | `unbound-force/website` | Public website (Hugo + Doks) | v1.0.0 (Content Accuracy, Minimal Footprint, Visitor Clarity) | Active, 1 spec complete |
+| `unbound-force/dewey` | Semantic knowledge layer (MCP server) | N/A | Active |
 | `unbound-force/homebrew-tap` | Homebrew formula distribution | N/A | Active |
 
 ## Specification Framework
 
 This repo uses a unified two-tier specification framework
-distributed via the `unbound` CLI binary. Install with
+distributed via the `unbound-force` CLI binary (alias: `uf`). Install with
 `brew install unbound-force/tap/unbound-force` and run
 `uf init` to scaffold into any repository.
 

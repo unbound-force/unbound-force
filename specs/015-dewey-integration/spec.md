@@ -2,7 +2,7 @@
 spec_id: "015"
 title: "Dewey Integration"
 phase: 3
-status: draft
+status: complete
 depends_on:
   - "[[specs/014-dewey-architecture/spec]]"
   - "[[specs/013-binary-rename/spec]]"

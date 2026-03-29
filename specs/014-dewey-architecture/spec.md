@@ -2,7 +2,7 @@
 spec_id: "014"
 title: "Dewey Architecture"
 phase: 3
-status: draft
+status: complete
 depends_on:
   - "[[specs/002-hero-interface-contract/spec]]"
   - "[[specs/010-knowledge-graph-integration/spec]]"

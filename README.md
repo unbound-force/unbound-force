@@ -44,7 +44,7 @@ The framework provides:
 - **Workflow orchestration**: Hero lifecycle commands (`/workflow start`, `/workflow status`, `/workflow list`, `/workflow advance`) for managing the 6-stage feature lifecycle
 - **Constitution governance bridge**: Every proposal includes alignment assessment against the four org principles
 
-`uf init` scaffolds 47 files into your repository: templates, scripts, commands, agents, Divisor review personas, convention packs, and the custom `unbound-force` OpenSpec schema. Use `uf init --divisor` to deploy only the PR review agents and convention packs. Use `--lang` to override language auto-detection for convention pack selection. User-owned files are skipped on re-run; tool-owned files are auto-updated when content changes.
+`uf init` scaffolds 50 files into your repository: templates, scripts, commands, agents, Divisor review personas, convention packs, and the custom `unbound-force` OpenSpec schema. Use `uf init --divisor` to deploy only the PR review agents and convention packs. Use `--lang` to override language auto-detection for convention pack selection. User-owned files are skipped on re-run; tool-owned files are auto-updated when content changes.
 
 See [AGENTS.md](AGENTS.md) for full workflow documentation and boundary guidelines.
 
@@ -52,18 +52,18 @@ See [AGENTS.md](AGENTS.md) for full workflow documentation and boundary guidelin
 
 This repo contains architectural design specs for all heroes and shared standards:
 
-- **`specs/`** -- 10 architectural specifications organized in three phases
+- **`specs/`** -- 16 architectural specifications organized in four phases
 - **`cmd/unbound-force/`** -- Go CLI binary for framework distribution
 - **`internal/scaffold/`** -- Scaffold engine with embedded assets
 - **`.specify/memory/constitution.md`** -- The org constitution (highest authority)
 - **`openspec/`** -- OpenSpec tactical workflow configuration and schema
-- **`opencode.json`** -- MCP server configuration (knowledge graph via graphthulhu)
+- **`opencode.json`** -- MCP server configuration (Dewey semantic knowledge layer)
 - **`unbound-force.md`** -- Hero descriptions and team vision
 - **`AGENTS.md`** -- Development conventions and workflow guide
 
-## Knowledge Graph
+## Knowledge Layer
 
-Project knowledge is indexed and queryable via [graphthulhu](https://github.com/skridlevsky/graphthulhu), an MCP-based knowledge graph server. Hero agents can search specs, traverse cross-references, and query document metadata without loading entire files into their context windows. See `specs/010-knowledge-graph-integration/` for the full specification.
+Project knowledge is indexed and queryable via [Dewey](https://github.com/unbound-force/dewey), a semantic knowledge layer that combines graph traversal with vector-based semantic search. Hero agents can search specs, find similar documents, traverse cross-references, and query document metadata via MCP tools without loading entire files into their context windows. See `specs/014-dewey-architecture/` for the design and `specs/015-dewey-integration/` for agent integration details.
 
 See [AGENTS.md](AGENTS.md) for full project structure, spec organization, and development workflow.
 
