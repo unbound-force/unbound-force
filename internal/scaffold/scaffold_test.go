@@ -99,8 +99,9 @@ var expectedAssetPaths = []string{
 	"specify/scripts/bash/create-new-feature.sh",
 	"specify/scripts/bash/setup-plan.sh",
 	"specify/scripts/bash/update-agent-context.sh",
-	// OpenCode commands (12)
+	// OpenCode commands (13)
 	"opencode/command/cobalt-crush.md",
+	"opencode/command/finale.md",
 	"opencode/command/uf-init.md",
 	"opencode/command/constitution-check.md",
 	"opencode/command/speckit.analyze.md",
