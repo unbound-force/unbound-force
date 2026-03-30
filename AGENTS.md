@@ -95,6 +95,7 @@ unbound-force/
 │   │   ├── speckit.taskstoissues.md
 │   │   ├── review-council.md        # /review-council command (Divisor)
 │   │   ├── constitution-check.md    # /constitution-check command
+│   │   ├── unleash.md               # /unleash autonomous pipeline (Spec 018)
 │   │   ├── workflow-start.md        # /workflow start command (Spec 008)
 │   │   ├── workflow-status.md       # /workflow status command (Spec 008)
 │   │   ├── workflow-list.md         # /workflow list command (Spec 008)
@@ -145,7 +146,8 @@ unbound-force/
 │   ├── 013-binary-rename/           # CLI binary rename (unbound → unbound-force/uf)
 │   ├── 014-dewey-architecture/      # Dewey semantic knowledge layer design
 │   ├── 015-dewey-integration/       # Dewey integration with agents, scaffold, doctor, setup
-│   └── 016-autonomous-define/       # Autonomous define with Dewey
+│   ├── 016-autonomous-define/       # Autonomous define with Dewey
+│   └── 018-unleash-command/         # Autonomous Speckit pipeline (/unleash)
 ├── schemas/                         # JSON Schema registry for inter-hero artifacts
 │   ├── envelope/                    # Artifact envelope schema + samples
 │   ├── quality-report/              # Gaze quality report payload schema
@@ -190,13 +192,14 @@ Each hero's design. Can proceed in parallel once Phase 0 is done.
 - **006-cobalt-crush-architecture**: Dev persona, coding standards, Gaze/Divisor feedback loops
 - **007-mx-f-architecture**: Metrics platform, coaching engine, impediment tracking, sprint management
 
-### Phase 2: Cross-Cutting (008-009, 016)
+### Phase 2: Cross-Cutting (008-009, 016, 018)
 
 Depends on all Phase 1 specs.
 
 - **008-swarm-orchestration**: Feature lifecycle workflow, artifact handoff, Swarm plugin, learning loop
 - **009-shared-data-model**: JSON schemas for all artifact types, versioning, schema registry
 - **016-autonomous-define**: Autonomous define with Dewey -- configurable execution modes, seed command, spec review checkpoint
+- **018-unleash-command**: Autonomous Speckit pipeline (`/unleash`) -- single command from spec to demo-ready code
 
 ### Phase 3: Infrastructure (010-013)
 
@@ -225,6 +228,7 @@ Phase 2 (Cross-Cutting) — depends on Phase 1
   008-swarm-orchestration
   009-shared-data-model
   016-autonomous-define (depends on 012, 014, 015)
+  018-unleash-command (depends on 003, 008, 012, 014, 016)
 
 Phase 3 (Infrastructure) — meta-repo operational
   010-knowledge-graph-integration
@@ -548,9 +552,12 @@ This repo is primarily specifications and governance documents. Follow these con
 - N/A (configuration and documentation changes; Dewey MCP tools: `dewey_search`, `dewey_semantic_search`, `dewey_traverse`, `dewey_get_page`, `dewey_find_by_tag`, `dewey_query_properties`, `dewey_find_connections`, `dewey_similar`, `dewey_semantic_search_filtered`) (015-dewey-integration)
 - JSON workflow files at `.unbound-force/workflows/` (016-autonomous-define)
 - `opencode.json` at repo root (JSON file) (017-init-opencode-config)
+- Markdown (OpenCode command file) + Existing slash commands (018-unleash-command)
+- N/A (orchestrates existing tools) (018-unleash-command)
 
 ## Recent Changes
 
+- 018-unleash-command: Created `/unleash` autonomous Speckit pipeline command -- single Markdown command file (`.opencode/command/unleash.md`, ~600 lines) that orchestrates 8 steps (clarify, plan, tasks, spec review, implement, code review, retrospective, demo) with Dewey-powered clarification (auto-resolve with provenance annotations), parallel Swarm worker execution (max 4 concurrent, worktree isolation, cherry-pick merge), filesystem-based resumability (no state file -- probes spec.md markers, plan.md/tasks.md existence, `<!-- spec-review: passed -->` marker, task checkbox state), 6 exit points (clarify unanswerable, spec review HIGH/CRITICAL, worker failure, merge conflict, build checkpoint, code review 3 iterations), graceful degradation for all optional tools (Dewey, Gaze, Swarm worktrees, Hivemind, SwarmMail), CI commands derived from `.github/workflows/` (not hardcoded). Scaffold asset copy at `internal/scaffold/assets/opencode/command/unleash.md`, file count updated 51 → 52, expectedAssetPaths updated (13 → 14 commands). Pre-existing scaffold drift synced (23 assets). All 6 user stories and 31 tasks completed.
 - 017-init-opencode-config: Moved `opencode.json` management from `uf setup` to `uf init`. `uf init` now creates/updates `opencode.json` with Dewey MCP server entry (`mcp.dewey` with `type: local`, `command: ["dewey", "serve", "--vault", "."]`, `enabled: true`) when `dewey` is in PATH, and Swarm plugin entry (`opencode-swarm-plugin` in `plugin` array) when `.hive/` exists. Idempotent by default (skips when both entries present, preserves custom MCP servers and plugins). `--force` overwrites stale `mcp.dewey` entries. `scaffold.Options` expanded with `ReadFile`, `WriteFile`, and `DryRun` fields for injectable file I/O. `printSummary()` updated with new action symbols (`✓`/`—`/`✗`). `uf setup` step count reduced from 16 to 15 (opencode.json step removed, now handled transparently by `uf init` at final step). `uf doctor` `checkMCPConfig()` fixed to check canonical `"mcp"` key first with `"mcpServers"` fallback, and to extract binary names from both string-style and array-style command fields. Legacy `mcpServers.dewey` treated as already configured. All 4 user stories and 37 tasks completed.
 - 016-autonomous-define: Enabled autonomous define stage -- configurable execution mode overrides on `NewWorkflow()` (accepts `overrides map[string]string` for per-stage mode customization, validated against `StageOrder()` and `ModeHuman`/`ModeSwarm`), `SpecReviewEnabled` field on `WorkflowInstance` (instance-only, not on `WorkflowRecord`), spec review checkpoint in `Advance()` (fires when define=swarm + specReview=true, silently skipped when define=human), `Start()` updated to forward overrides and specReview, `/workflow seed` command (creates backlog item + starts workflow with define=swarm in one operation), `--define-mode` and `--spec-review` flags on `/workflow start`, Muti-Mind autonomous specification workflow instructions (6-step Dewey-powered spec drafting with Tier 1 fallback), SKILL.md updated with seed workflow section and comparison table, workflow command docs updated for spec review checkpoint output. All 5 user stories and 28 tasks completed.
 - setup-init-full-stack: Extended `uf setup` to install ALL ecosystem tools and `uf init` to initialize sub-tools automatically. `uf setup` now installs 3 new tools (Mx F via `brew install unbound-force/tap/mxf`, GitHub CLI via `brew install gh`, OpenSpec CLI via `bun add -g @fission-ai/openspec@latest` with npm fallback) and runs 2 new initialization steps (`dewey init` to create `.dewey/` workspace, `dewey index` to build initial search index). Step count increased from 11 to 16. `uf init` now initializes Dewey workspace after scaffolding via `initSubTools()` (idempotent — skips if `.dewey/` exists or if called after `uf setup`). `scaffold.Options` expanded with `LookPath` and `ExecCmd` fields for testability. `printSummary` updated with context-aware next-step guidance (constitution, doctor, speckit, opsx when tools available; `uf setup` when tools missing). `runUnboundInit` forwards `LookPath`/`ExecCmd` to scaffold for injection chain. All changes follow existing patterns (installGaze for Homebrew tools, installSwarmPlugin for npm/bun tools, runSwarmSetup for subprocess init). 43 tasks completed.

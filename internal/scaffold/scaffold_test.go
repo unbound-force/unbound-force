@@ -100,7 +100,7 @@ var expectedAssetPaths = []string{
 	"specify/scripts/bash/create-new-feature.sh",
 	"specify/scripts/bash/setup-plan.sh",
 	"specify/scripts/bash/update-agent-context.sh",
-	// OpenCode commands (13)
+	// OpenCode commands (14)
 	"opencode/command/cobalt-crush.md",
 	"opencode/command/finale.md",
 	"opencode/command/uf-init.md",
@@ -114,6 +114,7 @@ var expectedAssetPaths = []string{
 	"opencode/command/speckit.specify.md",
 	"opencode/command/speckit.tasks.md",
 	"opencode/command/speckit.taskstoissues.md",
+	"opencode/command/unleash.md",
 	// OpenCode agents — legacy reviewers (4) + Divisor personas (5) + Cobalt-Crush (1) + Mx F coach (1) + constitution-check (1)
 	"opencode/agents/cobalt-crush-dev.md",
 	"opencode/agents/constitution-check.md",
