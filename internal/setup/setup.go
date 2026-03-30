@@ -637,11 +637,11 @@ func installGolangciLint(opts *Options, env doctor.DetectedEnvironment) stepResu
 	}
 
 	if opts.DryRun {
-		return stepResult{name: "golangci-lint", action: "dry-run", detail: "Would install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"}
+		return stepResult{name: "golangci-lint", action: "dry-run", detail: "Would install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"}
 	}
 
 	// Try go install first (Go is already a prerequisite).
-	if _, err := opts.ExecCmd("go", "install", "github.com/golangci/golangci-lint/cmd/golangci-lint@latest"); err == nil {
+	if _, err := opts.ExecCmd("go", "install", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"); err == nil {
 		return stepResult{name: "golangci-lint", action: "installed", detail: "via go install"}
 	}
 
@@ -656,7 +656,7 @@ func installGolangciLint(opts *Options, env doctor.DetectedEnvironment) stepResu
 	return stepResult{
 		name:   "golangci-lint",
 		action: "failed",
-		detail: "Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest",
+		detail: "Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest",
 		err:    fmt.Errorf("golangci-lint not available"),
 	}
 }
