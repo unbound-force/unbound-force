@@ -115,9 +115,8 @@ func TestSetupRun_AllMissing(t *testing.T) {
 	// Verify install order: opencode (brew), gaze (brew), mxf (brew),
 	// gh (brew), node version check, bun (npm), openspec (npm),
 	// swarm (npm), swarm setup, swarm init, ollama (brew),
-	// dewey (brew). Note: dewey init/index are skipped because
-	// the LookPath stub doesn't include dewey (simulating a fresh
-	// install where the binary isn't yet in the test's PATH stub).
+	// dewey (brew). Note: dewey init/index are handled by uf init
+	// (via scaffold.initSubTools), not by setup directly.
 	expectedCmds := []string{
 		"brew install anomalyco/tap/opencode",
 		"brew install unbound-force/tap/gaze",
@@ -1730,267 +1729,9 @@ func TestSetupRun_OpenSpecNpmFails(t *testing.T) {
 	}
 }
 
-// --- Dewey init/index tests ---
-
-func TestSetupRun_DeweyInit(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
-
-	rec := &cmdRecorder{
-		outputs: map[string]string{
-			"node --version": "v22.15.0",
-			"ollama list":    "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
-		},
-	}
-
-	var buf bytes.Buffer
-	opts := Options{
-		TargetDir: dir,
-		Stdout:    &buf,
-		Stderr:    &buf,
-		LookPath: stubLookPath(map[string]string{
-			"brew":     "/opt/homebrew/bin/brew",
-			"opencode": "/usr/local/bin/opencode",
-			"gaze":     "/usr/local/bin/gaze",
-			"mxf":      "/usr/local/bin/mxf",
-			"gh":       "/usr/local/bin/gh",
-			"node":     "/usr/local/bin/node",
-			"npm":      "/usr/local/bin/npm",
-			"bun":      "/home/user/.bun/bin/bun",
-			"openspec": "/usr/local/bin/openspec",
-			"swarm":    "/usr/local/bin/swarm",
-			"dewey":    "/usr/local/bin/dewey",
-			"ollama":   "/usr/local/bin/ollama",
-			// .dewey/ does NOT exist — should run dewey init
-		}),
-		ExecCmd:      rec.execCmd,
-		EvalSymlinks: stubEvalSymlinks(nil),
-		Getenv:       stubGetenv(map[string]string{}),
-		ReadFile:     os.ReadFile,
-		WriteFile:    os.WriteFile,
-	}
-
-	err := Run(opts)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	found := false
-	for _, call := range rec.calls {
-		if call == "dewey init" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected dewey init, got calls: %v", rec.calls)
-	}
-}
-
-func TestSetupRun_DeweyInitFails(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
-
-	rec := &cmdRecorder{
-		outputs: map[string]string{
-			"node --version": "v22.15.0",
-			"ollama list":    "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
-		},
-		errors: map[string]error{
-			"dewey init": fmt.Errorf("dewey init failed"),
-		},
-	}
-
-	var buf bytes.Buffer
-	opts := Options{
-		TargetDir: dir,
-		Stdout:    &buf,
-		Stderr:    &buf,
-		LookPath: stubLookPath(map[string]string{
-			"brew":     "/opt/homebrew/bin/brew",
-			"opencode": "/usr/local/bin/opencode",
-			"gaze":     "/usr/local/bin/gaze",
-			"mxf":      "/usr/local/bin/mxf",
-			"gh":       "/usr/local/bin/gh",
-			"node":     "/usr/local/bin/node",
-			"npm":      "/usr/local/bin/npm",
-			"bun":      "/home/user/.bun/bin/bun",
-			"openspec": "/usr/local/bin/openspec",
-			"swarm":    "/usr/local/bin/swarm",
-			"dewey":    "/usr/local/bin/dewey",
-			"ollama":   "/usr/local/bin/ollama",
-		}),
-		ExecCmd:      rec.execCmd,
-		EvalSymlinks: stubEvalSymlinks(nil),
-		Getenv:       stubGetenv(map[string]string{}),
-		ReadFile:     os.ReadFile,
-		WriteFile:    os.WriteFile,
-	}
-
-	err := Run(opts)
-	// dewey init failure increments the fail count.
-	if err == nil {
-		t.Log("Run returned nil -- dewey init failure counted but not fatal in this config")
-	}
-
-	// Verify dewey index was NOT called (skipped because init failed).
-	for _, call := range rec.calls {
-		if call == "dewey index" {
-			t.Error("dewey index should NOT be called when dewey init fails")
-		}
-	}
-
-	output := buf.String()
-	if !strings.Contains(output, "failed") {
-		t.Error("expected failure message for dewey init")
-	}
-}
-
-func TestSetupRun_DeweyIndex(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	// .dewey/ already exists — dewey init should skip, but dewey index should run.
-	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
-
-	rec := &cmdRecorder{
-		outputs: map[string]string{
-			"node --version": "v22.15.0",
-			"ollama list":    "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
-		},
-	}
-
-	var buf bytes.Buffer
-	opts := Options{
-		TargetDir: dir,
-		Stdout:    &buf,
-		Stderr:    &buf,
-		LookPath: stubLookPath(map[string]string{
-			"brew":     "/opt/homebrew/bin/brew",
-			"opencode": "/usr/local/bin/opencode",
-			"gaze":     "/usr/local/bin/gaze",
-			"mxf":      "/usr/local/bin/mxf",
-			"gh":       "/usr/local/bin/gh",
-			"node":     "/usr/local/bin/node",
-			"npm":      "/usr/local/bin/npm",
-			"bun":      "/home/user/.bun/bin/bun",
-			"openspec": "/usr/local/bin/openspec",
-			"swarm":    "/usr/local/bin/swarm",
-			"dewey":    "/usr/local/bin/dewey",
-			"ollama":   "/usr/local/bin/ollama",
-		}),
-		ExecCmd:      rec.execCmd,
-		EvalSymlinks: stubEvalSymlinks(nil),
-		Getenv:       stubGetenv(map[string]string{}),
-		ReadFile:     os.ReadFile,
-		WriteFile:    os.WriteFile,
-	}
-
-	err := Run(opts)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	// dewey init should NOT be called (.dewey/ already exists).
-	for _, call := range rec.calls {
-		if call == "dewey init" {
-			t.Error("dewey init should NOT be called when .dewey/ already exists")
-		}
-	}
-
-	// dewey index SHOULD be called (.dewey/ exists).
-	found := false
-	for _, call := range rec.calls {
-		if call == "dewey index" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected dewey index, got calls: %v", rec.calls)
-	}
-}
-
-func TestSetupRun_DeweyIndexFails(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
-
-	rec := &cmdRecorder{
-		outputs: map[string]string{
-			"node --version": "v22.15.0",
-			"ollama list":    "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
-		},
-		errors: map[string]error{
-			"dewey index": fmt.Errorf("connection refused"),
-		},
-	}
-
-	var buf bytes.Buffer
-	opts := Options{
-		TargetDir: dir,
-		Stdout:    &buf,
-		Stderr:    &buf,
-		LookPath: stubLookPath(map[string]string{
-			"brew":     "/opt/homebrew/bin/brew",
-			"opencode": "/usr/local/bin/opencode",
-			"gaze":     "/usr/local/bin/gaze",
-			"mxf":      "/usr/local/bin/mxf",
-			"gh":       "/usr/local/bin/gh",
-			"node":     "/usr/local/bin/node",
-			"npm":      "/usr/local/bin/npm",
-			"bun":      "/home/user/.bun/bin/bun",
-			"openspec": "/usr/local/bin/openspec",
-			"swarm":    "/usr/local/bin/swarm",
-			"dewey":    "/usr/local/bin/dewey",
-			"ollama":   "/usr/local/bin/ollama",
-		}),
-		ExecCmd:      rec.execCmd,
-		EvalSymlinks: stubEvalSymlinks(nil),
-		Getenv:       stubGetenv(map[string]string{}),
-		ReadFile:     os.ReadFile,
-		WriteFile:    os.WriteFile,
-	}
-
-	err := Run(opts)
-	// dewey index failure increments the fail count.
-	if err == nil {
-		t.Log("Run returned nil -- dewey index failure counted but not fatal in this config")
-	}
-
-	output := buf.String()
-	if !strings.Contains(output, "failed") {
-		t.Error("expected failure message for dewey index")
-	}
-	if !strings.Contains(output, "ollama serve") {
-		t.Error("expected Ollama server hint in dewey index failure")
-	}
-}
+// Dewey init/index tests were removed — dewey workspace initialization
+// is now handled exclusively by uf init (via scaffold.initSubTools).
+// See internal/scaffold/scaffold_test.go for the corresponding tests.
 
 // --- Dry-run update test ---
 
@@ -2027,8 +1768,8 @@ func TestSetupRun_DryRunNewSteps(t *testing.T) {
 	output := buf.String()
 
 	// Verify dry-run output includes new tools.
-	// Note: dewey index shows "skipped (no .dewey/ workspace)" in dry-run
-	// because initDewey didn't actually create .dewey/ — correct behavior.
+	// Note: dewey init/index are no longer in setup — they are handled
+	// by uf init (via scaffold.initSubTools).
 	checks := []struct {
 		name    string
 		pattern string
@@ -2036,7 +1777,6 @@ func TestSetupRun_DryRunNewSteps(t *testing.T) {
 		{"mxf", "Would install: brew install unbound-force/tap/mxf"},
 		{"gh", "Would install: brew install gh"},
 		{"openspec", "Would install: bun add -g @fission-ai/openspec@latest"},
-		{"dewey init", "Would run: dewey init"},
 	}
 	for _, c := range checks {
 		if !strings.Contains(output, c.pattern) {

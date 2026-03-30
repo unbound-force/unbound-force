@@ -2699,6 +2699,89 @@ func TestConfigureOpencodeJSON_DryRun(t *testing.T) {
 	}
 }
 
+// --- Dewey force re-index tests ---
+
+func TestInitSubTools_DeweyForceReindex(t *testing.T) {
+	dir := t.TempDir()
+	// Create .dewey/ directory — already initialized.
+	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		Force:     true,
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Should have dewey index re-indexed result.
+	foundReindex := false
+	for _, r := range results {
+		if r.name == "dewey index" && r.action == "re-indexed" {
+			foundReindex = true
+		}
+	}
+	if !foundReindex {
+		t.Errorf("expected dewey index re-indexed result, got %v", results)
+	}
+
+	// Verify dewey index was called.
+	indexCalled := false
+	for _, call := range rec.calls {
+		if call == "dewey index" {
+			indexCalled = true
+		}
+	}
+	if !indexCalled {
+		t.Errorf("expected dewey index command, got calls: %v", rec.calls)
+	}
+
+	// Verify dewey init was NOT called (.dewey/ already exists).
+	for _, call := range rec.calls {
+		if call == "dewey init" {
+			t.Error("dewey init should NOT be called when .dewey/ already exists")
+		}
+	}
+}
+
+func TestInitSubTools_DeweyExistsNoForce(t *testing.T) {
+	dir := t.TempDir()
+	// Create .dewey/ directory — already initialized.
+	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		Force:     false,
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Should NOT have any dewey-related results (skipped silently).
+	for _, r := range results {
+		if r.name == ".dewey/" || r.name == "dewey index" {
+			t.Errorf("unexpected dewey result when Force=false and .dewey/ exists: %s %s", r.name, r.action)
+		}
+	}
+
+	// Verify no dewey commands were called.
+	for _, call := range rec.calls {
+		if call == "dewey init" || call == "dewey index" {
+			t.Errorf("unexpected dewey command when Force=false: %s", call)
+		}
+	}
+}
+
 // Phase 8: Integration test (T032a)
 
 func TestInitSubTools_OpencodeJSON(t *testing.T) {
