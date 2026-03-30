@@ -664,9 +664,11 @@ func initSubTools(opts *Options) []subToolResult {
 	}
 
 	// Dewey: init + index if binary available and workspace absent.
+	// Force re-index if workspace exists and Force is set.
 	if _, err := opts.LookPath("dewey"); err == nil {
 		deweyDir := filepath.Join(opts.TargetDir, ".dewey")
 		if _, statErr := os.Stat(deweyDir); os.IsNotExist(statErr) {
+			// First run: initialize workspace and build index.
 			fmt.Fprintf(opts.Stdout, "  Initializing Dewey workspace...\n")
 			if _, initErr := opts.ExecCmd("dewey", "init"); initErr != nil {
 				results = append(results, subToolResult{
@@ -694,6 +696,20 @@ func initSubTools(opts *Options) []subToolResult {
 			} else {
 				results = append(results, subToolResult{
 					name: "dewey index", action: "completed"})
+			}
+		} else if opts.Force {
+			// Force re-index: workspace exists, user wants a fresh index.
+			// Design decision: opt-in via --force to avoid latency on
+			// default re-runs. Users who add new files can explicitly
+			// request re-indexing.
+			fmt.Fprintf(opts.Stdout, "  Re-indexing Dewey sources...\n")
+			if _, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
+				results = append(results, subToolResult{
+					name: "dewey index", action: "failed",
+					detail: "dewey index failed"})
+			} else {
+				results = append(results, subToolResult{
+					name: "dewey index", action: "re-indexed"})
 			}
 		}
 	}

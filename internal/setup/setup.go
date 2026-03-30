@@ -170,23 +170,23 @@ func Run(opts Options) error {
 	fmt.Fprintln(opts.Stdout, "Installing...")
 
 	// Step 1: Install OpenCode (FR-022).
-	fmt.Fprintf(opts.Stdout, "  [1/15] OpenCode...\n")
+	fmt.Fprintf(opts.Stdout, "  [1/13] OpenCode...\n")
 	results = append(results, installOpenCode(&opts, env))
 
 	// Step 2: Install Gaze (FR-023).
-	fmt.Fprintf(opts.Stdout, "  [2/15] Gaze...\n")
+	fmt.Fprintf(opts.Stdout, "  [2/13] Gaze...\n")
 	results = append(results, installGaze(&opts, env))
 
 	// Step 3: Install Mx F Manager hero.
-	fmt.Fprintf(opts.Stdout, "  [3/15] Mx F...\n")
+	fmt.Fprintf(opts.Stdout, "  [3/13] Mx F...\n")
 	results = append(results, installMxF(&opts, env))
 
 	// Step 4: Install GitHub CLI.
-	fmt.Fprintf(opts.Stdout, "  [4/15] GitHub CLI...\n")
+	fmt.Fprintf(opts.Stdout, "  [4/13] GitHub CLI...\n")
 	results = append(results, installGH(&opts, env))
 
 	// Step 5: Ensure Node.js (FR-024).
-	fmt.Fprintf(opts.Stdout, "  [5/15] Node.js...\n")
+	fmt.Fprintf(opts.Stdout, "  [5/13] Node.js...\n")
 	nodeResult := ensureNodeJS(&opts, env)
 	results = append(results, nodeResult)
 	nodeAvailable := nodeResult.err == nil && nodeResult.action != "failed"
@@ -194,30 +194,30 @@ func Run(opts Options) error {
 	// Steps 6-10: Node.js-dependent tools (inside nodeAvailable block).
 	if nodeAvailable {
 		// Step 6: Ensure bun is available (prerequisite for swarm setup).
-		fmt.Fprintf(opts.Stdout, "  [6/15] Bun...\n")
+		fmt.Fprintf(opts.Stdout, "  [6/13] Bun...\n")
 		bunResult := ensureBun(&opts, env)
 		results = append(results, bunResult)
 
 		// Step 7: Install OpenSpec CLI.
-		fmt.Fprintf(opts.Stdout, "  [7/15] OpenSpec CLI...\n")
+		fmt.Fprintf(opts.Stdout, "  [7/13] OpenSpec CLI...\n")
 		results = append(results, installOpenSpec(&opts, env))
 
 		// Step 8: Install Swarm plugin (FR-025).
-		fmt.Fprintf(opts.Stdout, "  [8/15] Swarm plugin...\n")
+		fmt.Fprintf(opts.Stdout, "  [8/13] Swarm plugin...\n")
 		swarmResult := installSwarmPlugin(&opts, env)
 		results = append(results, swarmResult)
 
 		if swarmResult.err == nil && swarmResult.action != "failed" && swarmResult.action != "skipped" {
 			// Step 9: Run swarm setup (FR-026).
-			fmt.Fprintf(opts.Stdout, "  [9/15] Swarm setup...\n")
+			fmt.Fprintf(opts.Stdout, "  [9/13] Swarm setup...\n")
 			results = append(results, runSwarmSetup(&opts))
 
 			// Step 10: Initialize .hive/ (FR-029).
-			fmt.Fprintf(opts.Stdout, "  [10/15] .hive/...\n")
+			fmt.Fprintf(opts.Stdout, "  [10/13] .hive/...\n")
 			results = append(results, initializeHive(&opts))
 		} else if swarmResult.action == "already installed" {
 			// Swarm already installed — still initialize .hive/.
-			fmt.Fprintf(opts.Stdout, "  [10/15] .hive/...\n")
+			fmt.Fprintf(opts.Stdout, "  [10/13] .hive/...\n")
 			results = append(results, initializeHive(&opts))
 		} else {
 			results = append(results, stepResult{name: "swarm setup", action: "skipped", detail: "no swarm"})
@@ -231,30 +231,19 @@ func Run(opts Options) error {
 	}
 
 	// Step 11: Install Ollama (prerequisite for Dewey + Swarm embeddings).
-	fmt.Fprintf(opts.Stdout, "  [11/15] Ollama...\n")
+	fmt.Fprintf(opts.Stdout, "  [11/13] Ollama...\n")
 	results = append(results, installOllama(&opts, env))
 
 	// Step 12: Install Dewey (after Ollama, before uf init).
-	fmt.Fprintf(opts.Stdout, "  [12/15] Dewey...\n")
+	fmt.Fprintf(opts.Stdout, "  [12/13] Dewey...\n")
 	results = append(results, installDewey(&opts, env))
 
-	// Step 13: Initialize .dewey/ workspace.
-	fmt.Fprintf(opts.Stdout, "  [13/15] Dewey workspace...\n")
-	deweyInitResult := initDewey(&opts)
-	results = append(results, deweyInitResult)
-
-	// Step 14: Build Dewey index (skip if init failed).
-	fmt.Fprintf(opts.Stdout, "  [14/15] Dewey index (this may take a moment)...\n")
-	if deweyInitResult.action != "failed" {
-		results = append(results, indexDewey(&opts))
-	} else {
-		results = append(results, stepResult{name: "dewey index", action: "skipped", detail: "dewey init failed"})
-	}
-
-	// Step 15: Run uf init (FR-033).
+	// Step 13: Run uf init (FR-033).
 	// opencode.json is now configured by uf init (via scaffold.configureOpencodeJSON),
-	// not by setup directly. This eliminates the former step 10.
-	fmt.Fprintf(opts.Stdout, "  [15/15] uf init...\n")
+	// not by setup directly. Dewey workspace initialization (dewey init + dewey index)
+	// is also handled by uf init (via scaffold.initSubTools) — repo-level operations
+	// belong in the repo-level command.
+	fmt.Fprintf(opts.Stdout, "  [13/13] uf init...\n")
 	results = append(results, runUnboundInit(&opts))
 
 	// Print results.
@@ -632,56 +621,6 @@ func initializeHive(opts *Options) stepResult {
 	return stepResult{name: ".hive/", action: "initialized"}
 }
 
-// initDewey runs `dewey init` if `.dewey/` doesn't exist.
-// Follows the runSwarmSetup() precedent: takes only opts (no env),
-// since no Homebrew/version manager logic is needed.
-func initDewey(opts *Options) stepResult {
-	deweyDir := filepath.Join(opts.TargetDir, ".dewey")
-	if info, err := os.Stat(deweyDir); err == nil && info.IsDir() {
-		return stepResult{name: ".dewey/", action: "already initialized"}
-	}
-
-	if _, err := opts.LookPath("dewey"); err != nil {
-		return stepResult{name: ".dewey/", action: "skipped", detail: "dewey not installed"}
-	}
-
-	if opts.DryRun {
-		return stepResult{name: ".dewey/", action: "dry-run", detail: "Would run: dewey init"}
-	}
-
-	if _, err := opts.ExecCmd("dewey", "init"); err != nil {
-		return stepResult{name: ".dewey/", action: "failed", detail: "dewey init failed", err: err}
-	}
-	return stepResult{name: ".dewey/", action: "initialized"}
-}
-
-// indexDewey runs `dewey index` if `.dewey/` exists.
-// Follows the runSwarmSetup() precedent: takes only opts (no env).
-func indexDewey(opts *Options) stepResult {
-	deweyDir := filepath.Join(opts.TargetDir, ".dewey")
-	if _, err := os.Stat(deweyDir); os.IsNotExist(err) {
-		return stepResult{name: "dewey index", action: "skipped", detail: "no .dewey/ workspace"}
-	}
-
-	if _, err := opts.LookPath("dewey"); err != nil {
-		return stepResult{name: "dewey index", action: "skipped", detail: "dewey not installed"}
-	}
-
-	if opts.DryRun {
-		return stepResult{name: "dewey index", action: "dry-run", detail: "Would run: dewey index"}
-	}
-
-	if _, err := opts.ExecCmd("dewey", "index"); err != nil {
-		return stepResult{
-			name:   "dewey index",
-			action: "failed",
-			detail: "dewey index failed — ensure Ollama server is running (ollama serve)",
-			err:    err,
-		}
-	}
-	return stepResult{name: "dewey index", action: "completed"}
-}
-
 // installOllama installs Ollama if missing. Ollama is the local
 // model runtime used by both Dewey (semantic search embeddings)
 // and Swarm (semantic memory). Follows the installGaze() pattern:
@@ -784,10 +723,8 @@ func pullEmbeddingModel(opts *Options) stepResult {
 }
 
 // runUnboundInit runs `uf init` if .opencode/ doesn't exist per FR-033.
-// Note: scaffold.Run() calls initSubTools() which attempts dewey init + dewey index.
-// When called from uf setup, steps 14-15 (initDewey/indexDewey) already ran, so
-// initSubTools' .dewey/ existence check causes it to skip — no double execution.
-// When called standalone (uf init), initSubTools runs dewey init for the first time.
+// scaffold.Run() calls initSubTools() which handles dewey init + dewey index
+// as repo-level operations. This is the sole path for dewey workspace setup.
 func runUnboundInit(opts *Options) stepResult {
 	ocDir := filepath.Join(opts.TargetDir, ".opencode")
 	if info, err := os.Stat(ocDir); err == nil && info.IsDir() {
