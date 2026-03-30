@@ -71,7 +71,7 @@ func ValidateConventionPack(packPath string) error {
 // frontmatter map and the remaining body content. Returns an
 // error if no frontmatter delimiters are found.
 func extractFrontmatter(content string) (map[string]interface{}, string, error) {
-	lines := strings.SplitN(content, "\n", -1)
+	lines := strings.Split(content, "\n")
 	if len(lines) < 2 || strings.TrimSpace(lines[0]) != "---" {
 		return nil, content, fmt.Errorf("no YAML frontmatter found (file must start with ---)")
 	}

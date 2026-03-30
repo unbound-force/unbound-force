@@ -156,7 +156,7 @@ func Standup(store *SprintStore, impRepo *impediment.Repository, metricsStore *m
 			}
 			fmt.Fprintf(w, "  %s  %s  %s%s\n", imp.ID, imp.Severity, imp.Title, stale)
 		}
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	}
 
 	return nil

@@ -893,7 +893,7 @@ func validateSkills(skillDir string, opts *Options) []CheckResult {
 			})
 		} else {
 			results = append(results, CheckResult{
-				Name:     fmt.Sprintf("1 skill validated"),
+				Name:     "1 skill validated",
 				Severity: Pass,
 				Message:  name,
 			})

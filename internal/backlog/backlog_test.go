@@ -103,7 +103,7 @@ func TestRepository_Get_MalformedFrontmatter(t *testing.T) {
 	repo := backlog.NewRepository(dir)
 
 	malformed := []byte("---\nbad yaml\n---\nbody")
-	os.WriteFile(filepath.Join(dir, "BI-001.md"), malformed, 0644)
+	_ = os.WriteFile(filepath.Join(dir, "BI-001.md"), malformed, 0644) //nolint:errcheck // test setup
 
 	_, err := repo.Get("BI-001")
 	if err == nil {

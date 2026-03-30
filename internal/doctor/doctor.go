@@ -99,7 +99,7 @@ func Run(opts Options) (*Report, error) {
 
 	// Platform guard: Windows is not supported (FR-037).
 	if runtime.GOOS == "windows" {
-		return nil, fmt.Errorf("Platform not supported: doctor and setup require macOS or Linux")
+		return nil, fmt.Errorf("platform not supported: doctor and setup require macOS or Linux")
 	}
 
 	env := DetectEnvironment(&opts)

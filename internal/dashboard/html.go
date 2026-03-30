@@ -109,7 +109,7 @@ func RenderHTML(snapshot metrics.MetricsSnapshot, indicators []metrics.HealthInd
 	if err != nil {
 		return fmt.Errorf("create HTML file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	return tmpl.Execute(f, data)
 }

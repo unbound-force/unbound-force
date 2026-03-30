@@ -342,7 +342,7 @@ func runMetrics(p MxFParams, sub, format string, sprints int, period string) err
 			return outputJSON(p.Stdout, points)
 		}
 		for _, pt := range points {
-			fmt.Fprintf(p.Stdout, "  %-12s  %.1f items\n", pt.Sprint, pt.Velocity)
+			_, _ = fmt.Fprintf(p.Stdout, "  %-12s  %.1f items\n", pt.Sprint, pt.Velocity)
 		}
 		return nil
 	case "cycle-time":
@@ -353,8 +353,8 @@ func runMetrics(p MxFParams, sub, format string, sprints int, period string) err
 		if format == "json" {
 			return outputJSON(p.Stdout, stats)
 		}
-		fmt.Fprintf(p.Stdout, "Cycle Time (last %s)\n", period)
-		fmt.Fprintf(p.Stdout, "  Avg: %.1fh  Median: %.1fh  P90: %.1fh  P99: %.1fh\n",
+		_, _ = fmt.Fprintf(p.Stdout, "Cycle Time (last %s)\n", period)
+		_, _ = fmt.Fprintf(p.Stdout, "  Avg: %.1fh  Median: %.1fh  P90: %.1fh  P99: %.1fh\n",
 			stats.Avg, stats.Median, stats.P90, stats.P99)
 		return nil
 	case "bottlenecks":
@@ -410,7 +410,7 @@ func runImpedimentList(p MxFParams, status, format string) error {
 		return outputJSON(p.Stdout, imps)
 	}
 	if len(imps) == 0 {
-		fmt.Fprintln(p.Stdout, "No impediments found.")
+		_, _ = fmt.Fprintln(p.Stdout, "No impediments found.")
 		return nil
 	}
 	fmt.Fprintf(p.Stdout, "%-8s  %-8s  %-4s  %-10s  %s\n", "ID", "Severity", "Age", "Owner", "Title")
@@ -442,7 +442,7 @@ func runImpedimentDetect(p MxFParams) error {
 		return err
 	}
 	if len(detected) == 0 {
-		fmt.Fprintln(p.Stdout, "No potential impediments detected.")
+		_, _ = fmt.Fprintln(p.Stdout, "No potential impediments detected.")
 		return nil
 	}
 	fmt.Fprintf(p.Stdout, "Detected %d potential impediments:\n\n", len(detected))
@@ -498,7 +498,7 @@ func runDashboard(p MxFParams, sub string, html bool, output string) error {
 				bars = append(bars, dashboard.BarChartPoint{Label: pt.Sprint, Value: pt.Velocity})
 			}
 			_ = dashboard.RenderBarChart("Velocity", bars, p.Stdout)
-			fmt.Fprintln(p.Stdout)
+			_, _ = fmt.Fprintln(p.Stdout)
 		}
 		return dashboard.RenderHealthIndicators("Health", snap.HealthIndicators, p.Stdout)
 	}
@@ -579,7 +579,7 @@ func runRetro(p MxFParams, sub, status string) error {
 			for _, ai := range prevItems {
 				fmt.Fprintf(p.Stdout, "  %s  %-10s  %s (%s)\n", ai.ID, ai.Status, ai.Description, ai.Owner)
 			}
-			fmt.Fprintln(p.Stdout)
+			_, _ = fmt.Fprintln(p.Stdout)
 		}
 
 		record, err := retroStore.StartRetro(date, metricsData)
@@ -598,7 +598,7 @@ func runRetro(p MxFParams, sub, status string) error {
 			return err
 		}
 		if len(retros) == 0 {
-			fmt.Fprintln(p.Stdout, "No action items found. Run `mxf retro start` first.")
+			_, _ = fmt.Fprintln(p.Stdout, "No action items found. Run `mxf retro start` first.")
 			return nil
 		}
 		var allItems []coaching.ActionItem
@@ -613,7 +613,7 @@ func runRetro(p MxFParams, sub, status string) error {
 			}
 		}
 		if len(allItems) == 0 {
-			fmt.Fprintln(p.Stdout, "No action items matching filter.")
+			_, _ = fmt.Fprintln(p.Stdout, "No action items matching filter.")
 			return nil
 		}
 		fmt.Fprintf(p.Stdout, "%-6s  %-10s  %-10s  %-12s  %s\n", "ID", "Status", "Owner", "Deadline", "Description")

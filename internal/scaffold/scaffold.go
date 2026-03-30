@@ -209,11 +209,35 @@ func Run(opts Options) (*Result, error) {
 		}
 	}
 
+	// Detect legacy reviewer-*.md files in the target directory and
+	// warn the user. Per Spec 019 FR-003a: warn but do NOT delete.
+	warnLegacyReviewerFiles(opts.Stdout, opts.TargetDir)
+
 	// Initialize sub-tools after file scaffolding, before summary.
 	subResults := initSubTools(&opts)
 
 	printSummary(opts.Stdout, opts.DivisorOnly, langExplicit, langDetected, result, subResults)
 	return result, nil
+}
+
+// warnLegacyReviewerFiles checks for previously scaffolded reviewer-*.md
+// files in the target's .opencode/agents/ directory. If found, prints a
+// warning listing each file and suggests a removal command. Per Spec 019
+// FR-003a: warn but do NOT delete the files.
+func warnLegacyReviewerFiles(w io.Writer, targetDir string) {
+	pattern := filepath.Join(targetDir, ".opencode", "agents", "reviewer-*.md")
+	matches, err := filepath.Glob(pattern)
+	if err != nil || len(matches) == 0 {
+		return
+	}
+
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "⚠  Legacy reviewer agents detected:")
+	for _, m := range matches {
+		_, _ = fmt.Fprintf(w, "    %s\n", filepath.Base(m))
+	}
+	_, _ = fmt.Fprintln(w, "  These have been superseded by divisor-* agents.")
+	_, _ = fmt.Fprintln(w, "  Remove with: rm .opencode/agents/reviewer-*.md")
 }
 
 // knownAssetPrefixes enumerates the valid top-level prefixes
@@ -309,8 +333,8 @@ func shouldDeployPack(relPath, lang string) bool {
 	base := filepath.Base(relPath)
 	name := strings.TrimSuffix(base, filepath.Ext(base))
 
-	// Always deploy default packs
-	if name == "default" || name == "default-custom" {
+	// Always deploy default and severity packs (language-agnostic)
+	if name == "default" || name == "default-custom" || name == "severity" {
 		return true
 	}
 	// Deploy language-specific pack and its custom extension
@@ -669,7 +693,7 @@ func initSubTools(opts *Options) []subToolResult {
 		deweyDir := filepath.Join(opts.TargetDir, ".dewey")
 		if _, statErr := os.Stat(deweyDir); os.IsNotExist(statErr) {
 			// First run: initialize workspace and build index.
-			fmt.Fprintf(opts.Stdout, "  Initializing Dewey workspace...\n")
+			_, _ = fmt.Fprintf(opts.Stdout, "  Initializing Dewey workspace...\n")
 			if _, initErr := opts.ExecCmd("dewey", "init"); initErr != nil {
 				results = append(results, subToolResult{
 					name: ".dewey/", action: "failed",
@@ -688,7 +712,7 @@ func initSubTools(opts *Options) []subToolResult {
 				results = append(results, *sr)
 			}
 
-			fmt.Fprintf(opts.Stdout, "  Indexing Dewey sources (this may take a moment)...\n")
+			_, _ = fmt.Fprintf(opts.Stdout, "  Indexing Dewey sources (this may take a moment)...\n")
 			if _, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
 				results = append(results, subToolResult{
 					name: "dewey index", action: "failed",
@@ -702,7 +726,7 @@ func initSubTools(opts *Options) []subToolResult {
 			// Design decision: opt-in via --force to avoid latency on
 			// default re-runs. Users who add new files can explicitly
 			// request re-indexing.
-			fmt.Fprintf(opts.Stdout, "  Re-indexing Dewey sources...\n")
+			_, _ = fmt.Fprintf(opts.Stdout, "  Re-indexing Dewey sources...\n")
 			if _, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
 				results = append(results, subToolResult{
 					name: "dewey index", action: "failed",
@@ -756,57 +780,57 @@ func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *
 	if divisorOnly {
 		label = "uf init (divisor)"
 	}
-	fmt.Fprintf(w, "\n%s: %d files processed\n\n", label, total)
+	_, _ = fmt.Fprintf(w, "\n%s: %d files processed\n\n", label, total)
 
 	if len(r.Created) > 0 {
-		fmt.Fprintf(w, "  created:     %d\n", len(r.Created))
+		_, _ = fmt.Fprintf(w, "  created:     %d\n", len(r.Created))
 		for _, f := range r.Created {
-			fmt.Fprintf(w, "    + %s\n", f)
+			_, _ = fmt.Fprintf(w, "    + %s\n", f)
 		}
 	}
 	if len(r.Updated) > 0 {
-		fmt.Fprintf(w, "  updated:     %d\n", len(r.Updated))
+		_, _ = fmt.Fprintf(w, "  updated:     %d\n", len(r.Updated))
 		for _, f := range r.Updated {
-			fmt.Fprintf(w, "    ~ %s\n", f)
+			_, _ = fmt.Fprintf(w, "    ~ %s\n", f)
 		}
 	}
 	if len(r.Overwritten) > 0 {
-		fmt.Fprintf(w, "  overwritten: %d\n", len(r.Overwritten))
+		_, _ = fmt.Fprintf(w, "  overwritten: %d\n", len(r.Overwritten))
 		for _, f := range r.Overwritten {
-			fmt.Fprintf(w, "    ! %s\n", f)
+			_, _ = fmt.Fprintf(w, "    ! %s\n", f)
 		}
 	}
 	if len(r.Skipped) > 0 {
-		fmt.Fprintf(w, "  skipped:     %d (use --force to overwrite)\n", len(r.Skipped))
+		_, _ = fmt.Fprintf(w, "  skipped:     %d (use --force to overwrite)\n", len(r.Skipped))
 		for _, f := range r.Skipped {
-			fmt.Fprintf(w, "    - %s\n", f)
+			_, _ = fmt.Fprintf(w, "    - %s\n", f)
 		}
 	}
 
 	// Sub-tool initialization results.
 	if len(subResults) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Sub-tool initialization:")
+		_, _ = fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, "Sub-tool initialization:")
 		for _, sr := range subResults {
 			symbol := subToolSymbol(sr.action)
 			line := fmt.Sprintf("  %s %s %s", symbol, sr.name, sr.action)
 			if sr.detail != "" {
 				line += " (" + sr.detail + ")"
 			}
-			fmt.Fprintln(w, line)
+			_, _ = fmt.Fprintln(w, line)
 		}
 	}
 
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 	if divisorOnly && !langExplicit && !langDetected {
-		fmt.Fprintln(w, "  note: language not detected; deployed default convention pack only. Use --lang to specify.")
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, "  note: language not detected; deployed default convention pack only. Use --lang to specify.")
+		_, _ = fmt.Fprintln(w)
 	}
 	if divisorOnly {
-		fmt.Fprintln(w, hintDivisor)
+		_, _ = fmt.Fprintln(w, hintDivisor)
 	} else {
 		// Show context-aware next steps.
-		fmt.Fprintln(w, "Next steps:")
+		_, _ = fmt.Fprintln(w, "Next steps:")
 		// Check if key tools are available to determine guidance.
 		hasDewey := false
 		if r != nil {
@@ -830,14 +854,14 @@ func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *
 			}
 		}
 		if !hasDewey && len(subResults) == 0 {
-			fmt.Fprintln(w, "  1. Run uf setup to install the full toolchain")
-			fmt.Fprintln(w, "  2. Run /speckit.constitution to create your project constitution")
-			fmt.Fprintln(w, "  3. Run uf doctor to verify your environment")
+			_, _ = fmt.Fprintln(w, "  1. Run uf setup to install the full toolchain")
+			_, _ = fmt.Fprintln(w, "  2. Run /speckit.constitution to create your project constitution")
+			_, _ = fmt.Fprintln(w, "  3. Run uf doctor to verify your environment")
 		} else {
-			fmt.Fprintln(w, "  1. Run /speckit.constitution to create your project constitution")
-			fmt.Fprintln(w, "  2. Run uf doctor to verify your environment")
-			fmt.Fprintln(w, "  3. Run /speckit.specify to start a strategic spec")
-			fmt.Fprintln(w, "  4. Run /opsx:propose to start a tactical change")
+			_, _ = fmt.Fprintln(w, "  1. Run /speckit.constitution to create your project constitution")
+			_, _ = fmt.Fprintln(w, "  2. Run uf doctor to verify your environment")
+			_, _ = fmt.Fprintln(w, "  3. Run /speckit.specify to start a strategic spec")
+			_, _ = fmt.Fprintln(w, "  4. Run /opsx:propose to start a tactical change")
 		}
 	}
 }
@@ -1008,18 +1032,18 @@ func writeSourcesConfig(path, currentName string, siblings []string, parentDir, 
 	// Current repo first.
 	b.WriteString("  - id: disk-local\n")
 	b.WriteString("    type: disk\n")
-	b.WriteString(fmt.Sprintf("    name: %s\n", currentName))
+	_, _ = fmt.Fprintf(&b, "    name: %s\n", currentName)
 	b.WriteString("    config:\n")
 	b.WriteString("      path: \".\"\n")
 
 	// Sibling repos.
 	for _, sib := range siblings {
 		b.WriteString("\n")
-		b.WriteString(fmt.Sprintf("  - id: disk-%s\n", sib))
+		_, _ = fmt.Fprintf(&b, "  - id: disk-%s\n", sib)
 		b.WriteString("    type: disk\n")
-		b.WriteString(fmt.Sprintf("    name: %s\n", sib))
+		_, _ = fmt.Fprintf(&b, "    name: %s\n", sib)
 		b.WriteString("    config:\n")
-		b.WriteString(fmt.Sprintf("      path: \"../%s\"\n", sib))
+		_, _ = fmt.Fprintf(&b, "      path: \"../%s\"\n", sib)
 	}
 
 	// Org-level disk source.
@@ -1035,15 +1059,15 @@ func writeSourcesConfig(path, currentName string, siblings []string, parentDir, 
 	if org != "" {
 		b.WriteString("\n")
 		b.WriteString("  # GitHub API (issues, PRs, READMEs)\n")
-		b.WriteString(fmt.Sprintf("  - id: github-%s\n", org))
+		_, _ = fmt.Fprintf(&b, "  - id: github-%s\n", org)
 		b.WriteString("    type: github\n")
-		b.WriteString(fmt.Sprintf("    name: %s org\n", org))
+		_, _ = fmt.Fprintf(&b, "    name: %s org\n", org)
 		b.WriteString("    config:\n")
-		b.WriteString(fmt.Sprintf("      org: %s\n", org))
+		_, _ = fmt.Fprintf(&b, "      org: %s\n", org)
 		b.WriteString("      repos:\n")
-		b.WriteString(fmt.Sprintf("        - %s\n", currentName))
+		_, _ = fmt.Fprintf(&b, "        - %s\n", currentName)
 		for _, sib := range siblings {
-			b.WriteString(fmt.Sprintf("        - %s\n", sib))
+			_, _ = fmt.Fprintf(&b, "        - %s\n", sib)
 		}
 		b.WriteString("    refresh_interval: daily\n")
 	}

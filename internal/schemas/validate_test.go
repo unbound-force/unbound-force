@@ -14,8 +14,8 @@ func TestValidateArtifact_ValidFile(t *testing.T) {
 	artifact := `{"name":"test"}`
 	schemaPath := filepath.Join(dir, "schema.json")
 	artPath := filepath.Join(dir, "artifact.json")
-	os.WriteFile(schemaPath, []byte(schema), 0o644)
-	os.WriteFile(artPath, []byte(artifact), 0o644)
+	_ = os.WriteFile(schemaPath, []byte(schema), 0o644) //nolint:errcheck // test setup
+	_ = os.WriteFile(artPath, []byte(artifact), 0o644)  //nolint:errcheck // test setup
 
 	err := ValidateArtifact(schemaPath, artPath)
 	if err != nil {
@@ -29,8 +29,8 @@ func TestValidateArtifact_MissingRequired(t *testing.T) {
 	artifact := `{"age":42}`
 	schemaPath := filepath.Join(dir, "schema.json")
 	artPath := filepath.Join(dir, "artifact.json")
-	os.WriteFile(schemaPath, []byte(schema), 0o644)
-	os.WriteFile(artPath, []byte(artifact), 0o644)
+	_ = os.WriteFile(schemaPath, []byte(schema), 0o644) //nolint:errcheck // test setup
+	_ = os.WriteFile(artPath, []byte(artifact), 0o644)  //nolint:errcheck // test setup
 
 	err := ValidateArtifact(schemaPath, artPath)
 	if err == nil {
@@ -43,8 +43,8 @@ func TestValidateArtifact_MissingRequired(t *testing.T) {
 
 func TestValidateArtifact_MalformedSchema(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{not json"), 0o644)
-	os.WriteFile(filepath.Join(dir, "art.json"), []byte(`{}`), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{not json"), 0o644) //nolint:errcheck // test setup
+	_ = os.WriteFile(filepath.Join(dir, "art.json"), []byte(`{}`), 0o644)        //nolint:errcheck // test setup
 
 	err := ValidateArtifact(filepath.Join(dir, "bad.json"), filepath.Join(dir, "art.json"))
 	if err == nil {
@@ -55,8 +55,8 @@ func TestValidateArtifact_MalformedSchema(t *testing.T) {
 func TestValidateArtifact_MalformedArtifact(t *testing.T) {
 	dir := t.TempDir()
 	schema := `{"type":"object"}`
-	os.WriteFile(filepath.Join(dir, "schema.json"), []byte(schema), 0o644)
-	os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{not json"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "schema.json"), []byte(schema), 0o644)   //nolint:errcheck // test setup
+	_ = os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{not json"), 0o644) //nolint:errcheck // test setup
 
 	err := ValidateArtifact(filepath.Join(dir, "schema.json"), filepath.Join(dir, "bad.json"))
 	if err == nil {
@@ -66,7 +66,7 @@ func TestValidateArtifact_MalformedArtifact(t *testing.T) {
 
 func TestValidateArtifact_SchemaNotFound(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "art.json"), []byte(`{}`), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "art.json"), []byte(`{}`), 0o644) //nolint:errcheck // test setup
 
 	err := ValidateArtifact(filepath.Join(dir, "nonexistent.json"), filepath.Join(dir, "art.json"))
 	if err == nil {

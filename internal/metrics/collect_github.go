@@ -108,10 +108,14 @@ func CollectGitHub(runner sync.GHRunner, repo string, period time.Duration) (*So
 
 	dataPoints := len(prs)
 	if v, ok := raw["ci_runs"]; ok {
-		dataPoints += v.(int)
+		if n, isInt := v.(int); isInt {
+			dataPoints += n
+		}
 	}
 	if v, ok := raw["issue_count"]; ok {
-		dataPoints += v.(int)
+		if n, isInt := v.(int); isInt {
+			dataPoints += n
+		}
 	}
 
 	return &SourceCollection{

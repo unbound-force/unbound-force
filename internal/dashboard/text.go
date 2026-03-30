@@ -23,8 +23,8 @@ func RenderBarChart(title string, data []BarChartPoint, w io.Writer) error {
 		return nil
 	}
 
-	fmt.Fprintf(w, "%s\n", title)
-	fmt.Fprintf(w, "%s\n", strings.Repeat("─", len(title)))
+	_, _ = fmt.Fprintf(w, "%s\n", title)
+	_, _ = fmt.Fprintf(w, "%s\n", strings.Repeat("─", len(title)))
 
 	maxVal := 0.0
 	maxLabel := 0
@@ -47,7 +47,7 @@ func RenderBarChart(title string, data []BarChartPoint, w io.Writer) error {
 			width = 1
 		}
 		bar := strings.Repeat("█", width)
-		fmt.Fprintf(w, "  %-*s  %s  %.0f\n", maxLabel, d.Label, bar, d.Value)
+		_, _ = fmt.Fprintf(w, "  %-*s  %s  %.0f\n", maxLabel, d.Label, bar, d.Value)
 	}
 
 	return nil
@@ -59,8 +59,8 @@ func RenderSparkline(title string, data []float64, w io.Writer) error {
 		return nil
 	}
 
-	fmt.Fprintf(w, "%s\n", title)
-	fmt.Fprintf(w, "%s\n", strings.Repeat("─", len(title)))
+	_, _ = fmt.Fprintf(w, "%s\n", title)
+	_, _ = fmt.Fprintf(w, "%s\n", strings.Repeat("─", len(title)))
 
 	minVal := data[0]
 	maxVal := data[0]
@@ -88,8 +88,8 @@ func RenderSparkline(title string, data []float64, w io.Writer) error {
 		spark.WriteRune(sparkChars[idx])
 	}
 
-	fmt.Fprintf(w, "  %s\n", spark.String())
-	fmt.Fprintf(w, "  Min: %.1f  Avg: %.1f  Max: %.1f\n", minVal, avg, maxVal)
+	_, _ = fmt.Fprintf(w, "  %s\n", spark.String())
+	_, _ = fmt.Fprintf(w, "  Min: %.1f  Avg: %.1f  Max: %.1f\n", minVal, avg, maxVal)
 
 	return nil
 }

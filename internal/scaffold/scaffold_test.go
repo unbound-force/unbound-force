@@ -115,7 +115,7 @@ var expectedAssetPaths = []string{
 	"opencode/command/speckit.tasks.md",
 	"opencode/command/speckit.taskstoissues.md",
 	"opencode/command/unleash.md",
-	// OpenCode agents — legacy reviewers (4) + Divisor personas (5) + Cobalt-Crush (1) + Mx F coach (1) + constitution-check (1)
+	// OpenCode agents — Divisor personas (5) + Cobalt-Crush (1) + Mx F coach (1) + constitution-check (1)
 	"opencode/agents/cobalt-crush-dev.md",
 	"opencode/agents/constitution-check.md",
 	"opencode/agents/mx-f-coach.md", // Spec 007: Mx F coaching persona (user-owned, not in --divisor subset, not tool-owned)
@@ -124,10 +124,6 @@ var expectedAssetPaths = []string{
 	"opencode/agents/divisor-guard.md",
 	"opencode/agents/divisor-sre.md",
 	"opencode/agents/divisor-testing.md",
-	"opencode/agents/reviewer-adversary.md",
-	"opencode/agents/reviewer-architect.md",
-	"opencode/agents/reviewer-guard.md",
-	"opencode/agents/reviewer-sre.md",
 	// OpenCode commands — includes review-council (11)
 	"opencode/command/review-council.md",
 	// Convention packs — shared by all heroes (6)
@@ -135,6 +131,7 @@ var expectedAssetPaths = []string{
 	"opencode/unbound/packs/default.md",
 	"opencode/unbound/packs/go-custom.md",
 	"opencode/unbound/packs/go.md",
+	"opencode/unbound/packs/severity.md",
 	"opencode/unbound/packs/typescript-custom.md",
 	"opencode/unbound/packs/typescript.md",
 	// OpenSpec schema (5)
@@ -873,8 +870,13 @@ var knownNonEmbeddedFiles = map[string]bool{
 	// Agents — local-only tooling, not scaffolded by uf init
 	".opencode/agents/gaze-reporter.md":       true,
 	".opencode/agents/gaze-test-generator.md": true,
-	".opencode/agents/reviewer-testing.md":    true,
 	".opencode/agents/muti-mind-po.md":        true,
+	// Legacy reviewer agents — superseded by divisor-* (Spec 019)
+	".opencode/agents/reviewer-adversary.md": true,
+	".opencode/agents/reviewer-architect.md": true,
+	".opencode/agents/reviewer-guard.md":     true,
+	".opencode/agents/reviewer-sre.md":       true,
+	".opencode/agents/reviewer-testing.md":   true,
 	// Commands — local-only tooling
 	".opencode/command/cobalt-crush.md":               true,
 	".opencode/command/gaze.md":                       true,
@@ -1001,10 +1003,9 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/unbound/packs/go.md", true},
 		{"opencode/unbound/packs/default.md", true},
 		{"opencode/unbound/packs/go-custom.md", true},
+		{"opencode/unbound/packs/severity.md", true},
 		// Non-Divisor assets
 		{"opencode/agents/constitution-check.md", false},
-		{"opencode/agents/reviewer-guard.md", false},
-		{"opencode/agents/reviewer-architect.md", false},
 		{"opencode/command/speckit.specify.md", false},
 		{"opencode/command/speckit.plan.md", false},
 		{"specify/templates/spec-template.md", false},
@@ -1062,10 +1063,13 @@ func TestShouldDeployPack(t *testing.T) {
 		// Non-pack files always pass
 		{"opencode/agents/divisor-guard.md", "go", true},
 		{"opencode/command/review-council.md", "go", true},
-		// Default packs always deploy
+		// Default and severity packs always deploy (language-agnostic)
 		{"opencode/unbound/packs/default.md", "go", true},
 		{"opencode/unbound/packs/default-custom.md", "go", true},
 		{"opencode/unbound/packs/default.md", "typescript", true},
+		{"opencode/unbound/packs/severity.md", "go", true},
+		{"opencode/unbound/packs/severity.md", "typescript", true},
+		{"opencode/unbound/packs/severity.md", "default", true},
 		// Matching language packs deploy
 		{"opencode/unbound/packs/go.md", "go", true},
 		{"opencode/unbound/packs/go-custom.md", "go", true},
@@ -1233,12 +1237,12 @@ func TestRun_DivisorSubset_DefaultFallback(t *testing.T) {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	// Verify only default packs deployed
+	// Verify only default and severity packs deployed (language-agnostic)
 	for _, f := range result.Created {
 		if strings.Contains(f, "unbound/packs") {
 			base := filepath.Base(f)
-			if !strings.HasPrefix(base, "default") {
-				t.Errorf("expected only default packs, got %s", f)
+			if !strings.HasPrefix(base, "default") && base != "severity.md" {
+				t.Errorf("expected only default/severity packs, got %s", f)
 			}
 		}
 	}
@@ -1389,6 +1393,117 @@ func TestScaffoldOutput_NoBareUnboundReferences(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("walk error: %v", err)
+	}
+}
+
+// TestDivisorAgents_NoBareFRReferences is a regression guard for
+// Spec 019 FR-008: all FR references in Divisor agent files must
+// use the qualified "per Spec NNN FR-XXX" format.
+func TestDivisorAgents_NoBareFRReferences(t *testing.T) {
+	paths, err := assetPaths()
+	if err != nil {
+		t.Fatalf("get asset paths: %v", err)
+	}
+
+	// Regex: bare "FR-NNN" not preceded by "per Spec NNN "
+	// We check for any "FR-" followed by digits that is NOT
+	// preceded by "per Spec" on the same line.
+	for _, relPath := range paths {
+		if !strings.HasPrefix(relPath, "opencode/agents/divisor-") {
+			continue
+		}
+
+		content, readErr := assetContent(relPath)
+		if readErr != nil {
+			t.Errorf("read %s: %v", relPath, readErr)
+			continue
+		}
+
+		lines := strings.Split(string(content), "\n")
+		for i, line := range lines {
+			// Skip lines that don't contain FR- references
+			if !strings.Contains(line, "FR-") {
+				continue
+			}
+			// Check that every FR- reference has "per Spec" qualifier
+			// Find all FR-NNN occurrences and verify each is qualified
+			idx := 0
+			for {
+				pos := strings.Index(line[idx:], "FR-")
+				if pos < 0 {
+					break
+				}
+				absPos := idx + pos
+				// Check if "per Spec" (case-insensitive) appears before this FR- on the same line
+				prefix := strings.ToLower(line[:absPos])
+				if !strings.Contains(prefix, "per spec") {
+					t.Errorf("%s:%d: bare FR reference without 'per Spec' qualifier: %s",
+						relPath, i+1, strings.TrimSpace(line))
+					break
+				}
+				idx = absPos + 3
+			}
+		}
+	}
+}
+
+// TestRun_LegacyFileWarning verifies that uf init warns about
+// previously scaffolded reviewer-*.md files per Spec 019 FR-003a.
+func TestRun_LegacyFileWarning(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, ".opencode", "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Create legacy reviewer files.
+	legacyFiles := []string{
+		"reviewer-adversary.md",
+		"reviewer-architect.md",
+		"reviewer-guard.md",
+		"reviewer-sre.md",
+		"reviewer-testing.md",
+	}
+	for _, f := range legacyFiles {
+		if err := os.WriteFile(filepath.Join(agentsDir, f), []byte("legacy"), 0o644); err != nil {
+			t.Fatalf("create %s: %v", f, err)
+		}
+	}
+
+	var buf bytes.Buffer
+	_, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	output := buf.String()
+
+	// Verify warning is printed.
+	if !strings.Contains(output, "Legacy reviewer agents detected") {
+		t.Errorf("expected legacy warning, got:\n%s", output)
+	}
+
+	// Verify file names are listed.
+	for _, f := range legacyFiles {
+		if !strings.Contains(output, f) {
+			t.Errorf("expected %s in warning, got:\n%s", f, output)
+		}
+	}
+
+	// Verify removal command is suggested.
+	if !strings.Contains(output, "rm .opencode/agents/reviewer-*.md") {
+		t.Errorf("expected removal command in warning, got:\n%s", output)
+	}
+
+	// Verify legacy files are NOT deleted (FR-003a).
+	for _, f := range legacyFiles {
+		if _, err := os.Stat(filepath.Join(agentsDir, f)); os.IsNotExist(err) {
+			t.Errorf("legacy file %s should NOT be deleted", f)
+		}
 	}
 }
 
@@ -2175,12 +2290,12 @@ func TestConfigureOpencodeJSON_Create(t *testing.T) {
 	// Verify mcp.dewey entry.
 	dewey := getMCPDewey(t, ocMap)
 	var deweyType string
-	json.Unmarshal(dewey["type"], &deweyType)
+	_ = json.Unmarshal(dewey["type"], &deweyType) //nolint:errcheck // test helper
 	if deweyType != "local" {
 		t.Errorf("mcp.dewey.type = %q, want 'local'", deweyType)
 	}
 	var cmd []string
-	json.Unmarshal(dewey["command"], &cmd)
+	_ = json.Unmarshal(dewey["command"], &cmd) //nolint:errcheck // test helper
 	expectedCmd := []string{"dewey", "serve", "--vault", "."}
 	if len(cmd) != len(expectedCmd) {
 		t.Errorf("mcp.dewey.command = %v, want %v", cmd, expectedCmd)
@@ -2192,7 +2307,7 @@ func TestConfigureOpencodeJSON_Create(t *testing.T) {
 		}
 	}
 	var enabled bool
-	json.Unmarshal(dewey["enabled"], &enabled)
+	_ = json.Unmarshal(dewey["enabled"], &enabled) //nolint:errcheck // test helper
 	if !enabled {
 		t.Error("mcp.dewey.enabled should be true")
 	}
@@ -2444,7 +2559,7 @@ func TestConfigureOpencodeJSON_PreserveCustom(t *testing.T) {
 	// Verify custom server preserved.
 	mcpRaw := ocMap["mcp"]
 	var mcpMap map[string]json.RawMessage
-	json.Unmarshal(mcpRaw, &mcpMap)
+	_ = json.Unmarshal(mcpRaw, &mcpMap) //nolint:errcheck // test helper
 	if _, ok := mcpMap["my-custom-server"]; !ok {
 		t.Error("custom MCP server should be preserved")
 	}
@@ -2624,7 +2739,7 @@ func TestConfigureOpencodeJSON_Force(t *testing.T) {
 	// Verify mcp.dewey was overwritten with correct command (no --include-hidden).
 	dewey := getMCPDewey(t, ocMap)
 	var cmd []string
-	json.Unmarshal(dewey["command"], &cmd)
+	_ = json.Unmarshal(dewey["command"], &cmd) //nolint:errcheck // test helper
 	expectedCmd := []string{"dewey", "serve", "--vault", "."}
 	if len(cmd) != len(expectedCmd) {
 		t.Fatalf("command = %v, want %v", cmd, expectedCmd)

@@ -133,7 +133,7 @@ func TestWriteArtifact_ErrorDir(t *testing.T) {
 	// Creating a file then using it as a directory to force MkdirAll to fail
 	dir := t.TempDir()
 	fileAsDir := filepath.Join(dir, "file.txt")
-	os.WriteFile(fileAsDir, []byte(""), 0644)
+	_ = os.WriteFile(fileAsDir, []byte(""), 0644) //nolint:errcheck // test setup
 
 	err := artifacts.GenerateBacklogItemArtifact(fileAsDir, &backlog.Item{ID: "BI-999"})
 	if err == nil {
@@ -174,9 +174,9 @@ func TestFindArtifacts_EmptyDir(t *testing.T) {
 func TestFindArtifacts_SkipsNonJSON(t *testing.T) {
 	dir := t.TempDir()
 	// Write a non-JSON file
-	os.WriteFile(filepath.Join(dir, "readme.md"), []byte("# hello"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "readme.md"), []byte("# hello"), 0644) //nolint:errcheck // test setup
 	// Write a valid artifact
-	artifacts.WriteArtifact(dir, "gaze", "quality-report", "r1", map[string]string{})
+	_ = artifacts.WriteArtifact(dir, "gaze", "quality-report", "r1", map[string]string{}) //nolint:errcheck // test setup
 
 	paths, err := artifacts.FindArtifacts(dir, "quality-report")
 	if err != nil {
@@ -189,7 +189,7 @@ func TestFindArtifacts_SkipsNonJSON(t *testing.T) {
 
 func TestReadEnvelope_ValidFile(t *testing.T) {
 	dir := t.TempDir()
-	artifacts.WriteArtifact(dir, "mx-f", "metrics-snapshot", "s1", map[string]float64{"velocity": 8.2})
+	_ = artifacts.WriteArtifact(dir, "mx-f", "metrics-snapshot", "s1", map[string]float64{"velocity": 8.2}) //nolint:errcheck // test setup
 
 	// Find the written file
 	paths, _ := artifacts.FindArtifacts(dir, "metrics-snapshot")
@@ -211,7 +211,7 @@ func TestReadEnvelope_ValidFile(t *testing.T) {
 
 func TestReadEnvelope_MalformedFile(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{invalid json"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{invalid json"), 0644) //nolint:errcheck // test setup
 	_, err := artifacts.ReadEnvelope(filepath.Join(dir, "bad.json"))
 	if err == nil {
 		t.Error("expected error for malformed JSON")

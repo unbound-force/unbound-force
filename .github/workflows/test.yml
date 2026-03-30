@@ -25,8 +25,20 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+      - name: Lint
+        run: golangci-lint run
+
       - name: Test
         run: go test -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Vulnerability Check
+        run: govulncheck ./...
 
       - name: Enforce Coverage Ratchets
         run: |

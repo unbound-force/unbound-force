@@ -122,14 +122,14 @@ func Run(opts Options) error {
 
 	// Platform guard: Windows is not supported (FR-037).
 	if runtime.GOOS == "windows" {
-		return fmt.Errorf("Platform not supported: doctor and setup require macOS or Linux")
+		return fmt.Errorf("platform not supported: doctor and setup require macOS or Linux")
 	}
 
 	// Set Ollama env vars so Swarm's Hivemind uses the same
 	// enterprise-grade embedding model as Dewey. These are
 	// inherited by child processes (swarm setup, swarm init).
-	os.Setenv("OLLAMA_MODEL", graniteModel)
-	os.Setenv("OLLAMA_EMBED_DIM", graniteEmbedDim)
+	_ = os.Setenv("OLLAMA_MODEL", graniteModel)
+	_ = os.Setenv("OLLAMA_EMBED_DIM", graniteEmbedDim)
 
 	// Detect environment (reuse from doctor package).
 	doctorOpts := &doctor.Options{
@@ -170,23 +170,23 @@ func Run(opts Options) error {
 	fmt.Fprintln(opts.Stdout, "Installing...")
 
 	// Step 1: Install OpenCode (FR-022).
-	fmt.Fprintf(opts.Stdout, "  [1/13] OpenCode...\n")
+	fmt.Fprintf(opts.Stdout, "  [1/15] OpenCode...\n")
 	results = append(results, installOpenCode(&opts, env))
 
 	// Step 2: Install Gaze (FR-023).
-	fmt.Fprintf(opts.Stdout, "  [2/13] Gaze...\n")
+	fmt.Fprintf(opts.Stdout, "  [2/15] Gaze...\n")
 	results = append(results, installGaze(&opts, env))
 
 	// Step 3: Install Mx F Manager hero.
-	fmt.Fprintf(opts.Stdout, "  [3/13] Mx F...\n")
+	fmt.Fprintf(opts.Stdout, "  [3/15] Mx F...\n")
 	results = append(results, installMxF(&opts, env))
 
 	// Step 4: Install GitHub CLI.
-	fmt.Fprintf(opts.Stdout, "  [4/13] GitHub CLI...\n")
+	fmt.Fprintf(opts.Stdout, "  [4/15] GitHub CLI...\n")
 	results = append(results, installGH(&opts, env))
 
 	// Step 5: Ensure Node.js (FR-024).
-	fmt.Fprintf(opts.Stdout, "  [5/13] Node.js...\n")
+	fmt.Fprintf(opts.Stdout, "  [5/15] Node.js...\n")
 	nodeResult := ensureNodeJS(&opts, env)
 	results = append(results, nodeResult)
 	nodeAvailable := nodeResult.err == nil && nodeResult.action != "failed"
@@ -194,30 +194,30 @@ func Run(opts Options) error {
 	// Steps 6-10: Node.js-dependent tools (inside nodeAvailable block).
 	if nodeAvailable {
 		// Step 6: Ensure bun is available (prerequisite for swarm setup).
-		fmt.Fprintf(opts.Stdout, "  [6/13] Bun...\n")
+		fmt.Fprintf(opts.Stdout, "  [6/15] Bun...\n")
 		bunResult := ensureBun(&opts, env)
 		results = append(results, bunResult)
 
 		// Step 7: Install OpenSpec CLI.
-		fmt.Fprintf(opts.Stdout, "  [7/13] OpenSpec CLI...\n")
+		fmt.Fprintf(opts.Stdout, "  [7/15] OpenSpec CLI...\n")
 		results = append(results, installOpenSpec(&opts, env))
 
 		// Step 8: Install Swarm plugin (FR-025).
-		fmt.Fprintf(opts.Stdout, "  [8/13] Swarm plugin...\n")
+		fmt.Fprintf(opts.Stdout, "  [8/15] Swarm plugin...\n")
 		swarmResult := installSwarmPlugin(&opts, env)
 		results = append(results, swarmResult)
 
 		if swarmResult.err == nil && swarmResult.action != "failed" && swarmResult.action != "skipped" {
 			// Step 9: Run swarm setup (FR-026).
-			fmt.Fprintf(opts.Stdout, "  [9/13] Swarm setup...\n")
+			fmt.Fprintf(opts.Stdout, "  [9/15] Swarm setup...\n")
 			results = append(results, runSwarmSetup(&opts))
 
 			// Step 10: Initialize .hive/ (FR-029).
-			fmt.Fprintf(opts.Stdout, "  [10/13] .hive/...\n")
+			fmt.Fprintf(opts.Stdout, "  [10/15] .hive/...\n")
 			results = append(results, initializeHive(&opts))
 		} else if swarmResult.action == "already installed" {
 			// Swarm already installed — still initialize .hive/.
-			fmt.Fprintf(opts.Stdout, "  [10/13] .hive/...\n")
+			fmt.Fprintf(opts.Stdout, "  [10/15] .hive/...\n")
 			results = append(results, initializeHive(&opts))
 		} else {
 			results = append(results, stepResult{name: "swarm setup", action: "skipped", detail: "no swarm"})
@@ -231,19 +231,27 @@ func Run(opts Options) error {
 	}
 
 	// Step 11: Install Ollama (prerequisite for Dewey + Swarm embeddings).
-	fmt.Fprintf(opts.Stdout, "  [11/13] Ollama...\n")
+	fmt.Fprintf(opts.Stdout, "  [11/15] Ollama...\n")
 	results = append(results, installOllama(&opts, env))
 
 	// Step 12: Install Dewey (after Ollama, before uf init).
-	fmt.Fprintf(opts.Stdout, "  [12/13] Dewey...\n")
+	fmt.Fprintf(opts.Stdout, "  [12/15] Dewey...\n")
 	results = append(results, installDewey(&opts, env))
 
-	// Step 13: Run uf init (FR-033).
+	// Step 13: Install golangci-lint (Spec 019 FR-012).
+	fmt.Fprintf(opts.Stdout, "  [13/15] golangci-lint...\n")
+	results = append(results, installGolangciLint(&opts, env))
+
+	// Step 14: Install govulncheck (Spec 019 FR-012).
+	fmt.Fprintf(opts.Stdout, "  [14/15] govulncheck...\n")
+	results = append(results, installGovulncheck(&opts, env))
+
+	// Step 15: Run uf init (FR-033).
 	// opencode.json is now configured by uf init (via scaffold.configureOpencodeJSON),
 	// not by setup directly. Dewey workspace initialization (dewey init + dewey index)
 	// is also handled by uf init (via scaffold.initSubTools) — repo-level operations
 	// belong in the repo-level command.
-	fmt.Fprintf(opts.Stdout, "  [13/13] uf init...\n")
+	fmt.Fprintf(opts.Stdout, "  [15/15] uf init...\n")
 	results = append(results, runUnboundInit(&opts))
 
 	// Print results.
@@ -522,7 +530,7 @@ func installNodeJS(opts *Options, env doctor.DetectedEnvironment, reason string)
 		name:   "Node.js",
 		action: "failed",
 		detail: fmt.Sprintf("%s. Install: brew install node or https://nodejs.org/", reason),
-		err:    fmt.Errorf("Node.js not available"),
+		err:    fmt.Errorf("node.js not available"),
 	}
 }
 
@@ -619,6 +627,55 @@ func initializeHive(opts *Options) stepResult {
 		return stepResult{name: ".hive/", action: "failed", detail: "swarm init failed", err: err}
 	}
 	return stepResult{name: ".hive/", action: "initialized"}
+}
+
+// installGolangciLint installs golangci-lint if missing per Spec 019
+// FR-012. Uses go install as primary method with Homebrew fallback.
+func installGolangciLint(opts *Options, env doctor.DetectedEnvironment) stepResult {
+	if _, err := opts.LookPath("golangci-lint"); err == nil {
+		return stepResult{name: "golangci-lint", action: "already installed"}
+	}
+
+	if opts.DryRun {
+		return stepResult{name: "golangci-lint", action: "dry-run", detail: "Would install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"}
+	}
+
+	// Try go install first (Go is already a prerequisite).
+	if _, err := opts.ExecCmd("go", "install", "github.com/golangci/golangci-lint/cmd/golangci-lint@latest"); err == nil {
+		return stepResult{name: "golangci-lint", action: "installed", detail: "via go install"}
+	}
+
+	// Fallback to Homebrew.
+	if doctor.HasManager(env, doctor.ManagerHomebrew) {
+		if _, err := opts.ExecCmd("brew", "install", "golangci-lint"); err != nil {
+			return stepResult{name: "golangci-lint", action: "failed", detail: "brew install failed", err: err}
+		}
+		return stepResult{name: "golangci-lint", action: "installed", detail: "via Homebrew"}
+	}
+
+	return stepResult{
+		name:   "golangci-lint",
+		action: "failed",
+		detail: "Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest",
+		err:    fmt.Errorf("golangci-lint not available"),
+	}
+}
+
+// installGovulncheck installs govulncheck if missing per Spec 019
+// FR-012. Uses go install (the only installation method).
+func installGovulncheck(opts *Options, env doctor.DetectedEnvironment) stepResult {
+	if _, err := opts.LookPath("govulncheck"); err == nil {
+		return stepResult{name: "govulncheck", action: "already installed"}
+	}
+
+	if opts.DryRun {
+		return stepResult{name: "govulncheck", action: "dry-run", detail: "Would install: go install golang.org/x/vuln/cmd/govulncheck@latest"}
+	}
+
+	if _, err := opts.ExecCmd("go", "install", "golang.org/x/vuln/cmd/govulncheck@latest"); err != nil {
+		return stepResult{name: "govulncheck", action: "failed", detail: "go install failed", err: err}
+	}
+	return stepResult{name: "govulncheck", action: "installed", detail: "via go install"}
 }
 
 // installOllama installs Ollama if missing. Ollama is the local
@@ -806,12 +863,12 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	// Clean up temp file on error.
 	defer func() {
 		if err != nil {
-			os.Remove(tmpPath)
+			_ = os.Remove(tmpPath)
 		}
 	}()
 
 	if _, err = tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if err = tmp.Close(); err != nil {

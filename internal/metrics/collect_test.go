@@ -142,7 +142,8 @@ func TestCollectGitHub_SuccessfulCollection(t *testing.T) {
 	if !ok {
 		t.Fatal("missing pr_count in RawData")
 	}
-	if prCount.(int) != 2 {
+	prCountInt, isInt := prCount.(int)
+	if !isInt || prCountInt != 2 {
 		t.Errorf("pr_count = %v, want 2", prCount)
 	}
 
@@ -151,7 +152,8 @@ func TestCollectGitHub_SuccessfulCollection(t *testing.T) {
 	if !ok {
 		t.Fatal("missing avg_merge_hours in RawData")
 	}
-	if avgMerge.(float64) <= 0 {
+	avgMergeF, isFloat := avgMerge.(float64)
+	if !isFloat || avgMergeF <= 0 {
 		t.Errorf("avg_merge_hours = %v, want > 0", avgMerge)
 	}
 
@@ -160,7 +162,8 @@ func TestCollectGitHub_SuccessfulCollection(t *testing.T) {
 	if !ok {
 		t.Fatal("missing ci_runs in RawData")
 	}
-	if ciRuns.(int) != 3 {
+	ciRunsInt, isInt2 := ciRuns.(int)
+	if !isInt2 || ciRunsInt != 3 {
 		t.Errorf("ci_runs = %v, want 3", ciRuns)
 	}
 	ciPassRate, ok := coll.RawData["ci_pass_rate"]
@@ -169,7 +172,8 @@ func TestCollectGitHub_SuccessfulCollection(t *testing.T) {
 	}
 	// 2 success out of 3 = 66.67%
 	wantRate := float64(2) / float64(3) * 100
-	if ciPassRate.(float64) != wantRate {
+	ciPassRateF, isFloat2 := ciPassRate.(float64)
+	if !isFloat2 || ciPassRateF != wantRate {
 		t.Errorf("ci_pass_rate = %v, want %v", ciPassRate, wantRate)
 	}
 
@@ -178,14 +182,16 @@ func TestCollectGitHub_SuccessfulCollection(t *testing.T) {
 	if !ok {
 		t.Fatal("missing issues_opened in RawData")
 	}
-	if issuesOpened.(int) != 2 {
+	issuesOpenedInt, isInt3 := issuesOpened.(int)
+	if !isInt3 || issuesOpenedInt != 2 {
 		t.Errorf("issues_opened = %v, want 2", issuesOpened)
 	}
 	issuesClosed, ok := coll.RawData["issues_closed"]
 	if !ok {
 		t.Fatal("missing issues_closed in RawData")
 	}
-	if issuesClosed.(int) != 1 {
+	issuesClosedInt, isInt4 := issuesClosed.(int)
+	if !isInt4 || issuesClosedInt != 1 {
 		t.Errorf("issues_closed = %v, want 1", issuesClosed)
 	}
 
@@ -231,10 +237,13 @@ func TestCollectGitHub_EmptyResponses(t *testing.T) {
 	if coll == nil {
 		t.Fatal("expected non-nil collection even with empty data")
 	}
-	if coll.RawData["pr_count"].(int) != 0 {
+	prCountVal, prOk := coll.RawData["pr_count"].(int)
+	if !prOk || prCountVal != 0 {
 		t.Errorf("pr_count = %v, want 0", coll.RawData["pr_count"])
 	}
-	if coll.RawData["ci_runs"].(int) != 0 {
+	ciRunsVal, ciOk := coll.RawData["ci_runs"].(int)
+	_ = ciOk
+	if ciRunsVal != 0 {
 		t.Errorf("ci_runs = %v, want 0", coll.RawData["ci_runs"])
 	}
 	if coll.RawData["issue_count"].(int) != 0 {
