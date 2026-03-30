@@ -44,13 +44,13 @@ func FormatText(report *Report, w io.Writer) error {
 	hasColor := renderer.ColorProfile() != termenv.Ascii
 
 	// Header with stethoscope emoji.
-	fmt.Fprintln(w, titleStyle.Render("🩺 Unbound Force Doctor"))
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, titleStyle.Render("🩺 Unbound Force Doctor"))
+	_, _ = fmt.Fprintln(w)
 
 	boldStyle := renderer.NewStyle().Bold(true)
 
 	for _, group := range report.Groups {
-		fmt.Fprintln(w, boldStyle.Render(group.Name))
+		_, _ = fmt.Fprintln(w, boldStyle.Render(group.Name))
 
 		for _, r := range group.Results {
 			indicator := formatIndicator(r, hasColor, passStyle, warnStyle, failStyle, dimStyle)
@@ -59,42 +59,42 @@ func FormatText(report *Report, w io.Writer) error {
 			if r.Detail != "" {
 				msg += " (" + r.Detail + ")"
 			}
-			fmt.Fprintf(w, "  %s %s %s\n", indicator, name, msg)
+			_, _ = fmt.Fprintf(w, "  %s %s %s\n", indicator, name, msg)
 
 			// Fix hint on indented line below in subtle gray.
 			if r.InstallHint != "" {
-				fmt.Fprintln(w, dimStyle.Render("     Fix: "+r.InstallHint))
+				_, _ = fmt.Fprintln(w, dimStyle.Render("     Fix: "+r.InstallHint))
 			}
 			if r.InstallURL != "" {
-				fmt.Fprintln(w, dimStyle.Render("     Docs: "+r.InstallURL))
+				_, _ = fmt.Fprintln(w, dimStyle.Render("     Docs: "+r.InstallURL))
 			}
 		}
 
 		// Render embedded output (e.g., swarm doctor) between separators.
 		if group.Embed != "" {
 			separator := strings.Repeat("─", 40)
-			fmt.Fprintf(w, "  ── %s %s\n", group.Name+" ", separator[:max(0, 38-len(group.Name))])
+			_, _ = fmt.Fprintf(w, "  ── %s %s\n", group.Name+" ", separator[:max(0, 38-len(group.Name))])
 			for _, line := range strings.Split(strings.TrimRight(group.Embed, "\n"), "\n") {
-				fmt.Fprintf(w, "  %s\n", line)
+				_, _ = fmt.Fprintf(w, "  %s\n", line)
 			}
-			fmt.Fprintf(w, "  %s\n", separator)
+			_, _ = fmt.Fprintf(w, "  %s\n", separator)
 		}
 
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	}
 
 	// Boxed summary with emoji counters.
 	summaryContent := fmt.Sprintf("  ✅ %d passed  ⚠️  %d warnings  ❌ %d failed",
 		report.Summary.Passed, report.Summary.Warned, report.Summary.Failed)
-	fmt.Fprintln(w, boxStyle.Render(summaryContent))
+	_, _ = fmt.Fprintln(w, boxStyle.Render(summaryContent))
 
 	// Contextual completion message.
 	if report.Summary.Failed == 0 && report.Summary.Warned == 0 {
-		fmt.Fprintln(w, passStyle.Render("🎉 Everything looks good!"))
+		_, _ = fmt.Fprintln(w, passStyle.Render("🎉 Everything looks good!"))
 	} else if report.Summary.Failed > 0 {
-		fmt.Fprintln(w, dimStyle.Render("  Run 'uf doctor' after fixes."))
+		_, _ = fmt.Fprintln(w, dimStyle.Render("  Run 'uf doctor' after fixes."))
 	} else {
-		fmt.Fprintln(w, dimStyle.Render("  All critical checks passed."))
+		_, _ = fmt.Fprintln(w, dimStyle.Render("  All critical checks passed."))
 	}
 
 	return nil

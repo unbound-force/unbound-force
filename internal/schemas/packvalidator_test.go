@@ -168,6 +168,11 @@ func TestValidateConventionPack_AllPacksValid(t *testing.T) {
 		if strings.Contains(name, "-custom") {
 			continue
 		}
+		// Skip severity pack — it's a shared severity definitions
+		// pack, not a coding convention pack (Spec 019)
+		if name == "severity.md" {
+			continue
+		}
 
 		t.Run(name, func(t *testing.T) {
 			packPath := filepath.Join(packsDir, name)

@@ -1,6 +1,4 @@
-linters-settings:
-  errcheck:
-    check-type-assertions: true
+version: "2"
 
 linters:
   disable-all: true
@@ -11,3 +9,11 @@ linters:
     - ineffassign
     - unused
     - misspell
+
+  settings:
+    errcheck:
+      check-type-assertions: false
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln

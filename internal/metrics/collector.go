@@ -58,7 +58,7 @@ func (c *Collector) Collect(sources []string, repo string, period time.Duration)
 		sources = []string{"github", "gaze", "divisor", "muti-mind"}
 	}
 
-	fmt.Fprintf(c.Stdout, "Collecting metrics (period: %s)...\n\n", formatPeriod(period))
+	_, _ = fmt.Fprintf(c.Stdout, "Collecting metrics (period: %s)...\n\n", formatPeriod(period))
 
 	collected := 0
 	total := len(sources)
@@ -71,7 +71,7 @@ func (c *Collector) Collect(sources []string, repo string, period time.Duration)
 		switch src {
 		case "github":
 			if repo == "" {
-				fmt.Fprintf(c.Stdout, "  %-12s --              no repository specified\n", src)
+				_, _ = fmt.Fprintf(c.Stdout, "  %-12s --              no repository specified\n", src)
 				continue
 			}
 			coll, err = CollectGitHub(c.GHRunner, repo, period)
@@ -82,23 +82,23 @@ func (c *Collector) Collect(sources []string, repo string, period time.Duration)
 		case "muti-mind":
 			coll, err = CollectMutiMind(c.ArtifactDir, since)
 		default:
-			fmt.Fprintf(c.Stdout, "  %-12s --              unknown source\n", src)
+			_, _ = fmt.Fprintf(c.Stdout, "  %-12s --              unknown source\n", src)
 			continue
 		}
 
 		if err != nil {
-			fmt.Fprintf(c.Stdout, "  %-12s --              %v\n", src, err)
+			_, _ = fmt.Fprintf(c.Stdout, "  %-12s --              %v\n", src, err)
 			lastErr = err
 			continue
 		}
 
 		if coll == nil {
-			fmt.Fprintf(c.Stdout, "  %-12s --              no artifacts found\n", src)
+			_, _ = fmt.Fprintf(c.Stdout, "  %-12s --              no artifacts found\n", src)
 			continue
 		}
 
 		if err := c.Store.WriteCollection(src, *coll); err != nil {
-			fmt.Fprintf(c.Stdout, "  %-12s --              write error: %v\n", src, err)
+			_, _ = fmt.Fprintf(c.Stdout, "  %-12s --              write error: %v\n", src, err)
 			lastErr = err
 			continue
 		}

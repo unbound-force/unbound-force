@@ -93,7 +93,7 @@ func (s *Syncer) Push(id string) error {
 						return err
 					}
 					log.Info("Created GitHub Issue", "issue", num, "id", item.ID)
-					fmt.Fprintf(s.out, "Created GitHub Issue #%d for %s\n", num, item.ID)
+					_, _ = fmt.Fprintf(s.out, "Created GitHub Issue #%d for %s\n", num, item.ID)
 				}
 			}
 		} else {
@@ -103,7 +103,7 @@ func (s *Syncer) Push(id string) error {
 				return err
 			}
 			log.Info("Updated GitHub Issue", "issue", *item.GitHubIssueNumber, "id", item.ID)
-			fmt.Fprintf(s.out, "Updated GitHub Issue #%d for %s\n", *item.GitHubIssueNumber, item.ID)
+			_, _ = fmt.Fprintf(s.out, "Updated GitHub Issue #%d for %s\n", *item.GitHubIssueNumber, item.ID)
 		}
 	}
 
@@ -156,7 +156,7 @@ func (s *Syncer) Pull() error {
 				return err
 			}
 			log.Info("Pulled updates", "issue", issue.Number, "id", item.ID)
-			fmt.Fprintf(s.out, "Pulled updates for %s from Issue #%d\n", item.ID, issue.Number)
+			_, _ = fmt.Fprintf(s.out, "Pulled updates for %s from Issue #%d\n", item.ID, issue.Number)
 		} else {
 			// Create new local item
 			id, err := s.repo.NextID()
@@ -177,7 +177,7 @@ func (s *Syncer) Pull() error {
 				return err
 			}
 			log.Info("Imported unmapped issue", "issue", num, "id", id)
-			fmt.Fprintf(s.out, "Imported unmapped Issue #%d as %s\n", num, id)
+			_, _ = fmt.Fprintf(s.out, "Imported unmapped Issue #%d as %s\n", num, id)
 		}
 	}
 
@@ -191,8 +191,8 @@ func (s *Syncer) Status() error {
 		return err
 	}
 
-	fmt.Fprintf(s.out, "%-10s %-15s %s\n", "ID", "SYNC STATUS", "GITHUB ISSUE")
-	fmt.Fprintln(s.out, "--------------------------------------------------")
+	_, _ = fmt.Fprintf(s.out, "%-10s %-15s %s\n", "ID", "SYNC STATUS", "GITHUB ISSUE")
+	_, _ = fmt.Fprintln(s.out, "--------------------------------------------------")
 
 	for _, item := range items {
 		status := "un-synced"
@@ -201,7 +201,7 @@ func (s *Syncer) Status() error {
 			status = "synced" // naive
 			issue = fmt.Sprintf("#%d", *item.GitHubIssueNumber)
 		}
-		fmt.Fprintf(s.out, "%-10s %-15s %s\n", item.ID, status, issue)
+		_, _ = fmt.Fprintf(s.out, "%-10s %-15s %s\n", item.ID, status, issue)
 	}
 
 	return nil
@@ -209,11 +209,11 @@ func (s *Syncer) Status() error {
 
 // Sync is bidirectional wrapper
 func (s *Syncer) Sync() error {
-	fmt.Fprintln(s.out, "Pulling updates from GitHub...")
+	_, _ = fmt.Fprintln(s.out, "Pulling updates from GitHub...")
 	if err := s.Pull(); err != nil {
 		return err
 	}
-	fmt.Fprintln(s.out, "Pushing updates to GitHub...")
+	_, _ = fmt.Fprintln(s.out, "Pushing updates to GitHub...")
 	if err := s.Push(""); err != nil {
 		return err
 	}
@@ -222,6 +222,6 @@ func (s *Syncer) Sync() error {
 
 // SyncProject wrapper (stub)
 func (s *Syncer) SyncProject() error {
-	fmt.Fprintln(s.out, "GitHub Project sync not fully implemented yet.")
+	_, _ = fmt.Fprintln(s.out, "GitHub Project sync not fully implemented yet.")
 	return nil
 }

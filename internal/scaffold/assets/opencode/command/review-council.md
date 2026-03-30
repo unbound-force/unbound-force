@@ -106,11 +106,11 @@ This table documents known Divisor persona roles and their focus areas. It is us
 
 | Agent Name | Persona | Code Review Focus | Spec Review Focus |
 |---|---|---|---|
-| `divisor-adversary` | The Adversary | Security, resilience, efficiency, zero-waste, error handling, universal security, dependency vulnerabilities | Completeness, testability, ambiguity, security gaps, dependency risks, cross-spec consistency |
-| `divisor-architect` | The Architect | Architectural alignment, coding conventions [PACK], pattern adherence, plan alignment, DRY, testing conventions [PACK], documentation [PACK] | Template consistency, spec-to-plan alignment, task coverage, data model coherence, inter-spec architecture |
-| `divisor-guard` | The Guard | Intent drift detection, constitution alignment, neighborhood rule [PACK], zero-waste mandate | Intent fidelity, scope discipline, inter-spec consistency, status accuracy, user value, constitution alignment |
+| `divisor-adversary` | The Adversary | Secrets/credentials, dependency CVEs/supply chain, error handling/resilience, path/injection safety | Completeness, testability, ambiguity, security gaps, dependency risks, cross-spec consistency |
+| `divisor-architect` | The Architect | Architectural alignment, coding conventions [PACK], pattern adherence, DRY, testing conventions [PACK], documentation [PACK] | Template consistency, spec-to-plan alignment, task coverage, data model coherence, inter-spec architecture |
+| `divisor-guard` | The Guard | Intent drift/plan alignment, zero-waste mandate, constitution alignment, cross-component value [PACK] | Intent fidelity, scope discipline, inter-spec consistency, status accuracy, user value, constitution alignment |
 | `divisor-testing` | The Tester | Test architecture [PACK], coverage strategy, assertion depth, test isolation, regression protection, convention compliance [PACK] | Testability of requirements, test strategy coverage, fixture feasibility, coverage expectations, contract surface |
-| `divisor-sre` | The Operator | Release pipeline [PACK], dependency health [PACK], configuration, runtime observability, upgrade paths, operational docs | Deployment feasibility, operational requirements, config management, dependency risk, maintenance burden |
+| `divisor-sre` | The Operator | File permissions/config, efficiency/performance, release pipeline [PACK], dependency health [PACK], runtime observability, upgrade paths, operational docs, backup/recovery | Deployment feasibility, operational requirements, config management, dependency risk, maintenance burden |
 
 For any discovered agent not in this table, delegate with a generic review prompt appropriate to the current review mode.
 
@@ -241,6 +241,8 @@ step, determine which artifacts to review:
 2. Collect all **REQUEST CHANGES** findings from the discovered reviewers. If all discovered reviewers return **APPROVE**, report the result and stop.
 
 3. If there are **REQUEST CHANGES**, apply the **hybrid fix policy**:
+
+   Severity levels are defined in the shared severity convention pack at `.opencode/unbound/packs/severity.md`. The auto-fix boundary (LOW/MEDIUM = auto-fix, HIGH/CRITICAL = report only) is grounded in these shared definitions to ensure consistent behavior across all 5 personas.
 
    **Auto-fix (LOW and MEDIUM findings)** — Apply these fixes directly to the spec files:
    - Formatting and template compliance issues

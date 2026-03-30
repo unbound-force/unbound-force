@@ -294,7 +294,6 @@ func (o *Orchestrator) Advance(workflowID string) (*WorkflowResult, error) {
 			nextMode := effectiveMode(wf.Stages[i].ExecutionMode)
 			if !resuming && completedMode == ModeSwarm && nextMode == ModeHuman {
 				wf.Status = StatusAwaitingHuman
-				nextFound = true
 				if err := o.store().Save(wf); err != nil {
 					return nil, fmt.Errorf("save workflow at checkpoint: %w", err)
 				}
