@@ -708,7 +708,7 @@ func initSubTools(opts *Options) []subToolResult {
 			// Auto-detect sibling repos for Dewey sources config.
 			// Runs after dewey init creates default sources.yaml
 			// and before dewey index ingests all sources.
-			if sr := generateDeweySources(opts); sr != nil {
+			if sr := generateDeweySources(opts, false); sr != nil {
 				results = append(results, *sr)
 			}
 
@@ -722,10 +722,13 @@ func initSubTools(opts *Options) []subToolResult {
 					name: "dewey index", action: "completed"})
 			}
 		} else if opts.Force {
-			// Force re-index: workspace exists, user wants a fresh index.
-			// Design decision: opt-in via --force to avoid latency on
-			// default re-runs. Users who add new files can explicitly
-			// request re-indexing.
+			// Force: regenerate sources.yaml + re-index.
+			// Regenerate first so the updated sources config
+			// (e.g., recursive: false on disk-org) is used for
+			// the re-index. Bypasses the customization check.
+			if sr := generateDeweySources(opts, true); sr != nil {
+				results = append(results, *sr)
+			}
 			_, _ = fmt.Fprintf(opts.Stdout, "  Re-indexing Dewey sources...\n")
 			if _, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
 				results = append(results, subToolResult{
@@ -899,7 +902,7 @@ func assetContent(relPath string) ([]byte, error) {
 // sources, uf init never overwrites. Detection uses simple
 // `- id:` counting per Composability First — no YAML parsing
 // dependency needed.
-func generateDeweySources(opts *Options) *subToolResult {
+func generateDeweySources(opts *Options, force bool) *subToolResult {
 	sourcesPath := filepath.Join(opts.TargetDir, ".dewey", "sources.yaml")
 
 	// Skip if sources.yaml doesn't exist (dewey init didn't run
@@ -910,8 +913,9 @@ func generateDeweySources(opts *Options) *subToolResult {
 	}
 
 	// Skip if user has customized the file (more than the default
-	// single-source config).
-	if !isDefaultSourcesConfig(data) {
+	// single-source config) — unless force is true (regenerate
+	// even if customized).
+	if !force && !isDefaultSourcesConfig(data) {
 		return &subToolResult{
 			name:   "dewey sources",
 			action: "skipped",
@@ -1054,6 +1058,7 @@ func writeSourcesConfig(path, currentName string, siblings []string, parentDir, 
 	b.WriteString("    name: org-workspace\n")
 	b.WriteString("    config:\n")
 	b.WriteString("      path: \"../\"\n")
+	b.WriteString("      recursive: false\n")
 
 	// GitHub API source (optional — only if org was detected).
 	if org != "" {

@@ -1882,7 +1882,7 @@ func TestGenerateDeweySources_SiblingsDetected(t *testing.T) {
 		},
 	}
 
-	result := generateDeweySources(opts)
+	result := generateDeweySources(opts, false)
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -1915,9 +1915,12 @@ func TestGenerateDeweySources_SiblingsDetected(t *testing.T) {
 		t.Error("expected disk-website source")
 	}
 
-	// Verify disk-org source.
+	// Verify disk-org source with recursive: false.
 	if !strings.Contains(text, "- id: disk-org") {
 		t.Error("expected disk-org source")
+	}
+	if !strings.Contains(text, "recursive: false") {
+		t.Error("expected recursive: false on disk-org")
 	}
 
 	// Verify GitHub source with repos list.
@@ -1968,7 +1971,7 @@ func TestGenerateDeweySources_NoSiblings(t *testing.T) {
 		},
 	}
 
-	result := generateDeweySources(opts)
+	result := generateDeweySources(opts, false)
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -1993,6 +1996,9 @@ func TestGenerateDeweySources_NoSiblings(t *testing.T) {
 	}
 	if !strings.Contains(text, "- id: disk-org") {
 		t.Error("expected disk-org source")
+	}
+	if !strings.Contains(text, "recursive: false") {
+		t.Error("expected recursive: false on disk-org")
 	}
 
 	// Should NOT have GitHub source (no remote).
@@ -2035,7 +2041,7 @@ func TestGenerateDeweySources_AlreadyCustomized(t *testing.T) {
 		},
 	}
 
-	result := generateDeweySources(opts)
+	result := generateDeweySources(opts, false)
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -2054,6 +2060,77 @@ func TestGenerateDeweySources_AlreadyCustomized(t *testing.T) {
 	}
 	if string(content) != customSources {
 		t.Error("customized sources.yaml should not have been overwritten")
+	}
+}
+
+func TestGenerateDeweySources_ForceOverwritesCustom(t *testing.T) {
+	// Create a parent dir with the "current" project and a sibling repo.
+	parentDir := t.TempDir()
+	currentDir := filepath.Join(parentDir, "my-project")
+	if err := os.MkdirAll(filepath.Join(currentDir, ".dewey"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Create a sibling repo.
+	if err := os.MkdirAll(filepath.Join(parentDir, "gaze", ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir sibling: %v", err)
+	}
+
+	// Write a customized sources.yaml (>1 source entry).
+	customSources := `sources:
+  - id: disk-local
+    type: disk
+    config:
+      path: "."
+  - id: my-custom-source
+    type: disk
+    config:
+      path: "../custom"
+`
+	sourcesPath := filepath.Join(currentDir, ".dewey", "sources.yaml")
+	if err := os.WriteFile(sourcesPath, []byte(customSources), 0o644); err != nil {
+		t.Fatalf("write sources.yaml: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: currentDir,
+		ExecCmd: func(name string, args ...string) ([]byte, error) {
+			if name == "git" {
+				return []byte("git@github.com:unbound-force/my-project.git\n"), nil
+			}
+			return nil, fmt.Errorf("unexpected: %s", name)
+		},
+	}
+
+	// Call with force=true — should overwrite customized file.
+	result := generateDeweySources(opts, true)
+
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.action != "completed" {
+		t.Errorf("expected action 'completed', got %q", result.action)
+	}
+
+	// Read the regenerated sources.yaml.
+	content, err := os.ReadFile(sourcesPath)
+	if err != nil {
+		t.Fatalf("read sources.yaml: %v", err)
+	}
+	text := string(content)
+
+	// Should have the auto-detected config, not the custom one.
+	if strings.Contains(text, "my-custom-source") {
+		t.Error("custom source should have been overwritten")
+	}
+	if !strings.Contains(text, "- id: disk-gaze") {
+		t.Error("expected disk-gaze source in regenerated config")
+	}
+	if !strings.Contains(text, "- id: disk-org") {
+		t.Error("expected disk-org source")
+	}
+	if !strings.Contains(text, "recursive: false") {
+		t.Error("expected recursive: false on disk-org")
 	}
 }
 
@@ -2823,6 +2900,13 @@ func TestInitSubTools_DeweyForceReindex(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
+	// Write a default sources.yaml so generateDeweySources has
+	// something to regenerate on force.
+	defaultSources := "sources:\n  - id: disk-local\n    type: disk\n    config:\n      path: \".\"\n"
+	if err := os.WriteFile(filepath.Join(dir, ".dewey", "sources.yaml"), []byte(defaultSources), 0o644); err != nil {
+		t.Fatalf("write sources.yaml: %v", err)
+	}
+
 	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
 
 	opts := &Options{
@@ -2861,6 +2945,15 @@ func TestInitSubTools_DeweyForceReindex(t *testing.T) {
 		if call == "dewey init" {
 			t.Error("dewey init should NOT be called when .dewey/ already exists")
 		}
+	}
+
+	// Verify sources.yaml was regenerated with recursive: false.
+	content, readErr := os.ReadFile(filepath.Join(dir, ".dewey", "sources.yaml"))
+	if readErr != nil {
+		t.Fatalf("read sources.yaml: %v", readErr)
+	}
+	if !strings.Contains(string(content), "recursive: false") {
+		t.Error("expected sources.yaml to contain recursive: false after force regeneration")
 	}
 }
 
