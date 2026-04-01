@@ -78,7 +78,44 @@ go run cmd/mutimind/main.go generate-artifact "BI-NNN"
 
 ## Knowledge Retrieval
 
-When Dewey MCP tools are available, use them for context retrieval. If Dewey is unavailable, fall back to direct file operations.
+Agents SHOULD prefer Dewey MCP tools over grep/glob/read
+for backlog queries, acceptance history, and cross-repo
+context. Dewey provides semantic search across all indexed
+Markdown files — returning ranked results with provenance
+metadata that grep cannot match.
+
+### Step 0: Knowledge Retrieval (Before Acceptance Judgments)
+
+Before rendering acceptance decisions or prioritizing the
+backlog, query Dewey for context that grounds your
+judgment in project history:
+
+1. **Backlog patterns**: Query `dewey_semantic_search`
+   for past acceptance criteria and backlog patterns
+   related to the current feature domain. Example:
+   - "past acceptance criteria for dashboard features"
+   - "backlog priorities for export functionality"
+
+2. **Acceptance history**: Query `dewey_search` for
+   prior acceptance decisions to maintain consistency.
+   Example:
+   - "acceptance-decision reject rationale"
+   - "conditional acceptance criteria"
+
+3. **Tag-based discovery**: Query `dewey_find_by_tag`
+   for backlog-tagged content. Example:
+   - `dewey_find_by_tag` tag: "backlog"
+   - `dewey_find_by_tag` tag: "acceptance"
+
+4. **Item status queries**: Query
+   `dewey_query_properties` for backlog item metadata.
+   Example:
+   - `dewey_query_properties` property: "status",
+     value: "draft"
+   - `dewey_query_properties` property: "priority",
+     value: "P1"
+
+### Graceful Degradation (3-Tier Pattern)
 
 **Tier 3 (Full Dewey)** — semantic + structured search:
 - `dewey_semantic_search` for conceptual queries:
@@ -87,10 +124,14 @@ When Dewey MCP tools are available, use them for context retrieval. If Dewey is 
   - "backlog patterns for this domain"
 - `dewey_search` for keyword queries across the backlog
 - `dewey_traverse` for dependency chain navigation and cross-repo issue discovery
+- `dewey_find_by_tag` for backlog and acceptance tags
+- `dewey_query_properties` for item status and priority
 
 **Tier 2 (Graph-only, no embedding model)** — structured search only:
 - `dewey_search` for keyword queries
 - `dewey_traverse` for relationship navigation
+- `dewey_find_by_tag`, `dewey_query_properties` —
+  metadata queries
 - Semantic search unavailable — use exact keyword matches
 
 **Tier 1 (No Dewey)** — direct file access:

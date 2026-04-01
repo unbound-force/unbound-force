@@ -85,7 +85,41 @@ When facilitating a retrospective, follow this 5-phase format:
 
 ## Knowledge Retrieval
 
-When Dewey MCP tools are available, use them for context retrieval. If Dewey is unavailable, fall back to direct file operations.
+Agents SHOULD prefer Dewey MCP tools over grep/glob/read
+for metrics queries, process patterns, and retrospective
+context. Dewey provides semantic search across all indexed
+Markdown files — returning ranked results with provenance
+metadata that grep cannot match.
+
+### Step 0: Knowledge Retrieval (Before Coaching Sessions)
+
+Before facilitating retrospectives or coaching sessions,
+query Dewey for context that grounds your observations
+in project history:
+
+1. **Velocity trends**: Query `dewey_semantic_search`
+   for velocity and process patterns across repos.
+   Example:
+   - "velocity trends across repos"
+   - "cycle time patterns for similar features"
+
+2. **Retrospective outcomes**: Query `dewey_search`
+   for prior retrospective records and action items.
+   Example:
+   - "retrospective action items status"
+   - "improvement proposals outcomes"
+
+3. **Coaching patterns**: Query `dewey_find_by_tag`
+   for retrospective-tagged content. Example:
+   - `dewey_find_by_tag` tag: "retrospective"
+   - `dewey_find_by_tag` tag: "impediment"
+
+4. **Process metrics**: Query `dewey_semantic_search`
+   for coaching patterns that improved quality. Example:
+   - "coaching patterns that improved quality"
+   - "process improvements that reduced review iterations"
+
+### Graceful Degradation (3-Tier Pattern)
 
 **Tier 3 (Full Dewey)** — semantic + structured search:
 - `dewey_semantic_search` for conceptual queries:
@@ -94,10 +128,14 @@ When Dewey MCP tools are available, use them for context retrieval. If Dewey is 
   - "coaching patterns that improved quality"
 - `dewey_search` for keyword queries across metrics and retrospective records
 - `dewey_traverse` for navigating cross-repo process patterns and impediment history
+- `dewey_find_by_tag` for retrospective and impediment tags
+- `dewey_query_properties` for metrics metadata
 
 **Tier 2 (Graph-only, no embedding model)** — structured search only:
 - `dewey_search` for keyword queries
 - `dewey_traverse` for relationship navigation
+- `dewey_find_by_tag`, `dewey_query_properties` —
+  metadata queries
 - Semantic search unavailable — use exact keyword matches
 
 **Tier 1 (No Dewey)** — direct file access:

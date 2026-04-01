@@ -83,9 +83,20 @@ Given that feature description, do this:
    - The JSON output will contain BRANCH_NAME and SPEC_FILE paths
    - For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot")
 
-4. Load `.specify/templates/spec-template.md` to understand required sections.
+4. **Dewey Discovery** (optional): Before generating the
+   spec, query Dewey for existing specs with similar
+   topics to avoid duplication and identify dependencies:
+   - `dewey_semantic_search` with the feature description
+     to find related existing specs
+   - Reference any discovered specs in the Dependencies
+     or Assumptions section of the new spec
+   - If Dewey is unavailable (MCP tools return errors or
+     are not configured), skip this step and proceed
+     without cross-repo context.
 
-5. Follow this execution flow:
+5. Load `.specify/templates/spec-template.md` to understand required sections.
+
+6. Follow this execution flow:
 
     1. Parse user description from Input
        If empty: ERROR "No feature description provided"
@@ -111,9 +122,9 @@ Given that feature description, do this:
     7. Identify Key Entities (if data involved)
     8. Return: SUCCESS (spec ready for planning)
 
-6. Write the specification to SPEC_FILE using the template structure, replacing placeholders with concrete details derived from the feature description (arguments) while preserving section order and headings.
+7. Write the specification to SPEC_FILE using the template structure, replacing placeholders with concrete details derived from the feature description (arguments) while preserving section order and headings.
 
-7. **Specification Quality Validation**: After writing the initial spec, validate it against quality criteria:
+8. **Specification Quality Validation**: After writing the initial spec, validate it against quality criteria:
 
    a. **Create Spec Quality Checklist**: Generate a checklist file at `FEATURE_DIR/checklists/requirements.md` using the checklist template structure with these validation items:
 
@@ -160,7 +171,7 @@ Given that feature description, do this:
 
    c. **Handle Validation Results**:
 
-       - **If all items pass**: Mark checklist complete and proceed to step 7
+       - **If all items pass**: Mark checklist complete and proceed to step 8
 
       - **If items fail (excluding [NEEDS CLARIFICATION])**:
         1. List the failing items and specific issues
@@ -205,7 +216,7 @@ Given that feature description, do this:
 
    d. **Update Checklist**: After each validation iteration, update the checklist file with current pass/fail status
 
-8. Report completion with branch name, spec file path, checklist results, and readiness for the next phase (`/speckit.clarify` or `/speckit.plan`).
+9. Report completion with branch name, spec file path, checklist results, and readiness for the next phase (`/speckit.clarify` or `/speckit.plan`).
 
 **NOTE:** The script creates and checks out the new branch and initializes the spec file before writing.
 

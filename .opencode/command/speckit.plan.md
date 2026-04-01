@@ -42,12 +42,26 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 ### Phase 0: Outline & Research
 
-1. **Extract unknowns from Technical Context** above:
+1. **Dewey Discovery** (optional): Before researching
+   unknowns, query Dewey for prior research decisions
+   in related specs to avoid re-investigating solved
+   problems:
+   - `dewey_search` for "research.md" to find prior
+     research decisions across completed specs
+   - `dewey_semantic_search` with the feature topic to
+     find related architectural decisions
+   - Incorporate discovered decisions into the research
+     phase rather than re-deriving them
+   - If Dewey is unavailable (MCP tools return errors or
+     are not configured), skip this step and proceed
+     with standard research.
+
+2. **Extract unknowns from Technical Context** above:
    - For each NEEDS CLARIFICATION → research task
    - For each dependency → best practices task
    - For each integration → patterns task
 
-2. **Generate and dispatch research agents**:
+3. **Generate and dispatch research agents**:
 
    ```text
    For each unknown in Technical Context:
@@ -56,7 +70,7 @@ You **MUST** consider the user input before proceeding (if not empty).
      Task: "Find best practices for {tech} in {domain}"
    ```
 
-3. **Consolidate findings** in `research.md` using format:
+4. **Consolidate findings** in `research.md` using format:
    - Decision: [what was chosen]
    - Rationale: [why chosen]
    - Alternatives considered: [what else evaluated]

@@ -13,7 +13,10 @@ You are the coding persona for `/speckit.implement`. The implement command orche
 
 ## Source Documents
 
-Before writing code, read the following in order:
+Before writing code, first run the Knowledge Retrieval
+step (see "Step 0" below) to query Dewey for prior
+learnings, related specs, and architectural patterns.
+Then read the following in order:
 
 1. **`AGENTS.md`** — Project structure, coding conventions, build commands, testing conventions, active technologies
 2. **`.specify/memory/constitution.md`** — The four constitutional principles (Autonomous Collaboration, Composability First, Observable Quality, Testability). All code must align.
@@ -177,7 +180,44 @@ Swarm is coordinating parallel workers.
 
 ## Knowledge Retrieval
 
-When Dewey MCP tools are available, use them for context retrieval. If Dewey is unavailable, fall back to direct file operations.
+### Step 0: Knowledge Retrieval (Before Code Exploration)
+
+Before reading source documents or writing any code,
+query Dewey for context that grounds your implementation
+in project history and conventions. This step mirrors
+the Divisor agents' "Prior Learnings" pattern (per
+Spec 019) but uses Dewey for cross-repo architectural
+context (complementing Hivemind's session-specific
+learnings).
+
+1. **Prior learnings about target files**: Query
+   `dewey_semantic_search` for file-specific context
+   about the files you will modify. Example queries:
+   - "scaffold.go patterns and edge cases"
+   - "doctor checks.go implementation decisions"
+   - "orchestration workflow state management"
+
+2. **Related specs governing the feature**: Query
+   `dewey_search` for spec references that constrain
+   the implementation. Example queries:
+   - "FR-001 implementation requirements"
+   - "spec 008 workflow stages"
+   - "constitution testability principle"
+
+3. **Architectural patterns from conventions**: Query
+   `dewey_find_by_tag` for convention-tagged content
+   that applies to the current task. Example queries:
+   - `dewey_find_by_tag` tag: "convention"
+   - `dewey_find_by_tag` tag: "pattern"
+   - `dewey_query_properties` property: "type",
+     value: "convention"
+
+If Dewey returns relevant prior learnings (e.g.,
+"scaffold.go requires initSubTools nil guard for
+Stdout"), incorporate them into your implementation
+without the developer having to remind you.
+
+### Graceful Degradation (3-Tier Pattern)
 
 **Tier 3 (Full Dewey)** — semantic + structured search:
 - `dewey_semantic_search` for conceptual queries:
@@ -186,10 +226,14 @@ When Dewey MCP tools are available, use them for context retrieval. If Dewey is 
   - "similar implementations in other repos"
 - `dewey_search` for keyword queries across specs and code
 - `dewey_traverse` for navigating spec dependencies and architectural decisions
+- `dewey_find_by_tag` for convention-tagged content
+- `dewey_query_properties` for metadata queries
 
 **Tier 2 (Graph-only, no embedding model)** — structured search only:
 - `dewey_search` for keyword queries
 - `dewey_traverse` for relationship navigation
+- `dewey_find_by_tag`, `dewey_query_properties` —
+  metadata queries
 - Semantic search unavailable — use exact keyword matches
 
 **Tier 1 (No Dewey)** — direct file access:

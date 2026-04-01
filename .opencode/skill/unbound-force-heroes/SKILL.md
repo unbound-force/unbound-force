@@ -167,6 +167,34 @@ add `--spec-review` to pause after the spec is drafted:
 
 Workflows created before execution mode support (without `execution_mode` fields) are treated as all-human for backward compatibility. They advance one stage at a time with no automatic checkpoint pausing.
 
+## Knowledge Retrieval in the Hero Lifecycle
+
+Before delegating to a hero agent at each workflow stage,
+Swarm coordinators SHOULD query Dewey for relevant context
+that grounds the hero's work in project history. This
+step is optional — if Dewey is unavailable, skip it and
+proceed with delegation.
+
+### Per-Stage Dewey Queries
+
+| Stage | Dewey Query | Tool | Purpose |
+|-------|------------|------|---------|
+| define | Feature domain context | `dewey_semantic_search` | Find related specs, prior features, backlog patterns |
+| implement | File-specific learnings | `dewey_semantic_search` | Find prior learnings about target files, architectural patterns |
+| validate | Quality baselines | `dewey_search` | Find prior quality reports, known CRAP score patterns |
+| review | Review history | `dewey_search` | Find recurring review findings, convention violations |
+| accept | Acceptance precedents | `dewey_search` | Find prior acceptance decisions for similar features |
+| reflect | Process patterns | `dewey_semantic_search` | Find velocity trends, retrospective outcomes |
+
+### Graceful Degradation
+
+If Dewey MCP tools are unavailable (return errors or are
+not configured), skip the knowledge retrieval step
+entirely. The hero agent will still function — it will
+simply lack cross-repo context. Each hero agent has its
+own 3-tier degradation pattern (Full Dewey → Graph-only
+→ No Dewey) documented in its agent file.
+
 ## Escalation Rules
 
 1. **Max iterations**: If the review-implement loop exceeds 3 iterations, escalate to manual review with a summary of unresolved findings.

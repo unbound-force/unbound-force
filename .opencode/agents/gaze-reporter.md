@@ -352,7 +352,40 @@ above as your formatting guide and include:
 
 ## Knowledge Retrieval
 
-When Dewey MCP tools are available, use them for context retrieval. If Dewey is unavailable, fall back to direct file operations.
+Agents SHOULD prefer Dewey MCP tools over grep/glob/read
+for quality history, test patterns, and CRAP score
+context. Dewey provides semantic search across all indexed
+Markdown files — returning ranked results with provenance
+metadata that grep cannot match.
+
+### Step 0: Knowledge Retrieval (Before Quality Reports)
+
+Before producing quality reports, query Dewey for context
+that grounds your analysis in project history:
+
+1. **CRAP score patterns**: Query `dewey_semantic_search`
+   for historical CRAP score patterns and quality
+   baselines. Example:
+   - "CRAP score patterns in Go projects"
+   - "quality baselines from other repos"
+
+2. **Quality history**: Query `dewey_search` for prior
+   quality reports and known failure modes. Example:
+   - "quality-report findings"
+   - "test coverage gaps"
+
+3. **Test patterns**: Query `dewey_find_by_tag` for
+   quality-tagged content. Example:
+   - `dewey_find_by_tag` tag: "quality"
+   - `dewey_find_by_tag` tag: "testing"
+
+4. **Quality baselines**: Query `dewey_semantic_search`
+   for established quality baselines across repos.
+   Example:
+   - "common CRAP score issues"
+   - "test quality patterns"
+
+### Graceful Degradation (3-Tier Pattern)
 
 **Tier 3 (Full Dewey)** — semantic + structured search:
 - `dewey_semantic_search` for conceptual queries:
@@ -361,10 +394,14 @@ When Dewey MCP tools are available, use them for context retrieval. If Dewey is 
   - "quality baselines from other repos"
 - `dewey_search` for keyword queries across test files and specs
 - `dewey_traverse` for navigating quality report history and known failure modes
+- `dewey_find_by_tag` for quality and testing tags
+- `dewey_query_properties` for quality metadata
 
 **Tier 2 (Graph-only, no embedding model)** — structured search only:
 - `dewey_search` for keyword queries
 - `dewey_traverse` for relationship navigation
+- `dewey_find_by_tag`, `dewey_query_properties` —
+  metadata queries
 - Semantic search unavailable — use exact keyword matches
 
 **Tier 1 (No Dewey)** — direct file access:

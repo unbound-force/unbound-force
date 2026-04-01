@@ -460,6 +460,67 @@ All business logic lives under `internal/` and MUST NOT be imported externally b
 - **Logging**: Use `github.com/charmbracelet/log` for all application logging. Avoid standard library `log` or `fmt.Println` for operational logs.
 - **CLI Framework**: Use `github.com/spf13/cobra` for command routing and flag parsing.
 
+## Knowledge Retrieval
+
+Agents SHOULD prefer Dewey MCP tools over grep/glob/read
+for cross-repo context, design decisions, and
+architectural patterns. Dewey provides semantic search
+across all indexed Markdown files, specs, and web
+documentation — returning ranked results with provenance
+metadata that grep cannot match.
+
+### Tool Selection Matrix
+
+| Query Intent | Dewey Tool | When to Use |
+|-------------|-----------|-------------|
+| Conceptual understanding | `dewey_semantic_search` | "How does X work?", "Patterns for Y" |
+| Keyword lookup | `dewey_search` | Known terms, file names, FR numbers |
+| Read specific page | `dewey_get_page` | Known spec or document path |
+| Relationship discovery | `dewey_find_connections` | "How are X and Y related?" |
+| Similar documents | `dewey_similar` | "Find specs like this one" |
+| Tag-based discovery | `dewey_find_by_tag` | "All pages tagged #decision" |
+| Property queries | `dewey_query_properties` | "All specs with status: draft" |
+| Filtered semantic | `dewey_semantic_search_filtered` | Semantic search within source type |
+| Graph navigation | `dewey_traverse` | Dependency chain walking |
+
+### When to Fall Back to grep/glob/read
+
+Use direct file operations instead of Dewey when:
+- **Dewey is unavailable** — MCP tools return errors or
+  are not configured
+- **Exact string matching is needed** — searching for a
+  specific error message, variable name, or code pattern
+- **Specific file path is known** — reading a file you
+  already know the path to (use Read directly)
+- **Binary/non-Markdown content** — Dewey indexes
+  Markdown; use grep for Go source, JSON, YAML, etc.
+
+### Graceful Degradation (3-Tier Pattern)
+
+All Knowledge Retrieval steps follow this pattern:
+
+**Tier 3 (Full Dewey)** — semantic + structured search:
+- `dewey_semantic_search` — natural language queries
+- `dewey_search` — keyword queries
+- `dewey_get_page`, `dewey_find_connections`,
+  `dewey_traverse` — structured navigation
+- `dewey_find_by_tag`, `dewey_query_properties` —
+  metadata queries
+
+**Tier 2 (Graph-only, no embedding model)** — structured
+search only:
+- `dewey_search` — keyword queries (no embeddings needed)
+- `dewey_get_page`, `dewey_traverse`,
+  `dewey_find_connections` — graph navigation
+- `dewey_find_by_tag`, `dewey_query_properties` —
+  metadata queries
+- Semantic search unavailable — use exact keyword matches
+
+**Tier 1 (No Dewey)** — direct file access:
+- Use Read tool for direct file access
+- Use Grep for keyword search across the codebase
+- Use Glob for file pattern matching
+
 ## Testing Conventions
 
 - **Framework**: Standard library `testing` package only. No testify, gomega, or other external assertion libraries.
@@ -556,9 +617,11 @@ This repo is primarily specifications and governance documents. Follow these con
 - N/A (orchestrates existing tools) (018-unleash-command)
 - Go 1.24+ (scaffold engine, setup), Markdown (agents, packs, commands), YAML (CI workflow) + `github.com/spf13/cobra` (CLI), `embed.FS` (asset embedding), `github.com/charmbracelet/log` (logging) (019-divisor-council-refinement)
 - Filesystem only (Markdown files deployed to target directory, CI workflow YAML) (019-divisor-council-refinement)
+- N/A (configuration and documentation changes; Dewey MCP tools: `dewey_search`, `dewey_semantic_search`, `dewey_traverse`, `dewey_get_page`, `dewey_find_by_tag`, `dewey_query_properties`, `dewey_find_connections`, `dewey_similar`, `dewey_semantic_search_filtered`) (020-dewey-knowledge-retrieval)
 
 ## Recent Changes
 
+- 020-dewey-knowledge-retrieval: Added Dewey knowledge retrieval behavioral instructions across the agent ecosystem. Added "Knowledge Retrieval" top-level section to AGENTS.md with tool selection matrix (9 Dewey tools mapped to query intents), fallback criteria (when to use grep/glob/read instead), and 3-tier graceful degradation pattern (Full Dewey, Graph-only, No Dewey). Enhanced Cobalt-Crush with "Step 0: Knowledge Retrieval" that fires before code exploration (prior learnings, related specs, architectural patterns). Added Dewey query steps to 3 Speckit commands: `/speckit.specify` (search for similar specs), `/speckit.plan` (search for prior research decisions), `/speckit.tasks` (search for implementation patterns). Enhanced 3 hero agents with role-specific "Step 0" and "prefer Dewey" instructions: Muti-Mind (backlog patterns, acceptance history), Mx F (velocity trends, retrospective outcomes), Gaze (CRAP score patterns, quality baselines). Updated `unbound-force-heroes` SKILL.md with per-stage Dewey query table for Swarm coordinators. All Dewey instructions are SHOULD (soft preference) with graceful degradation — Dewey complements Hivemind (Spec 019), not replaces it. All 5 user stories and 22 tasks completed.
 - 019-divisor-council-refinement: Refined the Divisor Council review system -- removed 4 legacy `reviewer-*.md` scaffold assets (net -3 files: 52 → 49), added legacy file detection warning to `uf init`, de-duplicated cross-persona review responsibilities with exclusive ownership boundaries and "Out of Scope" sections in all 5 `divisor-*.md` agents, created shared `severity.md` convention pack (tool-owned, language-agnostic, always-deploy), qualified all FR references with "per Spec NNN" format, added Prior Learnings step (Hivemind `hivemind_find` with graceful degradation) to all 5 agents, updated `/review-council` reference table and severity pack reference, added `golangci-lint` and `govulncheck` to CI workflow and `uf setup` (step count 13 → 15), fixed 28+ pre-existing lint findings, added `.golangci.yml` with `version: "2"` and `fmt.Fprint*` exclusions. All 6 user stories and 56 tasks completed.
 - 018-unleash-command: Created `/unleash` autonomous Speckit pipeline command -- single Markdown command file (`.opencode/command/unleash.md`, ~600 lines) that orchestrates 8 steps (clarify, plan, tasks, spec review, implement, code review, retrospective, demo) with Dewey-powered clarification (auto-resolve with provenance annotations), parallel Swarm worker execution (max 4 concurrent, worktree isolation, cherry-pick merge), filesystem-based resumability (no state file -- probes spec.md markers, plan.md/tasks.md existence, `<!-- spec-review: passed -->` marker, task checkbox state), 6 exit points (clarify unanswerable, spec review HIGH/CRITICAL, worker failure, merge conflict, build checkpoint, code review 3 iterations), graceful degradation for all optional tools (Dewey, Gaze, Swarm worktrees, Hivemind, SwarmMail), CI commands derived from `.github/workflows/` (not hardcoded). Scaffold asset copy at `internal/scaffold/assets/opencode/command/unleash.md`, file count updated 51 → 52, expectedAssetPaths updated (13 → 14 commands). Pre-existing scaffold drift synced (23 assets). All 6 user stories and 31 tasks completed.
 - 017-init-opencode-config: Moved `opencode.json` management from `uf setup` to `uf init`. `uf init` now creates/updates `opencode.json` with Dewey MCP server entry (`mcp.dewey` with `type: local`, `command: ["dewey", "serve", "--vault", "."]`, `enabled: true`) when `dewey` is in PATH, and Swarm plugin entry (`opencode-swarm-plugin` in `plugin` array) when `.hive/` exists. Idempotent by default (skips when both entries present, preserves custom MCP servers and plugins). `--force` overwrites stale `mcp.dewey` entries. `scaffold.Options` expanded with `ReadFile`, `WriteFile`, and `DryRun` fields for injectable file I/O. `printSummary()` updated with new action symbols (`✓`/`—`/`✗`). `uf setup` step count reduced from 16 to 15 (opencode.json step removed, now handled transparently by `uf init` at final step). `uf doctor` `checkMCPConfig()` fixed to check canonical `"mcp"` key first with `"mcpServers"` fallback, and to extract binary names from both string-style and array-style command fields. Legacy `mcpServers.dewey` treated as already configured. All 4 user stories and 37 tasks completed.
