@@ -618,6 +618,8 @@ This repo is primarily specifications and governance documents. Follow these con
 - Go 1.24+ (scaffold engine, setup), Markdown (agents, packs, commands), YAML (CI workflow) + `github.com/spf13/cobra` (CLI), `embed.FS` (asset embedding), `github.com/charmbracelet/log` (logging) (019-divisor-council-refinement)
 - Filesystem only (Markdown files deployed to target directory, CI workflow YAML) (019-divisor-council-refinement)
 - N/A (configuration and documentation changes; Dewey MCP tools: `dewey_search`, `dewey_semantic_search`, `dewey_traverse`, `dewey_get_page`, `dewey_find_by_tag`, `dewey_query_properties`, `dewey_find_connections`, `dewey_similar`, `dewey_semantic_search_filtered`) (020-dewey-knowledge-retrieval)
+- Go 1.24+ (Dewey repo: Ollama + Dewey MCP server, Ollama HTTP (021-dewey-unified-memory)
+- Dewey `graph.db` (SQLite — learnings (021-dewey-unified-memory)
 
 ## Recent Changes
 
