@@ -1345,6 +1345,57 @@ func TestScaffoldOutput_NoGraphthulhuReferences(t *testing.T) {
 	}
 }
 
+// TestScaffoldOutput_NoHivemindReferences is a regression guard
+// for Spec 022 FR-006/FR-007: scaffolded files must not contain any
+// Hivemind tool references. Dewey replaces Hivemind as the unified
+// memory layer for all learning storage and retrieval.
+func TestScaffoldOutput_NoHivemindReferences(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	_, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Stale patterns that must NOT appear in scaffolded output.
+	stalePatterns := []string{
+		"hivemind_store",
+		"hivemind_find",
+		"hivemind_validate",
+		"hivemind_remove",
+		"hivemind_get",
+	}
+
+	// Walk all generated files and search for stale patterns.
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info.IsDir() {
+			return walkErr
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Errorf("read %s: %v", path, readErr)
+			return nil
+		}
+		text := string(content)
+		relPath, _ := filepath.Rel(dir, path)
+
+		for _, pattern := range stalePatterns {
+			if strings.Contains(text, pattern) {
+				t.Errorf("scaffolded file %s contains stale %q reference (Spec 022 violation)", relPath, pattern)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk error: %v", err)
+	}
+}
+
 // TestScaffoldOutput_NoBareUnboundReferences is a regression guard
 // for FR-015/SC-003: scaffolded files must not contain bare
 // `unbound init`, `unbound doctor`, `unbound setup`, or

@@ -187,8 +187,8 @@ query Dewey for context that grounds your implementation
 in project history and conventions. This step mirrors
 the Divisor agents' "Prior Learnings" pattern (per
 Spec 019) but uses Dewey for cross-repo architectural
-context (complementing Hivemind's session-specific
-learnings).
+context (Dewey is the unified memory layer for all
+learning storage and retrieval).
 
 1. **Prior learnings about target files**: Query
    `dewey_semantic_search` for file-specific context

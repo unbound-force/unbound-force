@@ -109,8 +109,8 @@ type stepResult struct {
 
 // graniteModel is the enterprise-grade embedding model used by both
 // Dewey and Swarm. IBM Granite, Apache 2.0, permissibly licensed
-// training data. Setting these env vars aligns Swarm's Hivemind
-// with Dewey's embedding model.
+// training data. Setting these env vars aligns all tools
+// with the same embedding model.
 const (
 	graniteModel    = "granite-embedding:30m"
 	graniteEmbedDim = "256"
@@ -125,9 +125,9 @@ func Run(opts Options) error {
 		return fmt.Errorf("platform not supported: doctor and setup require macOS or Linux")
 	}
 
-	// Set Ollama env vars so Swarm's Hivemind uses the same
-	// enterprise-grade embedding model as Dewey. These are
-	// inherited by child processes (swarm setup, swarm init).
+	// Set Ollama env vars so all embedding consumers use the same
+	// enterprise-grade embedding model. These are inherited by
+	// child processes (swarm setup, swarm init, dewey serve).
 	_ = os.Setenv("OLLAMA_MODEL", graniteModel)
 	_ = os.Setenv("OLLAMA_EMBED_DIM", graniteEmbedDim)
 

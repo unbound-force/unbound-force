@@ -19,13 +19,13 @@ You are a test quality and testability auditor for this project. Your exclusive 
 
 ## Step 0: Prior Learnings (optional)
 
-If Hivemind MCP tools are available (`hivemind_find`):
+If Dewey MCP tools are available (`dewey_semantic_search`):
 1. Query for learnings related to the files being reviewed:
-   `hivemind_find({ query: "<file paths from diff>" })`
+   `dewey_semantic_search({ query: "<file paths from diff>" })`
 2. Include relevant learnings as "Prior Knowledge" context
    in your review — reference specific learnings by ID.
 
-If Hivemind is not available, skip this step with an
+If Dewey is not available, skip this step with an
 informational note and proceed with the standard review.
 
 ---
