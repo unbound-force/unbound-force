@@ -3,6 +3,7 @@ package doctor
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,6 +14,11 @@ import (
 	"github.com/unbound-force/unbound-force/internal/orchestration"
 	"gopkg.in/yaml.v3"
 )
+
+// graniteModel is the enterprise-grade embedding model used by
+// Dewey for semantic search. Defined locally to avoid a circular
+// dependency on internal/setup.
+const graniteModel = "granite-embedding:30m"
 
 // checkDetectedEnvironment builds the "Detected Environment" group
 // listing all detected managers per FR-000a. All items are Pass
@@ -334,7 +340,7 @@ func checkSwarmPlugin(opts *Options) CheckGroup {
 			Name:        "swarm",
 			Severity:    Fail,
 			Message:     "not found",
-			InstallHint: "npm install -g opencode-swarm-plugin@latest",
+			InstallHint: "npm install -g github:unbound-force/swarm-tools",
 			InstallURL:  "https://www.swarmtools.ai/",
 		})
 		return group
@@ -903,6 +909,97 @@ func validateSkills(skillDir string, opts *Options) []CheckResult {
 	return results
 }
 
+// defaultEmbedCheck returns a function that tests embedding
+// generation by sending a POST to Ollama's /api/embed endpoint.
+// Uses OLLAMA_HOST env var (default http://localhost:11434) and
+// a 5-second timeout. Returns nil on success or a descriptive
+// error on failure per contracts/doctor-checks.md.
+func defaultEmbedCheck(getenv func(string) string) func(model string) error {
+	return func(model string) error {
+		host := getenv("OLLAMA_HOST")
+		if host == "" {
+			host = "http://localhost:11434"
+		}
+
+		url := host + "/api/embed"
+		body := fmt.Sprintf(`{"model": %q, "input": "test"}`, model)
+
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Post(url, "application/json", strings.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("embed request failed: %w", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			// Read body for error details.
+			var errResp struct {
+				Error string `json:"error"`
+			}
+			if decErr := json.NewDecoder(resp.Body).Decode(&errResp); decErr == nil && errResp.Error != "" {
+				return fmt.Errorf("%s", errResp.Error)
+			}
+			return fmt.Errorf("embed request returned status %d", resp.StatusCode)
+		}
+
+		// Parse response to verify embeddings were generated.
+		var result struct {
+			Embeddings [][]float64 `json:"embeddings"`
+		}
+		if decErr := json.NewDecoder(resp.Body).Decode(&result); decErr != nil {
+			return fmt.Errorf("could not parse embed response: %w", decErr)
+		}
+		if len(result.Embeddings) == 0 {
+			return fmt.Errorf("empty embeddings returned")
+		}
+
+		return nil
+	}
+}
+
+// checkEmbeddingCapability tests whether the embedding model can
+// generate embeddings end-to-end by calling opts.EmbedCheck.
+// Returns Pass on success, Warn with categorized hints on failure
+// per contracts/doctor-checks.md behavior matrix.
+func checkEmbeddingCapability(opts *Options) CheckResult {
+	err := opts.EmbedCheck(graniteModel)
+	if err == nil {
+		return CheckResult{
+			Name:     "embedding capability",
+			Severity: Pass,
+			Message:  graniteModel + " generating embeddings",
+		}
+	}
+
+	errMsg := err.Error()
+
+	// Categorize error for actionable hints.
+	if strings.Contains(errMsg, "connection refused") {
+		return CheckResult{
+			Name:        "embedding capability",
+			Severity:    Warn,
+			Message:     "cannot generate embeddings (Ollama not running)",
+			InstallHint: "Start Ollama: ollama serve",
+		}
+	}
+	if strings.Contains(errMsg, "not found") {
+		return CheckResult{
+			Name:        "embedding capability",
+			Severity:    Warn,
+			Message:     "cannot generate embeddings (model not loaded)",
+			InstallHint: "ollama pull " + graniteModel,
+		}
+	}
+
+	// Other errors (timeout, parse failure, etc.) — combined hint.
+	return CheckResult{
+		Name:        "embedding capability",
+		Severity:    Warn,
+		Message:     "cannot generate embeddings",
+		InstallHint: "Start Ollama: ollama serve, then: ollama pull " + graniteModel,
+	}
+}
+
 // checkDewey checks the Dewey knowledge layer components:
 // binary, embedding model, and workspace directory.
 // Design decision: Dewey checks are a separate group (not part of
@@ -931,6 +1028,11 @@ func checkDewey(opts *Options) CheckGroup {
 			Message:  "skipped: dewey not installed",
 		})
 		group.Results = append(group.Results, CheckResult{
+			Name:     "embedding capability",
+			Severity: Pass,
+			Message:  "skipped: dewey not installed",
+		})
+		group.Results = append(group.Results, CheckResult{
 			Name:     "workspace",
 			Severity: Pass,
 			Message:  "skipped: dewey not installed",
@@ -952,24 +1054,30 @@ func checkDewey(opts *Options) CheckGroup {
 			Name:        "embedding model",
 			Severity:    Warn,
 			Message:     "could not check (ollama not available)",
-			InstallHint: "ollama pull granite-embedding:30m",
+			InstallHint: "ollama pull " + graniteModel,
 		})
 	} else if strings.Contains(string(ollamaOutput), "granite-embedding") {
+		// Annotate with Ollama demotion per US3 — Dewey manages
+		// the Ollama lifecycle, so direct Ollama status is
+		// informational rather than actionable.
 		group.Results = append(group.Results, CheckResult{
 			Name:     "embedding model",
 			Severity: Pass,
-			Message:  "granite-embedding:30m installed",
+			Message:  graniteModel + " installed (Dewey manages Ollama lifecycle)",
 		})
 	} else {
 		group.Results = append(group.Results, CheckResult{
 			Name:        "embedding model",
 			Severity:    Warn,
 			Message:     "not pulled (graph-only mode available)",
-			InstallHint: "ollama pull granite-embedding:30m",
+			InstallHint: "ollama pull " + graniteModel,
 		})
 	}
 
-	// Check 3: .dewey/ workspace directory.
+	// Check 3: embedding capability — end-to-end verification.
+	group.Results = append(group.Results, checkEmbeddingCapability(opts))
+
+	// Check 4: .dewey/ workspace directory.
 	deweyDir := filepath.Join(opts.TargetDir, ".dewey")
 	if info, statErr := os.Stat(deweyDir); statErr == nil && info.IsDir() {
 		group.Results = append(group.Results, CheckResult{

@@ -45,6 +45,17 @@ type Options struct {
 
 	// ReadFile reads a file's contents (like os.ReadFile).
 	ReadFile func(string) ([]byte, error)
+
+	// EmbedCheck tests whether the embedding model can generate
+	// embeddings. Returns nil on success or an error describing
+	// the failure. Injected for testability per Constitution
+	// Principle IV.
+	//
+	// Production implementation sends a POST request to the Ollama
+	// /api/embed endpoint with a minimal test input. The endpoint
+	// URL is derived from OLLAMA_HOST env var (default:
+	// http://localhost:11434).
+	EmbedCheck func(model string) error
 }
 
 // defaults fills zero-value fields with production implementations.
@@ -75,6 +86,9 @@ func (o *Options) defaults() {
 	}
 	if o.ReadFile == nil {
 		o.ReadFile = os.ReadFile
+	}
+	if o.EmbedCheck == nil {
+		o.EmbedCheck = defaultEmbedCheck(o.Getenv)
 	}
 }
 

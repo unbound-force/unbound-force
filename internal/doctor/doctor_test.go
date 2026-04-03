@@ -1025,7 +1025,7 @@ func TestCheckSwarmPlugin_NotInstalled(t *testing.T) {
 	if r.Severity != Fail {
 		t.Errorf("swarm severity = %v, want Fail", r.Severity)
 	}
-	if !strings.Contains(r.InstallHint, "npm install -g opencode-swarm-plugin@latest") {
+	if !strings.Contains(r.InstallHint, "npm install -g github:unbound-force/swarm-tools") {
 		t.Errorf("install hint = %q, want npm install command", r.InstallHint)
 	}
 }
@@ -1618,7 +1618,7 @@ func TestHomebrewInstallCmd(t *testing.T) {
 		{"dewey", "brew install unbound-force/tap/dewey"},
 		{"node", "brew install node"},
 		{"gh", "brew install gh"},
-		{"swarm", "npm install -g opencode-swarm-plugin@latest"},
+		{"swarm", "npm install -g github:unbound-force/swarm-tools"},
 		{"custom", "brew install custom"},
 	}
 	for _, tt := range tests {
@@ -1680,7 +1680,7 @@ func TestManagerInstallCmd(t *testing.T) {
 		{"node", ManagerFnm, "fnm install 22"},
 		{"go", ManagerMise, "mise install go@1.24"},
 		{"node", ManagerMise, "mise install node@22"},
-		{"swarm", ManagerBun, "bun add -g opencode-swarm-plugin@latest"},
+		{"swarm", ManagerBun, "bun add -g github:unbound-force/swarm-tools"},
 	}
 	for _, tt := range tests {
 		got := managerInstallCmd(tt.tool, tt.manager)
@@ -1905,7 +1905,8 @@ func TestCheckDewey_AllPresent(t *testing.T) {
 			},
 			nil,
 		),
-		ReadFile: os.ReadFile,
+		ReadFile:   os.ReadFile,
+		EmbedCheck: func(model string) error { return nil },
 	}
 
 	group := checkDewey(opts)
@@ -1925,6 +1926,9 @@ func TestCheckDewey_AllPresent(t *testing.T) {
 	if r := results["embedding model"]; r.Severity != Pass {
 		t.Errorf("embedding model severity = %v, want Pass", r.Severity)
 	}
+	if r := results["embedding capability"]; r.Severity != Pass {
+		t.Errorf("embedding capability severity = %v, want Pass", r.Severity)
+	}
 	if r := results["workspace"]; r.Severity != Pass {
 		t.Errorf("workspace severity = %v, want Pass", r.Severity)
 	}
@@ -1934,16 +1938,17 @@ func TestCheckDewey_BinaryMissing(t *testing.T) {
 	dir := t.TempDir()
 
 	opts := &Options{
-		TargetDir: dir,
-		LookPath:  stubLookPathSimple(map[string]bool{}),
-		ExecCmd:   stubExecCmd(nil, nil),
-		ReadFile:  os.ReadFile,
+		TargetDir:  dir,
+		LookPath:   stubLookPathSimple(map[string]bool{}),
+		ExecCmd:    stubExecCmd(nil, nil),
+		ReadFile:   os.ReadFile,
+		EmbedCheck: func(model string) error { return nil },
 	}
 
 	group := checkDewey(opts)
 
-	if len(group.Results) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(group.Results))
+	if len(group.Results) != 4 {
+		t.Fatalf("expected 4 results, got %d", len(group.Results))
 	}
 
 	// Binary not found -- severity MUST be Pass (Dewey is optional per Constitution Principle II).
@@ -1966,10 +1971,16 @@ func TestCheckDewey_BinaryMissing(t *testing.T) {
 		t.Errorf("embedding model severity = %v, want Pass (skipped)", group.Results[1].Severity)
 	}
 	if !strings.Contains(group.Results[2].Message, "skipped") {
-		t.Errorf("workspace should be skipped, got %q", group.Results[2].Message)
+		t.Errorf("embedding capability should be skipped, got %q", group.Results[2].Message)
 	}
 	if group.Results[2].Severity != Pass {
-		t.Errorf("workspace severity = %v, want Pass (skipped)", group.Results[2].Severity)
+		t.Errorf("embedding capability severity = %v, want Pass (skipped)", group.Results[2].Severity)
+	}
+	if !strings.Contains(group.Results[3].Message, "skipped") {
+		t.Errorf("workspace should be skipped, got %q", group.Results[3].Message)
+	}
+	if group.Results[3].Severity != Pass {
+		t.Errorf("workspace severity = %v, want Pass (skipped)", group.Results[3].Severity)
 	}
 }
 
@@ -1985,7 +1996,8 @@ func TestCheckDewey_ModelMissing(t *testing.T) {
 			},
 			nil,
 		),
-		ReadFile: os.ReadFile,
+		ReadFile:   os.ReadFile,
+		EmbedCheck: func(model string) error { return nil },
 	}
 
 	group := checkDewey(opts)
@@ -2015,7 +2027,8 @@ func TestCheckDewey_WorkspaceMissing(t *testing.T) {
 			},
 			nil,
 		),
-		ReadFile: os.ReadFile,
+		ReadFile:   os.ReadFile,
+		EmbedCheck: func(model string) error { return nil },
 	}
 
 	group := checkDewey(opts)
@@ -2043,7 +2056,8 @@ func TestCheckDewey_OllamaNotAvailable(t *testing.T) {
 			nil,
 			map[string]error{"ollama list": fmt.Errorf("ollama not found")},
 		),
-		ReadFile: os.ReadFile,
+		ReadFile:   os.ReadFile,
+		EmbedCheck: func(model string) error { return fmt.Errorf("connection refused") },
 	}
 
 	group := checkDewey(opts)
@@ -2526,6 +2540,227 @@ func TestCheckMCPConfig_ArrayCommand(t *testing.T) {
 	}
 	if !found {
 		t.Error("dewey result not found with Pass severity")
+	}
+}
+
+// --- Phase 3: User Story 1 — Embedding Capability tests (T009-T012) ---
+
+func TestCheckDewey_EmbeddingCapability_Pass(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+		t.Fatalf("mkdir .dewey: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd: stubExecCmd(
+			map[string]string{
+				"ollama list": "NAME\ngranite-embedding:30m   abc123   63 MB\n",
+			},
+			nil,
+		),
+		ReadFile: os.ReadFile,
+		// Mock EmbedCheck returning nil (success).
+		EmbedCheck: func(model string) error { return nil },
+	}
+
+	group := checkDewey(opts)
+
+	results := make(map[string]CheckResult)
+	for _, r := range group.Results {
+		results[r.Name] = r
+	}
+
+	r, ok := results["embedding capability"]
+	if !ok {
+		t.Fatal("embedding capability check not found in results")
+	}
+	if r.Severity != Pass {
+		t.Errorf("embedding capability severity = %v, want Pass", r.Severity)
+	}
+	if !strings.Contains(r.Message, "granite-embedding:30m") {
+		t.Errorf("embedding capability message = %q, want model name", r.Message)
+	}
+
+	// Verify JSON output includes the check (FR-007).
+	var buf bytes.Buffer
+	report := &Report{
+		Environment: DetectedEnvironment{Managers: []ManagerInfo{}, Platform: "test"},
+		Groups:      []CheckGroup{group},
+		Summary:     computeSummary([]CheckGroup{group}),
+	}
+	if err := FormatJSON(report, &buf); err != nil {
+		t.Fatalf("FormatJSON: %v", err)
+	}
+	jsonOut := buf.String()
+	if !strings.Contains(jsonOut, `"embedding capability"`) {
+		t.Error("JSON output should contain embedding capability check")
+	}
+}
+
+func TestCheckDewey_EmbeddingCapability_Fail(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+		t.Fatalf("mkdir .dewey: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd: stubExecCmd(
+			map[string]string{
+				"ollama list": "NAME\ngranite-embedding:30m   abc123   63 MB\n",
+			},
+			nil,
+		),
+		ReadFile: os.ReadFile,
+		// Mock EmbedCheck returning an error.
+		EmbedCheck: func(model string) error {
+			return fmt.Errorf("embed request returned status 500")
+		},
+	}
+
+	group := checkDewey(opts)
+
+	results := make(map[string]CheckResult)
+	for _, r := range group.Results {
+		results[r.Name] = r
+	}
+
+	r, ok := results["embedding capability"]
+	if !ok {
+		t.Fatal("embedding capability check not found in results")
+	}
+	if r.Severity != Warn {
+		t.Errorf("embedding capability severity = %v, want Warn", r.Severity)
+	}
+	if r.InstallHint == "" {
+		t.Error("embedding capability should have actionable install hint")
+	}
+}
+
+func TestCheckDewey_EmbeddingCapability_Skip(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := &Options{
+		TargetDir:  dir,
+		LookPath:   stubLookPathSimple(map[string]bool{}), // dewey not found
+		ExecCmd:    stubExecCmd(nil, nil),
+		ReadFile:   os.ReadFile,
+		EmbedCheck: func(model string) error { return nil },
+	}
+
+	group := checkDewey(opts)
+
+	// Find embedding capability in skip results.
+	found := false
+	for _, r := range group.Results {
+		if r.Name == "embedding capability" {
+			found = true
+			if !strings.Contains(r.Message, "skipped: dewey not installed") {
+				t.Errorf("embedding capability message = %q, want 'skipped: dewey not installed'", r.Message)
+			}
+			if r.Severity != Pass {
+				t.Errorf("embedding capability severity = %v, want Pass (skipped)", r.Severity)
+			}
+		}
+	}
+	if !found {
+		t.Error("embedding capability skip result not found")
+	}
+}
+
+func TestCheckDewey_EmbeddingCapability_ConnectionRefused(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+		t.Fatalf("mkdir .dewey: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd: stubExecCmd(
+			map[string]string{
+				"ollama list": "NAME\ngranite-embedding:30m   abc123   63 MB\n",
+			},
+			nil,
+		),
+		ReadFile: os.ReadFile,
+		// Mock EmbedCheck returning connection refused error.
+		EmbedCheck: func(model string) error {
+			return fmt.Errorf("embed request failed: dial tcp 127.0.0.1:11434: connection refused")
+		},
+	}
+
+	group := checkDewey(opts)
+
+	results := make(map[string]CheckResult)
+	for _, r := range group.Results {
+		results[r.Name] = r
+	}
+
+	r, ok := results["embedding capability"]
+	if !ok {
+		t.Fatal("embedding capability check not found in results")
+	}
+	if r.Severity != Warn {
+		t.Errorf("embedding capability severity = %v, want Warn", r.Severity)
+	}
+	if !strings.Contains(r.InstallHint, "ollama serve") {
+		t.Errorf("install hint = %q, want 'ollama serve'", r.InstallHint)
+	}
+}
+
+// --- Phase 5: User Story 3 — Ollama Demotion test (T031) ---
+
+func TestCheckDewey_OllamaDemotion(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+		t.Fatalf("mkdir .dewey: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd: stubExecCmd(
+			map[string]string{
+				"ollama list": "NAME\ngranite-embedding:30m   abc123   63 MB\n",
+			},
+			nil,
+		),
+		ReadFile:   os.ReadFile,
+		EmbedCheck: func(model string) error { return nil },
+	}
+
+	group := checkDewey(opts)
+
+	results := make(map[string]CheckResult)
+	for _, r := range group.Results {
+		results[r.Name] = r
+	}
+
+	r, ok := results["embedding model"]
+	if !ok {
+		t.Fatal("embedding model check not found in results")
+	}
+	if !strings.Contains(r.Message, "(Dewey manages Ollama lifecycle)") {
+		t.Errorf("embedding model message = %q, want '(Dewey manages Ollama lifecycle)' annotation", r.Message)
+	}
+
+	// Verify annotation appears in JSON output (FR-007 / T033).
+	var buf bytes.Buffer
+	report := &Report{
+		Environment: DetectedEnvironment{Managers: []ManagerInfo{}, Platform: "test"},
+		Groups:      []CheckGroup{group},
+		Summary:     computeSummary([]CheckGroup{group}),
+	}
+	if err := FormatJSON(report, &buf); err != nil {
+		t.Fatalf("FormatJSON: %v", err)
+	}
+	jsonOut := buf.String()
+	if !strings.Contains(jsonOut, "Dewey manages Ollama lifecycle") {
+		t.Error("JSON output should contain Ollama demotion annotation")
 	}
 }
 

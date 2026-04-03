@@ -534,29 +534,34 @@ func installNodeJS(opts *Options, env doctor.DetectedEnvironment, reason string)
 	}
 }
 
-// installSwarmPlugin installs the Swarm plugin per FR-025.
-func installSwarmPlugin(opts *Options, env doctor.DetectedEnvironment) stepResult {
-	if _, err := opts.LookPath("swarm"); err == nil {
-		return stepResult{name: "Swarm plugin", action: "already installed"}
-	}
+// swarmForkSource is the GitHub fork source for the Swarm plugin.
+// Changed from upstream "opencode-swarm-plugin@latest" to the
+// organization's fork per Spec 023 US2.
+const swarmForkSource = "github:unbound-force/swarm-tools"
 
+// installSwarmPlugin installs the Swarm plugin from the
+// organization's fork per FR-025 and Spec 023 US2.
+// Design decision: No early-return when swarm is already installed.
+// The install always runs to ensure the fork version is current
+// (idempotent update per contracts/setup-swarm.md).
+func installSwarmPlugin(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	if opts.DryRun {
 		if doctor.HasManager(env, doctor.ManagerBun) {
-			return stepResult{name: "Swarm plugin", action: "dry-run", detail: "Would install: bun add -g opencode-swarm-plugin@latest"}
+			return stepResult{name: "Swarm plugin", action: "dry-run", detail: "Would install: bun add -g " + swarmForkSource}
 		}
-		return stepResult{name: "Swarm plugin", action: "dry-run", detail: "Would install: npm install -g opencode-swarm-plugin@latest"}
+		return stepResult{name: "Swarm plugin", action: "dry-run", detail: "Would install: npm install -g " + swarmForkSource}
 	}
 
 	// Prefer bun if available (FR-025).
 	if doctor.HasManager(env, doctor.ManagerBun) {
-		if _, err := opts.ExecCmd("bun", "add", "-g", "opencode-swarm-plugin@latest"); err != nil {
+		if _, err := opts.ExecCmd("bun", "add", "-g", swarmForkSource); err != nil {
 			return stepResult{name: "Swarm plugin", action: "failed", detail: "bun install failed", err: err}
 		}
 		return stepResult{name: "Swarm plugin", action: "installed", detail: "via bun"}
 	}
 
 	// Default to npm.
-	if _, err := opts.ExecCmd("npm", "install", "-g", "opencode-swarm-plugin@latest"); err != nil {
+	if _, err := opts.ExecCmd("npm", "install", "-g", swarmForkSource); err != nil {
 		return stepResult{name: "Swarm plugin", action: "failed", detail: "npm install failed", err: err}
 	}
 	return stepResult{name: "Swarm plugin", action: "installed", detail: "via npm"}

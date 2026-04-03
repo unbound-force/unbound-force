@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/unbound-force/unbound-force/internal/doctor"
 )
 
 // --- Test helpers ---
@@ -125,7 +127,7 @@ func TestSetupRun_AllMissing(t *testing.T) {
 		"node --version",
 		"npm install -g bun",
 		"npm install -g @fission-ai/openspec@latest",
-		"npm install -g opencode-swarm-plugin@latest",
+		"npm install -g github:unbound-force/swarm-tools",
 		"swarm setup",
 		"swarm init",
 		"brew install --cask ollama-app",
@@ -201,9 +203,10 @@ func TestSetupRun_AllPresent(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Verify no install commands were called (only node --version for checking).
+	// Verify no install commands were called EXCEPT swarm plugin
+	// (which always runs for idempotent fork update per Spec 023 US2).
 	for _, call := range rec.calls {
-		if strings.Contains(call, "install") {
+		if strings.Contains(call, "install") && !strings.Contains(call, "github:unbound-force/swarm-tools") {
 			t.Errorf("unexpected install command: %s", call)
 		}
 	}
@@ -272,7 +275,7 @@ func TestSetupRun_NpmFails(t *testing.T) {
 			"node --version": "v22.15.0",
 		},
 		errors: map[string]error{
-			"npm install -g opencode-swarm-plugin@latest": fmt.Errorf("npm ERR! code EACCES"),
+			"npm install -g github:unbound-force/swarm-tools": fmt.Errorf("npm ERR! code EACCES"),
 		},
 	}
 
@@ -340,7 +343,7 @@ func TestSetupRun_NvmDetected(t *testing.T) {
 	// Swarm should be installed via npm from nvm-managed node.
 	npmCalled := false
 	for _, call := range rec.calls {
-		if strings.Contains(call, "npm install -g opencode-swarm-plugin") {
+		if strings.Contains(call, "npm install -g github:unbound-force/swarm-tools") {
 			npmCalled = true
 		}
 	}
@@ -422,7 +425,7 @@ func TestSetupRun_BunDetected(t *testing.T) {
 	// Should use bun instead of npm.
 	bunCalled := false
 	for _, call := range rec.calls {
-		if strings.Contains(call, "bun add -g opencode-swarm-plugin") {
+		if strings.Contains(call, "bun add -g github:unbound-force/swarm-tools") {
 			bunCalled = true
 		}
 	}
@@ -981,7 +984,7 @@ func TestSetupRun_SwarmPluginNpmFails(t *testing.T) {
 			"node --version": "v22.15.0",
 		},
 		errors: map[string]error{
-			"npm install -g opencode-swarm-plugin@latest": fmt.Errorf("npm failed"),
+			"npm install -g github:unbound-force/swarm-tools": fmt.Errorf("npm failed"),
 		},
 	}
 
@@ -1012,6 +1015,149 @@ func TestSetupRun_SwarmPluginNpmFails(t *testing.T) {
 		if call == "swarm setup" || call == "swarm init" {
 			t.Errorf("unexpected command after npm failure: %s", call)
 		}
+	}
+}
+
+// --- Phase 4: User Story 2 — Forked Swarm Plugin tests (T017-T020) ---
+
+func TestInstallSwarmPlugin_ForkSource_Bun(t *testing.T) {
+	dir := t.TempDir()
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"bun": "/home/user/.bun/bin/bun",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installSwarmPlugin(&opts, env)
+
+	// Verify bun was called with fork source.
+	found := false
+	for _, call := range rec.calls {
+		if call == "bun add -g github:unbound-force/swarm-tools" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'bun add -g github:unbound-force/swarm-tools', got calls: %v", rec.calls)
+	}
+	if result.action == "failed" {
+		t.Errorf("install should succeed, got action=%q", result.action)
+	}
+}
+
+func TestInstallSwarmPlugin_ForkSource_Npm(t *testing.T) {
+	dir := t.TempDir()
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			// No bun — falls back to npm.
+			"npm": "/usr/local/bin/npm",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installSwarmPlugin(&opts, env)
+
+	// Verify npm was called with fork source.
+	found := false
+	for _, call := range rec.calls {
+		if call == "npm install -g github:unbound-force/swarm-tools" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'npm install -g github:unbound-force/swarm-tools', got calls: %v", rec.calls)
+	}
+	if result.action == "failed" {
+		t.Errorf("install should succeed, got action=%q", result.action)
+	}
+}
+
+func TestInstallSwarmPlugin_AlwaysInstalls(t *testing.T) {
+	dir := t.TempDir()
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"swarm": "/usr/local/bin/swarm", // swarm already installed
+			"npm":   "/usr/local/bin/npm",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installSwarmPlugin(&opts, env)
+
+	// Even though swarm is already installed, install command should
+	// still run (idempotent update per contracts/setup-swarm.md).
+	found := false
+	for _, call := range rec.calls {
+		if strings.Contains(call, "github:unbound-force/swarm-tools") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("install should run even when swarm is already installed, got calls: %v", rec.calls)
+	}
+	if result.action == "already installed" {
+		t.Error("should not return 'already installed' — must always run install for fork update")
 	}
 }
 

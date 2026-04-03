@@ -245,7 +245,7 @@ func managerInstallCmd(toolName string, manager ManagerKind) string {
 	case ManagerBun:
 		switch toolName {
 		case "swarm":
-			return "bun add -g opencode-swarm-plugin@latest"
+			return "bun add -g github:unbound-force/swarm-tools"
 		}
 	}
 	return homebrewInstallCmd(toolName)
@@ -269,7 +269,7 @@ func homebrewInstallCmd(toolName string) string {
 	case "gh":
 		return "brew install gh"
 	case "swarm":
-		return "npm install -g opencode-swarm-plugin@latest"
+		return "npm install -g github:unbound-force/swarm-tools"
 	case "ollama":
 		return "brew install --cask ollama-app && ollama pull granite-embedding:30m"
 	default:
@@ -290,7 +290,7 @@ func genericInstallCmd(toolName string) string {
 	case "node":
 		return "Download from https://nodejs.org/"
 	case "swarm":
-		return "npm install -g opencode-swarm-plugin@latest"
+		return "npm install -g github:unbound-force/swarm-tools"
 	case "gh":
 		return "Download from https://cli.github.com/"
 	case "ollama":
