@@ -173,6 +173,12 @@ func TestValidateConventionPack_AllPacksValid(t *testing.T) {
 		if name == "severity.md" {
 			continue
 		}
+		// Skip content pack — it's a content writing convention
+		// pack with different required sections (VB, TD, BA, PR,
+		// FA, FT) than coding packs (Coding Style, etc.)
+		if name == "content.md" {
+			continue
+		}
 
 		t.Run(name, func(t *testing.T) {
 			packPath := filepath.Join(packsDir, name)

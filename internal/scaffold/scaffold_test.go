@@ -124,9 +124,15 @@ var expectedAssetPaths = []string{
 	"opencode/agents/divisor-guard.md",
 	"opencode/agents/divisor-sre.md",
 	"opencode/agents/divisor-testing.md",
+	// OpenCode agents — Divisor content agents (3)
+	"opencode/agents/divisor-scribe.md",
+	"opencode/agents/divisor-herald.md",
+	"opencode/agents/divisor-envoy.md",
 	// OpenCode commands — includes review-council (11)
 	"opencode/command/review-council.md",
-	// Convention packs — shared by all heroes (6)
+	// Convention packs — shared by all heroes (9)
+	"opencode/unbound/packs/content-custom.md",
+	"opencode/unbound/packs/content.md",
 	"opencode/unbound/packs/default-custom.md",
 	"opencode/unbound/packs/default.md",
 	"opencode/unbound/packs/go-custom.md",
@@ -1211,15 +1217,15 @@ func TestRun_DivisorSubset_WithLangFlag(t *testing.T) {
 		}
 	}
 
-	// All 5 agent files still created
+	// All 8 Divisor agent files created (5 review + 3 content)
 	agentCount := 0
 	for _, f := range result.Created {
 		if strings.Contains(f, "agents/divisor-") {
 			agentCount++
 		}
 	}
-	if agentCount != 5 {
-		t.Errorf("expected 5 Divisor agent files, got %d", agentCount)
+	if agentCount != 8 {
+		t.Errorf("expected 8 Divisor agent files, got %d", agentCount)
 	}
 }
 
@@ -1237,12 +1243,13 @@ func TestRun_DivisorSubset_DefaultFallback(t *testing.T) {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	// Verify only default and severity packs deployed (language-agnostic)
+	// Verify only always-deploy packs deployed (default, severity, content)
 	for _, f := range result.Created {
 		if strings.Contains(f, "unbound/packs") {
 			base := filepath.Base(f)
-			if !strings.HasPrefix(base, "default") && base != "severity.md" {
-				t.Errorf("expected only default/severity packs, got %s", f)
+			if !strings.HasPrefix(base, "default") && base != "severity.md" &&
+				!strings.HasPrefix(base, "content") {
+				t.Errorf("expected only default/severity/content packs, got %s", f)
 			}
 		}
 	}

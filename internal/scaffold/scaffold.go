@@ -333,8 +333,9 @@ func shouldDeployPack(relPath, lang string) bool {
 	base := filepath.Base(relPath)
 	name := strings.TrimSuffix(base, filepath.Ext(base))
 
-	// Always deploy default and severity packs (language-agnostic)
-	if name == "default" || name == "default-custom" || name == "severity" {
+	// Always deploy default, severity, and content packs (language-agnostic)
+	if name == "default" || name == "default-custom" || name == "severity" ||
+		name == "content" || name == "content-custom" {
 		return true
 	}
 	// Deploy language-specific pack and its custom extension

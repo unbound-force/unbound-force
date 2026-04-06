@@ -30,9 +30,9 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 
 	// Verify the summary includes a non-trivial file count
-	// 49 = 52 original - 4 legacy reviewer assets + 1 severity pack (Spec 019)
-	if !strings.Contains(output, "49 files processed") {
-		t.Errorf("expected '49 files processed' in output, got:\n%s", output)
+	// 54 = 49 prior + 3 content agents + 2 content packs
+	if !strings.Contains(output, "54 files processed") {
+		t.Errorf("expected '54 files processed' in output, got:\n%s", output)
 	}
 
 	// Verify a user-owned file was created
