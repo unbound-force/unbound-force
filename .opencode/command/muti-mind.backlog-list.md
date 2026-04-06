@@ -7,7 +7,7 @@ agent: muti-mind-po
 
 ## Description
 
-Lists current backlog items in the `.muti-mind/backlog/` directory, sorted by priority.
+Lists current backlog items in the `.uf/muti-mind/backlog/` directory, sorted by priority.
 
 ## Usage
 

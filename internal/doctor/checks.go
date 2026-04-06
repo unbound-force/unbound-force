@@ -325,7 +325,7 @@ func checkNodeVersion(version, min string) bool {
 }
 
 // checkReplicator checks the Replicator installation, runs
-// `replicator doctor`, checks .hive/ and MCP config per FR-011.
+// `replicator doctor`, checks .uf/replicator/ and MCP config per FR-011.
 func checkReplicator(opts *Options) CheckGroup {
 	group := CheckGroup{
 		Name:    "Replicator",
@@ -376,17 +376,17 @@ func checkReplicator(opts *Options) CheckGroup {
 		group.Embed = string(output)
 	}
 
-	// Check 3: .hive/ existence.
-	hivePath := filepath.Join(opts.TargetDir, ".hive")
-	if info, statErr := os.Stat(hivePath); statErr == nil && info.IsDir() {
+	// Check 3: .uf/replicator/ existence.
+	replicatorDirPath := filepath.Join(opts.TargetDir, ".uf", "replicator")
+	if info, statErr := os.Stat(replicatorDirPath); statErr == nil && info.IsDir() {
 		group.Results = append(group.Results, CheckResult{
-			Name:     ".hive/",
+			Name:     ".uf/replicator/",
 			Severity: Pass,
 			Message:  "initialized",
 		})
 	} else {
 		group.Results = append(group.Results, CheckResult{
-			Name:        ".hive/",
+			Name:        ".uf/replicator/",
 			Severity:    Warn,
 			Message:     "not initialized",
 			InstallHint: "Run: uf init",
@@ -459,9 +459,9 @@ func checkScaffoldedFiles(opts *Options) CheckGroup {
 	commandDir := filepath.Join(opts.TargetDir, ".opencode", "command")
 	group.Results = append(group.Results, checkDirWithCount(commandDir, ".opencode/command/", "command files", ".md"))
 
-	// Check .opencode/unbound/packs/ for convention packs.
-	packsDir := filepath.Join(opts.TargetDir, ".opencode", "unbound", "packs")
-	group.Results = append(group.Results, checkDirWithCount(packsDir, ".opencode/unbound/packs/", "convention packs", ".md"))
+	// Check .opencode/uf/packs/ for convention packs.
+	packsDir := filepath.Join(opts.TargetDir, ".opencode", "uf", "packs")
+	group.Results = append(group.Results, checkDirWithCount(packsDir, ".opencode/uf/packs/", "convention packs", ".md"))
 
 	// Check .specify/ existence.
 	specifyDir := filepath.Join(opts.TargetDir, ".specify")
@@ -1060,8 +1060,8 @@ func checkDewey(opts *Options) CheckGroup {
 	// Check 3: embedding capability — end-to-end verification.
 	group.Results = append(group.Results, checkEmbeddingCapability(opts))
 
-	// Check 4: .dewey/ workspace directory.
-	deweyDir := filepath.Join(opts.TargetDir, ".dewey")
+	// Check 4: .uf/dewey/ workspace directory.
+	deweyDir := filepath.Join(opts.TargetDir, ".uf", "dewey")
 	if info, statErr := os.Stat(deweyDir); statErr == nil && info.IsDir() {
 		group.Results = append(group.Results, CheckResult{
 			Name:     "workspace",

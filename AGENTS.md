@@ -121,7 +121,7 @@ unbound-force/
 │   ├── skill/                       # Swarm skills packages
 │   │   └── unbound-force-heroes/
 │   │       └── SKILL.md             # Hero roles, routing, workflow stages (Spec 008)
-│   └── unbound/
+│   └── uf/
 │       └── packs/                   # Convention packs (shared by all heroes)
 │           ├── go.md                # Go convention pack (tool-owned)
 │           ├── go-custom.md         # Go custom rules (user-owned)
@@ -637,24 +637,24 @@ This repo is primarily specifications and governance documents. Follow these con
 - OpenCode + Speckit + OpenSpec (development workflow)
 - Node.js >= 20.19.0 (OpenSpec CLI, `@fission-ai/openspec`)
 - Go 1.24+ (for tooling/MCP if any, though primarily OpenCode agents/commands) + OpenCode runtime, GitHub CLI (`gh`) or GitHub API (004-muti-mind-architecture)
-- Local Markdown files (YAML frontmatter) in `.muti-mind/backlog/` indexed by Dewey (004-muti-mind-architecture)
+- Local Markdown files (YAML frontmatter) in `.uf/muti-mind/backlog/` indexed by Dewey (004-muti-mind-architecture)
 - Go 1.24+ (CLI backend), OpenCode Agents (AI runtime) + `github.com/spf13/cobra`, `github.com/charmbracelet/log`, OpenCode Runtime, Dewey MCP Server (004-muti-mind-architecture)
-- Local Markdown files with YAML frontmatter in `.muti-mind/backlog/` (004-muti-mind-architecture)
+- Local Markdown files with YAML frontmatter in `.uf/muti-mind/backlog/` (004-muti-mind-architecture)
 - Go 1.24+ (CLI/scaffold engine), Markdown (agents, packs, commands) + `github.com/spf13/cobra` (CLI), `embed.FS` (asset embedding), `github.com/charmbracelet/log` (logging) (005-the-divisor-architecture)
 - Filesystem only (embedded assets deployed to target directory) (005-the-divisor-architecture)
 - Markdown (agent file), Go 1.24+ (scaffold engine refactor) + `embed.FS` (asset embedding), existing scaffold engine (006-cobalt-crush-architecture)
 - Filesystem only (Markdown files deployed to target directory) (006-cobalt-crush-architecture)
 - Go 1.24+ (CLI backend), Markdown (coaching agent) + `github.com/spf13/cobra` (CLI), `github.com/charmbracelet/log` (logging), `github.com/charmbracelet/lipgloss` (terminal styling), `embed.FS` (agent embedding) (007-mx-f-architecture)
-- JSON files in `.mx-f/data/{source}/{timestamp}.json` for metrics, Markdown+YAML frontmatter in `.mx-f/impediments/` for impediments, `.mx-f/retros/` for retrospective records (007-mx-f-architecture)
+- JSON files in `.uf/mx-f/data/{source}/{timestamp}.json` for metrics, Markdown+YAML frontmatter in `.uf/mx-f/impediments/` for impediments, `.uf/mx-f/retros/` for retrospective records (007-mx-f-architecture)
 - Go 1.24+ (orchestration engine), Markdown (commands, skills) + `internal/artifacts` (envelope, FindArtifacts, WriteArtifact, ReadEnvelope — already exist from Spec 007), `internal/sync` (GHRunner), `github.com/charmbracelet/log` (008-swarm-orchestration)
-- JSON files at `.unbound-force/workflows/{workflow_id}.json` (workflow state), `.unbound-force/artifacts/{type}/{timestamp}-{hero}.json` (artifacts) (008-swarm-orchestration)
+- JSON files at `.uf/workflows/{workflow_id}.json` (workflow state), `.uf/artifacts/{type}/{timestamp}-{hero}.json` (artifacts) (008-swarm-orchestration)
 - Go 1.24+ + `github.com/spf13/cobra` (CLI), `github.com/charmbracelet/lipgloss` (terminal styling), `gopkg.in/yaml.v3` (frontmatter parsing) (011-doctor-setup)
 - N/A (reads filesystem and subprocess output, writes only to `opencode.json`) (011-doctor-setup)
 - Go 1.24 + `github.com/spf13/cobra` (012-swarm-delegation)
 - Go 1.24+ + `github.com/modelcontextprotocol/go-sdk/mcp` (014-dewey-architecture)
 - SQLite for persistent indexes (knowledge (014-dewey-architecture)
 - N/A (configuration and documentation changes; Dewey MCP tools: `dewey_search`, `dewey_semantic_search`, `dewey_traverse`, `dewey_get_page`, `dewey_find_by_tag`, `dewey_query_properties`, `dewey_find_connections`, `dewey_similar`, `dewey_semantic_search_filtered`) (015-dewey-integration)
-- JSON workflow files at `.unbound-force/workflows/` (016-autonomous-define)
+- JSON workflow files at `.uf/workflows/` (016-autonomous-define)
 - `opencode.json` at repo root (JSON file) (017-init-opencode-config)
 - Markdown (OpenCode command file) + Existing slash commands (018-unleash-command)
 - N/A (orchestrates existing tools) (018-unleash-command)
@@ -668,10 +668,13 @@ This repo is primarily specifications and governance documents. Follow these con
 - Go 1.24+ + `github.com/spf13/cobra` (CLI), `github.com/charmbracelet/lipgloss` (terminal styling), `gopkg.in/yaml.v3` (frontmatter parsing), `net/http` (standard library — new import in `checks.go`) (023-doctor-setup-dewey)
 - N/A (reads environment state, writes no persistent data) (023-doctor-setup-dewey)
 - Go 1.24+ + `github.com/spf13/cobra` (CLI), `embed.FS` (scaffold), `github.com/charmbracelet/log` (logging), `encoding/json` (opencode.json manipulation) (024-replicator-migration)
-- Filesystem only (`opencode.json`, `.hive/`) (024-replicator-migration)
+- Filesystem only (`opencode.json`, `.uf/replicator/`) (024-replicator-migration)
+- Go 1.24+ (scaffold engine, doctor, orchestration, setup), Markdown (agents, commands, skills), Bash (hero contract script) + `github.com/spf13/cobra` (CLI), `embed.FS` (scaffold), `gopkg.in/yaml.v3` (config parsing) (025-uf-directory-convention)
+- Filesystem only (path renames across `.uf/`, `.opencode/uf/packs/`, `opencode.json`, `.gitignore`) (025-uf-directory-convention)
 
 ## Recent Changes
 
+- 025-uf-directory-convention: Unified all tool workspace directories under `.uf/` -- renamed `.dewey/` to `.uf/dewey/`, `.hive/` to `.uf/replicator/`, `.unbound-force/` to `.uf/`, `.muti-mind/` to `.uf/muti-mind/`, `.mx-f/` to `.uf/mx-f/`, and `.opencode/unbound/packs/` to `.opencode/uf/packs/`. Updated scaffold engine (`internal/scaffold/scaffold.go`), doctor checks (`internal/doctor/checks.go`), orchestration engine (`internal/orchestration/`), Muti-Mind CLI (`cmd/mutimind/main.go`), metrics store comment, all 13 scaffold asset Markdown files, all 21 live agent/command Markdown files, `.gitignore`, `scripts/validate-hero-contract.sh`, hero-manifest schema, acceptance-decision sample, pack validator test comment, and AGENTS.md Project Structure + Active Technologies sections. Added `TestScaffoldOutput_NoOldPathReferences` regression test (6 stale patterns). No new Go logic -- purely mechanical path rename (~260 references). All 5 user stories and 79 tasks completed.
 - opsx/gatekeeping-protection: Added gatekeeping value protection rules to prevent AI agents from modifying quality/governance gates to make implementations pass. Added "Gatekeeping Integrity" MUST rule to constitution Development Workflow section (CRITICAL severity violation). Added "Gatekeeping Value Protection" subsection to AGENTS.md Behavioral Constraints with 8 protected value categories (coverage thresholds, severity definitions, convention pack classifications, CI flags, agent settings, constitution MUST rules, review limits, workflow markers) and "what to do instead" instruction. Added "Gatekeeping Integrity" checklist item to `divisor-guard.md` in both Code Review and Spec Review audit sections. Added "Gate Tampering" checklist item to `divisor-adversary.md` Security Checks section. Added "Gatekeeping Integrity" behavioral constraint to `cobalt-crush-dev.md` Engineering Philosophy section. Synchronized 3 scaffold asset copies. No Go code changes -- behavioral rules only. 13 tasks completed.
 - opsx/divisor-content-agents: Added 3 content-creation Divisor agents -- `divisor-scribe.md` (The Scribe: technical documentation, temp 0.1), `divisor-herald.md` (The Herald: blog/announcements, temp 0.4), `divisor-envoy.md` (The Envoy: PR/communications, temp 0.5). Created `content.md` convention pack (tool-owned, language-agnostic, always-deploy) with 6 sections: Voice & Brand (VB), Technical Documentation (TD), Blog & Announcements (BA), Public Relations (PR), Fact-Checking (FA), Formatting (FT). Created `content-custom.md` user-owned stub. Updated `shouldDeployPack()` to always deploy content/content-custom alongside default and severity. Added 5 scaffold asset copies. Updated `expectedAssetPaths` (added 5 files). All 3 agents have write+edit access, Dewey integration, and Out of Scope boundaries. 18 tasks completed.
 - 024-replicator-migration: Replaced Node.js Swarm plugin (`opencode-swarm-plugin`) with Replicator Go binary across all CLI commands. `uf setup` now installs Replicator via Homebrew (`brew install unbound-force/tap/replicator`) and runs `replicator setup` for per-machine init -- step count reduced from 15 to 12. Removed `installSwarmPlugin()`, `ensureBun()`, `runSwarmSetup()`, `initializeHive()`, `swarmForkSource` constant, and `uf init` call from setup. Removed all bun references -- OpenSpec CLI installs via npm only. `uf init` now adds `mcp.replicator` server entry to `opencode.json` (instead of `opencode-swarm-plugin` plugin array entry), detects via `LookPath("replicator")` (instead of `.hive/` directory), delegates to `replicator init` for per-repo setup, and migrates legacy `opencode-swarm-plugin` plugin entries. `uf doctor` replaced "Swarm Plugin" check group with "Replicator" group -- binary check, `replicator doctor` delegation, `.hive/` existence, `mcp.replicator` config verification. Updated all install hints from npm/bun to Homebrew. Updated `opencode.json` (removed `plugin` array, added `mcp.replicator`). Updated `/unleash` install hint text. Added 22 new test functions, removed 10 old ones, updated ~40 existing. Go 1.24+ (CLI), Markdown (commands). All 4 user stories and 63 tasks completed.

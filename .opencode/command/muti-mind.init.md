@@ -17,12 +17,12 @@ Initializes the Muti-Mind environment in the current repository by creating the 
 
 ## Instructions
 
-1. Use the `bash` tool to create the directory `.muti-mind/backlog/` if it does not already exist.
-2. Use the `write` tool to create the `.muti-mind/config.yaml` file with the default configuration if it does not exist. The default config should be:
+1. Use the `bash` tool to create the directory `.uf/muti-mind/backlog/` if it does not already exist.
+2. Use the `write` tool to create the `.uf/muti-mind/config.yaml` file with the default configuration if it does not exist. The default config should be:
    ```yaml
    # Muti-Mind Configuration
    backlog:
-     dir: ".muti-mind/backlog"
+     dir: ".uf/muti-mind/backlog"
      default_priority: "P3"
      default_status: "draft"
    github:

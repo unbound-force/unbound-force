@@ -300,7 +300,7 @@ at each tier:
 > - Use the Read tool to read local specs, backlog items, and
 >   convention packs
 > - Use the Grep tool for keyword search across the codebase
-> - Reference `.opencode/unbound/packs/` for coding standards
+> - Reference `.opencode/uf/packs/` for coding standards
 >
 > All tiers produce valid results. Higher tiers provide richer
 > cross-repo context but are never required.

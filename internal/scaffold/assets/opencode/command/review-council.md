@@ -53,7 +53,7 @@ examining the current branch and workspace:
    - **Code files**: everything else (`.go`, `.ts`, `.js`,
      `.py`, `go.mod`, `go.sum`, `Makefile`, `internal/`,
      `cmd/`, `.opencode/agents/`, `.opencode/command/`,
-     `.opencode/skill/`, `.opencode/unbound/packs/`,
+     `.opencode/skill/`, `.opencode/uf/packs/`,
      etc.)
 
 4. **Detect the workflow tier** from the branch name:
@@ -242,7 +242,7 @@ step, determine which artifacts to review:
 
 3. If there are **REQUEST CHANGES**, apply the **hybrid fix policy**:
 
-   Severity levels are defined in the shared severity convention pack at `.opencode/unbound/packs/severity.md`. The auto-fix boundary (LOW/MEDIUM = auto-fix, HIGH/CRITICAL = report only) is grounded in these shared definitions to ensure consistent behavior across all 5 personas.
+   Severity levels are defined in the shared severity convention pack at `.opencode/uf/packs/severity.md`. The auto-fix boundary (LOW/MEDIUM = auto-fix, HIGH/CRITICAL = report only) is grounded in these shared definitions to ensure consistent behavior across all 5 personas.
 
    **Auto-fix (LOW and MEDIUM findings)** — Apply these fixes directly to the spec files:
    - Formatting and template compliance issues

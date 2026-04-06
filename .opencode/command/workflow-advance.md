@@ -20,7 +20,7 @@ If no workflow-id is provided, advances the most recent in-progress workflow (ac
 When this command is invoked:
 
 1. **Find the in-progress workflow**:
-   - If a workflow-id is provided, read `.unbound-force/workflows/{workflow-id}.json`
+   - If a workflow-id is provided, read `.uf/workflows/{workflow-id}.json`
    - Otherwise, detect the current branch and find the most recent active or awaiting_human workflow
 
 2. **If the workflow is in awaiting_human status** (resuming from checkpoint):
@@ -48,7 +48,7 @@ When this command is invoked:
 
 7. **If no more stages remain**:
    - Set workflow status to "completed"
-   - Generate a workflow-record artifact at `.unbound-force/artifacts/`
+   - Generate a workflow-record artifact at `.uf/artifacts/`
    - Report the workflow completion summary
 
 8. **Update the workflow JSON file** with the new state.
@@ -124,7 +124,7 @@ All stages:
 
 Total time: 3h25m
 Outcome: shipped
-Workflow record: .unbound-force/artifacts/wf-feat-health-check-20260320T143000-workflow-record.json
+Workflow record: .uf/artifacts/wf-feat-health-check-20260320T143000-workflow-record.json
 ```
 
 ### Escalation

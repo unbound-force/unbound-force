@@ -39,8 +39,8 @@ Before writing, read:
 
 1. `AGENTS.md` — Project overview, recent changes, hero descriptions
 2. `unbound-force.md` — Hero descriptions and team vision (for brand voice)
-3. `.opencode/unbound/packs/content.md` — Content convention pack (focus on BA-NNN rules for Blog & Announcements and shared VB/FA/FT rules)
-4. `.opencode/unbound/packs/content-custom.md` — Project-specific content rules (if present)
+3. `.opencode/uf/packs/content.md` — Content convention pack (focus on BA-NNN rules for Blog & Announcements and shared VB/FA/FT rules)
+4. `.opencode/uf/packs/content-custom.md` — Project-specific content rules (if present)
 5. The spec artifacts for the feature being announced — read spec.md, plan.md, and tasks.md to understand what was built and why
 
 ---

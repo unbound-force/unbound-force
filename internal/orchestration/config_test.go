@@ -69,7 +69,7 @@ func TestLoadWorkflowConfig_CommentedOut(t *testing.T) {
 
 	// Scaffolded config with all values commented out.
 	// Commented YAML = empty document = zero-value config.
-	content := `# .unbound-force/config.yaml
+	content := `# .uf/config.yaml
 # Workflow configuration for Unbound Force hero lifecycle.
 # CLI flags (--define-mode, --spec-review) override these defaults.
 

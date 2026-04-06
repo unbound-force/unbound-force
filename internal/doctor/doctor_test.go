@@ -520,7 +520,7 @@ func TestCheckScaffoldedFiles(t *testing.T) {
 	createFile(t, dir, ".opencode/agents/agent1.md", "---\ndescription: test\n---\n# Agent")
 	createFile(t, dir, ".opencode/agents/agent2.md", "---\ndescription: test\n---\n# Agent")
 	createFile(t, dir, ".opencode/command/cmd1.md", "# Command")
-	createFile(t, dir, ".opencode/unbound/packs/go.md", "# Go pack")
+	createFile(t, dir, ".opencode/uf/packs/go.md", "# Go pack")
 	createFile(t, dir, ".specify/config.yaml", "# config")
 	createFile(t, dir, "AGENTS.md", "# Agents")
 
@@ -763,7 +763,7 @@ func TestDoctorRun(t *testing.T) {
 	// Create minimal scaffolded files.
 	createFile(t, dir, ".opencode/agents/test.md", "---\ndescription: test\n---\n# Agent")
 	createFile(t, dir, ".opencode/command/test.md", "# Command")
-	createFile(t, dir, ".opencode/unbound/packs/go.md", "# Go")
+	createFile(t, dir, ".opencode/uf/packs/go.md", "# Go")
 	createFile(t, dir, ".specify/config.yaml", "# config")
 	createFile(t, dir, "AGENTS.md", "# Agents")
 	createFile(t, dir, "opencode.json", `{"mcpServers":{}}`)
@@ -839,12 +839,12 @@ func TestDoctorRun_AllPass(t *testing.T) {
 	// Create all scaffolded files.
 	createFile(t, dir, ".opencode/agents/test.md", "---\ndescription: test\n---\n# Agent")
 	createFile(t, dir, ".opencode/command/test.md", "# Command")
-	createFile(t, dir, ".opencode/unbound/packs/go.md", "# Go")
+	createFile(t, dir, ".opencode/uf/packs/go.md", "# Go")
 	createFile(t, dir, ".specify/config.yaml", "# config")
 	createFile(t, dir, "AGENTS.md", "# Agents")
 	createFile(t, dir, "opencode.json", `{"mcp":{"replicator":{"type":"local","command":["replicator","serve"],"enabled":true}}}`)
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
-		t.Fatalf("mkdir .hive: %v", err)
+	if err := os.MkdirAll(filepath.Join(dir, ".uf", "replicator"), 0755); err != nil {
+		t.Fatalf("mkdir .uf/replicator: %v", err)
 	}
 
 	replicatorOut := "✓ OK\n"
@@ -1034,9 +1034,9 @@ func TestCheckReplicator_NotInstalled(t *testing.T) {
 func TestCheckReplicator_AllPass(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create .hive/ dir and opencode.json with mcp.replicator entry.
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
-		t.Fatalf("mkdir .hive: %v", err)
+	// Create .uf/replicator/ dir and opencode.json with mcp.replicator entry.
+	if err := os.MkdirAll(filepath.Join(dir, ".uf", "replicator"), 0755); err != nil {
+		t.Fatalf("mkdir .uf/replicator: %v", err)
 	}
 	createFile(t, dir, "opencode.json", `{"mcp":{"replicator":{"type":"local","command":["replicator","serve"],"enabled":true}}}`)
 
@@ -1068,8 +1068,8 @@ func TestCheckReplicator_AllPass(t *testing.T) {
 	if r := results["replicator"]; r.Severity != Pass {
 		t.Errorf("replicator severity = %v, want Pass", r.Severity)
 	}
-	if r := results[".hive/"]; r.Severity != Pass {
-		t.Errorf(".hive/ severity = %v, want Pass", r.Severity)
+	if r := results[".uf/replicator/"]; r.Severity != Pass {
+		t.Errorf(".uf/replicator/ severity = %v, want Pass", r.Severity)
 	}
 	if r := results["MCP config"]; r.Severity != Pass {
 		t.Errorf("MCP config severity = %v, want Pass", r.Severity)
@@ -1119,7 +1119,7 @@ func TestCheckReplicator_Timeout(t *testing.T) {
 
 func TestCheckReplicator_HiveMissing(t *testing.T) {
 	dir := t.TempDir()
-	// No .hive/ directory.
+	// No .uf/replicator/ directory.
 	createFile(t, dir, "opencode.json", `{"mcp":{"replicator":{"type":"local","command":["replicator","serve"],"enabled":true}}}`)
 
 	opts := &Options{
@@ -1141,9 +1141,9 @@ func TestCheckReplicator_HiveMissing(t *testing.T) {
 	group := checkReplicator(opts)
 
 	for _, r := range group.Results {
-		if r.Name == ".hive/" {
+		if r.Name == ".uf/replicator/" {
 			if r.Severity != Warn {
-				t.Errorf(".hive/ severity = %v, want Warn", r.Severity)
+				t.Errorf(".uf/replicator/ severity = %v, want Warn", r.Severity)
 			}
 			if !strings.Contains(r.InstallHint, "uf init") {
 				t.Errorf("install hint = %q, want 'uf init'", r.InstallHint)
@@ -1151,13 +1151,13 @@ func TestCheckReplicator_HiveMissing(t *testing.T) {
 			return
 		}
 	}
-	t.Error(".hive/ result not found")
+	t.Error(".uf/replicator/ result not found")
 }
 
 func TestCheckReplicator_MCPMissing(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
-		t.Fatalf("mkdir .hive: %v", err)
+	if err := os.MkdirAll(filepath.Join(dir, ".uf", "replicator"), 0755); err != nil {
+		t.Fatalf("mkdir .uf/replicator: %v", err)
 	}
 	// opencode.json exists but no mcp.replicator.
 	createFile(t, dir, "opencode.json", `{"mcp":{"dewey":{"type":"local"}}}`)
@@ -1884,9 +1884,9 @@ func TestCheckMCPConfig_MissingServerBinary(t *testing.T) {
 
 func TestCheckDewey_AllPresent(t *testing.T) {
 	dir := t.TempDir()
-	// Create .dewey/ workspace directory.
-	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
-		t.Fatalf("mkdir .dewey: %v", err)
+	// Create .uf/dewey/ workspace directory.
+	if err := os.MkdirAll(filepath.Join(dir, ".uf", "dewey"), 0755); err != nil {
+		t.Fatalf("mkdir .uf/dewey: %v", err)
 	}
 
 	opts := &Options{
@@ -2385,7 +2385,7 @@ func TestDoctorHints_NoBareUnboundReferences(t *testing.T) {
 	// Create minimal scaffolded files so all check groups execute.
 	createFile(t, dir, ".opencode/agents/test.md", "---\ndescription: test\n---\n# Agent")
 	createFile(t, dir, ".opencode/command/test.md", "# Command")
-	createFile(t, dir, ".opencode/unbound/packs/go.md", "# Go")
+	createFile(t, dir, ".opencode/uf/packs/go.md", "# Go")
 	createFile(t, dir, ".specify/config.yaml", "# config")
 	createFile(t, dir, "AGENTS.md", "# Agents")
 	createFile(t, dir, "opencode.json", `{"mcpServers":{}}`)
