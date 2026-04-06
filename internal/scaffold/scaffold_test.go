@@ -1345,6 +1345,55 @@ func TestScaffoldOutput_NoGraphthulhuReferences(t *testing.T) {
 	}
 }
 
+// TestScaffoldOutput_NoSwarmPluginReferences is a regression guard
+// for Spec 024 FR-010/FR-016: scaffolded files must not contain any
+// Swarm plugin references. Replicator replaces the Swarm plugin.
+func TestScaffoldOutput_NoSwarmPluginReferences(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	_, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Stale patterns that must NOT appear in scaffolded output.
+	stalePatterns := []string{
+		"opencode-swarm-plugin",
+		"installSwarmPlugin",
+		"ensureBun",
+		"swarmForkSource",
+	}
+
+	// Walk all generated files and search for stale patterns.
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info.IsDir() {
+			return walkErr
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Errorf("read %s: %v", path, readErr)
+			return nil
+		}
+		text := string(content)
+		relPath, _ := filepath.Rel(dir, path)
+
+		for _, pattern := range stalePatterns {
+			if strings.Contains(text, pattern) {
+				t.Errorf("scaffolded file %s contains stale %q reference (Spec 024 violation)", relPath, pattern)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk error: %v", err)
+	}
+}
+
 // TestScaffoldOutput_NoHivemindReferences is a regression guard
 // for Spec 022 FR-006/FR-007: scaffolded files must not contain any
 // Hivemind tool references. Dewey replaces Hivemind as the unified
@@ -2385,15 +2434,34 @@ func getPlugins(t *testing.T, ocMap map[string]json.RawMessage) []string {
 
 // Phase 3: US1 tests — Fresh Repo Init
 
+// getMCPReplicator extracts the mcp.replicator entry from a parsed opencode.json.
+func getMCPReplicator(t *testing.T, ocMap map[string]json.RawMessage) map[string]json.RawMessage {
+	t.Helper()
+	mcpRaw, ok := ocMap["mcp"]
+	if !ok {
+		t.Fatal("mcp key not found")
+	}
+	var mcpMap map[string]json.RawMessage
+	if err := json.Unmarshal(mcpRaw, &mcpMap); err != nil {
+		t.Fatalf("parse mcp: %v", err)
+	}
+	repRaw, ok := mcpMap["replicator"]
+	if !ok {
+		t.Fatal("mcp.replicator not found")
+	}
+	var rep map[string]json.RawMessage
+	if err := json.Unmarshal(repRaw, &rep); err != nil {
+		t.Fatalf("parse mcp.replicator: %v", err)
+	}
+	return rep
+}
+
 func TestConfigureOpencodeJSON_Create(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
-		t.Fatalf("mkdir .hive: %v", err)
-	}
 
 	opts := &Options{
 		TargetDir: dir,
-		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey", "replicator": "/usr/local/bin/replicator"}),
 	}
 
 	results := configureOpencodeJSON(opts)
@@ -2416,40 +2484,36 @@ func TestConfigureOpencodeJSON_Create(t *testing.T) {
 	}
 
 	// Verify mcp.dewey entry.
-	dewey := getMCPDewey(t, ocMap)
-	var deweyType string
-	_ = json.Unmarshal(dewey["type"], &deweyType) //nolint:errcheck // test helper
-	if deweyType != "local" {
-		t.Errorf("mcp.dewey.type = %q, want 'local'", deweyType)
+	getMCPDewey(t, ocMap)
+
+	// Verify mcp.replicator entry.
+	rep := getMCPReplicator(t, ocMap)
+	var repType string
+	_ = json.Unmarshal(rep["type"], &repType)
+	if repType != "local" {
+		t.Errorf("mcp.replicator.type = %q, want 'local'", repType)
 	}
 	var cmd []string
-	_ = json.Unmarshal(dewey["command"], &cmd) //nolint:errcheck // test helper
-	expectedCmd := []string{"dewey", "serve", "--vault", "."}
+	_ = json.Unmarshal(rep["command"], &cmd)
+	expectedCmd := []string{"replicator", "serve"}
 	if len(cmd) != len(expectedCmd) {
-		t.Errorf("mcp.dewey.command = %v, want %v", cmd, expectedCmd)
+		t.Errorf("mcp.replicator.command = %v, want %v", cmd, expectedCmd)
 	} else {
 		for i := range cmd {
 			if cmd[i] != expectedCmd[i] {
-				t.Errorf("mcp.dewey.command[%d] = %q, want %q", i, cmd[i], expectedCmd[i])
+				t.Errorf("mcp.replicator.command[%d] = %q, want %q", i, cmd[i], expectedCmd[i])
 			}
 		}
 	}
-	var enabled bool
-	_ = json.Unmarshal(dewey["enabled"], &enabled) //nolint:errcheck // test helper
-	if !enabled {
-		t.Error("mcp.dewey.enabled should be true")
-	}
 
-	// Verify plugin array.
-	plugins := getPlugins(t, ocMap)
-	if len(plugins) != 1 || plugins[0] != "opencode-swarm-plugin" {
-		t.Errorf("plugin = %v, want [opencode-swarm-plugin]", plugins)
+	// Verify no plugin array.
+	if _, ok := ocMap["plugin"]; ok {
+		t.Error("plugin key should not exist (Replicator uses MCP, not plugin array)")
 	}
 }
 
 func TestConfigureOpencodeJSON_DeweyOnly(t *testing.T) {
 	dir := t.TempDir()
-	// No .hive/ directory.
 
 	opts := &Options{
 		TargetDir: dir,
@@ -2470,19 +2534,16 @@ func TestConfigureOpencodeJSON_DeweyOnly(t *testing.T) {
 
 	// Should NOT have plugin key.
 	if _, ok := ocMap["plugin"]; ok {
-		t.Error("plugin key should not exist when no .hive/")
+		t.Error("plugin key should not exist")
 	}
 }
 
-func TestConfigureOpencodeJSON_HiveOnly(t *testing.T) {
+func TestConfigureOpencodeJSON_ReplicatorOnly(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
-		t.Fatalf("mkdir .hive: %v", err)
-	}
 
 	opts := &Options{
 		TargetDir: dir,
-		LookPath:  stubScaffoldLookPath(map[string]string{}), // No dewey
+		LookPath:  stubScaffoldLookPath(map[string]string{"replicator": "/usr/local/bin/replicator"}),
 	}
 
 	results := configureOpencodeJSON(opts)
@@ -2492,21 +2553,18 @@ func TestConfigureOpencodeJSON_HiveOnly(t *testing.T) {
 
 	ocMap := parseOpencodeJSON(t, dir)
 
-	// Should NOT have mcp key.
-	if _, ok := ocMap["mcp"]; ok {
-		t.Error("mcp key should not exist when dewey not available")
-	}
+	// Should have mcp.replicator.
+	getMCPReplicator(t, ocMap)
 
-	// Should have plugin array.
-	plugins := getPlugins(t, ocMap)
-	if len(plugins) != 1 || plugins[0] != "opencode-swarm-plugin" {
-		t.Errorf("plugin = %v, want [opencode-swarm-plugin]", plugins)
+	// Should NOT have plugin key.
+	if _, ok := ocMap["plugin"]; ok {
+		t.Error("plugin key should not exist")
 	}
 }
 
 func TestConfigureOpencodeJSON_Neither(t *testing.T) {
 	dir := t.TempDir()
-	// No dewey, no .hive/.
+	// No dewey, no replicator.
 
 	opts := &Options{
 		TargetDir: dir,
@@ -2531,9 +2589,6 @@ func TestConfigureOpencodeJSON_Neither(t *testing.T) {
 
 func TestConfigureOpencodeJSON_Idempotent(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
-		t.Fatalf("mkdir .hive: %v", err)
-	}
 
 	// Create opencode.json with both entries already present.
 	existing := `{
@@ -2543,11 +2598,13 @@ func TestConfigureOpencodeJSON_Idempotent(t *testing.T) {
       "command": ["dewey", "serve", "--vault", "."],
       "enabled": true,
       "type": "local"
+    },
+    "replicator": {
+      "command": ["replicator", "serve"],
+      "enabled": true,
+      "type": "local"
     }
-  },
-  "plugin": [
-    "opencode-swarm-plugin"
-  ]
+  }
 }
 `
 	if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(existing), 0o644); err != nil {
@@ -2556,7 +2613,7 @@ func TestConfigureOpencodeJSON_Idempotent(t *testing.T) {
 
 	opts := &Options{
 		TargetDir: dir,
-		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey", "replicator": "/usr/local/bin/replicator"}),
 	}
 
 	results := configureOpencodeJSON(opts)
@@ -2571,12 +2628,10 @@ func TestConfigureOpencodeJSON_Idempotent(t *testing.T) {
 	}
 }
 
-func TestConfigureOpencodeJSON_IdempotentWithOtherPlugins(t *testing.T) {
+func TestConfigureOpencodeJSON_LegacyPluginMigration(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
-		t.Fatalf("mkdir .hive: %v", err)
-	}
 
+	// Legacy opencode.json with opencode-swarm-plugin in plugin array.
 	existing := `{
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
@@ -2586,6 +2641,42 @@ func TestConfigureOpencodeJSON_IdempotentWithOtherPlugins(t *testing.T) {
       "enabled": true
     }
   },
+  "plugin": [
+    "opencode-swarm-plugin"
+  ]
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(existing), 0o644); err != nil {
+		t.Fatalf("write opencode.json: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey", "replicator": "/usr/local/bin/replicator"}),
+	}
+
+	results := configureOpencodeJSON(opts)
+	if results[0].action != "configured" {
+		t.Errorf("expected action 'configured', got %q", results[0].action)
+	}
+
+	ocMap := parseOpencodeJSON(t, dir)
+
+	// Verify mcp.replicator was added.
+	getMCPReplicator(t, ocMap)
+
+	// Verify plugin key was removed (empty after removing swarm plugin).
+	if _, ok := ocMap["plugin"]; ok {
+		t.Error("plugin key should be removed after legacy migration (empty array)")
+	}
+}
+
+func TestConfigureOpencodeJSON_LegacyPluginMigration_OtherPlugins(t *testing.T) {
+	dir := t.TempDir()
+
+	// Legacy opencode.json with swarm plugin AND other plugins.
+	existing := `{
+  "$schema": "https://opencode.ai/config.json",
   "plugin": [
     "other-plugin",
     "opencode-swarm-plugin"
@@ -2598,42 +2689,7 @@ func TestConfigureOpencodeJSON_IdempotentWithOtherPlugins(t *testing.T) {
 
 	opts := &Options{
 		TargetDir: dir,
-		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
-	}
-
-	results := configureOpencodeJSON(opts)
-	if results[0].action != "already configured" {
-		t.Errorf("expected action 'already configured', got %q", results[0].action)
-	}
-
-	// Verify file is unchanged — both plugins preserved.
-	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
-	if string(data) != existing {
-		t.Error("file should be byte-identical when already configured")
-	}
-}
-
-func TestConfigureOpencodeJSON_AddMissing(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
-		t.Fatalf("mkdir .hive: %v", err)
-	}
-
-	// Has plugin but no mcp.dewey.
-	existing := `{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    "opencode-swarm-plugin"
-  ]
-}
-`
-	if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(existing), 0o644); err != nil {
-		t.Fatalf("write opencode.json: %v", err)
-	}
-
-	opts := &Options{
-		TargetDir: dir,
-		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		LookPath:  stubScaffoldLookPath(map[string]string{"replicator": "/usr/local/bin/replicator"}),
 	}
 
 	results := configureOpencodeJSON(opts)
@@ -2643,14 +2699,82 @@ func TestConfigureOpencodeJSON_AddMissing(t *testing.T) {
 
 	ocMap := parseOpencodeJSON(t, dir)
 
-	// Verify mcp.dewey was added.
+	// Verify mcp.replicator was added.
+	getMCPReplicator(t, ocMap)
+
+	// Verify plugin key preserved with only other-plugin.
+	plugins := getPlugins(t, ocMap)
+	if len(plugins) != 1 || plugins[0] != "other-plugin" {
+		t.Errorf("plugin = %v, want [other-plugin]", plugins)
+	}
+}
+
+func TestConfigureOpencodeJSON_ReplicatorNotInstalled(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+	}
+
+	results := configureOpencodeJSON(opts)
+	if results[0].action != "created" {
+		t.Errorf("expected action 'created', got %q", results[0].action)
+	}
+
+	ocMap := parseOpencodeJSON(t, dir)
+
+	// Should have mcp.dewey but NOT mcp.replicator.
+	getMCPDewey(t, ocMap)
+	mcpRaw := ocMap["mcp"]
+	var mcpMap map[string]json.RawMessage
+	_ = json.Unmarshal(mcpRaw, &mcpMap)
+	if _, ok := mcpMap["replicator"]; ok {
+		t.Error("mcp.replicator should not exist when replicator not installed")
+	}
+
+	// Should NOT have plugin key.
+	if _, ok := ocMap["plugin"]; ok {
+		t.Error("plugin key should not exist")
+	}
+}
+
+func TestConfigureOpencodeJSON_AddMissing(t *testing.T) {
+	dir := t.TempDir()
+
+	// Has mcp.dewey but no mcp.replicator.
+	existing := `{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "dewey": {
+      "type": "local",
+      "command": ["dewey", "serve", "--vault", "."],
+      "enabled": true
+    }
+  }
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(existing), 0o644); err != nil {
+		t.Fatalf("write opencode.json: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey", "replicator": "/usr/local/bin/replicator"}),
+	}
+
+	results := configureOpencodeJSON(opts)
+	if results[0].action != "configured" {
+		t.Errorf("expected action 'configured', got %q", results[0].action)
+	}
+
+	ocMap := parseOpencodeJSON(t, dir)
+
+	// Verify mcp.dewey preserved.
 	getMCPDewey(t, ocMap)
 
-	// Verify existing plugin array is preserved.
-	plugins := getPlugins(t, ocMap)
-	if len(plugins) != 1 || plugins[0] != "opencode-swarm-plugin" {
-		t.Errorf("plugin = %v, want [opencode-swarm-plugin]", plugins)
-	}
+	// Verify mcp.replicator was added.
+	getMCPReplicator(t, ocMap)
 }
 
 func TestConfigureOpencodeJSON_PreserveCustom(t *testing.T) {
@@ -2799,13 +2923,10 @@ func TestConfigureOpencodeJSON_WriteFail(t *testing.T) {
 
 func TestConfigureOpencodeJSON_ByteIdentical(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
-		t.Fatalf("mkdir .hive: %v", err)
-	}
 
 	opts := &Options{
 		TargetDir: dir,
-		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey", "replicator": "/usr/local/bin/replicator"}),
 	}
 
 	// First run — creates the file.
@@ -2828,9 +2949,6 @@ func TestConfigureOpencodeJSON_ByteIdentical(t *testing.T) {
 
 func TestConfigureOpencodeJSON_Force(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
-		t.Fatalf("mkdir .hive: %v", err)
-	}
 
 	// Stale mcp.dewey with --include-hidden flag.
 	existing := `{
@@ -2840,11 +2958,13 @@ func TestConfigureOpencodeJSON_Force(t *testing.T) {
       "type": "local",
       "command": ["dewey", "serve", "--include-hidden", "--vault", "."],
       "enabled": true
+    },
+    "replicator": {
+      "type": "local",
+      "command": ["replicator", "serve"],
+      "enabled": true
     }
-  },
-  "plugin": [
-    "opencode-swarm-plugin"
-  ]
+  }
 }
 `
 	if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(existing), 0o644); err != nil {
@@ -2854,7 +2974,7 @@ func TestConfigureOpencodeJSON_Force(t *testing.T) {
 	opts := &Options{
 		TargetDir: dir,
 		Force:     true,
-		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey", "replicator": "/usr/local/bin/replicator"}),
 	}
 
 	results := configureOpencodeJSON(opts)
@@ -2867,7 +2987,7 @@ func TestConfigureOpencodeJSON_Force(t *testing.T) {
 	// Verify mcp.dewey was overwritten with correct command (no --include-hidden).
 	dewey := getMCPDewey(t, ocMap)
 	var cmd []string
-	_ = json.Unmarshal(dewey["command"], &cmd) //nolint:errcheck // test helper
+	_ = json.Unmarshal(dewey["command"], &cmd)
 	expectedCmd := []string{"dewey", "serve", "--vault", "."}
 	if len(cmd) != len(expectedCmd) {
 		t.Fatalf("command = %v, want %v", cmd, expectedCmd)
@@ -2878,16 +2998,9 @@ func TestConfigureOpencodeJSON_Force(t *testing.T) {
 		}
 	}
 
-	// Verify plugin array is NOT duplicated — still exactly one entry.
-	plugins := getPlugins(t, ocMap)
-	count := 0
-	for _, p := range plugins {
-		if p == "opencode-swarm-plugin" {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Errorf("expected exactly 1 opencode-swarm-plugin entry, got %d", count)
+	// Verify no plugin key.
+	if _, ok := ocMap["plugin"]; ok {
+		t.Error("plugin key should not exist")
 	}
 }
 
@@ -2913,7 +3026,7 @@ func TestConfigureOpencodeJSON_ForceCorrect(t *testing.T) {
 	opts := &Options{
 		TargetDir: dir,
 		Force:     true,
-		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey", "replicator": "/usr/local/bin/replicator"}),
 	}
 
 	results := configureOpencodeJSON(opts)
@@ -3045,19 +3158,20 @@ func TestInitSubTools_DeweyExistsNoForce(t *testing.T) {
 
 func TestInitSubTools_OpencodeJSON(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
-		t.Fatalf("mkdir .hive: %v", err)
-	}
 	// Create .dewey/ so dewey init is skipped.
 	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0o755); err != nil {
 		t.Fatalf("mkdir .dewey: %v", err)
+	}
+	// Create .hive/ so replicator init is skipped.
+	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
+		t.Fatalf("mkdir .hive: %v", err)
 	}
 
 	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
 
 	opts := &Options{
 		TargetDir: dir,
-		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey", "replicator": "/usr/local/bin/replicator"}),
 		ExecCmd:   rec.execCmd,
 	}
 
@@ -3081,8 +3195,118 @@ func TestInitSubTools_OpencodeJSON(t *testing.T) {
 	// Verify file exists with expected content.
 	ocMap := parseOpencodeJSON(t, dir)
 	getMCPDewey(t, ocMap)
-	plugins := getPlugins(t, ocMap)
-	if len(plugins) != 1 || plugins[0] != "opencode-swarm-plugin" {
-		t.Errorf("plugin = %v, want [opencode-swarm-plugin]", plugins)
+	getMCPReplicator(t, ocMap)
+
+	// Verify no plugin key.
+	if _, ok := ocMap["plugin"]; ok {
+		t.Error("plugin key should not exist")
+	}
+}
+
+// --- Replicator init delegation tests ---
+
+func TestInitSubTools_ReplicatorInit(t *testing.T) {
+	dir := t.TempDir()
+	// No .hive/ — should trigger replicator init.
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"replicator": "/usr/local/bin/replicator"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Should have .hive/ initialized result.
+	foundHive := false
+	for _, r := range results {
+		if r.name == ".hive/" && r.action == "initialized" {
+			foundHive = true
+		}
+	}
+	if !foundHive {
+		t.Errorf("expected .hive/ initialized, got %v", results)
+	}
+
+	// Verify replicator init was called.
+	found := false
+	for _, call := range rec.calls {
+		if call == "replicator init" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'replicator init' call, got: %v", rec.calls)
+	}
+}
+
+func TestInitSubTools_ReplicatorInitSkipsExisting(t *testing.T) {
+	dir := t.TempDir()
+	// Create .hive/ — should skip replicator init.
+	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"replicator": "/usr/local/bin/replicator"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Should NOT have .hive/ result.
+	for _, r := range results {
+		if r.name == ".hive/" {
+			t.Errorf("unexpected .hive/ result when already exists: %s %s", r.name, r.action)
+		}
+	}
+
+	// Verify replicator init was NOT called.
+	for _, call := range rec.calls {
+		if call == "replicator init" {
+			t.Error("replicator init should NOT be called when .hive/ exists")
+		}
+	}
+}
+
+func TestInitSubTools_ReplicatorInitFails(t *testing.T) {
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{
+		errors: map[string]error{
+			"replicator init": fmt.Errorf("init failed"),
+		},
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"replicator": "/usr/local/bin/replicator"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Should have .hive/ failed result.
+	foundFailed := false
+	for _, r := range results {
+		if r.name == ".hive/" && r.action == "failed" {
+			foundFailed = true
+		}
+	}
+	if !foundFailed {
+		t.Errorf("expected .hive/ failed, got %v", results)
+	}
+
+	// Should still have opencode.json result (init failure doesn't block).
+	foundOC := false
+	for _, r := range results {
+		if r.name == "opencode.json" {
+			foundOC = true
+		}
+	}
+	if !foundOC {
+		t.Error("opencode.json result should still be present after replicator init failure")
 	}
 }

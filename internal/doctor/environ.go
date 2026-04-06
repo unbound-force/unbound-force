@@ -242,11 +242,6 @@ func managerInstallCmd(toolName string, manager ManagerKind) string {
 		}
 	case ManagerHomebrew:
 		return homebrewInstallCmd(toolName)
-	case ManagerBun:
-		switch toolName {
-		case "swarm":
-			return "bun add -g github:unbound-force/swarm-tools"
-		}
 	}
 	return homebrewInstallCmd(toolName)
 }
@@ -268,8 +263,8 @@ func homebrewInstallCmd(toolName string) string {
 		return "brew install node"
 	case "gh":
 		return "brew install gh"
-	case "swarm":
-		return "npm install -g github:unbound-force/swarm-tools"
+	case "replicator":
+		return "brew install unbound-force/tap/replicator"
 	case "ollama":
 		return "brew install --cask ollama-app && ollama pull granite-embedding:30m"
 	default:
@@ -289,8 +284,8 @@ func genericInstallCmd(toolName string) string {
 		return "Download from https://go.dev/dl/"
 	case "node":
 		return "Download from https://nodejs.org/"
-	case "swarm":
-		return "npm install -g github:unbound-force/swarm-tools"
+	case "replicator":
+		return "brew install unbound-force/tap/replicator"
 	case "gh":
 		return "Download from https://cli.github.com/"
 	case "ollama":
@@ -326,6 +321,8 @@ func installURL(toolName string) string {
 		return "https://cli.github.com/"
 	case "dewey":
 		return "https://github.com/unbound-force/dewey"
+	case "replicator":
+		return "https://github.com/unbound-force/replicator"
 	case "ollama":
 		return "https://ollama.com"
 	default:

@@ -39,7 +39,7 @@ previous interrupted runs:
    plan.md, tasks.md, and task checkboxes live in the main
    working directory, not in worktrees.
 
-If `swarm_worktree_list` is not available (Swarm plugin
+If `swarm_worktree_list` is not available (Replicator
 not installed), skip this step silently.
 
 ### 1. Branch Safety Gate
@@ -390,7 +390,7 @@ of truth. This is the same pattern used by
    **If Swarm worktrees are NOT available**: fall back to
    sequential execution for `[P]` tasks. Announce:
    > "Swarm worktrees not available -- executing parallel
-   > tasks sequentially. Install the Swarm plugin for
+   > tasks sequentially. Install Replicator for
    > parallel execution."
 
    Execute each `[P]` task sequentially via the

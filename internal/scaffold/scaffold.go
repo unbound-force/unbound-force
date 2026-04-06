@@ -424,9 +424,10 @@ type subToolResult struct {
 }
 
 // configureOpencodeJSON creates or updates opencode.json with the Dewey
-// MCP server entry (when dewey is in PATH) and the Swarm plugin entry
-// (when .hive/ exists). Idempotent by default; Force overwrites stale
-// mcp.dewey entries. Returns a subToolResult describing the outcome.
+// MCP server entry (when dewey is in PATH) and the Replicator MCP entry
+// (when replicator is in PATH). Migrates legacy opencode-swarm-plugin
+// entries from the plugin array. Idempotent by default; Force overwrites
+// stale mcp.dewey entries. Returns a subToolResult describing the outcome.
 //
 // Design decision: Uses map[string]json.RawMessage to preserve unknown
 // user keys (custom MCP servers, custom config). Per SOLID Open/Closed
@@ -453,14 +454,13 @@ func configureOpencodeJSON(opts *Options) []subToolResult {
 	if _, err := opts.LookPath("dewey"); err == nil {
 		hasDewey = true
 	}
-	hiveDir := filepath.Join(opts.TargetDir, ".hive")
-	hasHive := false
-	if info, err := os.Stat(hiveDir); err == nil && info.IsDir() {
-		hasHive = true
+	hasReplicator := false
+	if _, err := opts.LookPath("replicator"); err == nil {
+		hasReplicator = true
 	}
 
 	// Nothing to configure — skip.
-	if !hasDewey && !hasHive {
+	if !hasDewey && !hasReplicator {
 		return []subToolResult{{
 			name:   "opencode.json",
 			action: "skipped",
@@ -557,29 +557,67 @@ func configureOpencodeJSON(opts *Options) []subToolResult {
 		}
 	}
 
-	// --- Swarm plugin entry ---
-	if hasHive {
-		var plugins []string
-		if pluginRaw, ok := ocMap["plugin"]; ok {
-			if json.Unmarshal(pluginRaw, &plugins) != nil {
-				plugins = []string{}
+	// --- Replicator MCP entry ---
+	if hasReplicator {
+		replicatorEntry := json.RawMessage(`{
+    "type": "local",
+    "command": ["replicator", "serve"],
+    "enabled": true
+  }`)
+
+		// Check for existing mcp.replicator.
+		alreadyHasReplicator := false
+		if mcpRaw, ok := ocMap["mcp"]; ok {
+			var mcpMap map[string]json.RawMessage
+			if json.Unmarshal(mcpRaw, &mcpMap) == nil {
+				if _, hasKey := mcpMap["replicator"]; hasKey {
+					alreadyHasReplicator = true
+				}
 			}
 		}
 
-		// Check if already present.
-		hasSwarmPlugin := false
-		for _, p := range plugins {
-			if p == "opencode-swarm-plugin" {
-				hasSwarmPlugin = true
-				break
+		if !alreadyHasReplicator || opts.Force {
+			// Get or create the mcp map.
+			var mcpMap map[string]json.RawMessage
+			if mcpRaw, ok := ocMap["mcp"]; ok {
+				if json.Unmarshal(mcpRaw, &mcpMap) != nil {
+					mcpMap = make(map[string]json.RawMessage)
+				}
+			} else {
+				mcpMap = make(map[string]json.RawMessage)
 			}
-		}
 
-		if !hasSwarmPlugin {
-			plugins = append(plugins, "opencode-swarm-plugin")
-			pluginJSON, _ := json.Marshal(plugins)
-			ocMap["plugin"] = json.RawMessage(pluginJSON)
+			mcpMap["replicator"] = replicatorEntry
+			mcpJSON, _ := json.Marshal(mcpMap)
+			ocMap["mcp"] = json.RawMessage(mcpJSON)
 			changed = true
+		}
+	}
+
+	// --- Legacy plugin migration ---
+	// Remove opencode-swarm-plugin from plugin array if present.
+	if pluginRaw, ok := ocMap["plugin"]; ok {
+		var plugins []string
+		if json.Unmarshal(pluginRaw, &plugins) == nil {
+			var filtered []string
+			removed := false
+			for _, p := range plugins {
+				if p == "opencode-swarm-plugin" {
+					removed = true
+					continue
+				}
+				filtered = append(filtered, p)
+			}
+			if removed {
+				if len(filtered) == 0 {
+					// Empty plugin array — remove the key entirely.
+					delete(ocMap, "plugin")
+				} else {
+					pluginJSON, _ := json.Marshal(filtered)
+					ocMap["plugin"] = json.RawMessage(pluginJSON)
+				}
+				changed = true
+			}
 		}
 	}
 
@@ -741,9 +779,25 @@ func initSubTools(opts *Options) []subToolResult {
 		}
 	}
 
-	// Configure opencode.json with Dewey MCP server and Swarm plugin
-	// entries. Runs after all sub-tool initialization steps that may
-	// create .hive/ (swarm init runs during uf setup before uf init).
+	// Replicator: init if binary available and .hive/ absent.
+	// Follows the Dewey init delegation pattern above.
+	if _, err := opts.LookPath("replicator"); err == nil {
+		hiveDir := filepath.Join(opts.TargetDir, ".hive")
+		if _, statErr := os.Stat(hiveDir); os.IsNotExist(statErr) {
+			_, _ = fmt.Fprintf(opts.Stdout, "  Initializing Replicator workspace...\n")
+			if _, initErr := opts.ExecCmd("replicator", "init"); initErr != nil {
+				results = append(results, subToolResult{
+					name: ".hive/", action: "failed",
+					detail: "replicator init failed"})
+			} else {
+				results = append(results, subToolResult{
+					name: ".hive/", action: "initialized"})
+			}
+		}
+	}
+
+	// Configure opencode.json with Dewey MCP server and Replicator MCP
+	// entries. Runs after all sub-tool initialization steps.
 	results = append(results, configureOpencodeJSON(opts)...)
 
 	return results

@@ -10,9 +10,14 @@
         "."
       ],
       "enabled": true
+    },
+    "replicator": {
+      "type": "local",
+      "command": [
+        "replicator",
+        "serve"
+      ],
+      "enabled": true
     }
-  },
-  "plugin": [
-    "opencode-swarm-plugin"
-  ]
+  }
 }

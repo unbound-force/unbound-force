@@ -121,7 +121,7 @@ func Run(opts Options) (*Report, error) {
 	groups := []CheckGroup{
 		checkDetectedEnvironment(env),
 		checkCoreTools(&opts, env),
-		checkSwarmPlugin(&opts),
+		checkReplicator(&opts),
 		checkDewey(&opts),
 		checkScaffoldedFiles(&opts),
 		checkHeroAvailability(&opts),

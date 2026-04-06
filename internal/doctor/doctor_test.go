@@ -352,11 +352,11 @@ func TestCheckCoreTools(t *testing.T) {
 	opts := &Options{
 		TargetDir: t.TempDir(),
 		LookPath: stubLookPath(map[string]string{
-			"go":    "/home/user/.goenv/shims/go",
-			"gaze":  "/opt/homebrew/bin/gaze",
-			"dewey": "/opt/homebrew/bin/dewey",
-			"node":  "/home/user/.nvm/versions/node/v22.15.0/bin/node",
-			"swarm": "/usr/local/bin/swarm",
+			"go":         "/home/user/.goenv/shims/go",
+			"gaze":       "/opt/homebrew/bin/gaze",
+			"dewey":      "/opt/homebrew/bin/dewey",
+			"node":       "/home/user/.nvm/versions/node/v22.15.0/bin/node",
+			"replicator": "/usr/local/bin/replicator",
 		}),
 		ExecCmd: stubExecCmd(
 			map[string]string{
@@ -467,13 +467,13 @@ func TestCheckCoreTools(t *testing.T) {
 		t.Error("gh check not found")
 	}
 
-	// swarm: found
-	if r, ok := results["swarm"]; ok {
+	// replicator: found
+	if r, ok := results["replicator"]; ok {
 		if r.Severity != Pass {
-			t.Errorf("swarm severity = %v, want Pass", r.Severity)
+			t.Errorf("replicator severity = %v, want Pass", r.Severity)
 		}
 	} else {
-		t.Error("swarm check not found")
+		t.Error("replicator check not found")
 	}
 }
 
@@ -802,7 +802,7 @@ func TestDoctorRun(t *testing.T) {
 	expectedGroups := []string{
 		"Detected Environment",
 		"Core Tools",
-		"Swarm Plugin",
+		"Replicator",
 		"Dewey Knowledge Layer",
 		"Scaffolded Files",
 		"Hero Availability",
@@ -842,12 +842,12 @@ func TestDoctorRun_AllPass(t *testing.T) {
 	createFile(t, dir, ".opencode/unbound/packs/go.md", "# Go")
 	createFile(t, dir, ".specify/config.yaml", "# config")
 	createFile(t, dir, "AGENTS.md", "# Agents")
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"],"mcpServers":{}}`)
+	createFile(t, dir, "opencode.json", `{"mcp":{"replicator":{"type":"local","command":["replicator","serve"],"enabled":true}}}`)
 	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
 		t.Fatalf("mkdir .hive: %v", err)
 	}
 
-	swarmOut := "✓ OK\n"
+	replicatorOut := "✓ OK\n"
 
 	var buf bytes.Buffer
 	opts := Options{
@@ -855,22 +855,22 @@ func TestDoctorRun_AllPass(t *testing.T) {
 		Format:    "text",
 		Stdout:    &buf,
 		LookPath: stubLookPath(map[string]string{
-			"go":       "/usr/local/go/bin/go",
-			"opencode": "/usr/local/bin/opencode",
-			"gaze":     "/usr/local/bin/gaze",
-			"mxf":      "/usr/local/bin/mxf",
-			"swarm":    "/usr/local/bin/swarm",
+			"go":         "/usr/local/go/bin/go",
+			"opencode":   "/usr/local/bin/opencode",
+			"gaze":       "/usr/local/bin/gaze",
+			"mxf":        "/usr/local/bin/mxf",
+			"replicator": "/usr/local/bin/replicator",
 		}),
 		ExecCmd: stubExecCmd(
 			map[string]string{
-				"go version":   "go version go1.24.3 darwin/arm64",
-				"swarm doctor": swarmOut,
+				"go version":        "go version go1.24.3 darwin/arm64",
+				"replicator doctor": replicatorOut,
 			},
 			nil,
 		),
 		ExecCmdTimeout: stubExecCmdTimeout(
 			map[string]string{
-				"swarm doctor": swarmOut,
+				"replicator doctor": replicatorOut,
 			},
 			nil,
 		),
@@ -1003,91 +1003,54 @@ func TestDoctorRun_DirFlag(t *testing.T) {
 	}
 }
 
-// --- Phase 4: User Story 2 tests (T032-T036) ---
+// --- Replicator tests ---
 
-func TestCheckSwarmPlugin_NotInstalled(t *testing.T) {
+func TestCheckReplicator_NotInstalled(t *testing.T) {
 	opts := &Options{
-		TargetDir:    t.TempDir(),
-		LookPath:     stubLookPathSimple(map[string]bool{}),
-		ExecCmd:      stubExecCmd(nil, nil),
-		EvalSymlinks: stubEvalSymlinks(nil),
-		Getenv:       stubGetenv(map[string]string{}),
-		ReadFile:     os.ReadFile,
+		TargetDir:      t.TempDir(),
+		LookPath:       stubLookPathSimple(map[string]bool{}),
+		ExecCmd:        stubExecCmd(nil, nil),
+		ExecCmdTimeout: stubExecCmdTimeout(nil, nil),
+		EvalSymlinks:   stubEvalSymlinks(nil),
+		Getenv:         stubGetenv(map[string]string{}),
+		ReadFile:       os.ReadFile,
 	}
 
-	group := checkSwarmPlugin(opts)
+	group := checkReplicator(opts)
 
 	if len(group.Results) == 0 {
 		t.Fatal("expected at least one result")
 	}
 
 	r := group.Results[0]
-	if r.Severity != Fail {
-		t.Errorf("swarm severity = %v, want Fail", r.Severity)
+	if r.Severity != Warn {
+		t.Errorf("replicator severity = %v, want Warn", r.Severity)
 	}
-	if !strings.Contains(r.InstallHint, "npm install -g github:unbound-force/swarm-tools") {
-		t.Errorf("install hint = %q, want npm install command", r.InstallHint)
+	if !strings.Contains(r.InstallHint, "brew install unbound-force/tap/replicator") {
+		t.Errorf("install hint = %q, want brew install command", r.InstallHint)
 	}
 }
 
-func TestCheckSwarmPlugin_MissingPluginConfig(t *testing.T) {
-	dir := t.TempDir()
-	// opencode.json exists but no plugin array.
-	createFile(t, dir, "opencode.json", `{"mcpServers":{}}`)
-
-	opts := &Options{
-		TargetDir: dir,
-		LookPath:  stubLookPath(map[string]string{"swarm": "/usr/local/bin/swarm"}),
-		ExecCmd: stubExecCmd(
-			map[string]string{},
-			map[string]error{"swarm doctor": fmt.Errorf("not configured")},
-		),
-		ExecCmdTimeout: stubExecCmdTimeout(
-			map[string]string{},
-			map[string]error{"swarm doctor": fmt.Errorf("not configured")},
-		),
-		EvalSymlinks: stubEvalSymlinks(nil),
-		Getenv:       stubGetenv(map[string]string{}),
-		ReadFile:     os.ReadFile,
-	}
-
-	group := checkSwarmPlugin(opts)
-
-	// Find plugin config result.
-	for _, r := range group.Results {
-		if r.Name == "plugin config" {
-			if r.Severity != Warn {
-				t.Errorf("plugin config severity = %v, want Warn", r.Severity)
-			}
-			if !strings.Contains(r.InstallHint, "uf setup") {
-				t.Errorf("install hint = %q, want 'uf setup'", r.InstallHint)
-			}
-			return
-		}
-	}
-	t.Error("plugin config result not found")
-}
-
-func TestCheckSwarmPlugin_Installed(t *testing.T) {
+func TestCheckReplicator_AllPass(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create .hive/ dir and opencode.json with plugin entry.
+	// Create .hive/ dir and opencode.json with mcp.replicator entry.
 	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
 		t.Fatalf("mkdir .hive: %v", err)
 	}
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
+	createFile(t, dir, "opencode.json", `{"mcp":{"replicator":{"type":"local","command":["replicator","serve"],"enabled":true}}}`)
 
-	swarmDoctorOutput := "✓ OpenCode plugin configured\n✓ Hive storage: libSQL (embedded SQLite)\n✓ Semantic memory: ready\n✓ Dependencies: all installed\n"
+	replicatorDoctorOutput := "✓ All checks passed\n"
 
 	opts := &Options{
 		TargetDir: dir,
-		LookPath:  stubLookPath(map[string]string{"swarm": "/usr/local/bin/swarm"}),
+		LookPath:  stubLookPath(map[string]string{"replicator": "/usr/local/bin/replicator"}),
 		ExecCmd: stubExecCmd(
-			map[string]string{"swarm doctor": swarmDoctorOutput},
+			map[string]string{"replicator doctor": replicatorDoctorOutput},
 			nil,
 		),
 		ExecCmdTimeout: stubExecCmdTimeout(
-			map[string]string{"swarm doctor": swarmDoctorOutput},
+			map[string]string{"replicator doctor": replicatorDoctorOutput},
 			nil,
 		),
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -1095,102 +1058,55 @@ func TestCheckSwarmPlugin_Installed(t *testing.T) {
 		ReadFile:     os.ReadFile,
 	}
 
-	group := checkSwarmPlugin(opts)
+	group := checkReplicator(opts)
 
-	// Verify swarm=Pass.
 	results := make(map[string]CheckResult)
 	for _, r := range group.Results {
 		results[r.Name] = r
 	}
 
-	if r := results["swarm"]; r.Severity != Pass {
-		t.Errorf("swarm severity = %v, want Pass", r.Severity)
+	if r := results["replicator"]; r.Severity != Pass {
+		t.Errorf("replicator severity = %v, want Pass", r.Severity)
 	}
-
-	// Verify embed contains swarm doctor output.
-	if !strings.Contains(group.Embed, "OpenCode plugin configured") {
-		t.Error("embed should contain swarm doctor output")
-	}
-
-	// Verify .hive/=Pass.
 	if r := results[".hive/"]; r.Severity != Pass {
 		t.Errorf(".hive/ severity = %v, want Pass", r.Severity)
 	}
+	if r := results["MCP config"]; r.Severity != Pass {
+		t.Errorf("MCP config severity = %v, want Pass", r.Severity)
+	}
 
-	// Verify plugin config=Pass.
-	if r := results["plugin config"]; r.Severity != Pass {
-		t.Errorf("plugin config severity = %v, want Pass", r.Severity)
+	// Verify embed contains replicator doctor output.
+	if !strings.Contains(group.Embed, "All checks passed") {
+		t.Error("embed should contain replicator doctor output")
 	}
 }
 
-func TestCheckSwarmPlugin_DoctorFails(t *testing.T) {
+func TestCheckReplicator_Timeout(t *testing.T) {
 	dir := t.TempDir()
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
+	createFile(t, dir, "opencode.json", `{"mcp":{"replicator":{"type":"local","command":["replicator","serve"],"enabled":true}}}`)
 
 	opts := &Options{
 		TargetDir: dir,
-		LookPath:  stubLookPath(map[string]string{"swarm": "/usr/local/bin/swarm"}),
+		LookPath:  stubLookPath(map[string]string{"replicator": "/usr/local/bin/replicator"}),
 		ExecCmd: stubExecCmd(
-			map[string]string{"swarm doctor": "✗ Plugin not configured\n"},
-			map[string]error{"swarm doctor": fmt.Errorf("exit status 1")},
+			nil,
+			map[string]error{"replicator doctor": fmt.Errorf("context deadline exceeded: timed out")},
 		),
 		ExecCmdTimeout: stubExecCmdTimeout(
-			map[string]string{"swarm doctor": "✗ Plugin not configured\n"},
-			map[string]error{"swarm doctor": fmt.Errorf("exit status 1")},
+			nil,
+			map[string]error{"replicator doctor": fmt.Errorf("context deadline exceeded: timed out")},
 		),
 		EvalSymlinks: stubEvalSymlinks(nil),
 		Getenv:       stubGetenv(map[string]string{}),
 		ReadFile:     os.ReadFile,
 	}
 
-	group := checkSwarmPlugin(opts)
+	group := checkReplicator(opts)
 
-	// Find swarm doctor result.
 	for _, r := range group.Results {
-		if r.Name == "swarm doctor" {
+		if r.Name == "replicator doctor" {
 			if r.Severity != Warn {
-				t.Errorf("swarm doctor severity = %v, want Warn", r.Severity)
-			}
-			if !strings.Contains(r.InstallHint, "uf setup") {
-				t.Errorf("install hint = %q, want 'uf setup'", r.InstallHint)
-			}
-			// Verify stderr is embedded.
-			if !strings.Contains(group.Embed, "Plugin not configured") {
-				t.Error("embed should contain swarm doctor stderr output")
-			}
-			return
-		}
-	}
-	t.Error("swarm doctor result not found")
-}
-
-func TestCheckSwarmPlugin_Timeout(t *testing.T) {
-	dir := t.TempDir()
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
-
-	opts := &Options{
-		TargetDir: dir,
-		LookPath:  stubLookPath(map[string]string{"swarm": "/usr/local/bin/swarm"}),
-		ExecCmd: stubExecCmd(
-			nil,
-			map[string]error{"swarm doctor": fmt.Errorf("context deadline exceeded: timed out")},
-		),
-		ExecCmdTimeout: stubExecCmdTimeout(
-			nil,
-			map[string]error{"swarm doctor": fmt.Errorf("context deadline exceeded: timed out")},
-		),
-		EvalSymlinks: stubEvalSymlinks(nil),
-		Getenv:       stubGetenv(map[string]string{}),
-		ReadFile:     os.ReadFile,
-	}
-
-	group := checkSwarmPlugin(opts)
-
-	// Find swarm doctor result.
-	for _, r := range group.Results {
-		if r.Name == "swarm doctor" {
-			if r.Severity != Warn {
-				t.Errorf("swarm doctor severity = %v, want Warn", r.Severity)
+				t.Errorf("replicator doctor severity = %v, want Warn", r.Severity)
 			}
 			if !strings.Contains(r.Message, "timed out") {
 				t.Errorf("message = %q, want 'timed out'", r.Message)
@@ -1198,7 +1114,84 @@ func TestCheckSwarmPlugin_Timeout(t *testing.T) {
 			return
 		}
 	}
-	t.Error("swarm doctor result not found")
+	t.Error("replicator doctor result not found")
+}
+
+func TestCheckReplicator_HiveMissing(t *testing.T) {
+	dir := t.TempDir()
+	// No .hive/ directory.
+	createFile(t, dir, "opencode.json", `{"mcp":{"replicator":{"type":"local","command":["replicator","serve"],"enabled":true}}}`)
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPath(map[string]string{"replicator": "/usr/local/bin/replicator"}),
+		ExecCmd: stubExecCmd(
+			map[string]string{"replicator doctor": "ok"},
+			nil,
+		),
+		ExecCmdTimeout: stubExecCmdTimeout(
+			map[string]string{"replicator doctor": "ok"},
+			nil,
+		),
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+	}
+
+	group := checkReplicator(opts)
+
+	for _, r := range group.Results {
+		if r.Name == ".hive/" {
+			if r.Severity != Warn {
+				t.Errorf(".hive/ severity = %v, want Warn", r.Severity)
+			}
+			if !strings.Contains(r.InstallHint, "uf init") {
+				t.Errorf("install hint = %q, want 'uf init'", r.InstallHint)
+			}
+			return
+		}
+	}
+	t.Error(".hive/ result not found")
+}
+
+func TestCheckReplicator_MCPMissing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
+		t.Fatalf("mkdir .hive: %v", err)
+	}
+	// opencode.json exists but no mcp.replicator.
+	createFile(t, dir, "opencode.json", `{"mcp":{"dewey":{"type":"local"}}}`)
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPath(map[string]string{"replicator": "/usr/local/bin/replicator"}),
+		ExecCmd: stubExecCmd(
+			map[string]string{"replicator doctor": "ok"},
+			nil,
+		),
+		ExecCmdTimeout: stubExecCmdTimeout(
+			map[string]string{"replicator doctor": "ok"},
+			nil,
+		),
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+	}
+
+	group := checkReplicator(opts)
+
+	for _, r := range group.Results {
+		if r.Name == "MCP config" {
+			if r.Severity != Warn {
+				t.Errorf("MCP config severity = %v, want Warn", r.Severity)
+			}
+			if !strings.Contains(r.InstallHint, "uf init") {
+				t.Errorf("install hint = %q, want 'uf init'", r.InstallHint)
+			}
+			return
+		}
+	}
+	t.Error("MCP config result not found")
 }
 
 // --- Phase 6: User Story 4 tests (T063-T066) ---
@@ -1241,15 +1234,15 @@ func TestFormatText_NoColors(t *testing.T) {
 	}
 }
 
-func TestFormatText_SwarmDoctorEmbed(t *testing.T) {
+func TestFormatText_ReplicatorDoctorEmbed(t *testing.T) {
 	report := &Report{
 		Groups: []CheckGroup{
 			{
-				Name: "Swarm Plugin",
+				Name: "Replicator",
 				Results: []CheckResult{
-					{Name: "swarm", Severity: Pass, Message: "installed"},
+					{Name: "replicator", Severity: Pass, Message: "installed"},
 				},
-				Embed: "✓ OpenCode plugin configured\n✓ Dependencies: all installed\n",
+				Embed: "✓ All checks passed\n✓ Dependencies: all installed\n",
 			},
 		},
 		Summary: Summary{Total: 1, Passed: 1},
@@ -1261,8 +1254,8 @@ func TestFormatText_SwarmDoctorEmbed(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "OpenCode plugin configured") {
-		t.Error("expected embedded swarm doctor output")
+	if !strings.Contains(output, "All checks passed") {
+		t.Error("expected embedded replicator doctor output")
 	}
 	if !strings.Contains(output, "─") {
 		t.Error("expected separator lines around embed")
@@ -1321,11 +1314,11 @@ func TestFormatJSON(t *testing.T) {
 				},
 			},
 			{
-				Name: "Swarm Plugin",
+				Name: "Replicator",
 				Results: []CheckResult{
-					{Name: "swarm", Severity: Pass, Message: "installed"},
+					{Name: "replicator", Severity: Pass, Message: "installed"},
 				},
-				Embed: "✓ OpenCode plugin configured\n",
+				Embed: "✓ All checks passed\n",
 			},
 		},
 		Summary: Summary{Total: 3, Passed: 2, Warned: 0, Failed: 1},
@@ -1522,15 +1515,15 @@ func TestCheckNodeVersion(t *testing.T) {
 	}
 }
 
-func TestInstallHint_BunForSwarm(t *testing.T) {
+func TestInstallHint_ReplicatorHomebrew(t *testing.T) {
 	env := DetectedEnvironment{
 		Managers: []ManagerInfo{
-			{Kind: ManagerBun, Path: "/home/user/.bun/bin/bun", Manages: []string{"node", "packages"}},
+			{Kind: ManagerHomebrew, Path: "/opt/homebrew/bin/brew", Manages: []string{"packages"}},
 		},
 	}
-	hint := installHint("swarm", env)
-	if !strings.Contains(hint, "bun") {
-		t.Errorf("hint = %q, want bun command", hint)
+	hint := installHint("replicator", env)
+	if !strings.Contains(hint, "brew install unbound-force/tap/replicator") {
+		t.Errorf("hint = %q, want brew install command", hint)
 	}
 }
 
@@ -1618,7 +1611,7 @@ func TestHomebrewInstallCmd(t *testing.T) {
 		{"dewey", "brew install unbound-force/tap/dewey"},
 		{"node", "brew install node"},
 		{"gh", "brew install gh"},
-		{"swarm", "npm install -g github:unbound-force/swarm-tools"},
+		{"replicator", "brew install unbound-force/tap/replicator"},
 		{"custom", "brew install custom"},
 	}
 	for _, tt := range tests {
@@ -1637,7 +1630,7 @@ func TestGenericInstallCmd(t *testing.T) {
 		{"gaze"},
 		{"go"},
 		{"node"},
-		{"swarm"},
+		{"replicator"},
 		{"gh"},
 		{"unknown"},
 	}
@@ -1680,7 +1673,7 @@ func TestManagerInstallCmd(t *testing.T) {
 		{"node", ManagerFnm, "fnm install 22"},
 		{"go", ManagerMise, "mise install go@1.24"},
 		{"node", ManagerMise, "mise install node@22"},
-		{"swarm", ManagerBun, "bun add -g github:unbound-force/swarm-tools"},
+		{"replicator", ManagerHomebrew, "brew install unbound-force/tap/replicator"},
 	}
 	for _, tt := range tests {
 		got := managerInstallCmd(tt.tool, tt.manager)
@@ -2151,38 +2144,43 @@ func TestValidateAgents_EmptyDir(t *testing.T) {
 	}
 }
 
-func TestCheckSwarmPlugin_PluginArrayParseError(t *testing.T) {
+func TestCheckReplicator_DoctorFails(t *testing.T) {
 	dir := t.TempDir()
-	// plugin key exists but is not an array.
-	createFile(t, dir, "opencode.json", `{"plugin": "not-an-array"}`)
+	createFile(t, dir, "opencode.json", `{"mcp":{"replicator":{"type":"local","command":["replicator","serve"],"enabled":true}}}`)
 
 	opts := &Options{
 		TargetDir: dir,
-		LookPath:  stubLookPath(map[string]string{"swarm": "/usr/local/bin/swarm"}),
+		LookPath:  stubLookPath(map[string]string{"replicator": "/usr/local/bin/replicator"}),
 		ExecCmd: stubExecCmd(
-			map[string]string{"swarm doctor": "ok"},
-			nil,
+			map[string]string{"replicator doctor": "✗ Not configured\n"},
+			map[string]error{"replicator doctor": fmt.Errorf("exit status 1")},
 		),
 		ExecCmdTimeout: stubExecCmdTimeout(
-			map[string]string{"swarm doctor": "ok"},
-			nil,
+			map[string]string{"replicator doctor": "✗ Not configured\n"},
+			map[string]error{"replicator doctor": fmt.Errorf("exit status 1")},
 		),
 		EvalSymlinks: stubEvalSymlinks(nil),
 		Getenv:       stubGetenv(map[string]string{}),
 		ReadFile:     os.ReadFile,
 	}
 
-	group := checkSwarmPlugin(opts)
+	group := checkReplicator(opts)
 
 	for _, r := range group.Results {
-		if r.Name == "plugin config" {
+		if r.Name == "replicator doctor" {
 			if r.Severity != Warn {
-				t.Errorf("unparseable plugin array should produce Warn, got %v", r.Severity)
+				t.Errorf("replicator doctor severity = %v, want Warn", r.Severity)
+			}
+			if !strings.Contains(r.InstallHint, "uf setup") {
+				t.Errorf("install hint = %q, want 'uf setup'", r.InstallHint)
+			}
+			if !strings.Contains(group.Embed, "Not configured") {
+				t.Error("embed should contain replicator doctor output")
 			}
 			return
 		}
 	}
-	t.Error("plugin config result not found")
+	t.Error("replicator doctor result not found")
 }
 
 func TestCheckMCPConfig_NoFile(t *testing.T) {

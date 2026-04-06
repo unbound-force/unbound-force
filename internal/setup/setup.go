@@ -1,7 +1,7 @@
 // Package setup implements automated tool chain installation for
 // the Unbound Force development environment. It detects existing
 // version managers, installs missing tools through the appropriate
-// manager, configures the Swarm plugin, and scaffolds project files.
+// manager, configures Replicator, and scaffolds project files.
 // All external dependencies are injected for testability per
 // Constitution Principle IV.
 package setup
@@ -17,7 +17,6 @@ import (
 	"strings"
 
 	"github.com/unbound-force/unbound-force/internal/doctor"
-	"github.com/unbound-force/unbound-force/internal/scaffold"
 )
 
 // Options configures a setup run. All external dependencies are
@@ -108,7 +107,7 @@ type stepResult struct {
 }
 
 // graniteModel is the enterprise-grade embedding model used by both
-// Dewey and Swarm. IBM Granite, Apache 2.0, permissibly licensed
+// Dewey and Replicator. IBM Granite, Apache 2.0, permissibly licensed
 // training data. Setting these env vars aligns all tools
 // with the same embedding model.
 const (
@@ -127,7 +126,7 @@ func Run(opts Options) error {
 
 	// Set Ollama env vars so all embedding consumers use the same
 	// enterprise-grade embedding model. These are inherited by
-	// child processes (swarm setup, swarm init, dewey serve).
+	// child processes (replicator setup, dewey serve).
 	_ = os.Setenv("OLLAMA_MODEL", graniteModel)
 	_ = os.Setenv("OLLAMA_EMBED_DIM", graniteEmbedDim)
 
@@ -170,89 +169,63 @@ func Run(opts Options) error {
 	fmt.Fprintln(opts.Stdout, "Installing...")
 
 	// Step 1: Install OpenCode (FR-022).
-	fmt.Fprintf(opts.Stdout, "  [1/15] OpenCode...\n")
+	fmt.Fprintf(opts.Stdout, "  [1/12] OpenCode...\n")
 	results = append(results, installOpenCode(&opts, env))
 
 	// Step 2: Install Gaze (FR-023).
-	fmt.Fprintf(opts.Stdout, "  [2/15] Gaze...\n")
+	fmt.Fprintf(opts.Stdout, "  [2/12] Gaze...\n")
 	results = append(results, installGaze(&opts, env))
 
 	// Step 3: Install Mx F Manager hero.
-	fmt.Fprintf(opts.Stdout, "  [3/15] Mx F...\n")
+	fmt.Fprintf(opts.Stdout, "  [3/12] Mx F...\n")
 	results = append(results, installMxF(&opts, env))
 
 	// Step 4: Install GitHub CLI.
-	fmt.Fprintf(opts.Stdout, "  [4/15] GitHub CLI...\n")
+	fmt.Fprintf(opts.Stdout, "  [4/12] GitHub CLI...\n")
 	results = append(results, installGH(&opts, env))
 
 	// Step 5: Ensure Node.js (FR-024).
-	fmt.Fprintf(opts.Stdout, "  [5/15] Node.js...\n")
+	fmt.Fprintf(opts.Stdout, "  [5/12] Node.js...\n")
 	nodeResult := ensureNodeJS(&opts, env)
 	results = append(results, nodeResult)
 	nodeAvailable := nodeResult.err == nil && nodeResult.action != "failed"
 
-	// Steps 6-10: Node.js-dependent tools (inside nodeAvailable block).
+	// Step 6: Install OpenSpec CLI (Node.js-dependent).
 	if nodeAvailable {
-		// Step 6: Ensure bun is available (prerequisite for swarm setup).
-		fmt.Fprintf(opts.Stdout, "  [6/15] Bun...\n")
-		bunResult := ensureBun(&opts, env)
-		results = append(results, bunResult)
-
-		// Step 7: Install OpenSpec CLI.
-		fmt.Fprintf(opts.Stdout, "  [7/15] OpenSpec CLI...\n")
+		fmt.Fprintf(opts.Stdout, "  [6/12] OpenSpec CLI...\n")
 		results = append(results, installOpenSpec(&opts, env))
-
-		// Step 8: Install Swarm plugin (FR-025).
-		fmt.Fprintf(opts.Stdout, "  [8/15] Swarm plugin...\n")
-		swarmResult := installSwarmPlugin(&opts, env)
-		results = append(results, swarmResult)
-
-		if swarmResult.err == nil && swarmResult.action != "failed" && swarmResult.action != "skipped" {
-			// Step 9: Run swarm setup (FR-026).
-			fmt.Fprintf(opts.Stdout, "  [9/15] Swarm setup...\n")
-			results = append(results, runSwarmSetup(&opts))
-
-			// Step 10: Initialize .hive/ (FR-029).
-			fmt.Fprintf(opts.Stdout, "  [10/15] .hive/...\n")
-			results = append(results, initializeHive(&opts))
-		} else if swarmResult.action == "already installed" {
-			// Swarm already installed — still initialize .hive/.
-			fmt.Fprintf(opts.Stdout, "  [10/15] .hive/...\n")
-			results = append(results, initializeHive(&opts))
-		} else {
-			results = append(results, stepResult{name: "swarm setup", action: "skipped", detail: "no swarm"})
-			results = append(results, stepResult{name: ".hive/", action: "skipped", detail: "no swarm"})
-		}
 	} else {
 		results = append(results, stepResult{name: "OpenSpec CLI", action: "skipped", detail: "no Node.js"})
-		results = append(results, stepResult{name: "Swarm plugin", action: "skipped", detail: "no Node.js"})
-		results = append(results, stepResult{name: "swarm setup", action: "skipped", detail: "no swarm"})
-		results = append(results, stepResult{name: ".hive/", action: "skipped", detail: "no swarm"})
 	}
 
-	// Step 11: Install Ollama (prerequisite for Dewey + Swarm embeddings).
-	fmt.Fprintf(opts.Stdout, "  [11/15] Ollama...\n")
+	// Step 7: Install Replicator (Homebrew, replaces Swarm plugin).
+	fmt.Fprintf(opts.Stdout, "  [7/12] Replicator...\n")
+	replicatorResult := installReplicator(&opts, env)
+	results = append(results, replicatorResult)
+
+	// Step 8: Run replicator setup.
+	if replicatorResult.err == nil && replicatorResult.action != "failed" && replicatorResult.action != "skipped" {
+		fmt.Fprintf(opts.Stdout, "  [8/12] Replicator setup...\n")
+		results = append(results, runReplicatorSetup(&opts))
+	} else {
+		results = append(results, stepResult{name: "replicator setup", action: "skipped", detail: "no replicator"})
+	}
+
+	// Step 9: Install Ollama (prerequisite for Dewey + Replicator embeddings).
+	fmt.Fprintf(opts.Stdout, "  [9/12] Ollama...\n")
 	results = append(results, installOllama(&opts, env))
 
-	// Step 12: Install Dewey (after Ollama, before uf init).
-	fmt.Fprintf(opts.Stdout, "  [12/15] Dewey...\n")
+	// Step 10: Install Dewey (after Ollama).
+	fmt.Fprintf(opts.Stdout, "  [10/12] Dewey...\n")
 	results = append(results, installDewey(&opts, env))
 
-	// Step 13: Install golangci-lint (Spec 019 FR-012).
-	fmt.Fprintf(opts.Stdout, "  [13/15] golangci-lint...\n")
+	// Step 11: Install golangci-lint (Spec 019 FR-012).
+	fmt.Fprintf(opts.Stdout, "  [11/12] golangci-lint...\n")
 	results = append(results, installGolangciLint(&opts, env))
 
-	// Step 14: Install govulncheck (Spec 019 FR-012).
-	fmt.Fprintf(opts.Stdout, "  [14/15] govulncheck...\n")
+	// Step 12: Install govulncheck (Spec 019 FR-012).
+	fmt.Fprintf(opts.Stdout, "  [12/12] govulncheck...\n")
 	results = append(results, installGovulncheck(&opts, env))
-
-	// Step 15: Run uf init (FR-033).
-	// opencode.json is now configured by uf init (via scaffold.configureOpencodeJSON),
-	// not by setup directly. Dewey workspace initialization (dewey init + dewey index)
-	// is also handled by uf init (via scaffold.initSubTools) — repo-level operations
-	// belong in the repo-level command.
-	fmt.Fprintf(opts.Stdout, "  [15/15] uf init...\n")
-	results = append(results, runUnboundInit(&opts))
 
 	// Print results.
 	for _, r := range results {
@@ -284,7 +257,7 @@ func Run(opts Options) error {
 
 	// Embedding model alignment note.
 	fmt.Fprintln(opts.Stdout)
-	fmt.Fprintln(opts.Stdout, "Note: Swarm and Dewey are configured to use "+graniteModel+".")
+	fmt.Fprintln(opts.Stdout, "Note: Replicator and Dewey are configured to use "+graniteModel+".")
 	fmt.Fprintln(opts.Stdout, "  Add to your shell profile for consistent behavior:")
 	fmt.Fprintln(opts.Stdout, "  export OLLAMA_MODEL="+graniteModel)
 	fmt.Fprintln(opts.Stdout, "  export OLLAMA_EMBED_DIM="+graniteEmbedDim)
@@ -387,35 +360,21 @@ func installGH(opts *Options, env doctor.DetectedEnvironment) stepResult {
 }
 
 // installOpenSpec installs the OpenSpec CLI if missing.
-// Follows the installSwarmPlugin() pattern with bun preference:
-// try bun first, fall back to npm.
+// Uses npm as the sole installation method (FR-004).
 func installOpenSpec(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	if _, err := opts.LookPath("openspec"); err == nil {
 		return stepResult{name: "OpenSpec CLI", action: "already installed"}
 	}
 
 	if opts.DryRun {
-		if doctor.HasManager(env, doctor.ManagerBun) {
-			return stepResult{name: "OpenSpec CLI", action: "dry-run", detail: "Would install: bun add -g @fission-ai/openspec@latest"}
-		}
 		return stepResult{name: "OpenSpec CLI", action: "dry-run", detail: "Would install: npm install -g @fission-ai/openspec@latest"}
-	}
-
-	// Prefer bun, fall back to npm (enhanced from installSwarmPlugin pattern
-	// — falls through to npm on bun failure for resilience).
-	if doctor.HasManager(env, doctor.ManagerBun) {
-		if _, bunErr := opts.ExecCmd("bun", "add", "-g", "@fission-ai/openspec@latest"); bunErr == nil {
-			return stepResult{name: "OpenSpec CLI", action: "installed", detail: "via bun"}
-		}
-		// bun failed — fall through to npm (log for diagnostics).
-		fmt.Fprintln(opts.Stderr, "  bun install failed, trying npm...")
 	}
 
 	if _, err := opts.ExecCmd("npm", "install", "-g", "@fission-ai/openspec@latest"); err != nil {
 		return stepResult{
 			name:   "OpenSpec CLI",
 			action: "failed",
-			detail: "npm install failed — fix npm permissions (see https://docs.npmjs.com/resolving-eacces-permissions-errors) or install via bun",
+			detail: "npm install failed — fix npm permissions (see https://docs.npmjs.com/resolving-eacces-permissions-errors)",
 			err:    err,
 		}
 	}
@@ -534,104 +493,54 @@ func installNodeJS(opts *Options, env doctor.DetectedEnvironment, reason string)
 	}
 }
 
-// swarmForkSource is the GitHub fork source for the Swarm plugin.
-// Changed from upstream "opencode-swarm-plugin@latest" to the
-// organization's fork per Spec 023 US2.
-const swarmForkSource = "github:unbound-force/swarm-tools"
+// installReplicator installs Replicator if missing per FR-001.
+// Follows the installGaze() pattern: Homebrew only, skip with
+// GitHub releases link if no Homebrew.
+func installReplicator(opts *Options, env doctor.DetectedEnvironment) stepResult {
+	if _, err := opts.LookPath("replicator"); err == nil {
+		return stepResult{name: "Replicator", action: "already installed"}
+	}
 
-// installSwarmPlugin installs the Swarm plugin from the
-// organization's fork per FR-025 and Spec 023 US2.
-// Design decision: No early-return when swarm is already installed.
-// The install always runs to ensure the fork version is current
-// (idempotent update per contracts/setup-swarm.md).
-func installSwarmPlugin(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	if opts.DryRun {
-		if doctor.HasManager(env, doctor.ManagerBun) {
-			return stepResult{name: "Swarm plugin", action: "dry-run", detail: "Would install: bun add -g " + swarmForkSource}
+		if doctor.HasManager(env, doctor.ManagerHomebrew) {
+			return stepResult{name: "Replicator", action: "dry-run", detail: "Would install: brew install unbound-force/tap/replicator"}
 		}
-		return stepResult{name: "Swarm plugin", action: "dry-run", detail: "Would install: npm install -g " + swarmForkSource}
+		return stepResult{name: "Replicator", action: "dry-run", detail: "Would install: download from GitHub releases"}
 	}
 
-	// Prefer bun if available (FR-025).
-	if doctor.HasManager(env, doctor.ManagerBun) {
-		if _, err := opts.ExecCmd("bun", "add", "-g", swarmForkSource); err != nil {
-			return stepResult{name: "Swarm plugin", action: "failed", detail: "bun install failed", err: err}
+	if !doctor.HasManager(env, doctor.ManagerHomebrew) {
+		return stepResult{
+			name:   "Replicator",
+			action: "skipped",
+			detail: "Homebrew not available. Download from https://github.com/unbound-force/replicator/releases",
 		}
-		return stepResult{name: "Swarm plugin", action: "installed", detail: "via bun"}
 	}
 
-	// Default to npm.
-	if _, err := opts.ExecCmd("npm", "install", "-g", swarmForkSource); err != nil {
-		return stepResult{name: "Swarm plugin", action: "failed", detail: "npm install failed", err: err}
+	if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/replicator"); err != nil {
+		return stepResult{name: "Replicator", action: "failed", detail: "brew install failed", err: err}
 	}
-	return stepResult{name: "Swarm plugin", action: "installed", detail: "via npm"}
+	return stepResult{name: "Replicator", action: "installed", detail: "via Homebrew"}
 }
 
-// ensureBun installs bun if not present. Bun is a prerequisite
-// for swarm setup -- the swarm plugin requires bun at runtime.
-func ensureBun(opts *Options, env doctor.DetectedEnvironment) stepResult {
-	if _, err := opts.LookPath("bun"); err == nil {
-		return stepResult{name: "Bun", action: "already installed"}
-	}
-
+// runReplicatorSetup runs `replicator setup` per FR-002.
+// Interactive guard prevents unattended execution.
+func runReplicatorSetup(opts *Options) stepResult {
 	if opts.DryRun {
-		return stepResult{name: "Bun", action: "dry-run", detail: "Would install: npm install -g bun"}
-	}
-
-	if _, err := opts.ExecCmd("npm", "install", "-g", "bun"); err != nil {
-		return stepResult{name: "Bun", action: "failed", detail: "npm install -g bun failed", err: err}
-	}
-	return stepResult{name: "Bun", action: "installed", detail: "via npm"}
-}
-
-// runSwarmSetup runs `swarm setup` per FR-026.
-// swarm setup may prompt for user input, so it requires either
-// the --yes flag or an interactive terminal. Without these,
-// CombinedOutput() would hang waiting for stdin that never arrives.
-func runSwarmSetup(opts *Options) stepResult {
-	if opts.DryRun {
-		return stepResult{name: "swarm setup", action: "dry-run", detail: "Would run: swarm setup"}
+		return stepResult{name: "replicator setup", action: "dry-run", detail: "Would run: replicator setup"}
 	}
 
 	if !opts.YesFlag && !opts.IsTTY() {
 		return stepResult{
-			name:   "swarm setup",
+			name:   "replicator setup",
 			action: "skipped",
-			detail: "interactive — run `swarm setup` manually or use --yes",
+			detail: "interactive — run `replicator setup` manually or use --yes",
 		}
 	}
 
-	if _, err := opts.ExecCmd("swarm", "setup"); err != nil {
-		return stepResult{name: "swarm setup", action: "failed", detail: "swarm setup failed", err: err}
+	if _, err := opts.ExecCmd("replicator", "setup"); err != nil {
+		return stepResult{name: "replicator setup", action: "failed", detail: "replicator setup failed", err: err}
 	}
-	return stepResult{name: "swarm setup", action: "completed"}
-}
-
-// initializeHive runs `swarm init` if .hive/ doesn't exist per FR-029.
-// swarm init may prompt for user input, so it requires either
-// the --yes flag or an interactive terminal.
-func initializeHive(opts *Options) stepResult {
-	hivePath := filepath.Join(opts.TargetDir, ".hive")
-	if info, err := os.Stat(hivePath); err == nil && info.IsDir() {
-		return stepResult{name: ".hive/", action: "already initialized"}
-	}
-
-	if opts.DryRun {
-		return stepResult{name: ".hive/", action: "dry-run", detail: "Would run: swarm init"}
-	}
-
-	if !opts.YesFlag && !opts.IsTTY() {
-		return stepResult{
-			name:   ".hive/",
-			action: "skipped",
-			detail: "interactive — run `swarm init` manually or use --yes",
-		}
-	}
-
-	if _, err := opts.ExecCmd("swarm", "init"); err != nil {
-		return stepResult{name: ".hive/", action: "failed", detail: "swarm init failed", err: err}
-	}
-	return stepResult{name: ".hive/", action: "initialized"}
+	return stepResult{name: "replicator setup", action: "completed"}
 }
 
 // installGolangciLint installs golangci-lint if missing per Spec 019
@@ -685,7 +594,7 @@ func installGovulncheck(opts *Options, env doctor.DetectedEnvironment) stepResul
 
 // installOllama installs Ollama if missing. Ollama is the local
 // model runtime used by both Dewey (semantic search embeddings)
-// and Swarm (semantic memory). Follows the installGaze() pattern:
+// and Replicator (semantic memory). Follows the installGaze() pattern:
 // Homebrew only, skip with download link if no Homebrew.
 func installOllama(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	if _, err := opts.LookPath("ollama"); err == nil {
@@ -714,7 +623,7 @@ func installOllama(opts *Options, env doctor.DetectedEnvironment) stepResult {
 }
 
 // installDewey installs Dewey and pulls the embedding model.
-// Position: after Swarm plugin, before uf init.
+// Position: after Replicator, before golangci-lint.
 // Design decision: Dewey is optional (Constitution Principle II —
 // Composability First), so installation failures produce warnings
 // rather than hard failures. Note: brew install and ollama pull are
@@ -755,7 +664,7 @@ func installDewey(opts *Options, env doctor.DetectedEnvironment) stepResult {
 }
 
 // pullEmbeddingModel pulls the enterprise-grade embedding model
-// via Ollama. Used by both Dewey and Swarm for consistent
+// via Ollama. Used by both Dewey and Replicator for consistent
 // semantic search across the toolchain.
 func pullEmbeddingModel(opts *Options) stepResult {
 	if _, err := opts.LookPath("ollama"); err != nil {
@@ -782,45 +691,6 @@ func pullEmbeddingModel(opts *Options) stepResult {
 	}
 
 	return stepResult{name: "Dewey", action: "installed", detail: "embedding model pulled"}
-}
-
-// runUnboundInit runs `uf init` if .opencode/ doesn't exist per FR-033.
-// scaffold.Run() calls initSubTools() which handles dewey init + dewey index
-// as repo-level operations. This is the sole path for dewey workspace setup.
-func runUnboundInit(opts *Options) stepResult {
-	ocDir := filepath.Join(opts.TargetDir, ".opencode")
-	if info, err := os.Stat(ocDir); err == nil && info.IsDir() {
-		return stepResult{name: "uf init", action: "already scaffolded"}
-	}
-
-	if opts.DryRun {
-		return stepResult{name: "uf init", action: "dry-run", detail: "Would run: uf init"}
-	}
-
-	// Call scaffold.Run() directly (same binary, no subprocess needed).
-	// Design decision: Direct function call avoids subprocess overhead
-	// and ensures consistent behavior. Per DRY principle, reuse the
-	// existing scaffold engine rather than shelling out.
-	// Forward LookPath/ExecCmd/ReadFile/WriteFile/DryRun to maintain
-	// the testability injection chain (FR-018).
-	result, err := scaffold.Run(scaffold.Options{
-		TargetDir: opts.TargetDir,
-		Stdout:    opts.Stdout,
-		LookPath:  opts.LookPath,
-		ExecCmd:   opts.ExecCmd,
-		ReadFile:  opts.ReadFile,
-		WriteFile: opts.WriteFile,
-		DryRun:    opts.DryRun,
-	})
-	if err != nil {
-		return stepResult{name: "uf init", action: "failed", detail: "scaffold failed", err: err}
-	}
-
-	return stepResult{
-		name:   "uf init",
-		action: "scaffolded",
-		detail: fmt.Sprintf("%d files", len(result.Created)+len(result.Updated)),
-	}
 }
 
 // printStepResult prints a formatted step result.

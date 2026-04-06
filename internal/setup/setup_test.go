@@ -115,21 +115,18 @@ func TestSetupRun_AllMissing(t *testing.T) {
 	}
 
 	// Verify install order: opencode (brew), gaze (brew), mxf (brew),
-	// gh (brew), node version check, bun (npm), openspec (npm),
-	// swarm (npm), swarm setup, swarm init, ollama (brew),
-	// dewey (brew). Note: dewey init/index are handled by uf init
-	// (via scaffold.initSubTools), not by setup directly.
+	// gh (brew), node version check, openspec (npm),
+	// replicator (brew), replicator setup, ollama (brew),
+	// dewey (brew).
 	expectedCmds := []string{
 		"brew install anomalyco/tap/opencode",
 		"brew install unbound-force/tap/gaze",
 		"brew install unbound-force/tap/mxf",
 		"brew install gh",
 		"node --version",
-		"npm install -g bun",
 		"npm install -g @fission-ai/openspec@latest",
-		"npm install -g github:unbound-force/swarm-tools",
-		"swarm setup",
-		"swarm init",
+		"brew install unbound-force/tap/replicator",
+		"replicator setup",
 		"brew install --cask ollama-app",
 		"brew install unbound-force/tap/dewey",
 	}
@@ -152,7 +149,7 @@ func TestSetupRun_AllPresent(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create all expected files/dirs.
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
+	createFile(t, dir, "opencode.json", `{"mcp":{"replicator":{"type":"local","command":["replicator","serve"],"enabled":true}}}`)
 	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
 		t.Fatalf("mkdir .hive: %v", err)
 	}
@@ -183,9 +180,8 @@ func TestSetupRun_AllPresent(t *testing.T) {
 			"gh":            "/usr/local/bin/gh",
 			"node":          "/usr/local/bin/node",
 			"npm":           "/usr/local/bin/npm",
-			"bun":           "/home/user/.bun/bin/bun",
 			"openspec":      "/usr/local/bin/openspec",
-			"swarm":         "/usr/local/bin/swarm",
+			"replicator":    "/usr/local/bin/replicator",
 			"dewey":         "/usr/local/bin/dewey",
 			"ollama":        "/usr/local/bin/ollama",
 			"golangci-lint": "/usr/local/bin/golangci-lint",
@@ -203,10 +199,9 @@ func TestSetupRun_AllPresent(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Verify no install commands were called EXCEPT swarm plugin
-	// (which always runs for idempotent fork update per Spec 023 US2).
+	// Verify no install commands were called (all tools already present).
 	for _, call := range rec.calls {
-		if strings.Contains(call, "install") && !strings.Contains(call, "github:unbound-force/swarm-tools") {
+		if strings.Contains(call, "install") {
 			t.Errorf("unexpected install command: %s", call)
 		}
 	}
@@ -259,15 +254,15 @@ func TestSetupRun_NoNodeJS(t *testing.T) {
 		t.Errorf("expected at least 2 non-node brew install calls, got %d", brewInstallCalls)
 	}
 
-	// Swarm steps should be skipped because Node.js failed.
+	// npm-dependent steps should be skipped because Node.js failed.
 	for _, call := range rec.calls {
-		if strings.Contains(call, "npm install") || call == "swarm setup" || call == "swarm init" {
-			t.Errorf("unexpected swarm-related command: %s", call)
+		if strings.Contains(call, "npm install") {
+			t.Errorf("unexpected npm command after Node.js failure: %s", call)
 		}
 	}
 }
 
-func TestSetupRun_NpmFails(t *testing.T) {
+func TestSetupRun_ReplicatorBrewFails(t *testing.T) {
 	dir := t.TempDir()
 
 	rec := &cmdRecorder{
@@ -275,7 +270,7 @@ func TestSetupRun_NpmFails(t *testing.T) {
 			"node --version": "v22.15.0",
 		},
 		errors: map[string]error{
-			"npm install -g github:unbound-force/swarm-tools": fmt.Errorf("npm ERR! code EACCES"),
+			"brew install unbound-force/tap/replicator": fmt.Errorf("brew: formula not found"),
 		},
 	}
 
@@ -298,13 +293,13 @@ func TestSetupRun_NpmFails(t *testing.T) {
 
 	err := Run(opts)
 	if err == nil {
-		t.Fatal("expected error when npm install fails")
+		t.Fatal("expected error when replicator brew install fails")
 	}
 
-	// swarm setup/init should NOT be called.
+	// replicator setup should NOT be called.
 	for _, call := range rec.calls {
-		if call == "swarm setup" || call == "swarm init" {
-			t.Errorf("unexpected command after npm failure: %s", call)
+		if call == "replicator setup" {
+			t.Errorf("unexpected command after brew failure: %s", call)
 		}
 	}
 }
@@ -340,15 +335,15 @@ func TestSetupRun_NvmDetected(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Swarm should be installed via npm from nvm-managed node.
+	// OpenSpec should be installed via npm from nvm-managed node.
 	npmCalled := false
 	for _, call := range rec.calls {
-		if strings.Contains(call, "npm install -g github:unbound-force/swarm-tools") {
+		if strings.Contains(call, "npm install -g @fission-ai/openspec@latest") {
 			npmCalled = true
 		}
 	}
 	if !npmCalled {
-		t.Error("expected npm install call for swarm plugin")
+		t.Error("expected npm install call for openspec")
 	}
 }
 
@@ -391,7 +386,7 @@ func TestSetupRun_NvmInstallNode(t *testing.T) {
 	}
 }
 
-func TestSetupRun_BunDetected(t *testing.T) {
+func TestSetupRun_ReplicatorAlreadyInstalled(t *testing.T) {
 	dir := t.TempDir()
 
 	rec := &cmdRecorder{
@@ -403,12 +398,14 @@ func TestSetupRun_BunDetected(t *testing.T) {
 	var buf bytes.Buffer
 	opts := Options{
 		TargetDir: dir,
+		YesFlag:   true,
 		Stdout:    &buf,
 		Stderr:    &buf,
 		LookPath: stubLookPath(map[string]string{
-			"brew": "/opt/homebrew/bin/brew",
-			"node": "/usr/local/bin/node",
-			"bun":  "/home/user/.bun/bin/bun",
+			"brew":       "/opt/homebrew/bin/brew",
+			"node":       "/usr/local/bin/node",
+			"npm":        "/usr/local/bin/npm",
+			"replicator": "/usr/local/bin/replicator",
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -422,22 +419,23 @@ func TestSetupRun_BunDetected(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Should use bun instead of npm.
-	bunCalled := false
+	// Should NOT call brew install for replicator.
 	for _, call := range rec.calls {
-		if strings.Contains(call, "bun add -g github:unbound-force/swarm-tools") {
-			bunCalled = true
+		if call == "brew install unbound-force/tap/replicator" {
+			t.Error("should not install replicator when already present")
 		}
 	}
-	if !bunCalled {
-		t.Errorf("expected bun add call, got calls: %v", rec.calls)
+
+	output := buf.String()
+	if !strings.Contains(output, "already installed") {
+		t.Error("expected 'already installed' for replicator")
 	}
 }
 
 func TestSetupRun_OpencodeJsonManipulation(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create opencode.json with existing MCP servers, no plugin key.
+	// Create opencode.json with existing MCP servers.
 	createFile(t, dir, "opencode.json", `{
   "mcpServers": {
     "dewey": {
@@ -458,10 +456,10 @@ func TestSetupRun_OpencodeJsonManipulation(t *testing.T) {
 		Stdout:    &buf,
 		Stderr:    &buf,
 		LookPath: stubLookPath(map[string]string{
-			"brew":  "/opt/homebrew/bin/brew",
-			"node":  "/usr/local/bin/node",
-			"npm":   "/usr/local/bin/npm",
-			"swarm": "/usr/local/bin/swarm",
+			"brew":       "/opt/homebrew/bin/brew",
+			"node":       "/usr/local/bin/node",
+			"npm":        "/usr/local/bin/npm",
+			"replicator": "/usr/local/bin/replicator",
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -475,9 +473,9 @@ func TestSetupRun_OpencodeJsonManipulation(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Setup no longer directly writes opencode.json (US4).
-	// opencode.json is now managed by uf init (via scaffold.configureOpencodeJSON).
-	// Verify the original file is unchanged by setup — uf init handles it.
+	// Setup does not directly write opencode.json — that is
+	// handled by uf init (via scaffold.configureOpencodeJSON).
+	// Verify the original file is unchanged by setup.
 	data, readErr := os.ReadFile(filepath.Join(dir, "opencode.json"))
 	if readErr != nil {
 		t.Fatalf("read opencode.json: %v", readErr)
@@ -510,10 +508,10 @@ func TestSetupRun_NoOpencodeJson(t *testing.T) {
 		Stdout:    &buf,
 		Stderr:    &buf,
 		LookPath: stubLookPath(map[string]string{
-			"brew":  "/opt/homebrew/bin/brew",
-			"node":  "/usr/local/bin/node",
-			"npm":   "/usr/local/bin/npm",
-			"swarm": "/usr/local/bin/swarm",
+			"brew":       "/opt/homebrew/bin/brew",
+			"node":       "/usr/local/bin/node",
+			"npm":        "/usr/local/bin/npm",
+			"replicator": "/usr/local/bin/replicator",
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -527,10 +525,8 @@ func TestSetupRun_NoOpencodeJson(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Setup no longer directly creates opencode.json (US4).
-	// opencode.json is now created by uf init (via scaffold.configureOpencodeJSON)
-	// which runs as the final step of setup. The file may or may not exist
-	// depending on whether dewey/swarm are available in the test environment.
+	// Setup does not directly create opencode.json — that is
+	// handled by uf init (via scaffold.configureOpencodeJSON).
 	// We just verify setup completes successfully without error.
 }
 
@@ -550,10 +546,10 @@ func TestSetupRun_MalformedOpencodeJson(t *testing.T) {
 		Stdout:    &buf,
 		Stderr:    &buf,
 		LookPath: stubLookPath(map[string]string{
-			"brew":  "/opt/homebrew/bin/brew",
-			"node":  "/usr/local/bin/node",
-			"npm":   "/usr/local/bin/npm",
-			"swarm": "/usr/local/bin/swarm",
+			"brew":       "/opt/homebrew/bin/brew",
+			"node":       "/usr/local/bin/node",
+			"npm":        "/usr/local/bin/npm",
+			"replicator": "/usr/local/bin/replicator",
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -563,9 +559,9 @@ func TestSetupRun_MalformedOpencodeJson(t *testing.T) {
 	}
 
 	err := Run(opts)
-	// Setup no longer directly touches opencode.json (US4).
-	// Malformed JSON is handled by uf init (scaffold.configureOpencodeJSON)
-	// which runs as the final step. Run should succeed.
+	// Setup does not directly touch opencode.json.
+	// Malformed JSON is handled by uf init (scaffold.configureOpencodeJSON).
+	// Run should succeed.
 	if err != nil {
 		t.Fatalf("Run: %v (malformed JSON should be non-fatal)", err)
 	}
@@ -976,70 +972,50 @@ func TestSetupRun_OpenCodeBrewFails(t *testing.T) {
 	}
 }
 
-func TestSetupRun_SwarmPluginNpmFails(t *testing.T) {
-	dir := t.TempDir()
+// --- Replicator installation tests ---
 
-	rec := &cmdRecorder{
-		outputs: map[string]string{
-			"node --version": "v22.15.0",
-		},
-		errors: map[string]error{
-			"npm install -g github:unbound-force/swarm-tools": fmt.Errorf("npm failed"),
-		},
-	}
+func TestInstallReplicator_AlreadyInstalled(t *testing.T) {
+	rec := &cmdRecorder{}
 
 	var buf bytes.Buffer
 	opts := Options{
-		TargetDir: dir,
-		Stdout:    &buf,
-		Stderr:    &buf,
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"replicator": "/usr/local/bin/replicator",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installReplicator(&opts, env)
+	if result.action != "already installed" {
+		t.Errorf("expected 'already installed', got %q", result.action)
+	}
+}
+
+func TestInstallReplicator_DryRun(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		DryRun: true,
+		Stdout: &buf,
+		Stderr: &buf,
 		LookPath: stubLookPath(map[string]string{
 			"brew": "/opt/homebrew/bin/brew",
-			"node": "/usr/local/bin/node",
-			"npm":  "/usr/local/bin/npm",
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
 		Getenv:       stubGetenv(map[string]string{}),
-		ReadFile:     os.ReadFile,
-		WriteFile:    os.WriteFile,
-	}
-
-	err := Run(opts)
-	if err == nil {
-		t.Fatal("expected error when npm install fails")
-	}
-
-	// Swarm setup/init should be skipped.
-	for _, call := range rec.calls {
-		if call == "swarm setup" || call == "swarm init" {
-			t.Errorf("unexpected command after npm failure: %s", call)
-		}
-	}
-}
-
-// --- Phase 4: User Story 2 — Forked Swarm Plugin tests (T017-T020) ---
-
-func TestInstallSwarmPlugin_ForkSource_Bun(t *testing.T) {
-	dir := t.TempDir()
-
-	rec := &cmdRecorder{
-		outputs: map[string]string{},
-	}
-
-	var buf bytes.Buffer
-	opts := Options{
-		TargetDir: dir,
-		Stdout:    &buf,
-		Stderr:    &buf,
-		LookPath: stubLookPath(map[string]string{
-			"bun": "/home/user/.bun/bin/bun",
-		}),
-		ExecCmd:      rec.execCmd,
-		EvalSymlinks: stubEvalSymlinks(nil),
-		Getenv:       stubGetenv(map[string]string{}),
-		ReadFile:     os.ReadFile,
-		WriteFile:    os.WriteFile,
 	}
 	opts.defaults()
 
@@ -1049,44 +1025,26 @@ func TestInstallSwarmPlugin_ForkSource_Bun(t *testing.T) {
 		Getenv:       opts.Getenv,
 	})
 
-	result := installSwarmPlugin(&opts, env)
-
-	// Verify bun was called with fork source.
-	found := false
-	for _, call := range rec.calls {
-		if call == "bun add -g github:unbound-force/swarm-tools" {
-			found = true
-		}
+	result := installReplicator(&opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("expected 'dry-run', got %q", result.action)
 	}
-	if !found {
-		t.Errorf("expected 'bun add -g github:unbound-force/swarm-tools', got calls: %v", rec.calls)
-	}
-	if result.action == "failed" {
-		t.Errorf("install should succeed, got action=%q", result.action)
+	if !strings.Contains(result.detail, "brew install unbound-force/tap/replicator") {
+		t.Errorf("expected brew install hint in detail, got %q", result.detail)
 	}
 }
 
-func TestInstallSwarmPlugin_ForkSource_Npm(t *testing.T) {
-	dir := t.TempDir()
-
-	rec := &cmdRecorder{
-		outputs: map[string]string{},
-	}
+func TestInstallReplicator_NoHomebrew(t *testing.T) {
+	rec := &cmdRecorder{}
 
 	var buf bytes.Buffer
 	opts := Options{
-		TargetDir: dir,
-		Stdout:    &buf,
-		Stderr:    &buf,
-		LookPath: stubLookPath(map[string]string{
-			// No bun — falls back to npm.
-			"npm": "/usr/local/bin/npm",
-		}),
+		Stdout:       &buf,
+		Stderr:       &buf,
+		LookPath:     stubLookPath(map[string]string{}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
 		Getenv:       stubGetenv(map[string]string{}),
-		ReadFile:     os.ReadFile,
-		WriteFile:    os.WriteFile,
 	}
 	opts.defaults()
 
@@ -1096,44 +1054,28 @@ func TestInstallSwarmPlugin_ForkSource_Npm(t *testing.T) {
 		Getenv:       opts.Getenv,
 	})
 
-	result := installSwarmPlugin(&opts, env)
-
-	// Verify npm was called with fork source.
-	found := false
-	for _, call := range rec.calls {
-		if call == "npm install -g github:unbound-force/swarm-tools" {
-			found = true
-		}
+	result := installReplicator(&opts, env)
+	if result.action != "skipped" {
+		t.Errorf("expected 'skipped', got %q", result.action)
 	}
-	if !found {
-		t.Errorf("expected 'npm install -g github:unbound-force/swarm-tools', got calls: %v", rec.calls)
-	}
-	if result.action == "failed" {
-		t.Errorf("install should succeed, got action=%q", result.action)
+	if !strings.Contains(result.detail, "github.com/unbound-force/replicator") {
+		t.Errorf("expected GitHub releases link in detail, got %q", result.detail)
 	}
 }
 
-func TestInstallSwarmPlugin_AlwaysInstalls(t *testing.T) {
-	dir := t.TempDir()
-
-	rec := &cmdRecorder{
-		outputs: map[string]string{},
-	}
+func TestInstallReplicator_Success(t *testing.T) {
+	rec := &cmdRecorder{}
 
 	var buf bytes.Buffer
 	opts := Options{
-		TargetDir: dir,
-		Stdout:    &buf,
-		Stderr:    &buf,
+		Stdout: &buf,
+		Stderr: &buf,
 		LookPath: stubLookPath(map[string]string{
-			"swarm": "/usr/local/bin/swarm", // swarm already installed
-			"npm":   "/usr/local/bin/npm",
+			"brew": "/opt/homebrew/bin/brew",
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
 		Getenv:       stubGetenv(map[string]string{}),
-		ReadFile:     os.ReadFile,
-		WriteFile:    os.WriteFile,
 	}
 	opts.defaults()
 
@@ -1143,21 +1085,105 @@ func TestInstallSwarmPlugin_AlwaysInstalls(t *testing.T) {
 		Getenv:       opts.Getenv,
 	})
 
-	result := installSwarmPlugin(&opts, env)
+	result := installReplicator(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
 
-	// Even though swarm is already installed, install command should
-	// still run (idempotent update per contracts/setup-swarm.md).
 	found := false
 	for _, call := range rec.calls {
-		if strings.Contains(call, "github:unbound-force/swarm-tools") {
+		if call == "brew install unbound-force/tap/replicator" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("install should run even when swarm is already installed, got calls: %v", rec.calls)
+		t.Errorf("expected brew install call, got: %v", rec.calls)
 	}
-	if result.action == "already installed" {
-		t.Error("should not return 'already installed' — must always run install for fork update")
+}
+
+func TestInstallReplicator_BrewFails(t *testing.T) {
+	rec := &cmdRecorder{
+		errors: map[string]error{
+			"brew install unbound-force/tap/replicator": fmt.Errorf("brew failed"),
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installReplicator(&opts, env)
+	if result.action != "failed" {
+		t.Errorf("expected 'failed', got %q", result.action)
+	}
+}
+
+func TestRunReplicatorSetup_DryRun(t *testing.T) {
+	opts := Options{DryRun: true}
+	opts.defaults()
+
+	result := runReplicatorSetup(&opts)
+	if result.action != "dry-run" {
+		t.Errorf("expected 'dry-run', got %q", result.action)
+	}
+}
+
+func TestRunReplicatorSetup_Success(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := Options{
+		YesFlag: true,
+		ExecCmd: rec.execCmd,
+	}
+	opts.defaults()
+
+	result := runReplicatorSetup(&opts)
+	if result.action != "completed" {
+		t.Errorf("expected 'completed', got %q", result.action)
+	}
+
+	found := false
+	for _, call := range rec.calls {
+		if call == "replicator setup" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'replicator setup' call, got: %v", rec.calls)
+	}
+}
+
+func TestRunReplicatorSetup_Failure(t *testing.T) {
+	rec := &cmdRecorder{
+		errors: map[string]error{
+			"replicator setup": fmt.Errorf("setup failed"),
+		},
+	}
+
+	opts := Options{
+		YesFlag: true,
+		ExecCmd: rec.execCmd,
+	}
+	opts.defaults()
+
+	result := runReplicatorSetup(&opts)
+	if result.action != "failed" {
+		t.Errorf("expected 'failed', got %q", result.action)
 	}
 }
 
@@ -1265,7 +1291,7 @@ func TestSetupRun_DeweyAlreadyInstalled(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
+	createFile(t, dir, "opencode.json", `{"mcp":{"replicator":{"type":"local","command":["replicator","serve"],"enabled":true}}}`)
 
 	rec := &cmdRecorder{
 		outputs: map[string]string{
@@ -1280,14 +1306,14 @@ func TestSetupRun_DeweyAlreadyInstalled(t *testing.T) {
 		Stdout:    &buf,
 		Stderr:    &buf,
 		LookPath: stubLookPath(map[string]string{
-			"brew":     "/opt/homebrew/bin/brew",
-			"node":     "/usr/local/bin/node",
-			"npm":      "/usr/local/bin/npm",
-			"opencode": "/usr/local/bin/opencode",
-			"gaze":     "/usr/local/bin/gaze",
-			"swarm":    "/usr/local/bin/swarm",
-			"dewey":    "/usr/local/bin/dewey",
-			"ollama":   "/usr/local/bin/ollama",
+			"brew":       "/opt/homebrew/bin/brew",
+			"node":       "/usr/local/bin/node",
+			"npm":        "/usr/local/bin/npm",
+			"opencode":   "/usr/local/bin/opencode",
+			"gaze":       "/usr/local/bin/gaze",
+			"replicator": "/usr/local/bin/replicator",
+			"dewey":      "/usr/local/bin/dewey",
+			"ollama":     "/usr/local/bin/ollama",
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -1366,10 +1392,6 @@ func TestSetupRun_OllamaInstall(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
 
 	rec := &cmdRecorder{
 		outputs: map[string]string{
@@ -1383,13 +1405,13 @@ func TestSetupRun_OllamaInstall(t *testing.T) {
 		Stdout:    &buf,
 		Stderr:    &buf,
 		LookPath: stubLookPath(map[string]string{
-			"brew":     "/opt/homebrew/bin/brew",
-			"node":     "/usr/local/bin/node",
-			"npm":      "/usr/local/bin/npm",
-			"go":       "/usr/local/bin/go",
-			"opencode": "/usr/local/bin/opencode",
-			"gaze":     "/usr/local/bin/gaze",
-			"swarm":    "/usr/local/bin/swarm",
+			"brew":       "/opt/homebrew/bin/brew",
+			"node":       "/usr/local/bin/node",
+			"npm":        "/usr/local/bin/npm",
+			"go":         "/usr/local/bin/go",
+			"opencode":   "/usr/local/bin/opencode",
+			"gaze":       "/usr/local/bin/gaze",
+			"replicator": "/usr/local/bin/replicator",
 			// ollama NOT in PATH -- should be installed via brew
 		}),
 		ExecCmd:      rec.execCmd,
@@ -1428,10 +1450,6 @@ func TestSetupRun_NoOllamaTip(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
 
 	rec := &cmdRecorder{
 		outputs: map[string]string{
@@ -1445,14 +1463,14 @@ func TestSetupRun_NoOllamaTip(t *testing.T) {
 		Stdout:    &buf,
 		Stderr:    &buf,
 		LookPath: stubLookPath(map[string]string{
-			"brew":     "/opt/homebrew/bin/brew",
-			"node":     "/usr/local/bin/node",
-			"npm":      "/usr/local/bin/npm",
-			"go":       "/usr/local/bin/go",
-			"opencode": "/usr/local/bin/opencode",
-			"gaze":     "/usr/local/bin/gaze",
-			"swarm":    "/usr/local/bin/swarm",
-			"ollama":   "/usr/local/bin/ollama", // ollama IS in PATH
+			"brew":       "/opt/homebrew/bin/brew",
+			"node":       "/usr/local/bin/node",
+			"npm":        "/usr/local/bin/npm",
+			"go":         "/usr/local/bin/go",
+			"opencode":   "/usr/local/bin/opencode",
+			"gaze":       "/usr/local/bin/gaze",
+			"replicator": "/usr/local/bin/replicator",
+			"ollama":     "/usr/local/bin/ollama", // ollama IS in PATH
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -1477,10 +1495,6 @@ func TestSetupRun_OllamaNoHomebrew(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
 
 	rec := &cmdRecorder{}
 
@@ -1491,11 +1505,11 @@ func TestSetupRun_OllamaNoHomebrew(t *testing.T) {
 		Stderr:    &buf,
 		LookPath: stubLookPath(map[string]string{
 			// No brew, no ollama — Homebrew not available
-			"node":     "/usr/local/bin/node",
-			"npm":      "/usr/local/bin/npm",
-			"opencode": "/usr/local/bin/opencode",
-			"gaze":     "/usr/local/bin/gaze",
-			"swarm":    "/usr/local/bin/swarm",
+			"node":       "/usr/local/bin/node",
+			"npm":        "/usr/local/bin/npm",
+			"opencode":   "/usr/local/bin/opencode",
+			"gaze":       "/usr/local/bin/gaze",
+			"replicator": "/usr/local/bin/replicator",
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -1528,10 +1542,6 @@ func TestSetupRun_OllamaBrewFails(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	createFile(t, dir, "opencode.json", `{"plugin":["opencode-swarm-plugin"]}`)
 
 	rec := &cmdRecorder{
 		outputs: map[string]string{
@@ -1549,13 +1559,12 @@ func TestSetupRun_OllamaBrewFails(t *testing.T) {
 		Stdout:    &buf,
 		Stderr:    &buf,
 		LookPath: stubLookPath(map[string]string{
-			"brew":     "/opt/homebrew/bin/brew",
-			"node":     "/usr/local/bin/node",
-			"npm":      "/usr/local/bin/npm",
-			"bun":      "/home/user/.bun/bin/bun",
-			"opencode": "/usr/local/bin/opencode",
-			"gaze":     "/usr/local/bin/gaze",
-			"swarm":    "/usr/local/bin/swarm",
+			"brew":       "/opt/homebrew/bin/brew",
+			"node":       "/usr/local/bin/node",
+			"npm":        "/usr/local/bin/npm",
+			"opencode":   "/usr/local/bin/opencode",
+			"gaze":       "/usr/local/bin/gaze",
+			"replicator": "/usr/local/bin/replicator",
 			// ollama NOT in PATH
 		}),
 		ExecCmd:      rec.execCmd,
@@ -1800,7 +1809,6 @@ func TestSetupRun_OpenSpecMissing_Install(t *testing.T) {
 			"gh":       "/usr/local/bin/gh",
 			"node":     "/usr/local/bin/node",
 			"npm":      "/usr/local/bin/npm",
-			"bun":      "/home/user/.bun/bin/bun",
 			// openspec NOT in PATH
 		}),
 		ExecCmd:      rec.execCmd,
@@ -1815,15 +1823,15 @@ func TestSetupRun_OpenSpecMissing_Install(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Should use bun (preferred) to install openspec.
-	bunCalled := false
+	// Should use npm to install openspec.
+	npmCalled := false
 	for _, call := range rec.calls {
-		if call == "bun add -g @fission-ai/openspec@latest" {
-			bunCalled = true
+		if call == "npm install -g @fission-ai/openspec@latest" {
+			npmCalled = true
 		}
 	}
-	if !bunCalled {
-		t.Errorf("expected bun add for openspec, got calls: %v", rec.calls)
+	if !npmCalled {
+		t.Errorf("expected npm install for openspec, got calls: %v", rec.calls)
 	}
 }
 
@@ -1853,7 +1861,7 @@ func TestSetupRun_OpenSpecNpmFails(t *testing.T) {
 			"gh":       "/usr/local/bin/gh",
 			"node":     "/usr/local/bin/node",
 			"npm":      "/usr/local/bin/npm",
-			// No bun — falls back to npm which fails
+			// npm install fails
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -1872,8 +1880,8 @@ func TestSetupRun_OpenSpecNpmFails(t *testing.T) {
 	if !strings.Contains(output, "failed") {
 		t.Error("expected failure message for openspec install")
 	}
-	if !strings.Contains(output, "npm") && !strings.Contains(output, "permissions") {
-		t.Error("expected npm permissions guidance in openspec failure message")
+	if !strings.Contains(output, "npm") {
+		t.Error("expected npm reference in openspec failure message")
 	}
 }
 
@@ -1916,15 +1924,14 @@ func TestSetupRun_DryRunNewSteps(t *testing.T) {
 	output := buf.String()
 
 	// Verify dry-run output includes new tools.
-	// Note: dewey init/index are no longer in setup — they are handled
-	// by uf init (via scaffold.initSubTools).
 	checks := []struct {
 		name    string
 		pattern string
 	}{
 		{"mxf", "Would install: brew install unbound-force/tap/mxf"},
 		{"gh", "Would install: brew install gh"},
-		{"openspec", "Would install: bun add -g @fission-ai/openspec@latest"},
+		{"openspec", "Would install: npm install -g @fission-ai/openspec@latest"},
+		{"replicator", "Would install: brew install unbound-force/tap/replicator"},
 	}
 	for _, c := range checks {
 		if !strings.Contains(output, c.pattern) {

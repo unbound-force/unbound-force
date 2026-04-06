@@ -117,7 +117,7 @@ var coreToolSpecs = []toolSpec{
 		name: "gh",
 	},
 	{
-		name: "swarm",
+		name: "replicator",
 	},
 	{
 		name: "ollama",
@@ -324,54 +324,51 @@ func checkNodeVersion(version, min string) bool {
 	return vMajor >= mMajor
 }
 
-// checkSwarmPlugin checks the Swarm plugin installation, runs
-// `swarm doctor`, checks .hive/ and plugin config per
-// FR-008/009/010/012.
-func checkSwarmPlugin(opts *Options) CheckGroup {
+// checkReplicator checks the Replicator installation, runs
+// `replicator doctor`, checks .hive/ and MCP config per FR-011.
+func checkReplicator(opts *Options) CheckGroup {
 	group := CheckGroup{
-		Name:    "Swarm Plugin",
+		Name:    "Replicator",
 		Results: []CheckResult{},
 	}
 
-	// Check swarm binary.
-	swarmPath, err := opts.LookPath("swarm")
+	// Check 1: replicator binary.
+	replicatorPath, err := opts.LookPath("replicator")
 	if err != nil {
 		group.Results = append(group.Results, CheckResult{
-			Name:        "swarm",
-			Severity:    Fail,
+			Name:        "replicator",
+			Severity:    Warn,
 			Message:     "not found",
-			InstallHint: "npm install -g github:unbound-force/swarm-tools",
-			InstallURL:  "https://www.swarmtools.ai/",
+			InstallHint: "brew install unbound-force/tap/replicator",
+			InstallURL:  "https://github.com/unbound-force/replicator",
 		})
 		return group
 	}
 
 	group.Results = append(group.Results, CheckResult{
-		Name:     "swarm",
+		Name:     "replicator",
 		Severity: Pass,
 		Message:  "installed",
-		Detail:   swarmPath,
+		Detail:   replicatorPath,
 	})
 
-	// Run swarm doctor with 10-second timeout per FR-009.
-	// Uses ExecCmdTimeout which defaults to exec.CommandContext
-	// with context.WithTimeout in production.
-	output, swarmErr := opts.ExecCmdTimeout(10*time.Second, "swarm", "doctor")
-	if swarmErr != nil {
-		errMsg := swarmErr.Error()
+	// Check 2: replicator doctor delegation with 10-second timeout.
+	output, repErr := opts.ExecCmdTimeout(10*time.Second, "replicator", "doctor")
+	if repErr != nil {
+		errMsg := repErr.Error()
 		if strings.Contains(errMsg, "timed out") || strings.Contains(errMsg, "deadline exceeded") {
 			group.Results = append(group.Results, CheckResult{
-				Name:        "swarm doctor",
+				Name:        "replicator doctor",
 				Severity:    Warn,
-				Message:     "swarm doctor timed out",
-				InstallHint: "Run swarm doctor manually",
+				Message:     "replicator doctor timed out",
+				InstallHint: "Run replicator doctor manually",
 			})
 		} else {
 			group.Embed = string(output)
 			group.Results = append(group.Results, CheckResult{
-				Name:        "swarm doctor",
+				Name:        "replicator doctor",
 				Severity:    Warn,
-				Message:     "swarm doctor reported issues",
+				Message:     "replicator doctor reported issues",
 				InstallHint: "Run: uf setup",
 			})
 		}
@@ -379,7 +376,7 @@ func checkSwarmPlugin(opts *Options) CheckGroup {
 		group.Embed = string(output)
 	}
 
-	// Check .hive/ existence (FR-010).
+	// Check 3: .hive/ existence.
 	hivePath := filepath.Join(opts.TargetDir, ".hive")
 	if info, statErr := os.Stat(hivePath); statErr == nil && info.IsDir() {
 		group.Results = append(group.Results, CheckResult{
@@ -392,68 +389,54 @@ func checkSwarmPlugin(opts *Options) CheckGroup {
 			Name:        ".hive/",
 			Severity:    Warn,
 			Message:     "not initialized",
-			InstallHint: "Run: swarm init",
+			InstallHint: "Run: uf init",
 		})
 	}
 
-	// Check plugin config in opencode.json (FR-012).
+	// Check 4: MCP config — check for mcp.replicator in opencode.json.
 	ocPath := filepath.Join(opts.TargetDir, "opencode.json")
 	ocData, readErr := opts.ReadFile(ocPath)
 	if readErr != nil {
 		group.Results = append(group.Results, CheckResult{
-			Name:        "plugin config",
+			Name:        "MCP config",
 			Severity:    Warn,
 			Message:     "opencode.json not found",
-			InstallHint: "Run: uf setup",
+			InstallHint: "Run: uf init",
 		})
 	} else {
 		var ocMap map[string]json.RawMessage
 		if jsonErr := json.Unmarshal(ocData, &ocMap); jsonErr != nil {
 			group.Results = append(group.Results, CheckResult{
-				Name:        "plugin config",
+				Name:        "MCP config",
 				Severity:    Warn,
 				Message:     "opencode.json could not be parsed",
 				InstallHint: "Fix JSON syntax in opencode.json",
 			})
-		} else if pluginRaw, ok := ocMap["plugin"]; ok {
-			var plugins []string
-			if pErr := json.Unmarshal(pluginRaw, &plugins); pErr == nil {
-				found := false
-				for _, p := range plugins {
-					if p == "opencode-swarm-plugin" {
+		} else {
+			// Check canonical "mcp" key for replicator entry.
+			found := false
+			if mcpRaw, ok := ocMap["mcp"]; ok {
+				var mcpMap map[string]json.RawMessage
+				if json.Unmarshal(mcpRaw, &mcpMap) == nil {
+					if _, hasKey := mcpMap["replicator"]; hasKey {
 						found = true
-						break
 					}
 				}
-				if found {
-					group.Results = append(group.Results, CheckResult{
-						Name:     "plugin config",
-						Severity: Pass,
-						Message:  "opencode-swarm-plugin in opencode.json",
-					})
-				} else {
-					group.Results = append(group.Results, CheckResult{
-						Name:        "plugin config",
-						Severity:    Warn,
-						Message:     "opencode-swarm-plugin not in plugin array",
-						InstallHint: "Fix: uf setup",
-					})
-				}
+			}
+			if found {
+				group.Results = append(group.Results, CheckResult{
+					Name:     "MCP config",
+					Severity: Pass,
+					Message:  "mcp.replicator in opencode.json",
+				})
 			} else {
 				group.Results = append(group.Results, CheckResult{
-					Name:        "plugin config",
+					Name:        "MCP config",
 					Severity:    Warn,
-					Message:     "plugin array could not be parsed",
-					InstallHint: "Fix: uf setup",
+					Message:     "mcp.replicator not in opencode.json",
+					InstallHint: "Run: uf init",
 				})
 			}
-		} else {
-			group.Results = append(group.Results, CheckResult{
-				Name:        "plugin config",
-				Severity:    Warn,
-				Message:     "no plugin key in opencode.json",
-				InstallHint: "Fix: uf setup",
-			})
 		}
 	}
 
