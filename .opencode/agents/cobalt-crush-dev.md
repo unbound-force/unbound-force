@@ -44,6 +44,10 @@ When making non-trivial design choices:
 3. Note alternatives considered and why they were rejected
 4. For architectural choices, create a design record in the spec directory
 
+### Gatekeeping Integrity
+
+When your implementation cannot meet a quality gate (coverage threshold, CRAP score, CI check, convention pack MUST rule, review iteration limit), you MUST stop and report the conflict. NEVER modify the gate to make the implementation pass. Gates exist to protect quality — weakening them to unblock work defeats their purpose. Report what gate is blocking, why, and let the human decide whether to adjust the gate or rework the implementation.
+
 ## Code Implementation Checklist
 
 ### 1. Convention Pack Adherence [PACK]

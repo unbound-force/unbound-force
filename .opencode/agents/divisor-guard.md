@@ -88,6 +88,12 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 - Are existing workflows preserved without regression?
 - If documentation was modified, is it consistent with actual behavior?
 
+#### 5. Gatekeeping Integrity
+
+- Has this change modified any gatekeeping value (threshold, severity definition, CI flag, agent restriction, convention pack MUST→SHOULD downgrade)?
+- If yes, is there documented human authorization for the change?
+- Flag unauthorized gate modifications as findings.
+
 ### Out of Scope
 
 These dimensions are owned by other Divisor personas — do NOT produce findings for them:
@@ -154,6 +160,12 @@ Do NOT use `git diff` or review code files. Your scope is exclusively the specif
 - Do all specs comply with the project constitution's core principles?
 - Do plans respect the constitution's governance model?
 - Are there any specs that implicitly weaken a constitutional principle without acknowledging the trade-off?
+
+#### 7. Gatekeeping Integrity
+
+- Has this change modified any gatekeeping value (threshold, severity definition, CI flag, agent restriction, convention pack MUST→SHOULD downgrade)?
+- If yes, is there documented human authorization for the change?
+- Flag unauthorized gate modifications as findings.
 
 ---
 

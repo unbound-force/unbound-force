@@ -92,6 +92,11 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 - Check the convention pack's `security_checks` section for language-specific vulnerability patterns.
 - Apply the pack's error handling conventions to the changed code.
 
+#### 6. Gate Tampering
+
+- Has this change removed or weakened any CI security control (`-race` flag, `govulncheck`, linter rules, pinned action SHAs, coverage thresholds)?
+- Flag as HIGH if a security-relevant gate was weakened without documented justification.
+
 ### Out of Scope
 
 These dimensions are owned by other Divisor personas — do NOT produce findings for them:

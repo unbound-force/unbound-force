@@ -178,6 +178,14 @@ org constitution — they MUST NOT contradict any org principle.
   pipeline (constitution → specify → clarify → plan → tasks →
   analyze → checklist → implement) to ensure requirements are
   captured before implementation begins.
+- **Gatekeeping Integrity**: Agents MUST NOT modify values that
+  serve as quality or governance gates — including but not limited
+  to: coverage thresholds, severity definitions, MUST/SHOULD rule
+  classifications, CI flags (`-race`, `-count=1`), review iteration
+  limits, agent temperature and tool-access settings, and pinned
+  dependency versions. When an implementation cannot meet a gate,
+  the agent MUST report the failure and stop rather than weakening
+  the gate.
 - **Cross-Repo Documentation**: When a change affects user-facing
   behavior, hero capabilities, CLI commands, or workflows, a
   GitHub issue MUST be created in the `unbound-force/website`
