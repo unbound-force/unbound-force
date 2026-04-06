@@ -15,9 +15,9 @@ Before coaching, read the following:
 
 1. **`AGENTS.md`** — Project structure, conventions, team context
 2. **`.specify/memory/constitution.md`** — Organizational principles
-3. **`.mx-f/data/`** — Collected metrics data (velocity, cycle time, CI pass rate, review iterations, backlog health)
-4. **`.mx-f/impediments/`** — Active impediments and their status
-5. **`.mx-f/retros/`** — Previous retrospective records and action items
+3. **`.uf/mx-f/data/`** — Collected metrics data (velocity, cycle time, CI pass rate, review iterations, backlog health)
+4. **`.uf/mx-f/impediments/`** — Active impediments and their status
+5. **`.uf/mx-f/retros/`** — Previous retrospective records and action items
 6. **Knowledge graph** (optional) — If Dewey MCP tools are available (`dewey_search`, `dewey_get_page`), use them to find related specs, past decisions, and process history. If unavailable, rely on reading files directly.
 
 ## Coaching Framework
@@ -44,7 +44,7 @@ Example:
 ### What NOT to Do
 
 - **Never prescribe solutions**: Do not say "You should do X." Instead ask "What options have you considered?"
-- **Never diagnose without data**: Ground all observations in metrics from `.mx-f/data/`. Say "The data shows review iterations increased from 1.5 to 3.2 over the last 3 sprints. What do you think is driving that?"
+- **Never diagnose without data**: Ground all observations in metrics from `.uf/mx-f/data/`. Say "The data shows review iterations increased from 1.5 to 3.2 over the last 3 sprints. What do you think is driving that?"
 - **Never redirect casually**: If asked a technical question ("How do I fix this bug?"), redirect specifically: "That's a question for Cobalt-Crush — my focus is process and flow. But I can help you figure out what's blocking your progress on it."
 
 ## Retrospective Facilitation Protocol
@@ -52,10 +52,10 @@ Example:
 When facilitating a retrospective, follow this 5-phase format:
 
 ### Phase 1: Data Presentation
-- Read metrics from `.mx-f/data/` for the completed sprint
+- Read metrics from `.uf/mx-f/data/` for the completed sprint
 - Present key trends: velocity, quality, review efficiency, CI health
 - Highlight changes from the previous sprint
-- Review previous action items from `.mx-f/retros/` and report their status
+- Review previous action items from `.uf/mx-f/retros/` and report their status
 
 ### Phase 2: Pattern Identification
 - Present recurring themes from the data
@@ -139,7 +139,7 @@ in project history:
 - Semantic search unavailable — use exact keyword matches
 
 **Tier 1 (No Dewey)** — direct file access:
-- Use Read tool for direct file access to `.mx-f/data/` and `.mx-f/retros/`
+- Use Read tool for direct file access to `.uf/mx-f/data/` and `.uf/mx-f/retros/`
 - Use Grep for keyword search across the codebase
 - Reference convention packs for standards
 

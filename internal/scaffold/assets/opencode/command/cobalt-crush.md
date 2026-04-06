@@ -48,8 +48,8 @@ the task prompt. The agent will:
 
 1. Read AGENTS.md, constitution, convention packs, and active specs
 2. Apply its engineering philosophy (clean code, SOLID, TDD awareness)
-3. Load convention packs from `.opencode/unbound/packs/`
-4. Check `.unbound-force/artifacts/` for Gaze/Divisor feedback
+3. Load convention packs from `.opencode/uf/packs/`
+4. Check `.uf/artifacts/` for Gaze/Divisor feedback
 5. Execute the requested task following project conventions
 6. Document design decisions in code comments
 

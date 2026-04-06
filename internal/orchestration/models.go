@@ -57,7 +57,7 @@ const (
 
 // WorkflowInstance represents a single execution of the hero
 // lifecycle for a feature. Persisted as JSON at
-// .unbound-force/workflows/{workflow_id}.json.
+// .uf/workflows/{workflow_id}.json.
 type WorkflowInstance struct {
 	WorkflowID        string          `json:"workflow_id"`
 	FeatureBranch     string          `json:"feature_branch"`

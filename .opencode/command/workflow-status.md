@@ -19,11 +19,11 @@ If no workflow-id is provided, shows the most recent in-progress workflow for th
 
 When this command is invoked:
 
-1. **If a workflow-id is provided**, read `.unbound-force/workflows/{workflow-id}.json` directly.
+1. **If a workflow-id is provided**, read `.uf/workflows/{workflow-id}.json` directly.
 
 2. **If no workflow-id is provided**:
    - Detect the current git branch via `git branch --show-current`
-   - Read all JSON files from `.unbound-force/workflows/`
+   - Read all JSON files from `.uf/workflows/`
    - Find the most recent in-progress workflow (active or awaiting_human) matching the current branch
 
 3. **Parse the workflow JSON** and display:
@@ -68,7 +68,7 @@ Stages:
   ○ reflect     (mx-f)          pending          [swarm]
 
 Artifacts produced:
-  .unbound-force/artifacts/BI-042-backlog-item.json
+  .uf/artifacts/BI-042-backlog-item.json
   specs/042-health-check/spec.md
 ```
 

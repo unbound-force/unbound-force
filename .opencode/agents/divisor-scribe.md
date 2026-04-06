@@ -39,8 +39,8 @@ Before writing, read:
 
 1. `AGENTS.md` — Project overview, conventions, structure
 2. `.specify/memory/constitution.md` — Constitution (if present)
-3. `.opencode/unbound/packs/content.md` — Content convention pack (focus on TD-NNN rules for Technical Documentation and shared VB/FA/FT rules)
-4. `.opencode/unbound/packs/content-custom.md` — Project-specific content rules (if present)
+3. `.opencode/uf/packs/content.md` — Content convention pack (focus on TD-NNN rules for Technical Documentation and shared VB/FA/FT rules)
+4. `.opencode/uf/packs/content-custom.md` — Project-specific content rules (if present)
 5. Existing documentation in the target area — read what already exists before writing or editing
 
 ---

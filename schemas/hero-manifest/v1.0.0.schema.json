@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/unbound-force/unbound-force/schemas/hero-manifest/v1.0.0.schema.json",
   "title": "Hero Manifest",
-  "description": "Machine-readable description of an Unbound Force hero's identity, capabilities, and integration points. Located at .unbound-force/hero.json in every hero repository.",
+  "description": "Machine-readable description of an Unbound Force hero's identity, capabilities, and integration points. Located at .uf/hero.json in every hero repository.",
   "type": "object",
   "required": [
     "name",

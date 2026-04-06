@@ -10,10 +10,10 @@ import (
 )
 
 // TestValidateConventionPack_GoPackValid validates that the actual
-// Go convention pack at .opencode/unbound/packs/go.md passes
+// Go convention pack at .opencode/uf/packs/go.md passes
 // structural validation (SC-007).
 func TestValidateConventionPack_GoPackValid(t *testing.T) {
-	packPath := filepath.Join("..", "..", ".opencode", "unbound", "packs", "go.md")
+	packPath := filepath.Join("..", "..", ".opencode", "uf", "packs", "go.md")
 
 	if _, err := os.Stat(packPath); err != nil {
 		t.Fatalf("Go convention pack not found at %s: %v", packPath, err)
@@ -149,7 +149,7 @@ No frontmatter here.
 // packs in the repo to ensure none have drifted from the required
 // structure.
 func TestValidateConventionPack_AllPacksValid(t *testing.T) {
-	packsDir := filepath.Join("..", "..", ".opencode", "unbound", "packs")
+	packsDir := filepath.Join("..", "..", ".opencode", "uf", "packs")
 
 	entries, err := os.ReadDir(packsDir)
 	if err != nil {

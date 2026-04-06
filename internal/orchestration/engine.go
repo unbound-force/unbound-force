@@ -32,8 +32,8 @@ type WorkflowResult struct {
 // (DI per SOLID Dependency Inversion Principle). This enables
 // testing with t.TempDir() paths and stubbed clocks.
 type Orchestrator struct {
-	WorkflowDir string        // .unbound-force/workflows/
-	ArtifactDir string        // .unbound-force/artifacts/
+	WorkflowDir string        // .uf/workflows/
+	ArtifactDir string        // .uf/artifacts/
 	AgentDir    string        // .opencode/agents/
 	GHRunner    sync.GHRunner // GitHub CLI interface (unused in v1.0.0)
 	Now         func() time.Time
@@ -144,7 +144,7 @@ func (o *Orchestrator) NewWorkflow(branch, backlogItemID string, overrides map[s
 // and specReview are forwarded to NewWorkflow (pass nil, false for defaults).
 //
 // Before creating the workflow, Start loads project-level config from
-// .unbound-force/config.yaml (same directory as workflow JSON files).
+// .uf/config.yaml (same directory as workflow JSON files).
 // Merge order: config execution modes (base) → CLI overrides (wins).
 // Spec review uses OR logic: config OR CLI (either true = enabled).
 // If config load fails, a warning is logged and empty defaults are used.

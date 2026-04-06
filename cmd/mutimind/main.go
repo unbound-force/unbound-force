@@ -46,8 +46,8 @@ func newRootCmdWithParams(params *AppParams) *cobra.Command {
 	}
 
 	rootCmd.PersistentFlags().StringVar(&params.OutputFormat, "format", "text", "Output format (text|json)")
-	rootCmd.PersistentFlags().StringVar(&params.BacklogDir, "backlog-dir", ".muti-mind/backlog", "Backlog directory")
-	rootCmd.PersistentFlags().StringVar(&params.ArtifactsDir, "artifacts-dir", ".muti-mind/artifacts", "Artifacts directory")
+	rootCmd.PersistentFlags().StringVar(&params.BacklogDir, "backlog-dir", ".uf/muti-mind/backlog", "Backlog directory")
+	rootCmd.PersistentFlags().StringVar(&params.ArtifactsDir, "artifacts-dir", ".uf/muti-mind/artifacts", "Artifacts directory")
 
 	rootCmd.AddCommand(newInitCmd(params))
 	rootCmd.AddCommand(newAddCmd(params))
@@ -77,7 +77,7 @@ func newInitCmd(p *AppParams) *cobra.Command {
 				return fmt.Errorf("failed to create artifacts directory: %w", err)
 			}
 			// Write default config if not exists
-			configPath := ".muti-mind/config.yaml"
+			configPath := ".uf/muti-mind/config.yaml"
 			if _, err := os.Stat(configPath); os.IsNotExist(err) {
 				_ = os.WriteFile(configPath, []byte("version: 1\n"), 0644)
 			}

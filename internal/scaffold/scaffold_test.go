@@ -131,15 +131,15 @@ var expectedAssetPaths = []string{
 	// OpenCode commands — includes review-council (11)
 	"opencode/command/review-council.md",
 	// Convention packs — shared by all heroes (9)
-	"opencode/unbound/packs/content-custom.md",
-	"opencode/unbound/packs/content.md",
-	"opencode/unbound/packs/default-custom.md",
-	"opencode/unbound/packs/default.md",
-	"opencode/unbound/packs/go-custom.md",
-	"opencode/unbound/packs/go.md",
-	"opencode/unbound/packs/severity.md",
-	"opencode/unbound/packs/typescript-custom.md",
-	"opencode/unbound/packs/typescript.md",
+	"opencode/uf/packs/content-custom.md",
+	"opencode/uf/packs/content.md",
+	"opencode/uf/packs/default-custom.md",
+	"opencode/uf/packs/default.md",
+	"opencode/uf/packs/go-custom.md",
+	"opencode/uf/packs/go.md",
+	"opencode/uf/packs/severity.md",
+	"opencode/uf/packs/typescript-custom.md",
+	"opencode/uf/packs/typescript.md",
 	// OpenSpec schema (5)
 	"openspec/schemas/unbound-force/schema.yaml",
 	"openspec/schemas/unbound-force/templates/proposal.md",
@@ -210,7 +210,7 @@ func TestRun_CreatesFiles(t *testing.T) {
 		".specify/scripts/bash",
 		".opencode/command",
 		".opencode/agents",
-		".opencode/unbound/packs",
+		".opencode/uf/packs",
 		"openspec/specs",
 		"openspec/changes",
 	}
@@ -541,13 +541,13 @@ func TestIsToolOwned(t *testing.T) {
 		{"openspec/schemas/unbound-force/schema.yaml", true},
 		{"openspec/schemas/unbound-force/templates/proposal.md", true},
 		// Tool-owned: convention packs (canonical)
-		{"opencode/unbound/packs/go.md", true},
-		{"opencode/unbound/packs/default.md", true},
-		{"opencode/unbound/packs/typescript.md", true},
+		{"opencode/uf/packs/go.md", true},
+		{"opencode/uf/packs/default.md", true},
+		{"opencode/uf/packs/typescript.md", true},
 		// User-owned: convention packs (custom)
-		{"opencode/unbound/packs/go-custom.md", false},
-		{"opencode/unbound/packs/default-custom.md", false},
-		{"opencode/unbound/packs/typescript-custom.md", false},
+		{"opencode/uf/packs/go-custom.md", false},
+		{"opencode/uf/packs/default-custom.md", false},
+		{"opencode/uf/packs/typescript-custom.md", false},
 		// User-owned: agents (including Divisor personas and Cobalt-Crush)
 		{"opencode/agents/divisor-guard.md", false},
 		{"opencode/agents/divisor-architect.md", false},
@@ -932,10 +932,7 @@ func TestCanonicalSources_AreEmbedded(t *testing.T) {
 	canonicalDirs := []string{
 		".opencode/command",
 		".opencode/agents",
-		".opencode/unbound/packs",
-		".specify/templates",
-		".specify/scripts/bash",
-		"openspec/schemas",
+		".opencode/uf/packs",
 	}
 
 	for _, dir := range canonicalDirs {
@@ -1006,10 +1003,10 @@ func TestIsDivisorAsset(t *testing.T) {
 		// Divisor command
 		{"opencode/command/review-council.md", true},
 		// Divisor convention packs
-		{"opencode/unbound/packs/go.md", true},
-		{"opencode/unbound/packs/default.md", true},
-		{"opencode/unbound/packs/go-custom.md", true},
-		{"opencode/unbound/packs/severity.md", true},
+		{"opencode/uf/packs/go.md", true},
+		{"opencode/uf/packs/default.md", true},
+		{"opencode/uf/packs/go-custom.md", true},
+		{"opencode/uf/packs/severity.md", true},
 		// Non-Divisor assets
 		{"opencode/agents/constitution-check.md", false},
 		{"opencode/command/speckit.specify.md", false},
@@ -1070,25 +1067,25 @@ func TestShouldDeployPack(t *testing.T) {
 		{"opencode/agents/divisor-guard.md", "go", true},
 		{"opencode/command/review-council.md", "go", true},
 		// Default and severity packs always deploy (language-agnostic)
-		{"opencode/unbound/packs/default.md", "go", true},
-		{"opencode/unbound/packs/default-custom.md", "go", true},
-		{"opencode/unbound/packs/default.md", "typescript", true},
-		{"opencode/unbound/packs/severity.md", "go", true},
-		{"opencode/unbound/packs/severity.md", "typescript", true},
-		{"opencode/unbound/packs/severity.md", "default", true},
+		{"opencode/uf/packs/default.md", "go", true},
+		{"opencode/uf/packs/default-custom.md", "go", true},
+		{"opencode/uf/packs/default.md", "typescript", true},
+		{"opencode/uf/packs/severity.md", "go", true},
+		{"opencode/uf/packs/severity.md", "typescript", true},
+		{"opencode/uf/packs/severity.md", "default", true},
 		// Matching language packs deploy
-		{"opencode/unbound/packs/go.md", "go", true},
-		{"opencode/unbound/packs/go-custom.md", "go", true},
-		{"opencode/unbound/packs/typescript.md", "typescript", true},
-		{"opencode/unbound/packs/typescript-custom.md", "typescript", true},
+		{"opencode/uf/packs/go.md", "go", true},
+		{"opencode/uf/packs/go-custom.md", "go", true},
+		{"opencode/uf/packs/typescript.md", "typescript", true},
+		{"opencode/uf/packs/typescript-custom.md", "typescript", true},
 		// Non-matching language packs do NOT deploy
-		{"opencode/unbound/packs/typescript.md", "go", false},
-		{"opencode/unbound/packs/typescript-custom.md", "go", false},
-		{"opencode/unbound/packs/go.md", "typescript", false},
-		{"opencode/unbound/packs/go-custom.md", "typescript", false},
+		{"opencode/uf/packs/typescript.md", "go", false},
+		{"opencode/uf/packs/typescript-custom.md", "go", false},
+		{"opencode/uf/packs/go.md", "typescript", false},
+		{"opencode/uf/packs/go-custom.md", "typescript", false},
 		// Default lang gets only default packs
-		{"opencode/unbound/packs/go.md", "default", false},
-		{"opencode/unbound/packs/default.md", "default", true},
+		{"opencode/uf/packs/go.md", "default", false},
+		{"opencode/uf/packs/default.md", "default", true},
 	}
 
 	for _, tt := range tests {
@@ -1159,7 +1156,7 @@ func TestRun_DivisorSubset(t *testing.T) {
 	// Verify Go convention pack deployed (auto-detected)
 	foundGoPack := false
 	for _, f := range result.Created {
-		if strings.HasSuffix(f, "go.md") && strings.Contains(f, "unbound/packs") {
+		if strings.HasSuffix(f, "go.md") && strings.Contains(f, "uf/packs") {
 			foundGoPack = true
 			break
 		}
@@ -1202,7 +1199,7 @@ func TestRun_DivisorSubset_WithLangFlag(t *testing.T) {
 	// Verify TypeScript pack deployed
 	foundTSPack := false
 	for _, f := range result.Created {
-		if strings.HasSuffix(f, "typescript.md") && strings.Contains(f, "unbound/packs") {
+		if strings.HasSuffix(f, "typescript.md") && strings.Contains(f, "uf/packs") {
 			foundTSPack = true
 		}
 	}
@@ -1212,7 +1209,7 @@ func TestRun_DivisorSubset_WithLangFlag(t *testing.T) {
 
 	// Verify Go pack NOT deployed
 	for _, f := range result.Created {
-		if strings.HasSuffix(f, "/go.md") && strings.Contains(f, "unbound/packs") {
+		if strings.HasSuffix(f, "/go.md") && strings.Contains(f, "uf/packs") {
 			t.Error("Go convention pack should not be deployed when lang=typescript")
 		}
 	}
@@ -1245,7 +1242,7 @@ func TestRun_DivisorSubset_DefaultFallback(t *testing.T) {
 
 	// Verify only always-deploy packs deployed (default, severity, content)
 	for _, f := range result.Created {
-		if strings.Contains(f, "unbound/packs") {
+		if strings.Contains(f, "uf/packs") {
 			base := filepath.Base(f)
 			if !strings.HasPrefix(base, "default") && base != "severity.md" &&
 				!strings.HasPrefix(base, "content") {
@@ -1503,6 +1500,58 @@ func TestScaffoldOutput_NoBareUnboundReferences(t *testing.T) {
 	}
 }
 
+// TestScaffoldOutput_NoOldPathReferences is a regression guard
+// for Spec 025 SC-001/SC-002: scaffolded files must not contain any
+// old directory path references. All tool workspace directories are
+// unified under .uf/ per the directory convention.
+func TestScaffoldOutput_NoOldPathReferences(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	_, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Stale patterns that must NOT appear in scaffolded output.
+	stalePatterns := []string{
+		"opencode/unbound/",
+		".unbound-force/",
+		".dewey/",
+		".hive/",
+		".muti-mind/",
+		".mx-f/",
+	}
+
+	// Walk all generated files and search for stale patterns.
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info.IsDir() {
+			return walkErr
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Errorf("read %s: %v", path, readErr)
+			return nil
+		}
+		text := string(content)
+		relPath, _ := filepath.Rel(dir, path)
+
+		for _, pattern := range stalePatterns {
+			if strings.Contains(text, pattern) {
+				t.Errorf("scaffolded file %s contains stale %q reference (Spec 025 violation)", relPath, pattern)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk error: %v", err)
+	}
+}
+
 // TestDivisorAgents_NoBareFRReferences is a regression guard for
 // Spec 019 FR-008: all FR references in Divisor agent files must
 // use the qualified "per Spec NNN FR-XXX" format.
@@ -1662,11 +1711,11 @@ func TestInitSubTools_DeweyAvailable(t *testing.T) {
 		t.Fatalf("expected 4 results, got %d: %v", len(results), results)
 	}
 
-	if results[0].name != ".unbound-force/config.yaml" || results[0].action != "initialized" {
-		t.Errorf("expected .unbound-force/config.yaml initialized, got %s %s", results[0].name, results[0].action)
+	if results[0].name != ".uf/config.yaml" || results[0].action != "initialized" {
+		t.Errorf("expected .uf/config.yaml initialized, got %s %s", results[0].name, results[0].action)
 	}
-	if results[1].name != ".dewey/" || results[1].action != "initialized" {
-		t.Errorf("expected .dewey/ initialized, got %s %s", results[1].name, results[1].action)
+	if results[1].name != ".uf/dewey/" || results[1].action != "initialized" {
+		t.Errorf("expected .uf/dewey/ initialized, got %s %s", results[1].name, results[1].action)
 	}
 	if results[2].name != "dewey index" || results[2].action != "completed" {
 		t.Errorf("expected dewey index completed, got %s %s", results[2].name, results[2].action)
@@ -1707,7 +1756,7 @@ func TestInitSubTools_DeweyNotAvailable(t *testing.T) {
 	if len(results) != 2 {
 		t.Errorf("expected 2 results, got %d: %v", len(results), results)
 	}
-	if len(results) > 0 && results[0].name != ".unbound-force/config.yaml" {
+	if len(results) > 0 && results[0].name != ".uf/config.yaml" {
 		t.Errorf("expected config.yaml result, got %s", results[0].name)
 	}
 	if len(results) > 1 && results[1].name != "opencode.json" {
@@ -1722,8 +1771,8 @@ func TestInitSubTools_DeweyNotAvailable(t *testing.T) {
 
 func TestInitSubTools_DeweyAlreadyInitialized(t *testing.T) {
 	dir := t.TempDir()
-	// Create .dewey/ directory — already initialized.
-	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+	// Create .uf/dewey/ directory — already initialized.
+	if err := os.MkdirAll(filepath.Join(dir, ".uf", "dewey"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -1738,11 +1787,11 @@ func TestInitSubTools_DeweyAlreadyInitialized(t *testing.T) {
 	results := initSubTools(opts)
 
 	// Should have 2 results: config.yaml initialized + opencode.json created
-	// (.dewey/ already exists, dewey in PATH → mcp.dewey added).
+	// (.uf/dewey/ already exists, dewey in PATH → mcp.dewey added).
 	if len(results) != 2 {
 		t.Errorf("expected 2 results, got %d: %v", len(results), results)
 	}
-	if len(results) > 0 && results[0].name != ".unbound-force/config.yaml" {
+	if len(results) > 0 && results[0].name != ".uf/config.yaml" {
 		t.Errorf("expected config.yaml result, got %s", results[0].name)
 	}
 	if len(results) > 1 && results[1].name != "opencode.json" {
@@ -1752,7 +1801,7 @@ func TestInitSubTools_DeweyAlreadyInitialized(t *testing.T) {
 	// dewey init should NOT have been called.
 	for _, call := range rec.calls {
 		if call == "dewey init" {
-			t.Error("dewey init should NOT be called when .dewey/ already exists")
+			t.Error("dewey init should NOT be called when .uf/dewey/ already exists")
 		}
 	}
 }
@@ -1778,11 +1827,11 @@ func TestInitSubTools_DeweyInitFails(t *testing.T) {
 		t.Fatalf("expected 3 results, got %d: %v", len(results), results)
 	}
 
-	if results[0].name != ".unbound-force/config.yaml" || results[0].action != "initialized" {
+	if results[0].name != ".uf/config.yaml" || results[0].action != "initialized" {
 		t.Errorf("expected config.yaml initialized, got %s %s", results[0].name, results[0].action)
 	}
-	if results[1].name != ".dewey/" || results[1].action != "failed" {
-		t.Errorf("expected .dewey/ failed, got %s %s", results[1].name, results[1].action)
+	if results[1].name != ".uf/dewey/" || results[1].action != "failed" {
+		t.Errorf("expected .uf/dewey/ failed, got %s %s", results[1].name, results[1].action)
 	}
 	if results[2].name != "opencode.json" || results[2].action != "created" {
 		t.Errorf("expected opencode.json created, got %s %s", results[2].name, results[2].action)
@@ -1828,7 +1877,7 @@ func TestPrintSummary_NextSteps(t *testing.T) {
 			Created: []string{".opencode/command/speckit.specify.md"},
 		}
 		subResults := []subToolResult{
-			{name: ".dewey/", action: "initialized"},
+			{name: ".uf/dewey/", action: "initialized"},
 			{name: "dewey index", action: "completed"},
 		}
 
@@ -1839,7 +1888,7 @@ func TestPrintSummary_NextSteps(t *testing.T) {
 		if !strings.Contains(output, "Sub-tool initialization:") {
 			t.Errorf("expected sub-tool section, got:\n%s", output)
 		}
-		if !strings.Contains(output, ".dewey/ initialized") {
+		if !strings.Contains(output, ".uf/dewey/ initialized") {
 			t.Errorf("expected dewey init result, got:\n%s", output)
 		}
 		if !strings.Contains(output, "dewey index completed") {
@@ -1881,7 +1930,7 @@ func TestPrintSummary_NextSteps(t *testing.T) {
 			Created: []string{".opencode/command/speckit.specify.md"},
 		}
 		subResults := []subToolResult{
-			{name: ".dewey/", action: "failed", detail: "dewey init failed"},
+			{name: ".uf/dewey/", action: "failed", detail: "dewey init failed"},
 		}
 
 		printSummary(&buf, false, false, true, r, subResults)
@@ -1914,16 +1963,16 @@ func TestInitSubTools_CreatesWorkflowConfig(t *testing.T) {
 	// Should have 1 result: config.yaml initialized.
 	foundConfig := false
 	for _, r := range results {
-		if r.name == ".unbound-force/config.yaml" && r.action == "initialized" {
+		if r.name == ".uf/config.yaml" && r.action == "initialized" {
 			foundConfig = true
 		}
 	}
 	if !foundConfig {
-		t.Errorf("expected .unbound-force/config.yaml initialized, got %v", results)
+		t.Errorf("expected .uf/config.yaml initialized, got %v", results)
 	}
 
 	// Verify file exists with commented content.
-	configPath := filepath.Join(dir, ".unbound-force", "config.yaml")
+	configPath := filepath.Join(dir, ".uf", "config.yaml")
 	content, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatalf("read config.yaml: %v", err)
@@ -1950,13 +1999,13 @@ func TestGenerateDeweySources_SiblingsDetected(t *testing.T) {
 	// Create a parent dir with the "current" project and 3 sibling repos.
 	parentDir := t.TempDir()
 	currentDir := filepath.Join(parentDir, "my-project")
-	if err := os.MkdirAll(filepath.Join(currentDir, ".dewey"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(currentDir, ".uf", "dewey"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
 	// Write default sources.yaml (single source entry).
 	defaultSources := "sources:\n  - id: disk-local\n    type: disk\n    config:\n      path: \".\"\n"
-	if err := os.WriteFile(filepath.Join(currentDir, ".dewey", "sources.yaml"), []byte(defaultSources), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(currentDir, ".uf", "dewey", "sources.yaml"), []byte(defaultSources), 0o644); err != nil {
 		t.Fatalf("write sources.yaml: %v", err)
 	}
 
@@ -2002,7 +2051,7 @@ func TestGenerateDeweySources_SiblingsDetected(t *testing.T) {
 	}
 
 	// Read the generated sources.yaml and verify content.
-	content, err := os.ReadFile(filepath.Join(currentDir, ".dewey", "sources.yaml"))
+	content, err := os.ReadFile(filepath.Join(currentDir, ".uf", "dewey", "sources.yaml"))
 	if err != nil {
 		t.Fatalf("read sources.yaml: %v", err)
 	}
@@ -2060,13 +2109,13 @@ func TestGenerateDeweySources_NoSiblings(t *testing.T) {
 	// Create a parent dir with only the current project.
 	parentDir := t.TempDir()
 	currentDir := filepath.Join(parentDir, "lonely-project")
-	if err := os.MkdirAll(filepath.Join(currentDir, ".dewey"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(currentDir, ".uf", "dewey"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
 	// Write default sources.yaml.
 	defaultSources := "sources:\n  - id: disk-local\n    type: disk\n    config:\n      path: \".\"\n"
-	if err := os.WriteFile(filepath.Join(currentDir, ".dewey", "sources.yaml"), []byte(defaultSources), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(currentDir, ".uf", "dewey", "sources.yaml"), []byte(defaultSources), 0o644); err != nil {
 		t.Fatalf("write sources.yaml: %v", err)
 	}
 
@@ -2091,7 +2140,7 @@ func TestGenerateDeweySources_NoSiblings(t *testing.T) {
 	}
 
 	// Read generated sources.yaml.
-	content, err := os.ReadFile(filepath.Join(currentDir, ".dewey", "sources.yaml"))
+	content, err := os.ReadFile(filepath.Join(currentDir, ".uf", "dewey", "sources.yaml"))
 	if err != nil {
 		t.Fatalf("read sources.yaml: %v", err)
 	}
@@ -2117,7 +2166,7 @@ func TestGenerateDeweySources_NoSiblings(t *testing.T) {
 func TestGenerateDeweySources_AlreadyCustomized(t *testing.T) {
 	parentDir := t.TempDir()
 	currentDir := filepath.Join(parentDir, "my-project")
-	if err := os.MkdirAll(filepath.Join(currentDir, ".dewey"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(currentDir, ".uf", "dewey"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -2136,7 +2185,7 @@ func TestGenerateDeweySources_AlreadyCustomized(t *testing.T) {
     config:
       org: myorg
 `
-	sourcesPath := filepath.Join(currentDir, ".dewey", "sources.yaml")
+	sourcesPath := filepath.Join(currentDir, ".uf", "dewey", "sources.yaml")
 	if err := os.WriteFile(sourcesPath, []byte(customSources), 0o644); err != nil {
 		t.Fatalf("write sources.yaml: %v", err)
 	}
@@ -2174,7 +2223,7 @@ func TestGenerateDeweySources_ForceOverwritesCustom(t *testing.T) {
 	// Create a parent dir with the "current" project and a sibling repo.
 	parentDir := t.TempDir()
 	currentDir := filepath.Join(parentDir, "my-project")
-	if err := os.MkdirAll(filepath.Join(currentDir, ".dewey"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(currentDir, ".uf", "dewey"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -2194,7 +2243,7 @@ func TestGenerateDeweySources_ForceOverwritesCustom(t *testing.T) {
     config:
       path: "../custom"
 `
-	sourcesPath := filepath.Join(currentDir, ".dewey", "sources.yaml")
+	sourcesPath := filepath.Join(currentDir, ".uf", "dewey", "sources.yaml")
 	if err := os.WriteFile(sourcesPath, []byte(customSources), 0o644); err != nil {
 		t.Fatalf("write sources.yaml: %v", err)
 	}
@@ -2353,7 +2402,7 @@ func TestInitSubTools_PreservesExistingConfig(t *testing.T) {
 	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
 
 	// Create existing config with custom content.
-	ufDir := filepath.Join(dir, ".unbound-force")
+	ufDir := filepath.Join(dir, ".uf")
 	if err := os.MkdirAll(ufDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -2372,7 +2421,7 @@ func TestInitSubTools_PreservesExistingConfig(t *testing.T) {
 
 	// Should NOT have a config result — file already exists.
 	for _, r := range results {
-		if r.name == ".unbound-force/config.yaml" {
+		if r.name == ".uf/config.yaml" {
 			t.Errorf("expected no config result (file exists), got %s %s", r.name, r.action)
 		}
 	}
@@ -3066,15 +3115,15 @@ func TestConfigureOpencodeJSON_DryRun(t *testing.T) {
 
 func TestInitSubTools_DeweyForceReindex(t *testing.T) {
 	dir := t.TempDir()
-	// Create .dewey/ directory — already initialized.
-	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+	// Create .uf/dewey/ directory — already initialized.
+	if err := os.MkdirAll(filepath.Join(dir, ".uf", "dewey"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
 	// Write a default sources.yaml so generateDeweySources has
 	// something to regenerate on force.
 	defaultSources := "sources:\n  - id: disk-local\n    type: disk\n    config:\n      path: \".\"\n"
-	if err := os.WriteFile(filepath.Join(dir, ".dewey", "sources.yaml"), []byte(defaultSources), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".uf", "dewey", "sources.yaml"), []byte(defaultSources), 0o644); err != nil {
 		t.Fatalf("write sources.yaml: %v", err)
 	}
 
@@ -3111,15 +3160,15 @@ func TestInitSubTools_DeweyForceReindex(t *testing.T) {
 		t.Errorf("expected dewey index command, got calls: %v", rec.calls)
 	}
 
-	// Verify dewey init was NOT called (.dewey/ already exists).
+	// Verify dewey init was NOT called (.uf/dewey/ already exists).
 	for _, call := range rec.calls {
 		if call == "dewey init" {
-			t.Error("dewey init should NOT be called when .dewey/ already exists")
+			t.Error("dewey init should NOT be called when .uf/dewey/ already exists")
 		}
 	}
 
 	// Verify sources.yaml was regenerated with recursive: false.
-	content, readErr := os.ReadFile(filepath.Join(dir, ".dewey", "sources.yaml"))
+	content, readErr := os.ReadFile(filepath.Join(dir, ".uf", "dewey", "sources.yaml"))
 	if readErr != nil {
 		t.Fatalf("read sources.yaml: %v", readErr)
 	}
@@ -3130,8 +3179,8 @@ func TestInitSubTools_DeweyForceReindex(t *testing.T) {
 
 func TestInitSubTools_DeweyExistsNoForce(t *testing.T) {
 	dir := t.TempDir()
-	// Create .dewey/ directory — already initialized.
-	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0755); err != nil {
+	// Create .uf/dewey/ directory — already initialized.
+	if err := os.MkdirAll(filepath.Join(dir, ".uf", "dewey"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -3148,8 +3197,8 @@ func TestInitSubTools_DeweyExistsNoForce(t *testing.T) {
 
 	// Should NOT have any dewey-related results (skipped silently).
 	for _, r := range results {
-		if r.name == ".dewey/" || r.name == "dewey index" {
-			t.Errorf("unexpected dewey result when Force=false and .dewey/ exists: %s %s", r.name, r.action)
+		if r.name == ".uf/dewey/" || r.name == "dewey index" {
+			t.Errorf("unexpected dewey result when Force=false and .uf/dewey/ exists: %s %s", r.name, r.action)
 		}
 	}
 
@@ -3165,13 +3214,13 @@ func TestInitSubTools_DeweyExistsNoForce(t *testing.T) {
 
 func TestInitSubTools_OpencodeJSON(t *testing.T) {
 	dir := t.TempDir()
-	// Create .dewey/ so dewey init is skipped.
-	if err := os.MkdirAll(filepath.Join(dir, ".dewey"), 0o755); err != nil {
-		t.Fatalf("mkdir .dewey: %v", err)
+	// Create .uf/dewey/ so dewey init is skipped.
+	if err := os.MkdirAll(filepath.Join(dir, ".uf", "dewey"), 0o755); err != nil {
+		t.Fatalf("mkdir .uf/dewey: %v", err)
 	}
-	// Create .hive/ so replicator init is skipped.
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
-		t.Fatalf("mkdir .hive: %v", err)
+	// Create .uf/replicator/ so replicator init is skipped.
+	if err := os.MkdirAll(filepath.Join(dir, ".uf", "replicator"), 0o755); err != nil {
+		t.Fatalf("mkdir .uf/replicator: %v", err)
 	}
 
 	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
@@ -3214,7 +3263,7 @@ func TestInitSubTools_OpencodeJSON(t *testing.T) {
 
 func TestInitSubTools_ReplicatorInit(t *testing.T) {
 	dir := t.TempDir()
-	// No .hive/ — should trigger replicator init.
+	// No .uf/replicator/ — should trigger replicator init.
 	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
 
 	opts := &Options{
@@ -3225,15 +3274,15 @@ func TestInitSubTools_ReplicatorInit(t *testing.T) {
 
 	results := initSubTools(opts)
 
-	// Should have .hive/ initialized result.
-	foundHive := false
+	// Should have .uf/replicator/ initialized result.
+	foundReplicator := false
 	for _, r := range results {
-		if r.name == ".hive/" && r.action == "initialized" {
-			foundHive = true
+		if r.name == ".uf/replicator/" && r.action == "initialized" {
+			foundReplicator = true
 		}
 	}
-	if !foundHive {
-		t.Errorf("expected .hive/ initialized, got %v", results)
+	if !foundReplicator {
+		t.Errorf("expected .uf/replicator/ initialized, got %v", results)
 	}
 
 	// Verify replicator init was called.
@@ -3250,8 +3299,8 @@ func TestInitSubTools_ReplicatorInit(t *testing.T) {
 
 func TestInitSubTools_ReplicatorInitSkipsExisting(t *testing.T) {
 	dir := t.TempDir()
-	// Create .hive/ — should skip replicator init.
-	if err := os.MkdirAll(filepath.Join(dir, ".hive"), 0o755); err != nil {
+	// Create .uf/replicator/ — should skip replicator init.
+	if err := os.MkdirAll(filepath.Join(dir, ".uf", "replicator"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
@@ -3264,17 +3313,17 @@ func TestInitSubTools_ReplicatorInitSkipsExisting(t *testing.T) {
 
 	results := initSubTools(opts)
 
-	// Should NOT have .hive/ result.
+	// Should NOT have .uf/replicator/ result.
 	for _, r := range results {
-		if r.name == ".hive/" {
-			t.Errorf("unexpected .hive/ result when already exists: %s %s", r.name, r.action)
+		if r.name == ".uf/replicator/" {
+			t.Errorf("unexpected .uf/replicator/ result when already exists: %s %s", r.name, r.action)
 		}
 	}
 
 	// Verify replicator init was NOT called.
 	for _, call := range rec.calls {
 		if call == "replicator init" {
-			t.Error("replicator init should NOT be called when .hive/ exists")
+			t.Error("replicator init should NOT be called when .uf/replicator/ exists")
 		}
 	}
 }
@@ -3295,15 +3344,15 @@ func TestInitSubTools_ReplicatorInitFails(t *testing.T) {
 
 	results := initSubTools(opts)
 
-	// Should have .hive/ failed result.
+	// Should have .uf/replicator/ failed result.
 	foundFailed := false
 	for _, r := range results {
-		if r.name == ".hive/" && r.action == "failed" {
+		if r.name == ".uf/replicator/" && r.action == "failed" {
 			foundFailed = true
 		}
 	}
 	if !foundFailed {
-		t.Errorf("expected .hive/ failed, got %v", results)
+		t.Errorf("expected .uf/replicator/ failed, got %v", results)
 	}
 
 	// Should still have opencode.json result (init failure doesn't block).

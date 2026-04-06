@@ -299,7 +299,7 @@ func isToolOwned(relPath string) bool {
 // isDivisorAsset returns true if the asset belongs to the
 // Divisor PR Reviewer Council subset. Used to filter assets
 // when DivisorOnly mode is active. Convention packs at the
-// shared opencode/unbound/packs/ location are included via
+// shared opencode/uf/packs/ location are included via
 // isConventionPack() since they are essential for Divisor
 // personas to function.
 func isDivisorAsset(relPath string) bool {
@@ -316,9 +316,9 @@ func isDivisorAsset(relPath string) bool {
 }
 
 // isConventionPack returns true if the asset is a convention
-// pack file under opencode/unbound/packs/.
+// pack file under opencode/uf/packs/.
 func isConventionPack(relPath string) bool {
-	return strings.HasPrefix(relPath, "opencode/unbound/packs/")
+	return strings.HasPrefix(relPath, "opencode/uf/packs/")
 }
 
 // shouldDeployPack returns true if the convention pack file
@@ -666,10 +666,10 @@ func configureOpencodeJSON(opts *Options) []subToolResult {
 	}}
 }
 
-// workflowConfigContent is the default content for .unbound-force/config.yaml.
+// workflowConfigContent is the default content for .uf/config.yaml.
 // All values are commented out — the team lead uncomments what they want.
 // Commenting is the mechanism for "use defaults" — no ambiguity.
-const workflowConfigContent = `# .unbound-force/config.yaml
+const workflowConfigContent = `# .uf/config.yaml
 # Workflow configuration for Unbound Force hero lifecycle.
 # CLI flags (--define-mode, --spec-review) override these defaults.
 
@@ -707,42 +707,42 @@ func initSubTools(opts *Options) []subToolResult {
 
 	var results []subToolResult
 
-	// Workflow config: create .unbound-force/config.yaml if absent.
+	// Workflow config: create .uf/config.yaml if absent.
 	// User-owned — skip if file already exists (preserves customizations).
-	ufDir := filepath.Join(opts.TargetDir, ".unbound-force")
+	ufDir := filepath.Join(opts.TargetDir, ".uf")
 	configPath := filepath.Join(ufDir, "config.yaml")
 	if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
 		if mkErr := os.MkdirAll(ufDir, 0o755); mkErr != nil {
 			results = append(results, subToolResult{
-				name: ".unbound-force/config.yaml", action: "failed",
+				name: ".uf/config.yaml", action: "failed",
 				detail: "create directory failed"})
 		} else if writeErr := os.WriteFile(configPath, []byte(workflowConfigContent), 0o644); writeErr != nil {
 			results = append(results, subToolResult{
-				name: ".unbound-force/config.yaml", action: "failed",
+				name: ".uf/config.yaml", action: "failed",
 				detail: "write failed"})
 		} else {
 			results = append(results, subToolResult{
-				name: ".unbound-force/config.yaml", action: "initialized"})
+				name: ".uf/config.yaml", action: "initialized"})
 		}
 	}
 
 	// Dewey: init + index if binary available and workspace absent.
 	// Force re-index if workspace exists and Force is set.
 	if _, err := opts.LookPath("dewey"); err == nil {
-		deweyDir := filepath.Join(opts.TargetDir, ".dewey")
+		deweyDir := filepath.Join(opts.TargetDir, ".uf", "dewey")
 		if _, statErr := os.Stat(deweyDir); os.IsNotExist(statErr) {
 			// First run: initialize workspace and build index.
 			_, _ = fmt.Fprintf(opts.Stdout, "  Initializing Dewey workspace...\n")
 			if _, initErr := opts.ExecCmd("dewey", "init"); initErr != nil {
 				results = append(results, subToolResult{
-					name: ".dewey/", action: "failed",
+					name: ".uf/dewey/", action: "failed",
 					detail: "dewey init failed"})
 				// Skip index if init failed, but still configure opencode.json.
 				results = append(results, configureOpencodeJSON(opts)...)
 				return results
 			}
 			results = append(results, subToolResult{
-				name: ".dewey/", action: "initialized"})
+				name: ".uf/dewey/", action: "initialized"})
 
 			// Auto-detect sibling repos for Dewey sources config.
 			// Runs after dewey init creates default sources.yaml
@@ -780,19 +780,19 @@ func initSubTools(opts *Options) []subToolResult {
 		}
 	}
 
-	// Replicator: init if binary available and .hive/ absent.
+	// Replicator: init if binary available and .uf/replicator/ absent.
 	// Follows the Dewey init delegation pattern above.
 	if _, err := opts.LookPath("replicator"); err == nil {
-		hiveDir := filepath.Join(opts.TargetDir, ".hive")
-		if _, statErr := os.Stat(hiveDir); os.IsNotExist(statErr) {
+		replicatorDir := filepath.Join(opts.TargetDir, ".uf", "replicator")
+		if _, statErr := os.Stat(replicatorDir); os.IsNotExist(statErr) {
 			_, _ = fmt.Fprintf(opts.Stdout, "  Initializing Replicator workspace...\n")
 			if _, initErr := opts.ExecCmd("replicator", "init"); initErr != nil {
 				results = append(results, subToolResult{
-					name: ".hive/", action: "failed",
+					name: ".uf/replicator/", action: "failed",
 					detail: "replicator init failed"})
 			} else {
 				results = append(results, subToolResult{
-					name: ".hive/", action: "initialized"})
+					name: ".uf/replicator/", action: "initialized"})
 			}
 		}
 	}
@@ -897,11 +897,11 @@ func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *
 			// Since printSummary doesn't have direct access to
 			// LookPath, we infer from subResults and created files.
 			for _, sr := range subResults {
-				if sr.name == ".dewey/" && (sr.action == "initialized" || sr.action == "completed") {
+				if sr.name == ".uf/dewey/" && (sr.action == "initialized" || sr.action == "completed") {
 					hasDewey = true
 				}
 			}
-			// If no sub-tool results but .dewey/ wasn't created,
+			// If no sub-tool results but .uf/dewey/ wasn't created,
 			// tools may still be available — check if dewey was
 			// already initialized (subResults would be empty).
 			if len(subResults) == 0 {
@@ -958,7 +958,7 @@ func assetContent(relPath string) ([]byte, error) {
 // `- id:` counting per Composability First — no YAML parsing
 // dependency needed.
 func generateDeweySources(opts *Options, force bool) *subToolResult {
-	sourcesPath := filepath.Join(opts.TargetDir, ".dewey", "sources.yaml")
+	sourcesPath := filepath.Join(opts.TargetDir, ".uf", "dewey", "sources.yaml")
 
 	// Skip if sources.yaml doesn't exist (dewey init didn't run
 	// or was cleaned up).

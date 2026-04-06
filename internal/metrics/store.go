@@ -12,7 +12,7 @@ import (
 
 // Store handles reading and writing metrics data to the filesystem.
 type Store struct {
-	DataDir string // Root data directory (e.g., ".mx-f/data")
+	DataDir string // Root data directory (e.g., ".uf/mx-f/data")
 }
 
 // NewStore creates a new metrics store.

@@ -177,19 +177,19 @@ else
   check_required "README.md exists" "fail"
 fi
 
-# 10. .unbound-force/hero.json exists
-if [[ -f "$REPO_PATH/.unbound-force/hero.json" ]]; then
-  check_required ".unbound-force/hero.json exists" "pass"
+# 10. .uf/hero.json exists
+if [[ -f "$REPO_PATH/.uf/hero.json" ]]; then
+  check_required ".uf/hero.json exists" "pass"
 
   # 11. hero.json is valid JSON
-  if python3 -m json.tool "$REPO_PATH/.unbound-force/hero.json" > /dev/null 2>&1; then
+  if python3 -m json.tool "$REPO_PATH/.uf/hero.json" > /dev/null 2>&1; then
     check_required "hero.json is valid JSON" "pass"
 
     # 12. hero.json contains required fields
     required_fields=("name" "display_name" "role" "version" "description" "repository" "parent_constitution_version" "artifacts_produced" "artifacts_consumed" "opencode_agents" "opencode_commands" "dependencies")
     missing_fields=()
     for field in "${required_fields[@]}"; do
-      if ! python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert '$field' in d" "$REPO_PATH/.unbound-force/hero.json" 2>/dev/null; then
+      if ! python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert '$field' in d" "$REPO_PATH/.uf/hero.json" 2>/dev/null; then
         missing_fields+=("$field")
       fi
     done
@@ -216,10 +216,10 @@ except ValidationError as e:
     print('fail:' + e.message[:120])
 except Exception as e:
     print('fail:' + str(e)[:120])
-" "$MANIFEST_SCHEMA" "$REPO_PATH/.unbound-force/hero.json" 2>&1)
+" "$MANIFEST_SCHEMA" "$REPO_PATH/.uf/hero.json" 2>&1)
       # Fallback: try ajv (Node.js) if available
       elif command -v ajv &>/dev/null; then
-        if ajv validate -s "$MANIFEST_SCHEMA" -d "$REPO_PATH/.unbound-force/hero.json" &>/dev/null; then
+        if ajv validate -s "$MANIFEST_SCHEMA" -d "$REPO_PATH/.uf/hero.json" &>/dev/null; then
           schema_result="pass"
         else
           schema_result="fail:ajv validation error"
@@ -242,7 +242,7 @@ except Exception as e:
     check_required "hero.json contains required fields" "fail" "cannot check - invalid JSON"
   fi
 else
-  check_required ".unbound-force/hero.json exists" "fail"
+  check_required ".uf/hero.json exists" "fail"
   # Skip JSON validity and field checks
   REQUIRED_TOTAL=$((REQUIRED_TOTAL + 2))
   printf "  ${RED}[FAIL]${NC} hero.json is valid JSON (file missing)\n"
@@ -283,8 +283,8 @@ if [[ -d "$REPO_PATH/.opencode/agents/" ]]; then
   non_compliant=()
   # Get the hero name from manifest or directory name
   hero_name=""
-  if [[ -f "$REPO_PATH/.unbound-force/hero.json" ]]; then
-    hero_name=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('name',''))" "$REPO_PATH/.unbound-force/hero.json" 2>/dev/null || true)
+  if [[ -f "$REPO_PATH/.uf/hero.json" ]]; then
+    hero_name=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('name',''))" "$REPO_PATH/.uf/hero.json" 2>/dev/null || true)
   fi
 
   if [[ -n "$hero_name" ]]; then

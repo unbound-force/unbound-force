@@ -37,8 +37,8 @@ Before reviewing, read:
 1. `AGENTS.md` -- Project overview, behavioral constraints, and conventions
 2. `.specify/memory/constitution.md` -- Project constitution (core principles)
 3. The relevant `spec.md`, `plan.md`, and `tasks.md` under `specs/` for the current work
-4. `.opencode/unbound/packs/severity.md` -- Shared severity definitions (MUST load for consistent severity classification per Spec 019 FR-006)
-5. All `*.md` files from `.opencode/unbound/packs/` -- active convention pack. If no pack files are found, note this in your findings and proceed with universal checks only.
+4. `.opencode/uf/packs/severity.md` -- Shared severity definitions (MUST load for consistent severity classification per Spec 019 FR-006)
+5. All `*.md` files from `.opencode/uf/packs/` -- active convention pack. If no pack files are found, note this in your findings and proceed with universal checks only.
 6. **Knowledge graph** (optional) — If Dewey MCP tools are available, use `dewey_semantic_search` to find cross-repo review patterns, recurring intent drift findings, and convention violations. Use `dewey_search` and `dewey_traverse` for structured queries. If only graph tools are available (no embedding model), use `dewey_search` and `dewey_traverse` only. If Dewey is unavailable, rely on reading files directly and using Grep for keyword search.
 
 ---
@@ -183,7 +183,7 @@ For each finding, provide:
 **Recommendation**: How to realign with the original intent
 ```
 
-Severity levels: CRITICAL, HIGH, MEDIUM, LOW (per `.opencode/unbound/packs/severity.md`)
+Severity levels: CRITICAL, HIGH, MEDIUM, LOW (per `.opencode/uf/packs/severity.md`)
 
 ## Decision Criteria
 

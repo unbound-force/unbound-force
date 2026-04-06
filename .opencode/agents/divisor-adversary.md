@@ -39,8 +39,8 @@ Before reviewing, read:
 1. `AGENTS.md` -- Behavioral Constraints, Active Technologies, Git & Workflow
 2. `.specify/memory/constitution.md` -- Constitution (if present)
 3. The relevant spec, plan, and tasks files under `specs/` for the current work
-4. `.opencode/unbound/packs/severity.md` -- Shared severity definitions (MUST load for consistent severity classification per Spec 019 FR-006)
-5. `.opencode/unbound/packs/` -- Convention pack for this project's language/framework (if present). Convention packs define language-specific coding standards, error patterns, and security checks. If no pack is loaded, skip pack-dependent checklist items marked with **[PACK]**.
+4. `.opencode/uf/packs/severity.md` -- Shared severity definitions (MUST load for consistent severity classification per Spec 019 FR-006)
+5. `.opencode/uf/packs/` -- Convention pack for this project's language/framework (if present). Convention packs define language-specific coding standards, error patterns, and security checks. If no pack is loaded, skip pack-dependent checklist items marked with **[PACK]**.
 6. **Knowledge graph** (optional) — If Dewey MCP tools are available, use `dewey_semantic_search` to find recurring security findings, resilience patterns, and constraint violations across repos. Use `dewey_search` and `dewey_traverse` for structured queries. If only graph tools are available (no embedding model), use `dewey_search` and `dewey_traverse` only. If Dewey is unavailable, rely on reading files directly and using Grep for keyword search.
 
 ---
@@ -87,7 +87,7 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 
 #### 5. Language-Specific Security Patterns [PACK]
 
-> Skip this section if no convention pack is loaded from `.opencode/unbound/packs/`.
+> Skip this section if no convention pack is loaded from `.opencode/uf/packs/`.
 
 - Check the convention pack's `security_checks` section for language-specific vulnerability patterns.
 - Apply the pack's error handling conventions to the changed code.
@@ -178,7 +178,7 @@ For each finding, provide:
 **Recommendation**: How to fix it
 ```
 
-Severity levels: CRITICAL, HIGH, MEDIUM, LOW (per `.opencode/unbound/packs/severity.md`)
+Severity levels: CRITICAL, HIGH, MEDIUM, LOW (per `.opencode/uf/packs/severity.md`)
 
 ## Decision Criteria
 

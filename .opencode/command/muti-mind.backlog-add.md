@@ -7,7 +7,7 @@ agent: muti-mind-po
 
 ## Description
 
-Creates a new backlog item in the `.muti-mind/backlog/` directory.
+Creates a new backlog item in the `.uf/muti-mind/backlog/` directory.
 
 ## Usage
 

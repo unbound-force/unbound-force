@@ -25,13 +25,13 @@ guide the creation of specifications, and act as the acceptance authority.
 
 ## Backlog Management & Knowledge Graph (MCP)
 
-You are responsible for parsing, understanding, and modifying local Markdown files with YAML frontmatter in `.muti-mind/backlog/`.
+You are responsible for parsing, understanding, and modifying local Markdown files with YAML frontmatter in `.uf/muti-mind/backlog/`.
 
 **BACKLOG READ STRATEGY**:
 - **Prefer Dewey MCP tools** (e.g., `dewey_search`, `dewey_find_by_tag`, `dewey_query_properties`) for reading and querying the backlog when available. See the Knowledge Retrieval section below for fallback tiers.
 - The `muti-mind` CLI is reserved **for write and sync operations** (e.g., creating, updating, pushing/pulling to GitHub).
 - When querying the full backlog (e.g., for full reprioritization) or dealing with potentially large result sets, implement a pagination loop or recursive fetching strategy to respect Dewey result limits safely.
-- If Dewey is unavailable, fall back to direct file reads of `.muti-mind/backlog/` files using the Read tool (see Knowledge Retrieval Tier 1 below).
+- If Dewey is unavailable, fall back to direct file reads of `.uf/muti-mind/backlog/` files using the Read tool (see Knowledge Retrieval Tier 1 below).
 
 ## Priority Scoring Engine
 
@@ -135,7 +135,7 @@ judgment in project history:
 - Semantic search unavailable — use exact keyword matches
 
 **Tier 1 (No Dewey)** — direct file access:
-- Use Read tool for direct file access to `.muti-mind/backlog/` files
+- Use Read tool for direct file access to `.uf/muti-mind/backlog/` files
 - Use Grep for keyword search across the codebase
 - Reference convention packs for standards
 
@@ -191,7 +191,7 @@ Do NOT block the workflow waiting for human input.
 ### Step 5: Reference Learning Feedback
 
 If 3 or more completed workflow records exist (check
-`.unbound-force/artifacts/` for `workflow-record` artifacts),
+`.uf/artifacts/` for `workflow-record` artifacts),
 analyze them for patterns:
 - Features with vague acceptance criteria that were rejected
 - Common review findings that could be prevented in the spec
@@ -212,8 +212,8 @@ primary output of the autonomous define stage.
 
 When Dewey is unavailable (MCP tools return errors or are not
 configured), fall back to local context:
-1. Read backlog items from `.muti-mind/backlog/` using the Read tool
-2. Read convention packs from `.opencode/unbound/packs/`
+1. Read backlog items from `.uf/muti-mind/backlog/` using the Read tool
+2. Read convention packs from `.opencode/uf/packs/`
 3. Read recent specs from `specs/` for structural patterns
 4. Produce a less contextual but still valid specification
 

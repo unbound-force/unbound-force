@@ -37,8 +37,8 @@ Before reviewing, read:
 1. `AGENTS.md` -- Project Structure, Active Technologies, conventions
 2. `.specify/memory/constitution.md` -- Constitution principles
 3. The relevant spec, plan, and tasks files under `specs/` for the current work
-4. `.opencode/unbound/packs/severity.md` -- Shared severity definitions (MUST load for consistent severity classification per Spec 019 FR-006)
-5. Read all `*.md` files from `.opencode/unbound/packs/` to load the active convention pack. If no pack files are found, note this and proceed with universal checks only.
+4. `.opencode/uf/packs/severity.md` -- Shared severity definitions (MUST load for consistent severity classification per Spec 019 FR-006)
+5. Read all `*.md` files from `.opencode/uf/packs/` to load the active convention pack. If no pack files are found, note this and proceed with universal checks only.
 6. **Knowledge graph** (optional) — If Dewey MCP tools are available, use `dewey_semantic_search` to find architectural patterns from specs, cross-repo structural decisions, and convention violations. Use `dewey_search` and `dewey_traverse` for structured queries. If only graph tools are available (no embedding model), use `dewey_search` and `dewey_traverse` only. If Dewey is unavailable, rely on reading files directly and using Grep for keyword search.
 
 ---
@@ -179,7 +179,7 @@ For each finding, provide:
 **Recommendation**: How to fix it
 ```
 
-Severity levels: CRITICAL, HIGH, MEDIUM, LOW (per `.opencode/unbound/packs/severity.md`)
+Severity levels: CRITICAL, HIGH, MEDIUM, LOW (per `.opencode/uf/packs/severity.md`)
 
 Also provide an **Architectural Alignment Score** (1-10):
 - 9-10: Exemplary alignment with all patterns and conventions

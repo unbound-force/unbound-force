@@ -19,7 +19,7 @@ Default: shows all workflows.
 
 When this command is invoked:
 
-1. **Read all JSON files** from `.unbound-force/workflows/`.
+1. **Read all JSON files** from `.uf/workflows/`.
 
 2. **Parse each workflow** and extract: workflow_id, feature_branch, status, started_at.
 

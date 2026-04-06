@@ -7,6 +7,6 @@
     "CI pipeline passes with 100% schema validation"
   ],
   "criteria_failed": [],
-  "gaze_report_ref": ".unbound-force/artifacts/quality-report/2026-03-21T10-00-00Z-gaze.json",
+  "gaze_report_ref": ".uf/artifacts/quality-report/2026-03-21T10-00-00Z-gaze.json",
   "decided_at": "2026-03-21T12:00:00Z"
 }

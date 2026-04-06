@@ -23,6 +23,5 @@ bin/
 # GoReleaser build output
 dist/
 
-# Workflow state (orchestration engine)
-.unbound-force/
-.dewey/
+# Workflow state, tool workspaces (orchestration engine)
+.uf/
