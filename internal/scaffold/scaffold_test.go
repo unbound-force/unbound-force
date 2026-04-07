@@ -1528,9 +1528,15 @@ func TestScaffoldOutput_NoOldPathReferences(t *testing.T) {
 	}
 
 	// Walk all generated files and search for stale patterns.
+	// Exclude .gitignore — it intentionally lists legacy directories
+	// as ignore patterns (per gitignore-init change).
 	err = filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil || info.IsDir() {
 			return walkErr
+		}
+		relPath, _ := filepath.Rel(dir, path)
+		if relPath == ".gitignore" {
+			return nil // .gitignore intentionally lists legacy dirs
 		}
 		content, readErr := os.ReadFile(path)
 		if readErr != nil {
@@ -1538,7 +1544,6 @@ func TestScaffoldOutput_NoOldPathReferences(t *testing.T) {
 			return nil
 		}
 		text := string(content)
-		relPath, _ := filepath.Rel(dir, path)
 
 		for _, pattern := range stalePatterns {
 			if strings.Contains(text, pattern) {
@@ -3364,5 +3369,176 @@ func TestInitSubTools_ReplicatorInitFails(t *testing.T) {
 	}
 	if !foundOC {
 		t.Error("opencode.json result should still be present after replicator init failure")
+	}
+}
+
+// --- ensureGitignore tests ---
+
+func TestEnsureGitignore_FreshDir(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+	}
+
+	result := ensureGitignore(opts)
+
+	if result.name != ".gitignore" {
+		t.Errorf("expected name '.gitignore', got %q", result.name)
+	}
+	if result.action != "configured" {
+		t.Errorf("expected action 'configured', got %q", result.action)
+	}
+
+	// Verify file exists with marker and all patterns.
+	content, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	text := string(content)
+
+	if !strings.Contains(text, gitignoreMarker) {
+		t.Error("expected marker comment in .gitignore")
+	}
+	// Verify representative patterns from each section.
+	for _, pattern := range []string{
+		".uf/workflows/",
+		".uf/dewey/graph.db",
+		".uf/dewey/cache/",
+		".uf/replicator/*.db",
+		".uf/muti-mind/artifacts/",
+		".uf/mx-f/data/",
+		".dewey/",
+		".hive/",
+		".unbound-force/",
+		".muti-mind/",
+		".mx-f/",
+	} {
+		if !strings.Contains(text, pattern) {
+			t.Errorf("expected pattern %q in .gitignore", pattern)
+		}
+	}
+}
+
+func TestEnsureGitignore_ExistingNoBlock(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create existing .gitignore with project-specific content.
+	existingContent := "node_modules/\n*.log\n"
+	giPath := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(giPath, []byte(existingContent), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+	}
+
+	result := ensureGitignore(opts)
+
+	if result.action != "configured" {
+		t.Errorf("expected action 'configured', got %q", result.action)
+	}
+
+	content, err := os.ReadFile(giPath)
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	text := string(content)
+
+	// Existing content must be preserved at the start.
+	if !strings.HasPrefix(text, existingContent) {
+		t.Errorf("existing content not preserved; got:\n%s", text)
+	}
+
+	// UF block must be appended.
+	if !strings.Contains(text, gitignoreMarker) {
+		t.Error("expected UF marker in .gitignore")
+	}
+
+	// Blank line separator between existing content and UF block.
+	markerIdx := strings.Index(text, gitignoreMarker)
+	if markerIdx < 2 {
+		t.Fatal("marker at unexpected position")
+	}
+	// The two characters before the marker should be "\n\n" (blank line separator).
+	before := text[:markerIdx]
+	if !strings.HasSuffix(before, "\n\n") {
+		t.Errorf("expected blank line separator before UF block, got trailing chars: %q",
+			before[len(before)-4:])
+	}
+}
+
+func TestEnsureGitignore_ExistingWithBlock(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create .gitignore that already has the UF block.
+	existingContent := "node_modules/\n\n" + gitignoreBlock
+	giPath := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(giPath, []byte(existingContent), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+	}
+
+	result := ensureGitignore(opts)
+
+	if result.action != "already configured" {
+		t.Errorf("expected action 'already configured', got %q", result.action)
+	}
+
+	// Verify file is byte-identical (not modified).
+	after, err := os.ReadFile(giPath)
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if string(after) != existingContent {
+		t.Error(".gitignore should be byte-identical when marker already present")
+	}
+}
+
+func TestEnsureGitignore_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+	}
+
+	// First call — creates the file.
+	result1 := ensureGitignore(opts)
+	if result1.action != "configured" {
+		t.Errorf("first call: expected 'configured', got %q", result1.action)
+	}
+
+	content1, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read after first call: %v", err)
+	}
+
+	// Second call — should skip (idempotent).
+	result2 := ensureGitignore(opts)
+	if result2.action != "already configured" {
+		t.Errorf("second call: expected 'already configured', got %q", result2.action)
+	}
+
+	content2, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read after second call: %v", err)
+	}
+
+	// Content must be identical after both calls (block not duplicated).
+	if !bytes.Equal(content1, content2) {
+		t.Errorf("content differs after second call:\nfirst:\n%s\nsecond:\n%s",
+			string(content1), string(content2))
 	}
 }

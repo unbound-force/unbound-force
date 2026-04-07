@@ -213,8 +213,13 @@ func Run(opts Options) (*Result, error) {
 	// warn the user. Per Spec 019 FR-003a: warn but do NOT delete.
 	warnLegacyReviewerFiles(opts.Stdout, opts.TargetDir)
 
+	// Ensure .gitignore has the standard UF ignore block.
+	// Called after file scaffolding but before sub-tool delegation
+	// so that .gitignore is ready before sub-tools create runtime files.
+	giResult := ensureGitignore(&opts)
+
 	// Initialize sub-tools after file scaffolding, before summary.
-	subResults := initSubTools(&opts)
+	subResults := append([]subToolResult{giResult}, initSubTools(&opts)...)
 
 	printSummary(opts.Stdout, opts.DivisorOnly, langExplicit, langDetected, result, subResults)
 	return result, nil
@@ -664,6 +669,92 @@ func configureOpencodeJSON(opts *Options) []subToolResult {
 		name:   "opencode.json",
 		action: action,
 	}}
+}
+
+// gitignoreBlock is the standard Unbound Force ignore block appended
+// to .gitignore by ensureGitignore(). The marker comment on the first
+// line is used for idempotency detection — if it already exists in
+// the file, the block is not appended again.
+const gitignoreBlock = `# Unbound Force — managed by uf init
+# Runtime data under .uf/ (databases, caches, locks, logs)
+.uf/workflows/
+.uf/artifacts/
+.uf/dewey/graph.db
+.uf/dewey/graph.db-shm
+.uf/dewey/graph.db-wal
+.uf/dewey/*.lock
+.uf/dewey/cache/
+.uf/dewey/dewey.log
+.uf/replicator/*.db
+.uf/replicator/*.db-shm
+.uf/replicator/*.db-wal
+.uf/replicator/*.lock
+.uf/muti-mind/artifacts/
+.uf/mx-f/data/
+# Legacy tool directories (renamed to .uf/ in Spec 025)
+.dewey/
+.hive/
+.unbound-force/
+.muti-mind/
+.mx-f/
+`
+
+// gitignoreMarker is the sentinel string used to detect whether the
+// UF ignore block has already been appended. Extracted as a constant
+// so the marker is defined in exactly one place (DRY).
+const gitignoreMarker = "# Unbound Force — managed by uf init"
+
+// ensureGitignore appends the standard UF ignore block to .gitignore
+// in targetDir. Idempotent: if the marker comment is already present,
+// the file is not modified. Creates .gitignore if it does not exist.
+// Uses opts.ReadFile/WriteFile for testability (dependency injection).
+func ensureGitignore(opts *Options) subToolResult {
+	giPath := filepath.Join(opts.TargetDir, ".gitignore")
+
+	existing, readErr := opts.ReadFile(giPath)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		// Non-"not found" error (e.g., permission denied).
+		return subToolResult{
+			name:   ".gitignore",
+			action: "failed",
+			detail: fmt.Sprintf("read failed: %v", readErr),
+		}
+	}
+
+	// Idempotency check: if the marker already exists, skip.
+	if readErr == nil && strings.Contains(string(existing), gitignoreMarker) {
+		return subToolResult{
+			name:   ".gitignore",
+			action: "already configured",
+		}
+	}
+
+	// Build the new content: existing content + blank line separator + UF block.
+	var content string
+	if readErr == nil {
+		content = string(existing)
+		// Ensure a blank line separates existing content from the UF block.
+		if len(content) > 0 && !strings.HasSuffix(content, "\n\n") {
+			if !strings.HasSuffix(content, "\n") {
+				content += "\n"
+			}
+			content += "\n"
+		}
+	}
+	content += gitignoreBlock
+
+	if writeErr := opts.WriteFile(giPath, []byte(content), 0o644); writeErr != nil {
+		return subToolResult{
+			name:   ".gitignore",
+			action: "failed",
+			detail: fmt.Sprintf("write failed: %v", writeErr),
+		}
+	}
+
+	return subToolResult{
+		name:   ".gitignore",
+		action: "configured",
+	}
 }
 
 // workflowConfigContent is the default content for .uf/config.yaml.
