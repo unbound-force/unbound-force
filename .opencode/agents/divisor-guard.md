@@ -94,6 +94,15 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 - If yes, is there documented human authorization for the change?
 - Flag unauthorized gate modifications as findings.
 
+#### 6. Documentation Completeness
+
+- Does this change modify user-facing behavior, CLI commands, agent capabilities, or workflows?
+- If yes:
+  - Was AGENTS.md updated (Recent Changes, Project Structure, Active Technologies as applicable)?
+  - Was README.md updated if project description or install steps changed?
+- If documentation updates were needed but missing, flag as MEDIUM.
+- Skip for internal-only changes (refactoring, test-only, CI-only).
+
 ### Out of Scope
 
 These dimensions are owned by other Divisor personas — do NOT produce findings for them:

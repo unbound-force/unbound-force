@@ -115,12 +115,13 @@ var expectedAssetPaths = []string{
 	"opencode/command/speckit.tasks.md",
 	"opencode/command/speckit.taskstoissues.md",
 	"opencode/command/unleash.md",
-	// OpenCode agents — Divisor personas (5) + Cobalt-Crush (1) + Mx F coach (1) + constitution-check (1)
+	// OpenCode agents — Divisor personas (6) + Cobalt-Crush (1) + Mx F coach (1) + constitution-check (1)
 	"opencode/agents/cobalt-crush-dev.md",
 	"opencode/agents/constitution-check.md",
 	"opencode/agents/mx-f-coach.md", // Spec 007: Mx F coaching persona (user-owned, not in --divisor subset, not tool-owned)
 	"opencode/agents/divisor-adversary.md",
 	"opencode/agents/divisor-architect.md",
+	"opencode/agents/divisor-curator.md",
 	"opencode/agents/divisor-guard.md",
 	"opencode/agents/divisor-sre.md",
 	"opencode/agents/divisor-testing.md",
@@ -913,6 +914,27 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".opencode/command/workflow-seed.md":    true,
 	// Swarm skills — Spec 008, local-only
 	".opencode/skill/unbound-force-heroes/SKILL.md": true,
+	// Replicator-scaffolded agents and commands — created by replicator init,
+	// not part of the uf binary's scaffold assets
+	".opencode/agents/background-worker.md": true,
+	".opencode/agents/coordinator.md":       true,
+	".opencode/agents/worker.md":            true,
+	".opencode/command/forge.md":            true,
+	".opencode/command/forge-status.md":     true,
+	".opencode/command/handoff.md":          true,
+	".opencode/command/inbox.md":            true,
+	".opencode/command/org.md":              true,
+	// Replicator-scaffolded skills — created by replicator init
+	".opencode/skills/always-on-guidance/SKILL.md": true,
+	".opencode/skills/forge-coordination/SKILL.md": true,
+	".opencode/skills/forge-global/SKILL.md":       true,
+	".opencode/skills/learning-systems/SKILL.md":   true,
+	".opencode/skills/replicator-cli/SKILL.md":     true,
+	".opencode/skills/system-design/SKILL.md":      true,
+	".opencode/skills/testing-patterns/SKILL.md":   true,
+	// Dewey-scaffolded commands — created by dewey init
+	".opencode/command/dewey-index.md":   true,
+	".opencode/command/dewey-reindex.md": true,
 }
 
 func TestCanonicalSources_AreEmbedded(t *testing.T) {
@@ -1214,15 +1236,15 @@ func TestRun_DivisorSubset_WithLangFlag(t *testing.T) {
 		}
 	}
 
-	// All 8 Divisor agent files created (5 review + 3 content)
+	// All 9 Divisor agent files created (6 review + 3 content)
 	agentCount := 0
 	for _, f := range result.Created {
 		if strings.Contains(f, "agents/divisor-") {
 			agentCount++
 		}
 	}
-	if agentCount != 8 {
-		t.Errorf("expected 8 Divisor agent files, got %d", agentCount)
+	if agentCount != 9 {
+		t.Errorf("expected 9 Divisor agent files, got %d", agentCount)
 	}
 }
 

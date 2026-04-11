@@ -30,9 +30,9 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 
 	// Verify the summary includes a non-trivial file count
-	// 54 = 49 prior + 3 content agents + 2 content packs
-	if !strings.Contains(output, "54 files processed") {
-		t.Errorf("expected '54 files processed' in output, got:\n%s", output)
+	// 55 = 54 prior + 1 curator agent
+	if !strings.Contains(output, "55 files processed") {
+		t.Errorf("expected '55 files processed' in output, got:\n%s", output)
 	}
 
 	// Verify a user-owned file was created
