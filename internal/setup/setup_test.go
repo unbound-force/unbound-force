@@ -115,9 +115,11 @@ func TestSetupRun_AllMissing(t *testing.T) {
 	}
 
 	// Verify install order: opencode (brew), gaze (brew), mxf (brew),
-	// gh (brew), node version check, openspec (npm),
+	// gh (brew), node version check, openspec (npm), uv (brew),
 	// replicator (brew), replicator setup, ollama (brew),
 	// dewey (brew).
+	// Note: specify-cli is skipped because uv was just installed
+	// and is not yet in the stubbed LookPath.
 	expectedCmds := []string{
 		"brew install anomalyco/tap/opencode",
 		"brew install unbound-force/tap/gaze",
@@ -125,6 +127,7 @@ func TestSetupRun_AllMissing(t *testing.T) {
 		"brew install gh",
 		"node --version",
 		"npm install -g @fission-ai/openspec@latest",
+		"brew install uv",
 		"brew install unbound-force/tap/replicator",
 		"replicator setup",
 		"brew install --cask ollama-app",
@@ -181,6 +184,8 @@ func TestSetupRun_AllPresent(t *testing.T) {
 			"node":          "/usr/local/bin/node",
 			"npm":           "/usr/local/bin/npm",
 			"openspec":      "/usr/local/bin/openspec",
+			"uv":            "/usr/local/bin/uv",
+			"specify":       "/usr/local/bin/specify",
 			"replicator":    "/usr/local/bin/replicator",
 			"dewey":         "/usr/local/bin/dewey",
 			"ollama":        "/usr/local/bin/ollama",
@@ -1885,6 +1890,375 @@ func TestSetupRun_OpenSpecNpmFails(t *testing.T) {
 	}
 }
 
+// --- uv installation tests ---
+
+func TestInstallUV_AlreadyInstalled(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"uv": "/usr/local/bin/uv",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installUV(&opts, env)
+	if result.action != "already installed" {
+		t.Errorf("expected 'already installed', got %q", result.action)
+	}
+}
+
+func TestInstallUV_DryRun_Homebrew(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		DryRun: true,
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installUV(&opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("expected 'dry-run', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "brew install uv") {
+		t.Errorf("expected brew install hint, got %q", result.detail)
+	}
+}
+
+func TestInstallUV_DryRun_Curl(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		DryRun:       true,
+		Stdout:       &buf,
+		Stderr:       &buf,
+		LookPath:     stubLookPath(map[string]string{}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installUV(&opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("expected 'dry-run', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "curl") {
+		t.Errorf("expected curl install hint, got %q", result.detail)
+	}
+}
+
+func TestInstallUV_Homebrew(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installUV(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+
+	found := false
+	for _, call := range rec.calls {
+		if call == "brew install uv" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'brew install uv' call, got: %v", rec.calls)
+	}
+}
+
+func TestInstallUV_Curl(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		YesFlag:  true,
+		Stdout:   &buf,
+		Stderr:   &buf,
+		LookPath: stubLookPath(map[string]string{
+			// No brew — should fall back to curl
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installUV(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "curl") {
+		t.Errorf("expected 'via curl' detail, got %q", result.detail)
+	}
+
+	curlCalled := false
+	for _, call := range rec.calls {
+		if strings.Contains(call, "curl") && strings.Contains(call, "astral.sh") {
+			curlCalled = true
+		}
+	}
+	if !curlCalled {
+		t.Errorf("expected curl install call, got: %v", rec.calls)
+	}
+}
+
+func TestInstallUV_CurlSkipped(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		YesFlag:  false,
+		IsTTY:    func() bool { return false },
+		Stdout:   &buf,
+		Stderr:   &buf,
+		LookPath: stubLookPath(map[string]string{
+			// No brew, no TTY, no --yes
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installUV(&opts, env)
+	if result.action != "skipped" {
+		t.Errorf("expected 'skipped', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "curl|bash") {
+		t.Errorf("expected curl|bash skip detail, got %q", result.detail)
+	}
+}
+
+// --- Specify CLI installation tests ---
+
+func TestInstallSpecify_AlreadyInstalled(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"specify": "/usr/local/bin/specify",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installSpecify(&opts, env)
+	if result.action != "already installed" {
+		t.Errorf("expected 'already installed', got %q", result.action)
+	}
+}
+
+func TestInstallSpecify_DryRun(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		DryRun: true,
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"uv": "/usr/local/bin/uv",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installSpecify(&opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("expected 'dry-run', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "uv tool install specify-cli") {
+		t.Errorf("expected uv tool install hint, got %q", result.detail)
+	}
+}
+
+func TestInstallSpecify_NoUV(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout:       &buf,
+		Stderr:       &buf,
+		LookPath:     stubLookPath(map[string]string{}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installSpecify(&opts, env)
+	if result.action != "skipped" {
+		t.Errorf("expected 'skipped', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "uv not available") {
+		t.Errorf("expected 'uv not available' detail, got %q", result.detail)
+	}
+}
+
+func TestInstallSpecify_Success(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"uv": "/usr/local/bin/uv",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installSpecify(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+
+	found := false
+	for _, call := range rec.calls {
+		if call == "uv tool install specify-cli" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'uv tool install specify-cli' call, got: %v", rec.calls)
+	}
+}
+
+func TestInstallSpecify_Failed(t *testing.T) {
+	rec := &cmdRecorder{
+		errors: map[string]error{
+			"uv tool install specify-cli": fmt.Errorf("install failed"),
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"uv": "/usr/local/bin/uv",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installSpecify(&opts, env)
+	if result.action != "failed" {
+		t.Errorf("expected 'failed', got %q", result.action)
+	}
+	if result.err == nil {
+		t.Error("expected non-nil error")
+	}
+}
+
 // Dewey init/index tests were removed — dewey workspace initialization
 // is now handled exclusively by uf init (via scaffold.initSubTools).
 // See internal/scaffold/scaffold_test.go for the corresponding tests.
@@ -1931,6 +2305,8 @@ func TestSetupRun_DryRunNewSteps(t *testing.T) {
 		{"mxf", "Would install: brew install unbound-force/tap/mxf"},
 		{"gh", "Would install: brew install gh"},
 		{"openspec", "Would install: npm install -g @fission-ai/openspec@latest"},
+		{"uv", "Would install: brew install uv"},
+		{"specify", "Would install: uv tool install specify-cli"},
 		{"replicator", "Would install: brew install unbound-force/tap/replicator"},
 	}
 	for _, c := range checks {

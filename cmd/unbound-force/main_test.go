@@ -30,15 +30,15 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 
 	// Verify the summary includes a non-trivial file count
-	// 55 = 54 prior + 1 curator agent
-	if !strings.Contains(output, "55 files processed") {
-		t.Errorf("expected '55 files processed' in output, got:\n%s", output)
+	// 42 = 55 prior - 12 specify assets - 1 openspec/config.yaml (Spec 027)
+	if !strings.Contains(output, "42 files processed") {
+		t.Errorf("expected '42 files processed' in output, got:\n%s", output)
 	}
 
 	// Verify a user-owned file was created
-	specTemplate := filepath.Join(dir, ".specify", "templates", "spec-template.md")
-	if _, err := os.Stat(specTemplate); os.IsNotExist(err) {
-		t.Error("expected user-owned spec-template.md to be created")
+	agentFile := filepath.Join(dir, ".opencode", "agents", "cobalt-crush-dev.md")
+	if _, err := os.Stat(agentFile); os.IsNotExist(err) {
+		t.Error("expected user-owned cobalt-crush-dev.md to be created")
 	}
 
 	// Verify a tool-owned file was created
@@ -64,7 +64,7 @@ func TestRunInit_ForceFlag(t *testing.T) {
 	}
 
 	// Modify a user-owned file
-	userFile := filepath.Join(dir, ".specify", "templates", "spec-template.md")
+	userFile := filepath.Join(dir, ".opencode", "agents", "cobalt-crush-dev.md")
 	if err := os.WriteFile(userFile, []byte("user content"), 0o644); err != nil {
 		t.Fatalf("modify user file: %v", err)
 	}
@@ -137,9 +137,9 @@ func TestInitCmd_Execute_CreatesFiles(t *testing.T) {
 	}
 
 	// Verify at least one scaffolded file exists
-	specTemplate := filepath.Join(dir, ".specify", "templates", "spec-template.md")
-	if _, err := os.Stat(specTemplate); os.IsNotExist(err) {
-		t.Error("expected spec-template.md to be scaffolded by init command")
+	agentFile := filepath.Join(dir, ".opencode", "agents", "cobalt-crush-dev.md")
+	if _, err := os.Stat(agentFile); os.IsNotExist(err) {
+		t.Error("expected cobalt-crush-dev.md to be scaffolded by init command")
 	}
 }
 

@@ -369,6 +369,33 @@ After customizations are applied:
   and delegates to the correct implementation command.
   Preferred over calling `/opsx-apply` directly.
 
+### Tool Delegation (Spec 027)
+
+As of Spec 027, `uf init` delegates workspace initialization
+to external CLIs when they are available:
+
+- **Speckit**: `.specify/` is created by `specify init` (not
+  embedded). If `specify` is in PATH and `.specify/` does not
+  exist, `uf init` calls `specify init` automatically.
+  Post-init customization of Speckit scripts/templates is
+  handled by the `specify` CLI itself.
+
+- **OpenSpec**: `openspec/config.yaml` and base structure are
+  created by `openspec init --tools opencode` (not embedded).
+  The custom OpenSpec schema (`openspec/schemas/unbound-force/`)
+  is still deployed from embedded assets. If `openspec` is in
+  PATH and `openspec/config.yaml` does not exist, `uf init`
+  calls `openspec init --tools opencode` automatically.
+
+- **Gaze**: Gaze agent files (e.g., `gaze-reporter.md`) are
+  created by `gaze init` (not embedded). If `gaze` is in PATH
+  and `.opencode/agents/gaze-reporter.md` does not exist,
+  `uf init` calls `gaze init` automatically.
+
+All delegations are optional — if a tool is not installed,
+`uf init` skips its delegation silently (Constitution
+Principle II — Composability First).
+
 ### When to Re-run
 
 Re-run `/uf-init` after:

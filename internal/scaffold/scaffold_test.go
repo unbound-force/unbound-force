@@ -85,21 +85,6 @@ func mapAssetToSource(relPath string) string {
 // expectedAssetPaths is the canonical list of embedded assets.
 // Update this list when adding or removing assets.
 var expectedAssetPaths = []string{
-	// Speckit templates (6)
-	"specify/templates/agent-file-template.md",
-	"specify/templates/checklist-template.md",
-	"specify/templates/constitution-template.md",
-	"specify/templates/plan-template.md",
-	"specify/templates/spec-template.md",
-	"specify/templates/tasks-template.md",
-	// Speckit config (1)
-	"specify/config.yaml",
-	// Speckit scripts (5)
-	"specify/scripts/bash/check-prerequisites.sh",
-	"specify/scripts/bash/common.sh",
-	"specify/scripts/bash/create-new-feature.sh",
-	"specify/scripts/bash/setup-plan.sh",
-	"specify/scripts/bash/update-agent-context.sh",
 	// OpenCode commands (14)
 	"opencode/command/cobalt-crush.md",
 	"opencode/command/finale.md",
@@ -147,8 +132,6 @@ var expectedAssetPaths = []string{
 	"openspec/schemas/unbound-force/templates/spec.md",
 	"openspec/schemas/unbound-force/templates/design.md",
 	"openspec/schemas/unbound-force/templates/tasks.md",
-	// OpenSpec config (1)
-	"openspec/config.yaml",
 	// Swarm skills (1)
 	"opencode/skill/speckit-workflow/SKILL.md",
 }
@@ -207,8 +190,6 @@ func TestRun_CreatesFiles(t *testing.T) {
 
 	// Verify expected directory structure
 	expectedDirs := []string{
-		".specify/templates",
-		".specify/scripts/bash",
 		".opencode/command",
 		".opencode/agents",
 		".opencode/uf/packs",
@@ -287,13 +268,13 @@ func TestRun_SkipsExisting(t *testing.T) {
 	// Verify a known user-owned file is in Skipped
 	foundUserSkip := false
 	for _, f := range result.Skipped {
-		if strings.Contains(f, "spec-template.md") {
+		if strings.Contains(f, "cobalt-crush-dev.md") {
 			foundUserSkip = true
 			break
 		}
 	}
 	if !foundUserSkip {
-		t.Error("expected user-owned spec-template.md to be in Skipped list")
+		t.Error("expected user-owned cobalt-crush-dev.md to be in Skipped list")
 	}
 }
 
@@ -425,7 +406,7 @@ func TestRun_OverwriteOnDiff_ToolOwned(t *testing.T) {
 	}
 
 	// Modify a user-owned file on disk
-	userFile := filepath.Join(dir, ".specify", "templates", "spec-template.md")
+	userFile := filepath.Join(dir, ".opencode", "agents", "cobalt-crush-dev.md")
 	if err := os.WriteFile(userFile, []byte("user modified"), 0o644); err != nil {
 		t.Fatalf("modify user-owned file: %v", err)
 	}
@@ -460,13 +441,13 @@ func TestRun_OverwriteOnDiff_ToolOwned(t *testing.T) {
 	// User-owned file should be skipped
 	foundUserSkip := false
 	for _, f := range result.Skipped {
-		if strings.Contains(f, "spec-template.md") {
+		if strings.Contains(f, "cobalt-crush-dev.md") {
 			foundUserSkip = true
 			break
 		}
 	}
 	if !foundUserSkip {
-		t.Error("expected spec-template.md to be in Skipped list")
+		t.Error("expected cobalt-crush-dev.md to be in Skipped list")
 	}
 
 	// Verify tool-owned file content was restored
@@ -554,12 +535,7 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/agents/divisor-architect.md", false},
 		{"opencode/agents/cobalt-crush-dev.md", false},
 		// User-owned: other
-		{"specify/templates/spec-template.md", false},
-		{"specify/templates/plan-template.md", false},
-		{"specify/scripts/bash/common.sh", false},
 		{"opencode/agents/constitution-check.md", false},
-		{"openspec/config.yaml", false},
-		{"specify/config.yaml", false},
 	}
 
 	for _, tt := range tests {
@@ -584,16 +560,16 @@ func TestRun_SchemaDistribution(t *testing.T) {
 		t.Fatalf("first Run() error: %v", err)
 	}
 
-	// Modify a schema file (tool-owned) and config (user-owned)
+	// Modify a schema file (tool-owned) and an agent (user-owned)
 	schemaFile := filepath.Join(dir, "openspec", "schemas",
 		"unbound-force", "schema.yaml")
-	configFile := filepath.Join(dir, "openspec", "config.yaml")
+	agentFile := filepath.Join(dir, ".opencode", "agents", "cobalt-crush-dev.md")
 
 	if err := os.WriteFile(schemaFile, []byte("modified schema"), 0o644); err != nil {
 		t.Fatalf("modify schema file: %v", err)
 	}
-	if err := os.WriteFile(configFile, []byte("user config"), 0o644); err != nil {
-		t.Fatalf("modify config file: %v", err)
+	if err := os.WriteFile(agentFile, []byte("user agent"), 0o644); err != nil {
+		t.Fatalf("modify agent file: %v", err)
 	}
 
 	// Re-run without --force
@@ -619,16 +595,16 @@ func TestRun_SchemaDistribution(t *testing.T) {
 		t.Error("expected schema.yaml to be in Updated list")
 	}
 
-	// Config file (user-owned) should be skipped
-	foundConfigSkip := false
+	// Agent file (user-owned) should be skipped
+	foundAgentSkip := false
 	for _, f := range result.Skipped {
-		if strings.Contains(f, "config.yaml") {
-			foundConfigSkip = true
+		if strings.Contains(f, "cobalt-crush-dev.md") {
+			foundAgentSkip = true
 			break
 		}
 	}
-	if !foundConfigSkip {
-		t.Error("expected config.yaml to be in Skipped list")
+	if !foundAgentSkip {
+		t.Error("expected cobalt-crush-dev.md to be in Skipped list")
 	}
 
 	// Verify schema was restored
@@ -640,13 +616,13 @@ func TestRun_SchemaDistribution(t *testing.T) {
 		t.Error("schema file was not restored to canonical content")
 	}
 
-	// Verify config was preserved
-	preserved, err := os.ReadFile(configFile)
+	// Verify agent was preserved
+	preserved, err := os.ReadFile(agentFile)
 	if err != nil {
-		t.Fatalf("read preserved config: %v", err)
+		t.Fatalf("read preserved agent: %v", err)
 	}
-	if string(preserved) != "user config" {
-		t.Error("config file should not have been overwritten")
+	if string(preserved) != "user agent" {
+		t.Error("agent file should not have been overwritten")
 	}
 }
 
@@ -730,10 +706,10 @@ func TestPrintSummary_Output(t *testing.T) {
 		var buf bytes.Buffer
 
 		r := &Result{
-			Created:     []string{".specify/templates/spec-template.md", ".opencode/command/speckit.specify.md"},
+			Created:     []string{".opencode/agents/cobalt-crush-dev.md", ".opencode/command/speckit.specify.md"},
 			Updated:     []string{".opencode/command/speckit.plan.md"},
 			Overwritten: []string{},
-			Skipped:     []string{".specify/config.yaml"},
+			Skipped:     []string{".opencode/uf/packs/go-custom.md"},
 		}
 
 		printSummary(&buf, false, false, true, r, nil)
@@ -756,13 +732,13 @@ func TestPrintSummary_Output(t *testing.T) {
 		}
 
 		// Verify file prefix characters
-		if !strings.Contains(output, "+ .specify/templates/spec-template.md") {
+		if !strings.Contains(output, "+ .opencode/agents/cobalt-crush-dev.md") {
 			t.Errorf("expected '+' prefix for created files")
 		}
 		if !strings.Contains(output, "~ .opencode/command/speckit.plan.md") {
 			t.Errorf("expected '~' prefix for updated files")
 		}
-		if !strings.Contains(output, "- .specify/config.yaml") {
+		if !strings.Contains(output, "- .opencode/uf/packs/go-custom.md") {
 			t.Errorf("expected '-' prefix for skipped files")
 		}
 
@@ -820,7 +796,7 @@ func TestPrintSummary_Output(t *testing.T) {
 		r := &Result{
 			Created:     []string{},
 			Updated:     []string{},
-			Overwritten: []string{".specify/templates/spec-template.md", ".opencode/command/speckit.specify.md"},
+			Overwritten: []string{".opencode/agents/cobalt-crush-dev.md", ".opencode/command/speckit.specify.md"},
 			Skipped:     []string{},
 		}
 
@@ -833,7 +809,7 @@ func TestPrintSummary_Output(t *testing.T) {
 		if !strings.Contains(output, "overwritten: 2") {
 			t.Errorf("expected overwritten count of 2, got output:\n%s", output)
 		}
-		if !strings.Contains(output, "! .specify/templates/spec-template.md") {
+		if !strings.Contains(output, "! .opencode/agents/cobalt-crush-dev.md") {
 			t.Errorf("expected '!' prefix for overwritten files")
 		}
 		if !strings.Contains(output, "! .opencode/command/speckit.specify.md") {
@@ -874,6 +850,21 @@ func TestRun_PrintSummaryIntegration(t *testing.T) {
 // binary. These are local-only tooling files (e.g., installed by
 // the Gaze scaffold) that are specific to this repository.
 var knownNonEmbeddedFiles = map[string]bool{
+	// Speckit files — created by specify init, not scaffolded by uf init
+	".specify/config.yaml":                          true,
+	".specify/templates/agent-file-template.md":     true,
+	".specify/templates/checklist-template.md":      true,
+	".specify/templates/constitution-template.md":   true,
+	".specify/templates/plan-template.md":           true,
+	".specify/templates/spec-template.md":           true,
+	".specify/templates/tasks-template.md":          true,
+	".specify/scripts/bash/check-prerequisites.sh":  true,
+	".specify/scripts/bash/common.sh":               true,
+	".specify/scripts/bash/create-new-feature.sh":   true,
+	".specify/scripts/bash/setup-plan.sh":           true,
+	".specify/scripts/bash/update-agent-context.sh": true,
+	// OpenSpec config — created by openspec init
+	"openspec/config.yaml": true,
 	// Agents — local-only tooling, not scaffolded by uf init
 	".opencode/agents/gaze-reporter.md":       true,
 	".opencode/agents/gaze-test-generator.md": true,
@@ -980,14 +971,10 @@ func TestCanonicalSources_AreEmbedded(t *testing.T) {
 		}
 	}
 
-	// Also check the two standalone config files
-	for _, f := range []string{".specify/config.yaml", "openspec/config.yaml"} {
-		if _, err := os.Stat(filepath.Join(root, f)); err == nil {
-			if !embeddedSet[f] {
-				t.Errorf("canonical source %s is not embedded", f)
-			}
-		}
-	}
+	// Also check standalone config files that are still embedded.
+	// Note: .specify/config.yaml and openspec/config.yaml are now
+	// created by external CLIs (specify init, openspec init) and
+	// listed in knownNonEmbeddedFiles — no longer checked here.
 }
 
 func TestMapAssetPath_Prefixes(t *testing.T) {
@@ -995,9 +982,7 @@ func TestMapAssetPath_Prefixes(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"specify/templates/spec-template.md", ".specify/templates/spec-template.md"},
 		{"opencode/command/speckit.specify.md", ".opencode/command/speckit.specify.md"},
-		{"openspec/config.yaml", "openspec/config.yaml"},
 		{"openspec/schemas/unbound-force/schema.yaml", "openspec/schemas/unbound-force/schema.yaml"},
 		// Unknown prefix passes through unchanged (default branch)
 		{"scripts/validate.sh", "scripts/validate.sh"},
@@ -1033,8 +1018,6 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/agents/constitution-check.md", false},
 		{"opencode/command/speckit.specify.md", false},
 		{"opencode/command/speckit.plan.md", false},
-		{"specify/templates/spec-template.md", false},
-		{"openspec/config.yaml", false},
 		// Non-Divisor: Cobalt-Crush agent
 		{"opencode/agents/cobalt-crush-dev.md", false},
 	}
@@ -1145,9 +1128,9 @@ func TestRun_DivisorSubset(t *testing.T) {
 		t.Fatal("expected Divisor files to be created")
 	}
 
-	// Verify no speckit/openspec files created
+	// Verify no openspec files created (except schema which is embedded)
 	for _, f := range result.Created {
-		if strings.HasPrefix(f, ".specify/") || strings.HasPrefix(f, "openspec/") {
+		if strings.HasPrefix(f, "openspec/") && !strings.Contains(f, "schemas/") {
 			t.Errorf("DivisorOnly should not create %s", f)
 		}
 		if strings.Contains(f, "reviewer-") {
@@ -3391,6 +3374,319 @@ func TestInitSubTools_ReplicatorInitFails(t *testing.T) {
 	}
 	if !foundOC {
 		t.Error("opencode.json result should still be present after replicator init failure")
+	}
+}
+
+// --- Specify delegation tests ---
+
+func TestInitSubTools_SpecifyInit(t *testing.T) {
+	dir := t.TempDir()
+	// No .specify/ — should trigger specify init.
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"specify": "/usr/local/bin/specify"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	foundSpecify := false
+	for _, r := range results {
+		if r.name == ".specify/" && r.action == "initialized" {
+			foundSpecify = true
+		}
+	}
+	if !foundSpecify {
+		t.Errorf("expected .specify/ initialized, got %v", results)
+	}
+
+	found := false
+	for _, call := range rec.calls {
+		if call == "specify init" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'specify init' call, got: %v", rec.calls)
+	}
+}
+
+func TestInitSubTools_SpecifySkipped(t *testing.T) {
+	dir := t.TempDir()
+	// Create .specify/ — should skip specify init.
+	if err := os.MkdirAll(filepath.Join(dir, ".specify"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"specify": "/usr/local/bin/specify"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	for _, r := range results {
+		if r.name == ".specify/" {
+			t.Errorf("unexpected .specify/ result when already exists: %s %s", r.name, r.action)
+		}
+	}
+
+	for _, call := range rec.calls {
+		if call == "specify init" {
+			t.Error("specify init should NOT be called when .specify/ exists")
+		}
+	}
+}
+
+func TestInitSubTools_SpecifyNotInstalled(t *testing.T) {
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{}), // No specify
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	for _, r := range results {
+		if r.name == ".specify/" {
+			t.Errorf("unexpected .specify/ result when specify not installed: %s %s", r.name, r.action)
+		}
+	}
+}
+
+func TestInitSubTools_SpecifyFailed(t *testing.T) {
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{
+		errors: map[string]error{
+			"specify init": fmt.Errorf("init failed"),
+		},
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"specify": "/usr/local/bin/specify"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	foundFailed := false
+	for _, r := range results {
+		if r.name == ".specify/" && r.action == "failed" {
+			foundFailed = true
+		}
+	}
+	if !foundFailed {
+		t.Errorf("expected .specify/ failed, got %v", results)
+	}
+}
+
+// --- OpenSpec delegation tests ---
+
+func TestInitSubTools_OpenSpecInit(t *testing.T) {
+	dir := t.TempDir()
+	// Create openspec/ directory (simulating embedded schema deployment)
+	// but no config.yaml — should trigger openspec init.
+	if err := os.MkdirAll(filepath.Join(dir, "openspec", "schemas"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"openspec": "/usr/local/bin/openspec"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	foundOpenSpec := false
+	for _, r := range results {
+		if r.name == "openspec/" && r.action == "initialized" {
+			foundOpenSpec = true
+		}
+	}
+	if !foundOpenSpec {
+		t.Errorf("expected openspec/ initialized, got %v", results)
+	}
+
+	found := false
+	for _, call := range rec.calls {
+		if call == "openspec init --tools opencode" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'openspec init --tools opencode' call, got: %v", rec.calls)
+	}
+}
+
+func TestInitSubTools_OpenSpecSkipped(t *testing.T) {
+	dir := t.TempDir()
+	// Create openspec/config.yaml — should skip openspec init.
+	if err := os.MkdirAll(filepath.Join(dir, "openspec"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "openspec", "config.yaml"), []byte("existing"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"openspec": "/usr/local/bin/openspec"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	for _, r := range results {
+		if r.name == "openspec/" {
+			t.Errorf("unexpected openspec/ result when config exists: %s %s", r.name, r.action)
+		}
+	}
+
+	for _, call := range rec.calls {
+		if strings.Contains(call, "openspec init") {
+			t.Error("openspec init should NOT be called when config.yaml exists")
+		}
+	}
+}
+
+func TestInitSubTools_OpenSpecFailed(t *testing.T) {
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{
+		errors: map[string]error{
+			"openspec init --tools opencode": fmt.Errorf("init failed"),
+		},
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"openspec": "/usr/local/bin/openspec"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	foundFailed := false
+	for _, r := range results {
+		if r.name == "openspec/" && r.action == "failed" {
+			foundFailed = true
+		}
+	}
+	if !foundFailed {
+		t.Errorf("expected openspec/ failed, got %v", results)
+	}
+}
+
+// --- Gaze delegation tests ---
+
+func TestInitSubTools_GazeInit(t *testing.T) {
+	dir := t.TempDir()
+	// Create .opencode/agents/ but no gaze-reporter.md — should trigger gaze init.
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode", "agents"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"gaze": "/usr/local/bin/gaze"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	foundGaze := false
+	for _, r := range results {
+		if r.name == "gaze" && r.action == "initialized" {
+			foundGaze = true
+		}
+	}
+	if !foundGaze {
+		t.Errorf("expected gaze initialized, got %v", results)
+	}
+
+	found := false
+	for _, call := range rec.calls {
+		if call == "gaze init" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'gaze init' call, got: %v", rec.calls)
+	}
+}
+
+func TestInitSubTools_GazeSkipped(t *testing.T) {
+	dir := t.TempDir()
+	// Create gaze-reporter.md — should skip gaze init.
+	agentDir := filepath.Join(dir, ".opencode", "agents")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "gaze-reporter.md"), []byte("existing"), 0o644); err != nil {
+		t.Fatalf("write agent: %v", err)
+	}
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"gaze": "/usr/local/bin/gaze"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	for _, r := range results {
+		if r.name == "gaze" {
+			t.Errorf("unexpected gaze result when agent exists: %s %s", r.name, r.action)
+		}
+	}
+
+	for _, call := range rec.calls {
+		if call == "gaze init" {
+			t.Error("gaze init should NOT be called when gaze-reporter.md exists")
+		}
+	}
+}
+
+func TestInitSubTools_GazeFailed(t *testing.T) {
+	dir := t.TempDir()
+	// Create .opencode/agents/ but no gaze-reporter.md.
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode", "agents"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	rec := &scaffoldCmdRecorder{
+		errors: map[string]error{
+			"gaze init": fmt.Errorf("init failed"),
+		},
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"gaze": "/usr/local/bin/gaze"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	foundFailed := false
+	for _, r := range results {
+		if r.name == "gaze" && r.action == "failed" {
+			foundFailed = true
+		}
+	}
+	if !foundFailed {
+		t.Errorf("expected gaze failed, got %v", results)
 	}
 }
 

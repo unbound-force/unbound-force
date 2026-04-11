@@ -169,62 +169,76 @@ func Run(opts Options) error {
 	fmt.Fprintln(opts.Stdout, "Installing...")
 
 	// Step 1: Install OpenCode (FR-022).
-	fmt.Fprintf(opts.Stdout, "  [1/12] OpenCode...\n")
+	fmt.Fprintf(opts.Stdout, "  [1/14] OpenCode...\n")
 	results = append(results, installOpenCode(&opts, env))
 
 	// Step 2: Install Gaze (FR-023).
-	fmt.Fprintf(opts.Stdout, "  [2/12] Gaze...\n")
+	fmt.Fprintf(opts.Stdout, "  [2/14] Gaze...\n")
 	results = append(results, installGaze(&opts, env))
 
 	// Step 3: Install Mx F Manager hero.
-	fmt.Fprintf(opts.Stdout, "  [3/12] Mx F...\n")
+	fmt.Fprintf(opts.Stdout, "  [3/14] Mx F...\n")
 	results = append(results, installMxF(&opts, env))
 
 	// Step 4: Install GitHub CLI.
-	fmt.Fprintf(opts.Stdout, "  [4/12] GitHub CLI...\n")
+	fmt.Fprintf(opts.Stdout, "  [4/14] GitHub CLI...\n")
 	results = append(results, installGH(&opts, env))
 
 	// Step 5: Ensure Node.js (FR-024).
-	fmt.Fprintf(opts.Stdout, "  [5/12] Node.js...\n")
+	fmt.Fprintf(opts.Stdout, "  [5/14] Node.js...\n")
 	nodeResult := ensureNodeJS(&opts, env)
 	results = append(results, nodeResult)
 	nodeAvailable := nodeResult.err == nil && nodeResult.action != "failed"
 
 	// Step 6: Install OpenSpec CLI (Node.js-dependent).
 	if nodeAvailable {
-		fmt.Fprintf(opts.Stdout, "  [6/12] OpenSpec CLI...\n")
+		fmt.Fprintf(opts.Stdout, "  [6/14] OpenSpec CLI...\n")
 		results = append(results, installOpenSpec(&opts, env))
 	} else {
 		results = append(results, stepResult{name: "OpenSpec CLI", action: "skipped", detail: "no Node.js"})
 	}
 
-	// Step 7: Install Replicator (Homebrew, replaces Swarm plugin).
-	fmt.Fprintf(opts.Stdout, "  [7/12] Replicator...\n")
+	// Step 7: Install uv (Python package manager for Specify CLI).
+	fmt.Fprintf(opts.Stdout, "  [7/14] uv...\n")
+	uvResult := installUV(&opts, env)
+	results = append(results, uvResult)
+	uvAvailable := uvResult.err == nil && uvResult.action != "failed"
+
+	// Step 8: Install Specify CLI (uv-dependent).
+	if uvAvailable {
+		fmt.Fprintf(opts.Stdout, "  [8/14] Specify CLI...\n")
+		results = append(results, installSpecify(&opts, env))
+	} else {
+		results = append(results, stepResult{name: "Specify CLI", action: "skipped", detail: "no uv"})
+	}
+
+	// Step 9: Install Replicator (Homebrew, replaces Swarm plugin).
+	fmt.Fprintf(opts.Stdout, "  [9/14] Replicator...\n")
 	replicatorResult := installReplicator(&opts, env)
 	results = append(results, replicatorResult)
 
-	// Step 8: Run replicator setup.
+	// Step 10: Run replicator setup.
 	if replicatorResult.err == nil && replicatorResult.action != "failed" && replicatorResult.action != "skipped" {
-		fmt.Fprintf(opts.Stdout, "  [8/12] Replicator setup...\n")
+		fmt.Fprintf(opts.Stdout, "  [10/14] Replicator setup...\n")
 		results = append(results, runReplicatorSetup(&opts))
 	} else {
 		results = append(results, stepResult{name: "replicator setup", action: "skipped", detail: "no replicator"})
 	}
 
-	// Step 9: Install Ollama (prerequisite for Dewey + Replicator embeddings).
-	fmt.Fprintf(opts.Stdout, "  [9/12] Ollama...\n")
+	// Step 11: Install Ollama (prerequisite for Dewey + Replicator embeddings).
+	fmt.Fprintf(opts.Stdout, "  [11/14] Ollama...\n")
 	results = append(results, installOllama(&opts, env))
 
-	// Step 10: Install Dewey (after Ollama).
-	fmt.Fprintf(opts.Stdout, "  [10/12] Dewey...\n")
+	// Step 12: Install Dewey (after Ollama).
+	fmt.Fprintf(opts.Stdout, "  [12/14] Dewey...\n")
 	results = append(results, installDewey(&opts, env))
 
-	// Step 11: Install golangci-lint (Spec 019 FR-012).
-	fmt.Fprintf(opts.Stdout, "  [11/12] golangci-lint...\n")
+	// Step 13: Install golangci-lint (Spec 019 FR-012).
+	fmt.Fprintf(opts.Stdout, "  [13/14] golangci-lint...\n")
 	results = append(results, installGolangciLint(&opts, env))
 
-	// Step 12: Install govulncheck (Spec 019 FR-012).
-	fmt.Fprintf(opts.Stdout, "  [12/12] govulncheck...\n")
+	// Step 14: Install govulncheck (Spec 019 FR-012).
+	fmt.Fprintf(opts.Stdout, "  [14/14] govulncheck...\n")
 	results = append(results, installGovulncheck(&opts, env))
 
 	// Print results.
@@ -491,6 +505,77 @@ func installNodeJS(opts *Options, env doctor.DetectedEnvironment, reason string)
 		detail: fmt.Sprintf("%s. Install: brew install node or https://nodejs.org/", reason),
 		err:    fmt.Errorf("node.js not available"),
 	}
+}
+
+// installUV installs the uv Python package manager if missing.
+// Follows the installOpenCode() pattern: Homebrew-first with curl
+// fallback and interactive guard for curl|bash.
+func installUV(opts *Options, env doctor.DetectedEnvironment) stepResult {
+	if _, err := opts.LookPath("uv"); err == nil {
+		return stepResult{name: "uv", action: "already installed"}
+	}
+
+	if opts.DryRun {
+		if doctor.HasManager(env, doctor.ManagerHomebrew) {
+			return stepResult{name: "uv", action: "dry-run", detail: "Would install: brew install uv"}
+		}
+		return stepResult{name: "uv", action: "dry-run", detail: "Would install: curl -LsSf https://astral.sh/uv/install.sh | sh"}
+	}
+
+	// Try Homebrew first.
+	if doctor.HasManager(env, doctor.ManagerHomebrew) {
+		if _, err := opts.ExecCmd("brew", "install", "uv"); err != nil {
+			return stepResult{name: "uv", action: "failed", detail: "brew install failed", err: err}
+		}
+		return stepResult{name: "uv", action: "installed", detail: "via Homebrew"}
+	}
+
+	// Fallback to curl|bash — requires --yes or TTY confirmation.
+	if !opts.YesFlag && !opts.IsTTY() {
+		return stepResult{
+			name:   "uv",
+			action: "skipped",
+			detail: "curl|bash install requires --yes flag or interactive terminal",
+		}
+	}
+
+	if _, err := opts.ExecCmd("bash", "-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"); err != nil {
+		return stepResult{name: "uv", action: "failed", detail: "curl install failed", err: err}
+	}
+	return stepResult{name: "uv", action: "installed", detail: "via curl"}
+}
+
+// installSpecify installs the Specify CLI via uv tool install.
+// Gated by uv availability — if uv is not in PATH, the step is
+// skipped. Follows the installOpenSpec() pattern (single install
+// method, gated by package manager availability).
+func installSpecify(opts *Options, env doctor.DetectedEnvironment) stepResult {
+	if _, err := opts.LookPath("specify"); err == nil {
+		return stepResult{name: "Specify CLI", action: "already installed"}
+	}
+
+	if opts.DryRun {
+		return stepResult{name: "Specify CLI", action: "dry-run", detail: "Would install: uv tool install specify-cli"}
+	}
+
+	// Check uv availability.
+	if _, err := opts.LookPath("uv"); err != nil {
+		return stepResult{
+			name:   "Specify CLI",
+			action: "skipped",
+			detail: "uv not available — install uv first",
+		}
+	}
+
+	if _, err := opts.ExecCmd("uv", "tool", "install", "specify-cli"); err != nil {
+		return stepResult{
+			name:   "Specify CLI",
+			action: "failed",
+			detail: "uv tool install failed — try: uv tool install specify-cli",
+			err:    err,
+		}
+	}
+	return stepResult{name: "Specify CLI", action: "installed", detail: "via uv"}
 }
 
 // installReplicator installs Replicator if missing per FR-001.
