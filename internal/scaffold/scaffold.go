@@ -122,7 +122,6 @@ func Run(opts Options) (*Result, error) {
 		}
 
 		// Map asset paths to output paths:
-		//   specify/    -> .specify/
 		//   opencode/   -> .opencode/
 		//   openspec/   -> openspec/
 		outRel := mapAssetPath(relPath)
@@ -248,19 +247,16 @@ func warnLegacyReviewerFiles(w io.Writer, targetDir string) {
 // knownAssetPrefixes enumerates the valid top-level prefixes
 // in the embedded assets directory. Used by mapAssetPath to
 // detect assets added under unexpected directories.
-var knownAssetPrefixes = []string{"specify/", "opencode/", "openspec/"}
+var knownAssetPrefixes = []string{"opencode/", "openspec/"}
 
 // mapAssetPath converts an embedded asset relative path to the
 // output path in the target directory. The assets/ directory
 // structure mirrors the target with these prefix mappings:
 //
-//	specify/  -> .specify/
 //	opencode/ -> .opencode/
 //	openspec/ -> openspec/  (no dot prefix)
 func mapAssetPath(relPath string) string {
 	switch {
-	case strings.HasPrefix(relPath, "specify/"):
-		return "." + relPath
 	case strings.HasPrefix(relPath, "opencode/"):
 		return "." + relPath
 	case strings.HasPrefix(relPath, "openspec/"):
@@ -884,6 +880,57 @@ func initSubTools(opts *Options) []subToolResult {
 			} else {
 				results = append(results, subToolResult{
 					name: ".uf/replicator/", action: "initialized"})
+			}
+		}
+	}
+
+	// Specify: init if binary available and .specify/ absent.
+	if _, err := opts.LookPath("specify"); err == nil {
+		specifyDir := filepath.Join(opts.TargetDir, ".specify")
+		if _, statErr := os.Stat(specifyDir); os.IsNotExist(statErr) {
+			_, _ = fmt.Fprintf(opts.Stdout, "  Initializing Speckit framework...\n")
+			if _, initErr := opts.ExecCmd("specify", "init"); initErr != nil {
+				results = append(results, subToolResult{
+					name: ".specify/", action: "failed",
+					detail: "specify init failed"})
+			} else {
+				results = append(results, subToolResult{
+					name: ".specify/", action: "initialized"})
+			}
+		}
+	}
+
+	// OpenSpec: init if binary available and openspec/config.yaml absent.
+	// Gate on config.yaml (not openspec/ directory) because the
+	// embedded custom schema creates openspec/schemas/ before
+	// initSubTools() runs.
+	if _, err := opts.LookPath("openspec"); err == nil {
+		openspecConfig := filepath.Join(opts.TargetDir, "openspec", "config.yaml")
+		if _, statErr := os.Stat(openspecConfig); os.IsNotExist(statErr) {
+			_, _ = fmt.Fprintf(opts.Stdout, "  Initializing OpenSpec framework...\n")
+			if _, initErr := opts.ExecCmd("openspec", "init", "--tools", "opencode"); initErr != nil {
+				results = append(results, subToolResult{
+					name: "openspec/", action: "failed",
+					detail: "openspec init failed"})
+			} else {
+				results = append(results, subToolResult{
+					name: "openspec/", action: "initialized"})
+			}
+		}
+	}
+
+	// Gaze: init if binary available and gaze agent file absent.
+	if _, err := opts.LookPath("gaze"); err == nil {
+		gazeAgent := filepath.Join(opts.TargetDir, ".opencode", "agents", "gaze-reporter.md")
+		if _, statErr := os.Stat(gazeAgent); os.IsNotExist(statErr) {
+			_, _ = fmt.Fprintf(opts.Stdout, "  Initializing Gaze integration...\n")
+			if _, initErr := opts.ExecCmd("gaze", "init"); initErr != nil {
+				results = append(results, subToolResult{
+					name: "gaze", action: "failed",
+					detail: "gaze init failed"})
+			} else {
+				results = append(results, subToolResult{
+					name: "gaze", action: "initialized"})
 			}
 		}
 	}
