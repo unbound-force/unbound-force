@@ -29,6 +29,7 @@ func main() {
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newDoctorCmd())
 	root.AddCommand(newSetupCmd())
+	root.AddCommand(newSandboxCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

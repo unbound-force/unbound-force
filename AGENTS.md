@@ -133,7 +133,8 @@ unbound-force/
 │           ├── typescript.md        # TypeScript convention pack (tool-owned)
 │           └── typescript-custom.md # TypeScript custom rules (user-owned)
 ├── cmd/unbound-force/
-│   └── main.go                      # Cobra CLI entry point
+│   ├── main.go                      # Cobra CLI entry point
+│   └── sandbox.go                   # Sandbox command group (start, stop, attach, extract, status)
 ├── cmd/mutimind/
 │   └── main.go                      # Muti-Mind backend CLI entry point
 ├── internal/scaffold/
@@ -143,6 +144,11 @@ unbound-force/
 ├── internal/backlog/                # Muti-Mind local backlog parsing
 ├── internal/sync/                   # Muti-Mind GitHub issue sync
 ├── internal/artifacts/              # Artifact envelope I/O (WriteArtifact, ReadEnvelope, FindArtifacts)
+├── internal/sandbox/                 # Containerized OpenCode session management (Spec 028)
+│   ├── sandbox.go                   # Core logic (Start, Stop, Attach, Extract, Status)
+│   ├── detect.go                    # Platform detection (DetectPlatform, SELinux)
+│   ├── config.go                    # Container config (buildRunArgs, env vars, volumes)
+│   └── sandbox_test.go              # Tests for all sandbox functions
 ├── internal/schemas/               # JSON Schema generation, validation, convention pack validation (Spec 009)
 ├── internal/orchestration/          # Swarm orchestration engine (Spec 008)
 ├── openspec/                        # OpenSpec tactical workflow
@@ -674,9 +680,12 @@ This repo is primarily specifications and governance documents. Follow these con
 - Filesystem only (path renames across `.uf/`, `.opencode/uf/packs/`, `opencode.json`, `.gitignore`) (025-uf-directory-convention)
 - Go 1.24+ (scaffold engine, tests only — no new Go logic) + Markdown (agent files), `embed.FS` (scaffold engine) (026-documentation-curation)
 - N/A (Markdown files deployed to target directory) (026-documentation-curation)
+- Go 1.24+ + `github.com/spf13/cobra` (CLI), `github.com/charmbracelet/log` (logging), `net/http` (health check), `os/exec` (subprocess) (028-sandbox-command)
+- N/A (no persistent state — container lifecycle is transient) (028-sandbox-command)
 
 ## Recent Changes
 
+- 028-sandbox-command: Added `uf sandbox` command with 5 subcommands (`start`, `stop`, `attach`, `extract`, `status`) for containerized OpenCode session management via Podman. Created new `internal/sandbox/` package (3 source files: `sandbox.go`, `detect.go`, `config.go`) following the established `Options`/`ExecCmd` injection pattern. `Start()` checks prerequisites (Podman, OpenCode), detects platform (macOS/Linux, SELinux), pulls image if needed, starts container with API key forwarding and resource limits, waits for health check with exponential backoff (500ms→5s, 60s timeout), and attaches TUI (or prints URL in `--detach` mode). `Extract()` generates patches via `git format-patch` inside container, displays summary, and applies via `git am` on confirmation. `Stop()` is idempotent. `Status()` parses `podman inspect` JSON. `Attach()` delegates to `opencode attach`. Two mount modes: isolated (read-only, default) and direct (read-write). SELinux `:Z` volume flag auto-detection on Linux. Dead container cleanup before start. Created `cmd/unbound-force/sandbox.go` with Cobra command registration (`--mode`, `--detach`, `--image`, `--memory`, `--cpus`, `--yes` flags). Added 39 test functions covering all public functions, error paths, platform detection, health check polling, and configuration builders. No persistent state -- container existence is the state. Go 1.24+ (CLI), `net/http` (health check), `os/exec` (subprocess). All 4 user stories and 87 tasks completed.
 - 027-externalize-tool-init: Externalized Speckit, OpenSpec, and Gaze initialization from embedded scaffold assets to CLI delegation. Removed 13 embedded assets (12 Speckit files from `internal/scaffold/assets/specify/` + 1 `openspec/config.yaml`), reducing embedded asset count from 55 to 42. Added 3 tool delegations to `initSubTools()` in `internal/scaffold/scaffold.go`: `specify init` (gated on `.specify/` absence), `openspec init --tools opencode` (gated on `openspec/config.yaml` absence), `gaze init` (gated on `gaze-reporter.md` absence). Added 2 new `uf setup` steps: `installUV()` (Homebrew-first with curl fallback) and `installSpecify()` (via `uv tool install specify-cli`, gated on uv availability), increasing step count from 12 to 14. Removed `"specify/"` from `knownAssetPrefixes` and `mapAssetPath()`. Updated `expectedAssetPaths` (55 → 42), added 13 entries to `knownNonEmbeddedFiles`, updated `TestRunInit_FreshDir` file count (55 → 42). Added 18 new test functions (7 setup + 11 scaffold delegation). Updated `/uf-init` command with tool delegation documentation. All 4 user stories and 41 tasks completed.
 - 026-documentation-curation: Added The Curator Divisor agent (`divisor-curator.md`) for documentation & content pipeline triage -- detects documentation gaps (AGENTS.md/README.md not updated for user-facing changes), identifies blog opportunities (new agents, CLI commands, migrations), identifies tutorial opportunities (new slash commands, workflow patterns), and files GitHub issues in `unbound-force/website` with labels `docs`/`blog`/`tutorial`. First Divisor agent with `bash: true` (restricted to `gh issue create` and `gh issue list` only). Temperature 0.2 (judgment-based decisions). Added "Documentation Completeness" checklist item (#6) to Guard's Code Review audit. Added Curator row to review council reference table. Synchronized 3 scaffold asset copies. Updated `expectedAssetPaths` (54 → 55 files). Updated Divisor agent count assertion (8 → 9). All 4 user stories and 38 tasks completed.
 - opsx/gitignore-init: Added `ensureGitignore()` function to the scaffold engine (`internal/scaffold/scaffold.go`) that appends a standard Unbound Force ignore block to `.gitignore` during `uf init`. The block covers `.uf/` runtime data (databases, caches, locks, logs) and legacy tool directories (`.dewey/`, `.hive/`, `.unbound-force/`, `.muti-mind/`, `.mx-f/`). Idempotent via marker comment detection (`# Unbound Force — managed by uf init`). Creates `.gitignore` if it does not exist. Called from `Run()` after file scaffolding but before sub-tool delegation. Result included in scaffold summary output. Added 4 test functions (`TestEnsureGitignore_FreshDir`, `TestEnsureGitignore_ExistingNoBlock`, `TestEnsureGitignore_ExistingWithBlock`, `TestEnsureGitignore_Idempotent`). Updated `TestScaffoldOutput_NoOldPathReferences` to exclude `.gitignore` from stale pattern check (legacy directories are intentional ignore patterns). No scaffold asset changes. 9 tasks completed.
