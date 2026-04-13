@@ -291,6 +291,10 @@ func TestForwardedEnvVars(t *testing.T) {
 			return "sk-ant-xxx"
 		case "OPENAI_API_KEY":
 			return "sk-xxx"
+		case "ANTHROPIC_VERTEX_PROJECT_ID":
+			return "my-gcp-project"
+		case "CLAUDE_CODE_USE_VERTEX":
+			return "1"
 		default:
 			return ""
 		}
@@ -305,6 +309,13 @@ func TestForwardedEnvVars(t *testing.T) {
 	}
 	if !strings.Contains(joined, "-e OPENAI_API_KEY") {
 		t.Errorf("expected OPENAI_API_KEY, got: %s", joined)
+	}
+	// Verify Vertex-specific vars are forwarded.
+	if !strings.Contains(joined, "-e ANTHROPIC_VERTEX_PROJECT_ID") {
+		t.Errorf("expected ANTHROPIC_VERTEX_PROJECT_ID, got: %s", joined)
+	}
+	if !strings.Contains(joined, "-e CLAUDE_CODE_USE_VERTEX") {
+		t.Errorf("expected CLAUDE_CODE_USE_VERTEX, got: %s", joined)
 	}
 	// Verify absent keys are NOT forwarded.
 	if strings.Contains(joined, "GEMINI_API_KEY") {

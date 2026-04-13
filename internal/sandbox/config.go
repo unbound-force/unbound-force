@@ -52,6 +52,9 @@ var forwardedAPIKeys = []string{
 	// Google Vertex AI (FR-020).
 	"GOOGLE_CLOUD_PROJECT",
 	"VERTEX_LOCATION",
+	// Anthropic via Vertex (Claude models on GCP).
+	"ANTHROPIC_VERTEX_PROJECT_ID",
+	"CLAUDE_CODE_USE_VERTEX",
 }
 
 // DefaultConfig resolves image, memory, and CPU settings from
