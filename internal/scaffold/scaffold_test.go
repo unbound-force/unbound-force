@@ -85,20 +85,12 @@ func mapAssetToSource(relPath string) string {
 // expectedAssetPaths is the canonical list of embedded assets.
 // Update this list when adding or removing assets.
 var expectedAssetPaths = []string{
-	// OpenCode commands (14)
+	// OpenCode commands (6) — UF-custom only; speckit.*.md externalized to specify init + /uf-init
 	"opencode/command/cobalt-crush.md",
-	"opencode/command/finale.md",
-	"opencode/command/uf-init.md",
 	"opencode/command/constitution-check.md",
-	"opencode/command/speckit.analyze.md",
-	"opencode/command/speckit.checklist.md",
-	"opencode/command/speckit.clarify.md",
-	"opencode/command/speckit.constitution.md",
-	"opencode/command/speckit.implement.md",
-	"opencode/command/speckit.plan.md",
-	"opencode/command/speckit.specify.md",
-	"opencode/command/speckit.tasks.md",
-	"opencode/command/speckit.taskstoissues.md",
+	"opencode/command/finale.md",
+	"opencode/command/review-council.md",
+	"opencode/command/uf-init.md",
 	"opencode/command/unleash.md",
 	// OpenCode agents — Divisor personas (6) + Cobalt-Crush (1) + Mx F coach (1) + constitution-check (1)
 	"opencode/agents/cobalt-crush-dev.md",
@@ -114,8 +106,6 @@ var expectedAssetPaths = []string{
 	"opencode/agents/divisor-scribe.md",
 	"opencode/agents/divisor-herald.md",
 	"opencode/agents/divisor-envoy.md",
-	// OpenCode commands — includes review-council (11)
-	"opencode/command/review-council.md",
 	// Convention packs — shared by all heroes (9)
 	"opencode/uf/packs/content-custom.md",
 	"opencode/uf/packs/content.md",
@@ -256,13 +246,13 @@ func TestRun_SkipsExisting(t *testing.T) {
 	// Verify a known tool-owned file is in Skipped
 	foundToolSkip := false
 	for _, f := range result.Skipped {
-		if strings.Contains(f, "speckit.specify.md") {
+		if strings.Contains(f, "review-council.md") {
 			foundToolSkip = true
 			break
 		}
 	}
 	if !foundToolSkip {
-		t.Error("expected tool-owned speckit.specify.md to be in Skipped list")
+		t.Error("expected tool-owned review-council.md to be in Skipped list")
 	}
 
 	// Verify a known user-owned file is in Skipped
@@ -400,7 +390,7 @@ func TestRun_OverwriteOnDiff_ToolOwned(t *testing.T) {
 	}
 
 	// Modify a tool-owned file on disk
-	toolFile := filepath.Join(dir, ".opencode", "command", "speckit.specify.md")
+	toolFile := filepath.Join(dir, ".opencode", "command", "review-council.md")
 	if err := os.WriteFile(toolFile, []byte("modified content"), 0o644); err != nil {
 		t.Fatalf("modify tool-owned file: %v", err)
 	}
@@ -429,13 +419,13 @@ func TestRun_OverwriteOnDiff_ToolOwned(t *testing.T) {
 
 	foundToolUpdate := false
 	for _, f := range result.Updated {
-		if strings.Contains(f, "speckit.specify.md") {
+		if strings.Contains(f, "review-council.md") {
 			foundToolUpdate = true
 			break
 		}
 	}
 	if !foundToolUpdate {
-		t.Error("expected speckit.specify.md to be in Updated list")
+		t.Error("expected review-council.md to be in Updated list")
 	}
 
 	// User-owned file should be skipped
@@ -450,7 +440,7 @@ func TestRun_OverwriteOnDiff_ToolOwned(t *testing.T) {
 		t.Error("expected cobalt-crush-dev.md to be in Skipped list")
 	}
 
-	// Verify tool-owned file content was restored
+	// Verify tool-owned file content was restored (review-council.md)
 	restored, err := os.ReadFile(toolFile)
 	if err != nil {
 		t.Fatalf("read restored tool file: %v", err)
@@ -706,8 +696,8 @@ func TestPrintSummary_Output(t *testing.T) {
 		var buf bytes.Buffer
 
 		r := &Result{
-			Created:     []string{".opencode/agents/cobalt-crush-dev.md", ".opencode/command/speckit.specify.md"},
-			Updated:     []string{".opencode/command/speckit.plan.md"},
+			Created:     []string{".opencode/agents/cobalt-crush-dev.md", ".opencode/command/review-council.md"},
+			Updated:     []string{".opencode/command/unleash.md"},
 			Overwritten: []string{},
 			Skipped:     []string{".opencode/uf/packs/go-custom.md"},
 		}
@@ -732,10 +722,10 @@ func TestPrintSummary_Output(t *testing.T) {
 		}
 
 		// Verify file prefix characters
-		if !strings.Contains(output, "+ .opencode/agents/cobalt-crush-dev.md") {
+		if !strings.Contains(output, "+ .opencode/agents/cobalt-crush-dev.md") || !strings.Contains(output, "+ .opencode/command/review-council.md") {
 			t.Errorf("expected '+' prefix for created files")
 		}
-		if !strings.Contains(output, "~ .opencode/command/speckit.plan.md") {
+		if !strings.Contains(output, "~ .opencode/command/unleash.md") {
 			t.Errorf("expected '~' prefix for updated files")
 		}
 		if !strings.Contains(output, "- .opencode/uf/packs/go-custom.md") {
@@ -796,7 +786,7 @@ func TestPrintSummary_Output(t *testing.T) {
 		r := &Result{
 			Created:     []string{},
 			Updated:     []string{},
-			Overwritten: []string{".opencode/agents/cobalt-crush-dev.md", ".opencode/command/speckit.specify.md"},
+			Overwritten: []string{".opencode/agents/cobalt-crush-dev.md", ".opencode/command/review-council.md"},
 			Skipped:     []string{},
 		}
 
@@ -812,7 +802,7 @@ func TestPrintSummary_Output(t *testing.T) {
 		if !strings.Contains(output, "! .opencode/agents/cobalt-crush-dev.md") {
 			t.Errorf("expected '!' prefix for overwritten files")
 		}
-		if !strings.Contains(output, "! .opencode/command/speckit.specify.md") {
+		if !strings.Contains(output, "! .opencode/command/review-council.md") {
 			t.Errorf("expected '!' prefix for second overwritten file")
 		}
 	})
@@ -850,6 +840,16 @@ func TestRun_PrintSummaryIntegration(t *testing.T) {
 // binary. These are local-only tooling files (e.g., installed by
 // the Gaze scaffold) that are specific to this repository.
 var knownNonEmbeddedFiles = map[string]bool{
+	// Speckit commands — created by specify init + /uf-init, not scaffolded by uf init
+	".opencode/command/speckit.specify.md":       true,
+	".opencode/command/speckit.clarify.md":       true,
+	".opencode/command/speckit.plan.md":          true,
+	".opencode/command/speckit.tasks.md":         true,
+	".opencode/command/speckit.analyze.md":       true,
+	".opencode/command/speckit.checklist.md":     true,
+	".opencode/command/speckit.implement.md":     true,
+	".opencode/command/speckit.constitution.md":  true,
+	".opencode/command/speckit.taskstoissues.md": true,
 	// Speckit files — created by specify init, not scaffolded by uf init
 	".specify/config.yaml":                          true,
 	".specify/templates/agent-file-template.md":     true,
@@ -1884,7 +1884,7 @@ func TestPrintSummary_NextSteps(t *testing.T) {
 		var buf bytes.Buffer
 
 		r := &Result{
-			Created: []string{".opencode/command/speckit.specify.md"},
+			Created: []string{".opencode/command/review-council.md"},
 		}
 		subResults := []subToolResult{
 			{name: ".uf/dewey/", action: "initialized"},
@@ -1921,7 +1921,7 @@ func TestPrintSummary_NextSteps(t *testing.T) {
 		var buf bytes.Buffer
 
 		r := &Result{
-			Created: []string{".opencode/command/speckit.specify.md"},
+			Created: []string{".opencode/command/review-council.md"},
 		}
 
 		printSummary(&buf, false, false, true, r, nil)
@@ -1937,7 +1937,7 @@ func TestPrintSummary_NextSteps(t *testing.T) {
 		var buf bytes.Buffer
 
 		r := &Result{
-			Created: []string{".opencode/command/speckit.specify.md"},
+			Created: []string{".opencode/command/review-council.md"},
 		}
 		subResults := []subToolResult{
 			{name: ".uf/dewey/", action: "failed", detail: "dewey init failed"},
