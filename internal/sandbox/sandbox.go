@@ -70,6 +70,33 @@ type Options struct {
 	// HTTPGet performs an HTTP GET request and returns the
 	// status code. Used for health check polling.
 	HTTPGet func(url string) (int, error)
+
+	// --- New fields for Spec 029 ---
+
+	// BackendName selects the backend: "auto", "podman",
+	// or "che". Default: "auto" (auto-detect).
+	BackendName string
+
+	// WorkspaceName overrides the auto-generated workspace
+	// name. Default: "uf-sandbox-<project-name>".
+	WorkspaceName string
+
+	// DemoPorts lists additional ports to expose for demos
+	// (Podman only). Merged with config file ports.
+	DemoPorts []int
+
+	// ConfigPath is the path to .uf/sandbox.yaml.
+	// Default: "<ProjectDir>/.uf/sandbox.yaml".
+	ConfigPath string
+
+	// CheURL is the Eclipse Che server URL. Overrides
+	// config file. Can also be set via UF_CHE_URL env var.
+	CheURL string
+
+	// HTTPDo performs an HTTP request and returns the
+	// response. Used for CDE REST API calls. Defaults to
+	// http.DefaultClient.Do.
+	HTTPDo func(req *http.Request) (*http.Response, error)
 }
 
 // ContainerStatus represents the current state of the
@@ -163,6 +190,9 @@ func (o *Options) defaults() {
 	if o.HTTPGet == nil {
 		o.HTTPGet = defaultHTTPGet
 	}
+	if o.HTTPDo == nil {
+		o.HTTPDo = http.DefaultClient.Do
+	}
 }
 
 // defaultExecCmd is the production implementation of ExecCmd.
@@ -237,14 +267,94 @@ func waitForHealth(opts Options, timeout time.Duration) error {
 		timeout, ContainerName)
 }
 
+// Create provisions a persistent sandbox workspace using the
+// selected backend. Resolves the backend from flags, env, config,
+// or auto-detection, then delegates to backend.Create().
+// After successful creation, auto-attaches the TUI unless
+// --detach is set.
+func Create(opts Options) error {
+	opts.defaults()
+	opts = DefaultConfig(opts)
+
+	backend, err := ResolveBackend(opts)
+	if err != nil {
+		return err
+	}
+
+	if err := backend.Create(opts); err != nil {
+		return err
+	}
+
+	// Display demo endpoint URLs after create.
+	ws, err := backend.Status(opts)
+	if err == nil && len(ws.DemoEndpoints) > 0 {
+		fmt.Fprintf(opts.Stderr, "Demo endpoints:\n")
+		for _, ep := range ws.DemoEndpoints {
+			fmt.Fprintf(opts.Stderr, "  %s: %s\n", ep.Name, ep.URL)
+		}
+	}
+
+	// Auto-attach unless --detach.
+	if opts.Detach {
+		serverURL := fmt.Sprintf("http://localhost:%d", DefaultServerPort)
+		if ws.ServerURL != "" {
+			serverURL = ws.ServerURL
+		}
+		fmt.Fprintf(opts.Stdout, "Sandbox created (detached).\nServer: %s\n", serverURL)
+		return nil
+	}
+
+	return backend.Attach(opts)
+}
+
+// Destroy permanently deletes the sandbox workspace and all
+// associated state. Resolves the backend and delegates to
+// backend.Destroy(). Idempotent.
+func Destroy(opts Options) error {
+	opts.defaults()
+
+	backend, err := ResolveBackend(opts)
+	if err != nil {
+		return err
+	}
+
+	return backend.Destroy(opts)
+}
+
+// isPersistentWorkspace checks if a persistent workspace
+// exists for the current project by looking for a named
+// volume.
+func isPersistentWorkspace(opts Options) bool {
+	volName := volumeNameForProject(opts.ProjectDir)
+	_, err := opts.ExecCmd("podman", "volume", "inspect", volName)
+	return err == nil
+}
+
 // Start launches a sandbox container with the project directory
 // mounted. Checks prerequisites (Podman, OpenCode), detects
 // platform, pulls the image if needed, starts the container,
 // waits for the health check, and attaches the TUI (unless
 // Detach is true).
+//
+// For persistent workspaces (created via `uf sandbox create`),
+// Start resumes the existing workspace. For ephemeral mode
+// (no prior create), Start uses the Spec 028 behavior.
 func Start(opts Options) error {
 	opts.defaults()
 	opts = DefaultConfig(opts)
+
+	// Persistent workspace detection: if a named volume
+	// exists for this project, delegate to the backend's
+	// Start method to resume the persistent workspace.
+	if isPersistentWorkspace(opts) {
+		backend, err := ResolveBackend(opts)
+		if err != nil {
+			return err
+		}
+		return backend.Start(opts)
+	}
+
+	// --- Ephemeral mode (Spec 028 backward compatibility) ---
 
 	// FR-001: Verify podman is in PATH.
 	if _, err := opts.LookPath("podman"); err != nil {
@@ -329,8 +439,24 @@ func Start(opts Options) error {
 
 // Stop stops and removes the sandbox container.
 // Returns nil if no container is running (idempotent).
+//
+// For persistent workspaces, stops the container but
+// preserves the named volume. For ephemeral mode,
+// stops and removes the container (Spec 028 behavior).
 func Stop(opts Options) error {
 	opts.defaults()
+
+	// Persistent workspace: delegate to backend.Stop()
+	// which preserves the named volume.
+	if isPersistentWorkspace(opts) {
+		backend, err := ResolveBackend(opts)
+		if err != nil {
+			return err
+		}
+		return backend.Stop(opts)
+	}
+
+	// --- Ephemeral mode (Spec 028 backward compatibility) ---
 
 	// Check if container exists at all.
 	if !isContainerExists(opts) {
@@ -377,6 +503,9 @@ func Attach(opts Options) error {
 // Extract generates a patch from the container's git history,
 // presents it for review, and applies it to the host repo on
 // confirmation.
+//
+// For persistent workspaces with git push access, suggests
+// using `git pull` instead of extract.
 func Extract(opts Options) error {
 	opts.defaults()
 
@@ -385,6 +514,17 @@ func Extract(opts Options) error {
 		fmt.Fprintf(opts.Stdout,
 			"Sandbox is in direct mode — changes are already on the host filesystem.\n")
 		return nil
+	}
+
+	// For persistent CDE workspaces, suggest git pull.
+	if isPersistentWorkspace(opts) {
+		// Check if this is a CDE workspace (has Che URL configured).
+		cheURL := resolveCheURL(opts)
+		if cheURL != "" {
+			fmt.Fprintf(opts.Stdout,
+				"This workspace has git push access. Use `git pull` on the host instead of extract.\n")
+			return nil
+		}
 	}
 
 	// Verify container is running.
@@ -454,6 +594,24 @@ func Extract(opts Options) error {
 
 	fmt.Fprintf(opts.Stdout, "Patch applied successfully (%d commits).\n", commitCount)
 	return nil
+}
+
+// WorkspaceStatusCheck returns the workspace status for
+// persistent workspaces. Returns a zero-value WorkspaceStatus
+// if no persistent workspace exists.
+func WorkspaceStatusCheck(opts Options) (WorkspaceStatus, error) {
+	opts.defaults()
+
+	if !isPersistentWorkspace(opts) {
+		return WorkspaceStatus{}, nil
+	}
+
+	backend, err := ResolveBackend(opts)
+	if err != nil {
+		return WorkspaceStatus{}, err
+	}
+
+	return backend.Status(opts)
 }
 
 // Status returns the current state of the sandbox container.
