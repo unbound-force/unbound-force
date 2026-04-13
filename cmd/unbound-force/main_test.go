@@ -30,9 +30,9 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 
 	// Verify the summary includes a non-trivial file count
-	// 42 = 55 prior - 12 specify assets - 1 openspec/config.yaml (Spec 027)
-	if !strings.Contains(output, "42 files processed") {
-		t.Errorf("expected '42 files processed' in output, got:\n%s", output)
+	// 33 = 42 prior - 9 speckit.*.md commands (externalized to specify init + /uf-init)
+	if !strings.Contains(output, "33 files processed") {
+		t.Errorf("expected '33 files processed' in output, got:\n%s", output)
 	}
 
 	// Verify a user-owned file was created
@@ -42,9 +42,9 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 
 	// Verify a tool-owned file was created
-	toolFile := filepath.Join(dir, ".opencode", "command", "speckit.specify.md")
+	toolFile := filepath.Join(dir, ".opencode", "command", "review-council.md")
 	if _, err := os.Stat(toolFile); os.IsNotExist(err) {
-		t.Error("expected tool-owned speckit.specify.md to be created")
+		t.Error("expected tool-owned review-council.md to be created")
 	}
 }
 
@@ -70,7 +70,7 @@ func TestRunInit_ForceFlag(t *testing.T) {
 	}
 
 	// Modify a tool-owned file
-	toolFile := filepath.Join(dir, ".opencode", "command", "speckit.specify.md")
+	toolFile := filepath.Join(dir, ".opencode", "command", "review-council.md")
 	if err := os.WriteFile(toolFile, []byte("tool content"), 0o644); err != nil {
 		t.Fatalf("modify tool file: %v", err)
 	}

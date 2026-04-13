@@ -37,6 +37,22 @@ Agents MUST NOT modify values that serve as quality or governance gates to make 
 
 **What to do instead**: When an implementation cannot meet a gate, the agent MUST stop, report which gate is blocking and why, and let the human decide whether to adjust the gate or rework the implementation. Modifying a gate without explicit human authorization is a constitution violation (CRITICAL severity).
 
+### Workflow Phase Boundaries
+
+Agents MUST NOT cross workflow phase boundaries:
+
+- **Specify/Clarify/Plan/Tasks/Analyze/Checklist** phases:
+  spec artifacts ONLY (`specs/NNN-*/` directory). No source
+  code, test, agent, command, or config changes.
+- **Implement** phase: source code changes allowed, guided
+  by spec artifacts.
+- **Review** phase: findings and minor fixes only. No new
+  features.
+
+A phase boundary violation is treated as a process error.
+The agent MUST stop and report the violation rather than
+proceeding with out-of-phase changes.
+
 ## Constitution (Highest Authority)
 
 The org constitution at `.specify/memory/constitution.md` defines four core principles that govern all hero repositories:
@@ -685,6 +701,7 @@ This repo is primarily specifications and governance documents. Follow these con
 
 ## Recent Changes
 
+- opsx/workflow-phase-boundaries: Added workflow phase boundary enforcement (closes #92 + #94). Externalized 9 `speckit.*.md` command files from scaffold assets to `specify init` + `/uf-init` (embedded asset count 42 → 33). Added "Phase Discipline" MUST rule to constitution Development Workflow section. Added "Workflow Phase Boundaries" subsection to AGENTS.md Behavioral Constraints. Added `<!-- code-review: passed -->` marker to `/unleash` Step 6 (code review) with matching resumability detection in Step 2. Added 3 new sections to `/uf-init`: "Speckit Custom Commands" (creates 4 UF-custom commands: analyze, checklist, clarify, taskstoissues), "Speckit Command Guardrails" (injects `## Guardrails` into all 9 speckit commands), "Speckit UF Customizations" (verifies Dewey/constitution/review-council references). Deleted stray tool directories from `internal/scaffold/` and `cmd/unbound-force/` (~74 files). Added `.gitignore` patterns to prevent stray recurrence (`cmd/**/.opencode/`, `internal/**/.uf/`, etc.). Updated `expectedAssetPaths` (42 → 33), added 9 entries to `knownNonEmbeddedFiles`, updated file count assertion (42 → 33). Synchronized 2 scaffold asset copies (unleash.md, uf-init.md). No new Go logic -- Markdown + test assertion changes only. 27 tasks completed.
 - 028-sandbox-command: Added `uf sandbox` command with 5 subcommands (`start`, `stop`, `attach`, `extract`, `status`) for containerized OpenCode session management via Podman. Created new `internal/sandbox/` package (3 source files: `sandbox.go`, `detect.go`, `config.go`) following the established `Options`/`ExecCmd` injection pattern. `Start()` checks prerequisites (Podman, OpenCode), detects platform (macOS/Linux, SELinux), pulls image if needed, starts container with API key forwarding and resource limits, waits for health check with exponential backoff (500ms→5s, 60s timeout), and attaches TUI (or prints URL in `--detach` mode). `Extract()` generates patches via `git format-patch` inside container, displays summary, and applies via `git am` on confirmation. `Stop()` is idempotent. `Status()` parses `podman inspect` JSON. `Attach()` delegates to `opencode attach`. Two mount modes: isolated (read-only, default) and direct (read-write). SELinux `:Z` volume flag auto-detection on Linux. Dead container cleanup before start. Created `cmd/unbound-force/sandbox.go` with Cobra command registration (`--mode`, `--detach`, `--image`, `--memory`, `--cpus`, `--yes` flags). Added 39 test functions covering all public functions, error paths, platform detection, health check polling, and configuration builders. No persistent state -- container existence is the state. Go 1.24+ (CLI), `net/http` (health check), `os/exec` (subprocess). All 4 user stories and 87 tasks completed.
 - 027-externalize-tool-init: Externalized Speckit, OpenSpec, and Gaze initialization from embedded scaffold assets to CLI delegation. Removed 13 embedded assets (12 Speckit files from `internal/scaffold/assets/specify/` + 1 `openspec/config.yaml`), reducing embedded asset count from 55 to 42. Added 3 tool delegations to `initSubTools()` in `internal/scaffold/scaffold.go`: `specify init` (gated on `.specify/` absence), `openspec init --tools opencode` (gated on `openspec/config.yaml` absence), `gaze init` (gated on `gaze-reporter.md` absence). Added 2 new `uf setup` steps: `installUV()` (Homebrew-first with curl fallback) and `installSpecify()` (via `uv tool install specify-cli`, gated on uv availability), increasing step count from 12 to 14. Removed `"specify/"` from `knownAssetPrefixes` and `mapAssetPath()`. Updated `expectedAssetPaths` (55 → 42), added 13 entries to `knownNonEmbeddedFiles`, updated `TestRunInit_FreshDir` file count (55 → 42). Added 18 new test functions (7 setup + 11 scaffold delegation). Updated `/uf-init` command with tool delegation documentation. All 4 user stories and 41 tasks completed.
 - 026-documentation-curation: Added The Curator Divisor agent (`divisor-curator.md`) for documentation & content pipeline triage -- detects documentation gaps (AGENTS.md/README.md not updated for user-facing changes), identifies blog opportunities (new agents, CLI commands, migrations), identifies tutorial opportunities (new slash commands, workflow patterns), and files GitHub issues in `unbound-force/website` with labels `docs`/`blog`/`tutorial`. First Divisor agent with `bash: true` (restricted to `gh issue create` and `gh issue list` only). Temperature 0.2 (judgment-based decisions). Added "Documentation Completeness" checklist item (#6) to Guard's Code Review audit. Added Curator row to review council reference table. Synchronized 3 scaffold asset copies. Updated `expectedAssetPaths` (54 → 55 files). Updated Divisor agent count assertion (8 → 9). All 4 user stories and 38 tasks completed.

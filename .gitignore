@@ -74,3 +74,13 @@ dist/
 .muti-mind/
 .mx-f/
 .DS_Store
+
+# Prevent stray tool directories in subdirectories
+cmd/**/.opencode/
+cmd/**/.uf/
+cmd/**/.specify/
+cmd/**/openspec/
+internal/**/.opencode/
+internal/**/.uf/
+internal/**/.specify/
+internal/**/openspec/

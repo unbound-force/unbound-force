@@ -186,6 +186,13 @@ org constitution — they MUST NOT contradict any org principle.
   dependency versions. When an implementation cannot meet a gate,
   the agent MUST report the failure and stop rather than weakening
   the gate.
+- **Phase Discipline**: Each pipeline phase (specify,
+  clarify, plan, tasks, analyze, checklist, implement,
+  review) MUST produce only its designated artifacts.
+  Implementation code MUST NOT be written during
+  specification phases. Specification phases may only
+  write to files within the `specs/NNN-*/` feature
+  directory.
 - **Cross-Repo Documentation**: When a change affects user-facing
   behavior, hero capabilities, CLI commands, or workflows, a
   GitHub issue MUST be created in the `unbound-force/website`

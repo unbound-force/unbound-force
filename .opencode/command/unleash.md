@@ -106,10 +106,8 @@ already complete. Check in order:
    if all task checkboxes are `[x]` (no `- [ ]` lines
    remain in the task phases).
 
-6. **Code review done?** Derive the build and test
-   commands from `.github/workflows/` (read the CI
-   workflow files to identify the exact commands). Run
-   them. If all pass, code review is a candidate.
+6. **Code review done?** Read `tasks.md` and check for
+   the `<!-- code-review: passed -->` HTML comment marker.
 
 Display the detection results:
 
@@ -447,8 +445,14 @@ quality data.
 
 **Processing results**:
 
-- If all reviewers APPROVE (and CI passes): proceed to
-  step 7.
+- If all reviewers APPROVE (and CI passes):
+  Write the code review marker to `tasks.md`:
+  ```
+  <!-- code-review: passed -->
+  ```
+  Append this marker at the very end of `tasks.md`
+  (after the spec-review marker if present).
+  Proceed to step 7.
 
 - If findings exist: attempt to fix them. For each
   iteration (up to 3 total):

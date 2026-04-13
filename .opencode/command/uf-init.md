@@ -311,7 +311,181 @@ customization), or at the end of the file if no natural
 insertion point exists. Do NOT insert this in command files --
 skills only (commands delegate to skills for behavior).
 
-### Step 5: Report Results
+### Step 5: Speckit Custom Commands
+
+Create the 4 UF-custom speckit commands that upstream
+`specify init` does not provide. For each file below:
+
+1. **Check** if the file exists in `.opencode/command/`
+2. **If it exists**: Report `⊘ <filename>: already exists (skipped)`
+3. **If it does not exist**: Create it with the content
+   described below. Report `✅ <filename>: created`
+
+#### speckit.analyze.md
+
+Create `.opencode/command/speckit.analyze.md` — a
+read-only cross-artifact consistency and quality analysis
+command. The command:
+- Runs after `/speckit.tasks` produces `tasks.md`
+- Loads spec.md, plan.md, tasks.md, and constitution
+- Performs 6 detection passes: duplication, ambiguity,
+  underspecification, constitution alignment, coverage
+  gaps, and inconsistency
+- Assigns severity (CRITICAL/HIGH/MEDIUM/LOW)
+- Produces a Markdown analysis report (no file writes)
+- Offers optional remediation suggestions
+
+Use this frontmatter:
+```yaml
+---
+description: Perform a non-destructive cross-artifact consistency and quality analysis across spec.md, plan.md, and tasks.md after task generation.
+---
+```
+
+#### speckit.checklist.md
+
+Create `.opencode/command/speckit.checklist.md` — a
+requirements quality validation command ("unit tests
+for English"). The command:
+- Generates checklists that test REQUIREMENTS quality,
+  not implementation behavior
+- Creates files in `FEATURE_DIR/checklists/[domain].md`
+- Items use question format: "Are [X] defined for [Y]?"
+- Items include quality dimension tags: [Completeness],
+  [Clarity], [Consistency], [Measurability], [Coverage]
+- Asks up to 3 clarifying questions before generating
+- Each run creates a NEW checklist file (never overwrites)
+
+Use this frontmatter:
+```yaml
+---
+description: Generate a custom checklist for the current feature based on user requirements.
+---
+```
+
+#### speckit.clarify.md
+
+Create `.opencode/command/speckit.clarify.md` — a spec
+ambiguity detection and resolution command. The command:
+- Scans spec.md for ambiguities across 10 taxonomy
+  categories (functional scope, data model, UX flow,
+  non-functional, integration, edge cases, constraints,
+  terminology, completion signals, placeholders)
+- Asks up to 5 targeted questions, one at a time
+- Provides recommended answers with reasoning
+- Integrates answers directly into spec.md sections
+- Records Q&A in a `## Clarifications` section
+
+Use this frontmatter:
+```yaml
+---
+description: Identify underspecified areas in the current feature spec by asking up to 5 highly targeted clarification questions and encoding answers back into the spec.
+---
+```
+
+#### speckit.taskstoissues.md
+
+Create `.opencode/command/speckit.taskstoissues.md` — a
+GitHub issue creation command. The command:
+- Reads tasks.md and creates GitHub issues for each task
+- Requires a GitHub remote URL (validates before creating)
+- Uses the GitHub MCP server for issue creation
+- NEVER creates issues in repos that don't match the
+  remote URL
+
+Use this frontmatter:
+```yaml
+---
+description: Convert existing tasks into actionable, dependency-ordered GitHub issues for the feature based on available design artifacts.
+tools: ['github/github-mcp-server/issue_write']
+---
+```
+
+All 4 commands MUST include the standard initialization
+step: run `.specify/scripts/bash/check-prerequisites.sh
+--json` from repo root and parse JSON for FEATURE_DIR.
+
+### Step 6: Speckit Command Guardrails
+
+Inject a `## Guardrails` section into ALL 9
+`.opencode/command/speckit.*.md` files. For each file:
+
+1. **Read** the file content
+2. **Check** if a `## Guardrails` section already exists
+   (search for the heading text `## Guardrails`)
+3. **If already present**: Report
+   `⊘ <filename>: guardrails already present (skipped)`
+4. **If not present**: Append the following block at the
+   very end of the file. Report
+   `✅ <filename>: guardrails injected`
+
+The guardrails block to append:
+
+```markdown
+
+## Guardrails
+
+- **NEVER modify source code** — this command updates
+  spec artifacts ONLY. Implementation changes belong in
+  `/speckit.implement`, `/unleash`, or `/cobalt-crush`.
+- **NEVER modify test files, Go source, Markdown agents,
+  convention packs, or config files** outside the
+  `specs/NNN-*/` feature directory.
+- The ONLY files this command may write are:
+  - `FEATURE_SPEC` (the spec.md file)
+  - Files within `FEATURE_DIR` (spec artifacts:
+    plan.md, tasks.md, research.md, data-model.md,
+    quickstart.md, contracts/, checklists/)
+```
+
+The 9 target files are:
+- `speckit.specify.md`
+- `speckit.clarify.md`
+- `speckit.plan.md`
+- `speckit.tasks.md`
+- `speckit.analyze.md`
+- `speckit.checklist.md`
+- `speckit.implement.md`
+- `speckit.constitution.md`
+- `speckit.taskstoissues.md`
+
+**Note**: `speckit.implement.md` is an exception — it IS
+allowed to modify source code. However, the guardrails
+section is still injected for consistency. The implement
+command's own instructions override the guardrails where
+they conflict (implement's instructions explicitly say
+to write source code).
+
+### Step 7: Speckit UF Customizations
+
+Verify that UF-specific content is present in the
+upstream speckit commands. For each of the 5 upstream
+commands (`speckit.specify.md`, `speckit.plan.md`,
+`speckit.tasks.md`, `speckit.implement.md`,
+`speckit.constitution.md`):
+
+1. **Read** the file content
+2. **Check** for these UF-specific references:
+   - Dewey integration: does the file mention
+     `dewey_semantic_search` or `dewey_search` as tool
+     invocations? (Not just prose mentions of "Dewey")
+   - Constitution check: does the file reference
+     `.specify/memory/constitution.md` or the
+     Constitution Check gate?
+   - Review council: does `speckit.implement.md`
+     reference `/review-council` or the Divisor review
+     system?
+3. **If all references present**: Report
+   `⊘ <filename>: UF customizations present (skipped)`
+4. **If any reference missing**: Report which references
+   are missing but do NOT modify the file. These are
+   informational — the upstream commands may not include
+   UF-specific content, and that's acceptable.
+   Report `ℹ <filename>: missing [list] (informational)`
+
+This step is read-only — it verifies but does not modify.
+
+### Step 8: Report Results
 
 After processing all customizations, display a summary:
 
@@ -332,6 +506,18 @@ After processing all customizations, display a summary:
   ...
 
 ### 3-Tier Degradation (Skills only)
+  [status] [filename]: [action]
+  ...
+
+### Speckit Custom Commands
+  [status] [filename]: [action]
+  ...
+
+### Speckit Command Guardrails
+  [status] [filename]: [action]
+  ...
+
+### Speckit UF Customizations
   [status] [filename]: [action]
   ...
 
