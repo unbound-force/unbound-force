@@ -84,3 +84,5 @@ internal/**/.opencode/
 internal/**/.uf/
 internal/**/.specify/
 internal/**/openspec/
+
+*.log

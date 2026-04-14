@@ -181,8 +181,6 @@ func TestBuildRunArgs_Direct(t *testing.T) {
 	joined := strings.Join(args, " ")
 
 	// Verify read-write mount (no :ro) for the project directory.
-	// Note: Google Cloud credential mounts may include :ro — that's
-	// correct. Only the project mount should be read-write.
 	if !strings.Contains(joined, "/tmp/test-project:/workspace") {
 		t.Errorf("expected volume mount, got: %s", joined)
 	}
@@ -446,7 +444,6 @@ func TestStart_DirectMount(t *testing.T) {
 	joined := strings.Join(args, " ")
 
 	// Check project mount is read-write (no :ro on project path).
-	// Google Cloud credential mounts may include :ro — that's correct.
 	if strings.Contains(joined, "/tmp/test-project:/workspace:ro") {
 		t.Errorf("expected no :ro on project mount for direct mode, got: %s", joined)
 	}

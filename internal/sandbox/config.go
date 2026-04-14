@@ -106,10 +106,10 @@ func forwardedEnvVars(opts Options) []string {
 //  1. If GOOGLE_APPLICATION_CREDENTIALS is set and the file
 //     exists, mount it read-only and set the env var to the
 //     container-internal path.
-//  2. If GOOGLE_APPLICATION_CREDENTIALS is not set, check for
-//     gcloud Application Default Credentials at the standard
-//     path (~/.config/gcloud/application_default_credentials.json)
-//     and mount it if present.
+//  2. If GOOGLE_APPLICATION_CREDENTIALS is not set, mount the
+//     entire ~/.config/gcloud/ directory read-write so the
+//     auth library can read credentials and write refreshed
+//     access tokens (needed for authorized_user credentials).
 func googleCloudCredentialMounts(opts Options, platform PlatformConfig) []string {
 	var args []string
 
@@ -127,19 +127,27 @@ func googleCloudCredentialMounts(opts Options, platform PlatformConfig) []string
 		return args
 	}
 
-	// Strategy 2: gcloud ADC fallback.
+	// Strategy 2: mount entire gcloud config directory.
+	// The authorized_user credential type needs access_tokens.db
+	// and credentials.db for token refresh. Mount read-write so
+	// the auth library can update cached access tokens.
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return args
 	}
-	adcPath := filepath.Join(home, ".config", "gcloud", "application_default_credentials.json")
-	if _, err := os.Stat(adcPath); err == nil {
-		containerPath := "/home/dev/.config/gcloud/application_default_credentials.json"
-		mount := fmt.Sprintf("%s:%s:ro", adcPath, containerPath)
+	gcloudDir := filepath.Join(home, ".config", "gcloud")
+	if _, err := os.Stat(gcloudDir); err == nil {
+		containerPath := "/home/dev/.config/gcloud"
+		mount := fmt.Sprintf("%s:%s", gcloudDir, containerPath)
 		if platform.SELinux {
-			mount += ",Z"
+			mount += ":Z"
 		}
 		args = append(args, "-v", mount)
+		// Set GOOGLE_APPLICATION_CREDENTIALS to the ADC file
+		// inside the mounted directory so the auth library
+		// finds it without searching.
+		adcContainer := containerPath + "/application_default_credentials.json"
+		args = append(args, "-e", "GOOGLE_APPLICATION_CREDENTIALS="+adcContainer)
 	}
 	return args
 }
