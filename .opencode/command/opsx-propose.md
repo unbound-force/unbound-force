@@ -43,6 +43,24 @@ When ready to implement, run /opsx-apply
    - If on a different `opsx/*` branch: **STOP** with error: "Already on branch `opsx/<other>` -- finish or archive that change first."
    - If on `main` or any non-opsx branch: create and checkout `opsx/<name>`.
 
+### Retrieve Context from Dewey (optional)
+
+Before drafting the proposal, query Dewey for relevant context:
+
+- `dewey_semantic_search` with the change description to find
+  related specs, past proposals, and similar changes
+- `dewey_semantic_search_filtered` with `source_type: "github"`
+  to find related issues across the organization
+- `dewey_traverse` on any discovered related specs to understand
+  dependencies
+
+Use the retrieved context to inform the proposal's scope,
+identify potential conflicts with existing work, and reference
+relevant prior decisions.
+
+If Dewey is unavailable, proceed without cross-repo context —
+use direct file reads of local specs and backlog items instead.
+
 4. **Get the artifact build order**
    ```bash
    openspec status --change "<name>" --json
@@ -112,3 +130,14 @@ After completing all artifacts, summarize:
 - If context is critically unclear, ask the user - but prefer making reasonable decisions to keep momentum
 - If a change with that name already exists, ask if user wants to continue it or create a new one
 - Verify each artifact file exists after writing before proceeding to next
+
+## Guardrails
+
+- **NEVER implement code changes** — this command
+  creates artifacts ONLY (proposal, design, specs, tasks)
+- **NEVER commit, push, or create PRs** — those are
+  /finale's responsibility
+- **NEVER run /opsx-apply or /cobalt-crush** — the
+  user decides when to implement
+- After artifacts are complete, STOP and prompt the
+  user to run /opsx-apply or /cobalt-crush
