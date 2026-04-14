@@ -485,7 +485,38 @@ commands (`speckit.specify.md`, `speckit.plan.md`,
 
 This step is read-only — it verifies but does not modify.
 
-### Step 8: Report Results
+### Step 8: OpenSpec Command Guardrails
+
+For `.opencode/command/opsx-propose.md`:
+
+1. **Read** the file content
+2. **Check** if a `## Guardrails` section exists at the
+   end of the file (search for the heading text
+   `## Guardrails`)
+3. **If already present**: Report
+   `⊘ opsx-propose.md: guardrails already present (skipped)`
+4. **If not present**: Append the following block at the
+   very end of the file. Report
+   `✅ opsx-propose.md: guardrails injected`
+
+The guardrails block to append:
+
+```markdown
+
+## Guardrails
+
+- **NEVER implement code changes** — this command
+  creates artifacts ONLY (proposal, design, specs,
+  tasks)
+- **NEVER commit, push, or create PRs** — those are
+  /finale's responsibility
+- **NEVER run /opsx-apply or /cobalt-crush** — the
+  user decides when to implement
+- After artifacts are complete, STOP and prompt the
+  user to run /opsx-apply or /cobalt-crush
+```
+
+### Step 9: Report Results
 
 After processing all customizations, display a summary:
 
@@ -518,6 +549,10 @@ After processing all customizations, display a summary:
   ...
 
 ### Speckit UF Customizations
+  [status] [filename]: [action]
+  ...
+
+### OpenSpec Command Guardrails
   [status] [filename]: [action]
   ...
 
