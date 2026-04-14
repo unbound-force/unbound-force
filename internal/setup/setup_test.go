@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -120,6 +121,11 @@ func TestSetupRun_AllMissing(t *testing.T) {
 	// dewey (brew).
 	// Note: specify-cli is skipped because uv was just installed
 	// and is not yet in the stubbed LookPath.
+	// Note: ollama uses formula on Linux, cask on macOS.
+	ollamaCmd := "brew install ollama"
+	if runtime.GOOS == "darwin" {
+		ollamaCmd = "brew install --cask ollama-app"
+	}
 	expectedCmds := []string{
 		"brew install anomalyco/tap/opencode",
 		"brew install unbound-force/tap/gaze",
@@ -130,7 +136,7 @@ func TestSetupRun_AllMissing(t *testing.T) {
 		"brew install uv",
 		"brew install unbound-force/tap/replicator",
 		"replicator setup",
-		"brew install --cask ollama-app",
+		ollamaCmd,
 		"brew install unbound-force/tap/dewey",
 	}
 
@@ -1431,16 +1437,22 @@ func TestSetupRun_OllamaInstall(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Verify Ollama was installed via Homebrew (no tip, actual install).
+	// Verify Ollama was installed via Homebrew. On Linux (this test
+	// runs on Linux), the formula path is used. On macOS, the cask
+	// path would be used. Check for whichever is appropriate.
+	expectedCmd := "brew install ollama" // Linux default
+	if opts.GOOS == "darwin" {
+		expectedCmd = "brew install --cask ollama-app"
+	}
 	found := false
 	for _, call := range rec.calls {
-		if call == "brew install --cask ollama-app" {
+		if call == expectedCmd {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("expected 'brew install --cask ollama-app' in recorded commands")
+		t.Errorf("expected %q in recorded commands, got: %v", expectedCmd, rec.calls)
 	}
 
 	// Verify no Ollama tip in output (removed -- now installed automatically).
@@ -1528,10 +1540,10 @@ func TestSetupRun_OllamaNoHomebrew(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Verify no brew install ollama-app was attempted.
+	// Verify no brew install ollama was attempted.
 	for _, call := range rec.calls {
-		if call == "brew install --cask ollama-app" {
-			t.Error("should NOT attempt brew install --cask ollama-app when Homebrew is not available")
+		if call == "brew install --cask ollama-app" || call == "brew install ollama" {
+			t.Error("should NOT attempt brew install ollama when Homebrew is not available")
 		}
 	}
 
@@ -1548,12 +1560,19 @@ func TestSetupRun_OllamaBrewFails(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
+	// On Linux, installOllama uses "brew install ollama" (formula).
+	// On macOS, it uses "brew install --cask ollama-app".
+	ollamaCmd := "brew install ollama"
+	if runtime.GOOS == "darwin" {
+		ollamaCmd = "brew install --cask ollama-app"
+	}
+
 	rec := &cmdRecorder{
 		outputs: map[string]string{
 			"node --version": "v22.15.0",
 		},
 		errors: map[string]error{
-			"brew install --cask ollama-app": fmt.Errorf("brew: cask not found"),
+			ollamaCmd: fmt.Errorf("brew: install failed"),
 		},
 	}
 
@@ -1589,6 +1608,250 @@ func TestSetupRun_OllamaBrewFails(t *testing.T) {
 	output := buf.String()
 	if !strings.Contains(output, "failed") && !strings.Contains(output, "FAIL") {
 		t.Error("expected failure indication in output when brew install ollama fails")
+	}
+}
+
+// --- OS-aware Ollama installation tests ---
+
+func TestOllamaBrew_Darwin(t *testing.T) {
+	args := ollamaBrew("darwin")
+	expected := []string{"brew", "install", "--cask", "ollama-app"}
+	if len(args) != len(expected) {
+		t.Fatalf("ollamaBrew(darwin) = %v, want %v", args, expected)
+	}
+	for i, v := range expected {
+		if args[i] != v {
+			t.Errorf("ollamaBrew(darwin)[%d] = %q, want %q", i, args[i], v)
+		}
+	}
+}
+
+func TestOllamaBrew_Linux(t *testing.T) {
+	args := ollamaBrew("linux")
+	expected := []string{"brew", "install", "ollama"}
+	if len(args) != len(expected) {
+		t.Fatalf("ollamaBrew(linux) = %v, want %v", args, expected)
+	}
+	for i, v := range expected {
+		if args[i] != v {
+			t.Errorf("ollamaBrew(linux)[%d] = %q, want %q", i, args[i], v)
+		}
+	}
+}
+
+func TestInstallOllama_LinuxFormula(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		GOOS:      "linux",
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":       "/home/linuxbrew/.linuxbrew/bin/brew",
+			"node":       "/usr/bin/node",
+			"npm":        "/usr/bin/npm",
+			"go":         "/usr/bin/go",
+			"opencode":   "/usr/bin/opencode",
+			"gaze":       "/usr/bin/gaze",
+			"replicator": "/usr/bin/replicator",
+			// ollama NOT in PATH
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	_ = Run(opts)
+
+	found := false
+	for _, call := range rec.calls {
+		if call == "brew install ollama" {
+			found = true
+		}
+		if call == "brew install --cask ollama-app" {
+			t.Error("should NOT use --cask on Linux")
+		}
+	}
+	if !found {
+		t.Errorf("expected 'brew install ollama' on Linux, got: %v", rec.calls)
+	}
+}
+
+func TestInstallOllama_DarwinCask(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"node --version": "v22.15.0",
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		TargetDir: dir,
+		GOOS:      "darwin",
+		Stdout:    &buf,
+		Stderr:    &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew":       "/opt/homebrew/bin/brew",
+			"node":       "/usr/local/bin/node",
+			"npm":        "/usr/local/bin/npm",
+			"go":         "/usr/local/bin/go",
+			"opencode":   "/usr/local/bin/opencode",
+			"gaze":       "/usr/local/bin/gaze",
+			"replicator": "/usr/local/bin/replicator",
+			// ollama NOT in PATH
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+		WriteFile:    os.WriteFile,
+	}
+
+	_ = Run(opts)
+
+	found := false
+	for _, call := range rec.calls {
+		if call == "brew install --cask ollama-app" {
+			found = true
+		}
+		if call == "brew install ollama" {
+			t.Error("should use --cask on macOS, not formula")
+		}
+	}
+	if !found {
+		t.Errorf("expected 'brew install --cask ollama-app' on macOS, got: %v", rec.calls)
+	}
+}
+
+// --- RPM URL and dnf install tests ---
+
+func TestRpmURL(t *testing.T) {
+	url := rpmURL("unbound-force/unbound-force", "0.12.0", "amd64")
+	expected := "https://github.com/unbound-force/unbound-force/releases/download/v0.12.0/unbound-force_0.12.0_linux_amd64.rpm"
+	if url != expected {
+		t.Errorf("rpmURL = %q, want %q", url, expected)
+	}
+}
+
+func TestRpmURL_Arm64(t *testing.T) {
+	url := rpmURL("unbound-force/gaze", "1.5.0", "arm64")
+	expected := "https://github.com/unbound-force/gaze/releases/download/v1.5.0/gaze_1.5.0_linux_arm64.rpm"
+	if url != expected {
+		t.Errorf("rpmURL = %q, want %q", url, expected)
+	}
+}
+
+func TestRepoName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"unbound-force/unbound-force", "unbound-force"},
+		{"unbound-force/gaze", "gaze"},
+		{"single", "single"},
+	}
+	for _, tt := range tests {
+		got := repoName(tt.input)
+		if got != tt.want {
+			t.Errorf("repoName(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestInstallViaRpm_Success(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := &Options{
+		ExecCmd: rec.execCmd,
+		Stdout:  &bytes.Buffer{},
+		Stderr:  &bytes.Buffer{},
+	}
+
+	result := installViaRpm(opts, "unbound-force", "unbound-force/unbound-force", "0.12.0")
+
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if result.detail != "via dnf (RPM)" {
+		t.Errorf("detail = %q, want 'via dnf (RPM)'", result.detail)
+	}
+	// Verify dnf was called with the RPM URL.
+	found := false
+	for _, call := range rec.calls {
+		if strings.Contains(call, "dnf install -y") && strings.Contains(call, ".rpm") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected dnf install call, got: %v", rec.calls)
+	}
+}
+
+func TestInstallViaRpm_NoVersion(t *testing.T) {
+	opts := &Options{
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	}
+
+	result := installViaRpm(opts, "unbound-force", "unbound-force/unbound-force", "")
+
+	if result.action != "skipped" {
+		t.Errorf("action = %q, want skipped", result.action)
+	}
+}
+
+func TestInstallViaRpm_DnfFails(t *testing.T) {
+	rec := &cmdRecorder{
+		errors: map[string]error{},
+	}
+	// Make all dnf calls fail.
+	rec.errors["dnf install -y "+rpmURL("unbound-force/unbound-force", "0.12.0", rpmArch())] = fmt.Errorf("dnf: not authorized")
+
+	opts := &Options{
+		ExecCmd: rec.execCmd,
+		Stdout:  &bytes.Buffer{},
+		Stderr:  &bytes.Buffer{},
+	}
+
+	result := installViaRpm(opts, "unbound-force", "unbound-force/unbound-force", "0.12.0")
+
+	if result.action != "failed" {
+		t.Errorf("action = %q, want failed", result.action)
+	}
+}
+
+func TestInstallViaRpm_DryRun(t *testing.T) {
+	opts := &Options{
+		DryRun: true,
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	}
+
+	result := installViaRpm(opts, "unbound-force", "unbound-force/unbound-force", "0.12.0")
+
+	if result.action != "dry-run" {
+		t.Errorf("action = %q, want dry-run", result.action)
+	}
+	if !strings.Contains(result.detail, "dnf install") {
+		t.Errorf("detail should contain dnf install hint, got: %q", result.detail)
 	}
 }
 

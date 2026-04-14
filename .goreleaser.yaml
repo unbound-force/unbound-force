@@ -65,6 +65,39 @@ changelog:
     exclude:
       - '^chore:'
 
+nfpms:
+  - id: unbound-force
+    package_name: unbound-force
+    vendor: Unbound Force
+    homepage: "https://github.com/unbound-force/unbound-force"
+    maintainer: "Unbound Force <team@unboundforce.dev>"
+    description: "Unbound Force specification framework toolkit"
+    license: Apache-2.0
+    formats:
+      - rpm
+    bindir: /usr/bin
+    contents:
+      - src: /usr/bin/unbound-force
+        dst: /usr/bin/uf
+        type: symlink
+
+brews:
+  - name: unbound-force
+    description: "Unbound Force specification framework toolkit"
+    homepage: "https://github.com/unbound-force/unbound-force"
+    directory: Formula
+    # skip_upload: true — GoReleaser generates the formula to dist/ but does
+    # not push to the tap. The sign-macos job downloads it, patches darwin
+    # checksums with signed values, then pushes the complete formula to
+    # homebrew-tap alongside the cask.
+    skip_upload: true
+    install: |
+      bin.install "unbound-force"
+      bin.install_symlink "unbound-force" => "uf"
+    repository:
+      owner: unbound-force
+      name: homebrew-tap
+
 homebrew_casks:
   - name: unbound-force
     description: "Unbound Force specification framework toolkit"

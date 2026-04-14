@@ -30,8 +30,11 @@ All hero repositories must maintain constitutions that align with (and never con
 This repo distributes a unified two-tier specification framework via the `unbound-force` CLI (alias: `uf`):
 
 ```bash
-# Install
+# Install via Homebrew (macOS and Linux)
 brew install unbound-force/tap/unbound-force
+
+# Install via RPM (Fedora/RHEL)
+dnf install https://github.com/unbound-force/unbound-force/releases/latest/download/unbound-force_<version>_linux_amd64.rpm
 
 # Scaffold into any repository
 uf init

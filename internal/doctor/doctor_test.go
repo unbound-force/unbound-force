@@ -174,6 +174,45 @@ func TestDetectEnvironment_HomebrewDetected(t *testing.T) {
 	}
 }
 
+func TestDetectEnvironment_DnfDetected(t *testing.T) {
+	opts := &Options{
+		LookPath:     stubLookPath(map[string]string{"dnf": "/usr/bin/dnf"}),
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+
+	env := DetectEnvironment(opts)
+
+	found := false
+	for _, m := range env.Managers {
+		if m.Kind == ManagerDnf {
+			found = true
+			if len(m.Manages) != 1 || m.Manages[0] != "packages" {
+				t.Errorf("dnf manages = %v, want [packages]", m.Manages)
+			}
+		}
+	}
+	if !found {
+		t.Error("dnf not detected")
+	}
+}
+
+func TestDetectEnvironment_DnfNotDetected(t *testing.T) {
+	opts := &Options{
+		LookPath:     stubLookPathSimple(map[string]bool{}),
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+
+	env := DetectEnvironment(opts)
+
+	for _, m := range env.Managers {
+		if m.Kind == ManagerDnf {
+			t.Error("dnf should not be detected when not in PATH")
+		}
+	}
+}
+
 func TestDetectEnvironment_NoManagers(t *testing.T) {
 	opts := &Options{
 		LookPath:     stubLookPathSimple(map[string]bool{}),

@@ -307,7 +307,7 @@ All artifacts use the standard envelope format: `hero`, `version`, `timestamp`, 
 | `unbound-force/gaze` | Go static analysis (tester hero) | v1.0.0 (Accuracy, Minimal Assumptions, Actionable Output) | Active, 5 specs complete |
 | `unbound-force/website` | Public website (Hugo + Doks) | v1.0.0 (Content Accuracy, Minimal Footprint, Visitor Clarity) | Active, 1 spec complete |
 | `unbound-force/dewey` | Semantic knowledge layer (MCP server) | N/A | Active |
-| `unbound-force/homebrew-tap` | Homebrew formula distribution | N/A | Active |
+| `unbound-force/homebrew-tap` | Homebrew cask + formula distribution | N/A | Active |
 
 ## Specification Framework
 
@@ -656,7 +656,7 @@ This repo is primarily specifications and governance documents. Follow these con
 
 ## Active Technologies
 - Go 1.24+ (unbound CLI binary, Cobra CLI framework, embed.FS scaffold)
-- GoReleaser v2 (cross-platform release pipeline, Homebrew cask publishing)
+- GoReleaser v2 (cross-platform release pipeline, Homebrew cask + formula publishing, RPM generation via nfpms)
 - Markdown (specifications, governance, templates, commands)
 - YAML (OpenSpec schema, configuration files)
 - Bash (speckit scripts)

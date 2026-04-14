@@ -81,6 +81,7 @@ const (
 	ManagerPyenv    ManagerKind = "pyenv"
 	ManagerMise     ManagerKind = "mise"
 	ManagerHomebrew ManagerKind = "homebrew"
+	ManagerDnf      ManagerKind = "dnf"
 	ManagerBun      ManagerKind = "bun"
 	ManagerSystem   ManagerKind = "system"
 	ManagerDirect   ManagerKind = "direct"

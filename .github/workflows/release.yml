@@ -45,13 +45,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload generated cask as release artifact
-        # GoReleaser writes dist/homebrew/Casks/unbound-force.rb with skip_upload: true.
-        # Upload it so the sign-macos job can download and patch darwin checksums.
+      - name: Upload generated cask and formula as release artifacts
+        # GoReleaser writes dist/homebrew/Casks/unbound-force.rb and
+        # dist/homebrew/Formula/unbound-force.rb with skip_upload: true.
+        # Upload both so the sign-macos job can download and patch darwin checksums.
         run: |
           gh release upload "${GITHUB_REF_NAME}" \
             --repo "$GITHUB_REPOSITORY" \
             dist/homebrew/Casks/unbound-force.rb \
+            --clobber
+
+          # Rename formula to avoid filename collision with cask (both are unbound-force.rb)
+          cp dist/homebrew/Formula/unbound-force.rb dist/homebrew/Formula/unbound-force-formula.rb
+          gh release upload "${GITHUB_REF_NAME}" \
+            --repo "$GITHUB_REPOSITORY" \
+            dist/homebrew/Formula/unbound-force-formula.rb \
             --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -165,7 +173,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update Homebrew cask
+      - name: Update Homebrew cask and formula
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
@@ -185,11 +193,14 @@ jobs:
           echo "darwin_arm64 SHA256: $ARM64_SHA"
           echo "darwin_amd64 SHA256: $AMD64_SHA"
 
-          # Download the GoReleaser-generated cask (uploaded by the release job)
+          # Download the GoReleaser-generated cask and formula (uploaded by the release job)
           gh release download "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --pattern "unbound-force.rb" --dir ./cask-staging
-          CASK_FILE="./cask-staging/unbound-force.rb"
+          gh release download "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --pattern "unbound-force-formula.rb" --dir ./formula-staging
 
-          # Patch darwin checksums with signed values
+          CASK_FILE="./cask-staging/unbound-force.rb"
+          FORMULA_FILE="./formula-staging/unbound-force-formula.rb"
+
+          # Patch darwin checksums in cask with signed values
           awk -v amd64="$AMD64_SHA" -v arm64="$ARM64_SHA" '
             /darwin_amd64/ { found_amd64=1 }
             /darwin_arm64/ { found_arm64=1 }
@@ -205,16 +216,34 @@ jobs:
           ' "$CASK_FILE" > "${CASK_FILE}.patched"
           mv "${CASK_FILE}.patched" "$CASK_FILE"
 
-          # Push to the Homebrew tap
+          # Patch darwin checksums in formula with signed values (same awk pattern)
+          awk -v amd64="$AMD64_SHA" -v arm64="$ARM64_SHA" '
+            /darwin_amd64/ { found_amd64=1 }
+            /darwin_arm64/ { found_arm64=1 }
+            /sha256/ && found_amd64 {
+              sub(/sha256 "[^"]*"/, "sha256 \"" amd64 "\"")
+              found_amd64=0
+            }
+            /sha256/ && found_arm64 {
+              sub(/sha256 "[^"]*"/, "sha256 \"" arm64 "\"")
+              found_arm64=0
+            }
+            { print }
+          ' "$FORMULA_FILE" > "${FORMULA_FILE}.patched"
+          mv "${FORMULA_FILE}.patched" "$FORMULA_FILE"
+
+          # Push both cask and formula to the Homebrew tap
           git clone "https://x-access-token:${HOMEBREW_TAP_GITHUB_TOKEN}@github.com/unbound-force/homebrew-tap.git" tap
           cp "$CASK_FILE" tap/Casks/unbound-force.rb
+          mkdir -p tap/Formula
+          cp "$FORMULA_FILE" tap/Formula/unbound-force.rb
 
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/unbound-force.rb
-          git diff --cached --quiet && { echo "No cask changes needed"; exit 0; }
-          git commit -m "feat: update unbound-force cask to v${VERSION} (signed)"
+          git add Casks/unbound-force.rb Formula/unbound-force.rb
+          git diff --cached --quiet && { echo "No tap changes needed"; exit 0; }
+          git commit -m "feat: update unbound-force cask and formula to v${VERSION} (signed)"
           git push
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

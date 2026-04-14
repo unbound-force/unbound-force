@@ -99,6 +99,15 @@ func DetectEnvironment(opts *Options) DetectedEnvironment {
 		})
 	}
 
+	// dnf: Fedora/RHEL package manager
+	if path, err := opts.LookPath("dnf"); err == nil {
+		env.Managers = append(env.Managers, ManagerInfo{
+			Kind:    ManagerDnf,
+			Path:    path,
+			Manages: []string{"packages"},
+		})
+	}
+
 	// Ensure Managers is empty slice, not nil, per data-model.md.
 	if env.Managers == nil {
 		env.Managers = []ManagerInfo{}
@@ -266,7 +275,11 @@ func homebrewInstallCmd(toolName string) string {
 	case "replicator":
 		return "brew install unbound-force/tap/replicator"
 	case "ollama":
-		return "brew install --cask ollama-app && ollama pull granite-embedding:30m"
+		// Cask on macOS, formula on Linux (casks are macOS-only).
+		if runtime.GOOS == "darwin" {
+			return "brew install --cask ollama-app && ollama pull granite-embedding:30m"
+		}
+		return "brew install ollama && ollama pull granite-embedding:30m"
 	default:
 		return "brew install " + toolName
 	}
@@ -289,7 +302,7 @@ func genericInstallCmd(toolName string) string {
 	case "gh":
 		return "Download from https://cli.github.com/"
 	case "ollama":
-		return "brew install --cask ollama-app && ollama pull granite-embedding:30m"
+		return "Download from https://ollama.com/download"
 	default:
 		return "Install " + toolName
 	}

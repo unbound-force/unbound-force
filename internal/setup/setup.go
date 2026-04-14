@@ -57,6 +57,15 @@ type Options struct {
 
 	// WriteFile writes data to a file atomically.
 	WriteFile func(string, []byte, os.FileMode) error
+
+	// GOOS overrides the detected operating system for testability.
+	// Defaults to runtime.GOOS when empty.
+	GOOS string
+
+	// Version is the current binary version (e.g., "0.12.0"),
+	// used to construct GitHub Release RPM URLs. Set by the CLI
+	// from the build-time version variable.
+	Version string
 }
 
 // defaults fills zero-value fields with production implementations.
@@ -90,6 +99,9 @@ func (o *Options) defaults() {
 	}
 	if o.IsTTY == nil {
 		o.IsTTY = func() bool { return false }
+	}
+	if o.GOOS == "" {
+		o.GOOS = runtime.GOOS
 	}
 }
 
@@ -677,18 +689,99 @@ func installGovulncheck(opts *Options, env doctor.DetectedEnvironment) stepResul
 	return stepResult{name: "govulncheck", action: "installed", detail: "via go install"}
 }
 
+// rpmURL constructs the GitHub Release RPM download URL for a tool.
+// The URL pattern follows GoReleaser's nfpms naming convention.
+func rpmURL(repo, version, arch string) string {
+	return fmt.Sprintf(
+		"https://github.com/%s/releases/download/v%s/%s_%s_linux_%s.rpm",
+		repo,
+		version,
+		repoName(repo),
+		version,
+		arch,
+	)
+}
+
+// repoName extracts the repository name from a "owner/repo" string.
+func repoName(repo string) string {
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return repo
+}
+
+// rpmArch returns the RPM architecture string for the current
+// Go architecture.
+func rpmArch() string {
+	switch runtime.GOARCH {
+	case "arm64":
+		return "arm64"
+	default:
+		return "amd64"
+	}
+}
+
+// installViaRpm installs a tool from a GitHub Release RPM URL
+// using dnf. Returns a stepResult with the outcome.
+func installViaRpm(opts *Options, toolName, repo, version string) stepResult {
+	if version == "" {
+		return stepResult{
+			name:   toolName,
+			action: "skipped",
+			detail: "version unknown — cannot construct RPM URL",
+		}
+	}
+
+	url := rpmURL(repo, version, rpmArch())
+
+	if opts.DryRun {
+		return stepResult{
+			name:   toolName,
+			action: "dry-run",
+			detail: "Would install: dnf install -y " + url,
+		}
+	}
+
+	if _, err := opts.ExecCmd("dnf", "install", "-y", url); err != nil {
+		return stepResult{
+			name:   toolName,
+			action: "failed",
+			detail: "dnf install failed — try: dnf install " + url,
+			err:    err,
+		}
+	}
+	return stepResult{name: toolName, action: "installed", detail: "via dnf (RPM)"}
+}
+
+// ollamaBrew returns the brew command arguments for installing
+// Ollama on the given OS. macOS uses the cask (ollama-app) for
+// .app bundle with auto-updates. Linux uses the formula (ollama)
+// because Homebrew casks are macOS-only.
+func ollamaBrew(goos string) []string {
+	if goos == "darwin" {
+		return []string{"brew", "install", "--cask", "ollama-app"}
+	}
+	return []string{"brew", "install", "ollama"}
+}
+
 // installOllama installs Ollama if missing. Ollama is the local
 // model runtime used by both Dewey (semantic search embeddings)
-// and Replicator (semantic memory). Follows the installGaze() pattern:
-// Homebrew only, skip with download link if no Homebrew.
+// and Replicator (semantic memory). OS-aware: uses cask on macOS,
+// formula on Linux. Skips with download link if no Homebrew.
 func installOllama(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	if _, err := opts.LookPath("ollama"); err == nil {
 		return stepResult{name: "Ollama", action: "already installed"}
 	}
 
+	// Determine the Homebrew install method based on OS.
+	// macOS: cask (ollama-app) for .app bundle with auto-updates.
+	// Linux: formula (ollama) — casks are macOS-only.
+	brewArgs := ollamaBrew(opts.GOOS)
+
 	if opts.DryRun {
 		if doctor.HasManager(env, doctor.ManagerHomebrew) {
-			return stepResult{name: "Ollama", action: "dry-run", detail: "Would install: brew install --cask ollama-app"}
+			return stepResult{name: "Ollama", action: "dry-run", detail: "Would install: brew install " + strings.Join(brewArgs[1:], " ")}
 		}
 		return stepResult{name: "Ollama", action: "dry-run", detail: "Would install: download from https://ollama.com/download"}
 	}
@@ -701,7 +794,7 @@ func installOllama(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		}
 	}
 
-	if _, err := opts.ExecCmd("brew", "install", "--cask", "ollama-app"); err != nil {
+	if _, err := opts.ExecCmd(brewArgs[0], brewArgs[1:]...); err != nil {
 		return stepResult{name: "Ollama", action: "failed", detail: "brew install failed", err: err}
 	}
 	return stepResult{name: "Ollama", action: "installed", detail: "via Homebrew"}

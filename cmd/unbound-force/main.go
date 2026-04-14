@@ -205,6 +205,7 @@ func runSetup(p setupParams) error {
 		YesFlag:   p.yesFlag,
 		Stdout:    p.stdout,
 		Stderr:    p.stderr,
+		Version:   version,
 	}
 
 	return setup.Run(opts)
