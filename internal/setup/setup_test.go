@@ -129,7 +129,7 @@ func TestSetupRun_AllMissing(t *testing.T) {
 	expectedCmds := []string{
 		"brew install anomalyco/tap/opencode",
 		"brew install unbound-force/tap/gaze",
-		"brew install unbound-force/tap/mxf",
+		// mxf is bundled with unbound-force — no separate install
 		"brew install gh",
 		"node --version",
 		"npm install -g @fission-ai/openspec@latest",
@@ -1857,7 +1857,7 @@ func TestInstallViaRpm_DryRun(t *testing.T) {
 
 // --- Mx F installation tests ---
 
-func TestSetupRun_MxFMissing_BrewInstall(t *testing.T) {
+func TestSetupRun_MxFMissing_BundledHint(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -1891,24 +1891,27 @@ func TestSetupRun_MxFMissing_BrewInstall(t *testing.T) {
 		WriteFile:    os.WriteFile,
 	}
 
-	err := Run(opts)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	_ = Run(opts)
 
-	found := false
+	// Verify no brew install mxf was attempted -- mxf is bundled.
 	for _, call := range rec.calls {
 		if call == "brew install unbound-force/tap/mxf" {
-			found = true
+			t.Error("should NOT attempt brew install mxf -- it is bundled with unbound-force")
 		}
 	}
-	if !found {
-		t.Errorf("expected brew install mxf, got calls: %v", rec.calls)
+
+	// Verify output contains bundled hint.
+	output := buf.String()
+	if !strings.Contains(output, "Bundled with unbound-force") {
+		t.Error("expected bundled hint in output when mxf is missing")
 	}
 }
 
-func TestSetupRun_MxFNoHomebrew(t *testing.T) {
+func TestSetupRun_MxFPresent(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
 
 	rec := &cmdRecorder{
 		outputs: map[string]string{
@@ -1923,9 +1926,13 @@ func TestSetupRun_MxFNoHomebrew(t *testing.T) {
 		Stdout:    &buf,
 		Stderr:    &buf,
 		LookPath: stubLookPath(map[string]string{
-			"node": "/usr/local/bin/node",
-			"npm":  "/usr/local/bin/npm",
-			// No brew, no mxf
+			"brew":     "/opt/homebrew/bin/brew",
+			"opencode": "/usr/local/bin/opencode",
+			"gaze":     "/usr/local/bin/gaze",
+			"mxf":      "/usr/local/bin/mxf",
+			"gh":       "/usr/local/bin/gh",
+			"node":     "/usr/local/bin/node",
+			"npm":      "/usr/local/bin/npm",
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -1934,21 +1941,11 @@ func TestSetupRun_MxFNoHomebrew(t *testing.T) {
 		WriteFile:    os.WriteFile,
 	}
 
-	err := Run(opts)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	// Verify no brew install mxf was attempted.
-	for _, call := range rec.calls {
-		if call == "brew install unbound-force/tap/mxf" {
-			t.Error("should NOT attempt brew install mxf when Homebrew is not available")
-		}
-	}
+	_ = Run(opts)
 
 	output := buf.String()
-	if !strings.Contains(output, "GitHub") || !strings.Contains(output, "releases") {
-		t.Error("expected GitHub releases link in output when Homebrew is not available")
+	if !strings.Contains(output, "already installed") {
+		t.Error("expected 'already installed' for mxf when present in PATH")
 	}
 }
 
@@ -2565,7 +2562,6 @@ func TestSetupRun_DryRunNewSteps(t *testing.T) {
 		name    string
 		pattern string
 	}{
-		{"mxf", "Would install: brew install unbound-force/tap/mxf"},
 		{"gh", "Would install: brew install gh"},
 		{"openspec", "Would install: npm install -g @fission-ai/openspec@latest"},
 		{"uv", "Would install: brew install uv"},

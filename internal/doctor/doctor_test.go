@@ -1646,7 +1646,7 @@ func TestHomebrewInstallCmd(t *testing.T) {
 		{"go", "brew install go"},
 		{"opencode", "brew install anomalyco/tap/opencode"},
 		{"gaze", "brew install unbound-force/tap/gaze"},
-		{"mxf", "brew install unbound-force/tap/mxf"},
+		{"mxf", "brew install unbound-force/tap/unbound-force (mxf is bundled)"},
 		{"dewey", "brew install unbound-force/tap/dewey"},
 		{"node", "brew install node"},
 		{"gh", "brew install gh"},

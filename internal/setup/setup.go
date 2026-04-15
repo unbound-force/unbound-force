@@ -327,33 +327,19 @@ func installOpenCode(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	return stepResult{name: "OpenCode", action: "installed", detail: "via curl"}
 }
 
-// installMxF installs the Mx F Manager hero if missing.
-// Follows the installGaze() pattern: Homebrew only, skip with
-// GitHub releases link if no Homebrew.
-func installMxF(opts *Options, env doctor.DetectedEnvironment) stepResult {
+// installMxF verifies the Mx F Manager hero is in PATH.
+// The mxf binary is bundled with unbound-force (same archive,
+// RPM, and Formula), so no separate install is needed.
+func installMxF(opts *Options, _ doctor.DetectedEnvironment) stepResult {
 	if _, err := opts.LookPath("mxf"); err == nil {
 		return stepResult{name: "Mx F", action: "already installed"}
 	}
 
-	if opts.DryRun {
-		if doctor.HasManager(env, doctor.ManagerHomebrew) {
-			return stepResult{name: "Mx F", action: "dry-run", detail: "Would install: brew install unbound-force/tap/mxf"}
-		}
-		return stepResult{name: "Mx F", action: "dry-run", detail: "Would install: download from GitHub releases"}
+	return stepResult{
+		name:   "Mx F",
+		action: "not found",
+		detail: "Bundled with unbound-force — reinstall unbound-force to get mxf",
 	}
-
-	if !doctor.HasManager(env, doctor.ManagerHomebrew) {
-		return stepResult{
-			name:   "Mx F",
-			action: "skipped",
-			detail: "Homebrew not available. Download from https://github.com/unbound-force/unbound-force/releases",
-		}
-	}
-
-	if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/mxf"); err != nil {
-		return stepResult{name: "Mx F", action: "failed", detail: "brew install failed", err: err}
-	}
-	return stepResult{name: "Mx F", action: "installed", detail: "via Homebrew"}
 }
 
 // installGH installs the GitHub CLI if missing.

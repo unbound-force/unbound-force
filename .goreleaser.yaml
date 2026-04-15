@@ -80,6 +80,8 @@ nfpms:
       - src: /usr/bin/unbound-force
         dst: /usr/bin/uf
         type: symlink
+      - src: ./mxf
+        dst: /usr/bin/mxf
 
 brews:
   - name: unbound-force
@@ -93,6 +95,7 @@ brews:
     skip_upload: true
     install: |
       bin.install "unbound-force"
+      bin.install "mxf"
       bin.install_symlink "unbound-force" => "uf"
     repository:
       owner: unbound-force
