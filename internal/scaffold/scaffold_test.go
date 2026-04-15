@@ -3860,3 +3860,38 @@ func TestEnsureGitignore_Idempotent(t *testing.T) {
 			string(content1), string(content2))
 	}
 }
+
+// TestUFInitAsset_GuidanceBlockPresence verifies the /uf-init
+// scaffold asset contains all 8 AGENTS.md guidance block
+// detection phrases. This catches missing or truncated blocks
+// without new test infrastructure. Added by Spec 030.
+func TestUFInitAsset_GuidanceBlockPresence(t *testing.T) {
+	content, err := assetContent("opencode/command/uf-init.md")
+	if err != nil {
+		t.Fatalf("read uf-init.md asset: %v", err)
+	}
+	text := string(content)
+
+	// Each entry is a detection phrase that must appear in the
+	// uf-init.md asset to confirm the guidance block is defined.
+	requiredPhrases := []struct {
+		block  string
+		phrase string
+	}{
+		{"Core Mission", "## Core Mission"},
+		{"Gatekeeping Value Protection", "Gatekeeping Value Protection"},
+		{"Workflow Phase Boundaries", "Workflow Phase Boundaries"},
+		{"CI Parity Gate", "CI Parity Gate"},
+		{"Review Council PR Prerequisite", "Review Council"},
+		{"Website Documentation Sync Gate", "Website Documentation"},
+		{"Spec-First Development", "Spec-First Development"},
+		{"Knowledge Retrieval", "Knowledge Retrieval"},
+	}
+
+	for _, rp := range requiredPhrases {
+		if !strings.Contains(text, rp.phrase) {
+			t.Errorf("uf-init.md asset missing guidance block %q (detection phrase %q not found)",
+				rp.block, rp.phrase)
+		}
+	}
+}
