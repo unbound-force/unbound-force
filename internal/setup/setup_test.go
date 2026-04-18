@@ -1413,6 +1413,7 @@ func TestSetupRun_OllamaInstall(t *testing.T) {
 	var buf bytes.Buffer
 	opts := Options{
 		TargetDir: dir,
+		GOOS:      runtime.GOOS,
 		Stdout:    &buf,
 		Stderr:    &buf,
 		LookPath: stubLookPath(map[string]string{
