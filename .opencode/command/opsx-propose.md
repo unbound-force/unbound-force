@@ -106,6 +106,13 @@ use direct file reads of local specs and backlog items instead.
    openspec status --change "<name>"
    ```
 
+**STOP HERE. Do NOT proceed to implementation.**
+
+Your job is done. Report the results and prompt the
+user. The user will invoke a separate command
+(/opsx-apply, /cobalt-crush, or /unleash) when they
+are ready to implement.
+
 **Output**
 
 After completing all artifacts, summarize:
@@ -134,7 +141,10 @@ After completing all artifacts, summarize:
 ## Guardrails
 
 - **NEVER implement code changes** — this command
-  creates artifacts ONLY (proposal, design, specs, tasks)
+  creates artifacts ONLY (proposal, design, specs, tasks).
+  The user needs to review the plan before
+  implementation begins. Implementing without review
+  defeats the purpose of the spec-first workflow.
 - **NEVER commit, push, or create PRs** — those are
   /finale's responsibility
 - **NEVER run /opsx-apply or /cobalt-crush** — the

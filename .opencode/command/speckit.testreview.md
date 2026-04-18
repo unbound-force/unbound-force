@@ -116,6 +116,13 @@ At end of report, output a concise Next Actions block:
 
 Ask the user: "Would you like me to suggest concrete remediation edits for the top N issues?" (Do NOT apply them automatically.)
 
+**STOP HERE. Do NOT proceed to implementation.**
+
+Your job is done. Report the results and prompt the
+user. The user will invoke a separate command
+(/opsx-apply, /cobalt-crush, or /unleash) when they
+are ready to implement.
+
 ## Operating Principles
 
 ### Context Efficiency
@@ -132,6 +139,23 @@ Ask the user: "Would you like me to suggest concrete remediation edits for the t
 - **Prioritize Principle IV violations** (these are always CRITICAL)
 - **Missing coverage strategy is CRITICAL** — not HIGH, not MEDIUM
 - **Report zero issues gracefully** (emit success report with testability statistics)
+
+## Guardrails
+
+- **NEVER modify source code** — this command updates
+  spec artifacts ONLY. Implementation changes belong in
+  `/speckit.implement`, `/unleash`, or `/cobalt-crush`.
+  The user needs to review the plan before
+  implementation begins. Implementing without review
+  defeats the purpose of the spec-first workflow.
+- **NEVER modify test files, Go source, Markdown agents,
+  convention packs, or config files** outside the
+  `specs/NNN-*/` feature directory.
+- The ONLY files this command may write are:
+  - `FEATURE_SPEC` (the spec.md file)
+  - Files within `FEATURE_DIR` (spec artifacts:
+    plan.md, tasks.md, research.md, data-model.md,
+    quickstart.md, contracts/, checklists/)
 
 ## Context
 

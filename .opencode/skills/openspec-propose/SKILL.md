@@ -157,6 +157,13 @@ cross-repo context but are never required.
    openspec status --change "<name>"
    ```
 
+**STOP HERE. Do NOT proceed to implementation.**
+
+Your job is done. Report the results and prompt the
+user. The user will invoke a separate command
+(/opsx-apply, /cobalt-crush, or /unleash) when they
+are ready to implement.
+
 **Output**
 
 After completing all artifacts, summarize:
@@ -176,8 +183,18 @@ After completing all artifacts, summarize:
   - These guide what you write, but should never appear in the output
 
 **Guardrails**
-- Create ALL artifacts needed for implementation (as defined by schema's `apply.requires`)
+- Create ALL artifacts needed for implementation (as defined by schema's `apply.requires`).
+  The user needs to review the plan before
+  implementation begins. Implementing without review
+  defeats the purpose of the spec-first workflow.
 - Always read dependency artifacts before creating a new one
 - If context is critically unclear, ask the user - but prefer making reasonable decisions to keep momentum
 - If a change with that name already exists, ask if user wants to continue it or create a new one
 - Verify each artifact file exists after writing before proceeding to next
+- **NEVER implement code changes** — this command
+  creates artifacts ONLY. The user needs to review
+  the plan before implementation begins.
+- **NEVER commit, push, or create PRs**
+- **NEVER run /opsx-apply or /cobalt-crush**
+- After artifacts are complete, STOP and prompt the
+  user.

@@ -219,6 +219,13 @@ Given that feature description, do this:
 
 9. Report completion with branch name, spec file path, checklist results, and readiness for the next phase (`/speckit.clarify` or `/speckit.plan`).
 
+**STOP HERE. Do NOT proceed to implementation.**
+
+Your job is done. Report the results and prompt the
+user. The user will invoke a separate command
+(/opsx-apply, /cobalt-crush, or /unleash) when they
+are ready to implement.
+
 **NOTE:** The script creates and checks out the new branch and initializes the spec file before writing.
 
 ## General Guidelines
@@ -289,6 +296,9 @@ Success criteria must be:
 - **NEVER modify source code** — this command updates
   spec artifacts ONLY. Implementation changes belong in
   `/speckit.implement`, `/unleash`, or `/cobalt-crush`.
+  The user needs to review the plan before
+  implementation begins. Implementing without review
+  defeats the purpose of the spec-first workflow.
 - **NEVER modify test files, Go source, Markdown agents,
   convention packs, or config files** outside the
   `specs/NNN-*/` feature directory.

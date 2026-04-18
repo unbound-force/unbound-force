@@ -166,6 +166,13 @@ At end of report, output a concise Next Actions block:
 
 Ask the user: "Would you like me to suggest concrete remediation edits for the top N issues?" (Do NOT apply them automatically.)
 
+**STOP HERE. Do NOT proceed to implementation.**
+
+Your job is done. Report the results and prompt the
+user. The user will invoke a separate command
+(/opsx-apply, /cobalt-crush, or /unleash) when they
+are ready to implement.
+
 ## Operating Principles
 
 ### Context Efficiency
@@ -192,6 +199,9 @@ $ARGUMENTS
 - **NEVER modify source code** — this command updates
   spec artifacts ONLY. Implementation changes belong in
   `/speckit.implement`, `/unleash`, or `/cobalt-crush`.
+  The user needs to review the plan before
+  implementation begins. Implementing without review
+  defeats the purpose of the spec-first workflow.
 - **NEVER modify test files, Go source, Markdown agents,
   convention packs, or config files** outside the
   `specs/NNN-*/` feature directory.
