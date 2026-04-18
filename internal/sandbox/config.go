@@ -192,6 +192,15 @@ func buildRunArgs(opts Options, platform PlatformConfig) []string {
 	args = append(args, "--memory", opts.Memory)
 	args = append(args, "--cpus", opts.CPUs)
 
+	// On Linux, map host UID into container namespace so
+	// bind mount permissions work correctly. Without this,
+	// the container user can't write to host-owned files
+	// (gcloud token refresh, direct mode project writes).
+	// Podman-native flag, not available in Docker.
+	if platform.OS == "linux" {
+		args = append(args, "--userns=keep-id")
+	}
+
 	// Image name (last argument).
 	args = append(args, opts.Image)
 

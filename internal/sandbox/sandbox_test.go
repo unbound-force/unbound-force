@@ -223,6 +223,36 @@ func TestBuildRunArgs_CustomImage(t *testing.T) {
 	}
 }
 
+func TestBuildRunArgs_UsernsKeepId(t *testing.T) {
+	opts := testOpts()
+	opts.Mode = ModeDirect
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64"}
+	args := buildRunArgs(opts, platform)
+	joined := strings.Join(args, " ")
+
+	if !strings.Contains(joined, "--userns=keep-id") {
+		t.Errorf("expected --userns=keep-id on linux, got: %s", joined)
+	}
+}
+
+func TestBuildRunArgs_UsernsNotOnMac(t *testing.T) {
+	opts := testOpts()
+	opts.Mode = ModeDirect
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildRunArgs(opts, platform)
+	joined := strings.Join(args, " ")
+
+	if strings.Contains(joined, "--userns=keep-id") {
+		t.Errorf("expected no --userns=keep-id on darwin, got: %s", joined)
+	}
+}
+
 func TestDefaultConfig_ImagePrecedence(t *testing.T) {
 	// Test 1: Flag value takes precedence.
 	opts := testOpts()
