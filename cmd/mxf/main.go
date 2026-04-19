@@ -322,6 +322,9 @@ func runMetrics(p MxFParams, sub, format string, sprints int, period string) err
 	}
 	store := metrics.NewStore(p.DataDir)
 	q := metrics.NewQuery(store)
+	if p.Now != nil {
+		q.Now = p.Now
+	}
 
 	switch sub {
 	case "summary":
@@ -455,6 +458,9 @@ func runImpedimentDetect(p MxFParams) error {
 func runDashboard(p MxFParams, sub string, html bool, output string) error {
 	store := metrics.NewStore(p.DataDir)
 	q := metrics.NewQuery(store)
+	if p.Now != nil {
+		q.Now = p.Now
+	}
 
 	snap, err := q.Summary(90 * 24 * time.Hour)
 	if err != nil {

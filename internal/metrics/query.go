@@ -9,16 +9,26 @@ import (
 // Query provides methods for querying and analyzing collected metrics.
 type Query struct {
 	Store *Store
+	// Now returns the current time. Defaults to time.Now.
+	// Inject a fixed function in tests for deterministic behavior.
+	Now func() time.Time
 }
 
 // NewQuery creates a new query engine.
 func NewQuery(store *Store) *Query {
-	return &Query{Store: store}
+	return &Query{Store: store, Now: time.Now}
+}
+
+func (q *Query) now() time.Time {
+	if q.Now != nil {
+		return q.Now()
+	}
+	return time.Now()
 }
 
 // Summary produces a consolidated metrics snapshot.
 func (q *Query) Summary(period time.Duration) (*MetricsSnapshot, error) {
-	since := time.Now().Add(-period)
+	since := q.now().Add(-period)
 	snapshots, err := q.Store.ReadSnapshots(since)
 	if err != nil {
 		return nil, fmt.Errorf("read snapshots: %w", err)
@@ -57,7 +67,7 @@ func (q *Query) Velocity(sprints int) ([]VelocityPoint, error) {
 
 // CycleTime returns cycle time statistics for the given period.
 func (q *Query) CycleTime(period time.Duration) (*CycleTimeStats, error) {
-	since := time.Now().Add(-period)
+	since := q.now().Add(-period)
 	snapshots, err := q.Store.ReadSnapshots(since)
 	if err != nil {
 		return nil, err
