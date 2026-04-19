@@ -787,6 +787,8 @@ This repo is primarily specifications and governance documents. Follow these con
 - Go 1.24+ + `github.com/spf13/cobra` (CLI), `gopkg.in/yaml.v3` (config), `net/http` (Che REST API), `os/exec` (subprocess) (029-sandbox-cde-lifecycle)
 - Podman named volumes for persistent state, Eclipse Che / Dev Spaces for CDE workspaces (029-sandbox-cde-lifecycle)
 - Markdown (OpenCode command files) + OpenCode runtime, `/review-council` command, `/opsx-propose` artifacts (031-unleash-openspec)
+- YAML (GitHub Actions, Peribolos config, Settings App config), Markdown + uwu-tools/peribolos (Go binary, Apache 2.0), Repository Settings App (hosted GitHub App, Probot-based) (032-org-gitops)
+- Git repositories (`.github` org repo + per-repo `.github/settings.yml`) (032-org-gitops)
 
 ## Recent Changes
 
