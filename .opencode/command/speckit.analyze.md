@@ -170,7 +170,7 @@ Ask the user: "Would you like me to suggest concrete remediation edits for the t
 
 Your job is done. Report the results and prompt the
 user. The user will invoke a separate command
-(/opsx-apply, /cobalt-crush, or /unleash) when they
+(/unleash, /cobalt-crush, or /opsx-apply) when they
 are ready to implement.
 
 ## Operating Principles

@@ -227,7 +227,7 @@ To avoid clutter, use descriptive types and clean up obsolete checklists when do
 
 Your job is done. Report the results and prompt the
 user. The user will invoke a separate command
-(/opsx-apply, /cobalt-crush, or /unleash) when they
+(/unleash, /cobalt-crush, or /opsx-apply) when they
 are ready to implement.
 
 ## Example Checklist Types & Sample Items

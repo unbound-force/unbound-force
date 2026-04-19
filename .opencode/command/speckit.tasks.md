@@ -74,7 +74,7 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 Your job is done. Report the results and prompt the
 user. The user will invoke a separate command
-(/opsx-apply, /cobalt-crush, or /unleash) when they
+(/unleash, /cobalt-crush, or /opsx-apply) when they
 are ready to implement.
 
 6. **Report**: Output path to generated tasks.md and summary:

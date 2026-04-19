@@ -223,7 +223,7 @@ Given that feature description, do this:
 
 Your job is done. Report the results and prompt the
 user. The user will invoke a separate command
-(/opsx-apply, /cobalt-crush, or /unleash) when they
+(/unleash, /cobalt-crush, or /opsx-apply) when they
 are ready to implement.
 
 **NOTE:** The script creates and checks out the new branch and initializes the spec file before writing.
