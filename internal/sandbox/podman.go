@@ -270,11 +270,12 @@ func buildPersistentRunArgs(opts Options, platform PlatformConfig, ctrName, volN
 		args = append(args, "-p", fmt.Sprintf("%d:%d", port, port))
 	}
 
-	// Environment variables.
-	args = append(args, forwardedEnvVars(opts)...)
+	// Environment variables (no gateway in persistent mode —
+	// persistent workspaces manage their own credentials).
+	args = append(args, forwardedEnvVars(opts, false)...)
 
 	// Google Cloud credential mounts.
-	args = append(args, googleCloudCredentialMounts(opts, platform)...)
+	args = append(args, googleCloudCredentialMounts(opts, platform, false)...)
 
 	// Resource limits.
 	args = append(args, "--memory", opts.Memory)

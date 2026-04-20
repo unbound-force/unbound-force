@@ -57,6 +57,30 @@ var forwardedAPIKeys = []string{
 	"CLAUDE_CODE_USE_VERTEX",
 }
 
+// gatewaySkippedKeys lists environment variable names that
+// are NOT forwarded to the container when the gateway is
+// active. The gateway handles authentication for these
+// providers, so their credentials must not leak into the
+// container (FR-011).
+var gatewaySkippedKeys = map[string]bool{
+	"ANTHROPIC_API_KEY":            true,
+	"ANTHROPIC_VERTEX_PROJECT_ID":  true,
+	"CLAUDE_CODE_USE_VERTEX":       true,
+	"GOOGLE_CLOUD_PROJECT":         true,
+	"VERTEX_LOCATION":              true,
+}
+
+// gatewayEnvVars returns -e flag pairs for the gateway's
+// container-internal URL and auth token. The container uses
+// host.containers.internal to reach the host's gateway
+// process (FR-011).
+func gatewayEnvVars(port int) []string {
+	return []string{
+		"-e", fmt.Sprintf("ANTHROPIC_BASE_URL=http://host.containers.internal:%d", port),
+		"-e", "ANTHROPIC_AUTH_TOKEN=gateway",
+	}
+}
+
 // DefaultConfig resolves image, memory, and CPU settings from
 // flag values → environment variables → constant defaults.
 // Flag values (already set on opts) take highest precedence.
@@ -85,9 +109,19 @@ func DefaultConfig(opts Options) Options {
 // Podman reads the value from the host environment. Ollama
 // host is set explicitly to the container-internal hostname
 // that resolves to the host machine (per research.md R7).
-func forwardedEnvVars(opts Options) []string {
+//
+// When gatewayActive is true, provider-specific keys
+// (ANTHROPIC_API_KEY, ANTHROPIC_VERTEX_PROJECT_ID,
+// CLAUDE_CODE_USE_VERTEX, etc.) are skipped because the
+// gateway handles authentication (FR-011). Non-proxied keys
+// (OPENAI_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY) are
+// always forwarded.
+func forwardedEnvVars(opts Options, gatewayActive bool) []string {
 	var args []string
 	for _, key := range forwardedAPIKeys {
+		if gatewayActive && gatewaySkippedKeys[key] {
+			continue
+		}
 		if v := opts.Getenv(key); v != "" {
 			args = append(args, "-e", key)
 		}
@@ -110,7 +144,14 @@ func forwardedEnvVars(opts Options) []string {
 //     entire ~/.config/gcloud/ directory read-write so the
 //     auth library can read credentials and write refreshed
 //     access tokens (needed for authorized_user credentials).
-func googleCloudCredentialMounts(opts Options, platform PlatformConfig) []string {
+//
+// When gatewayActive is true, all gcloud credential mounts
+// are skipped because the gateway handles authentication
+// on the host side (FR-011).
+func googleCloudCredentialMounts(opts Options, platform PlatformConfig, gatewayActive bool) []string {
+	if gatewayActive {
+		return nil
+	}
 	var args []string
 
 	// Strategy 1: explicit service account key file.
@@ -171,7 +212,11 @@ func buildVolumeMounts(opts Options, platform PlatformConfig) []string {
 // from Options and PlatformConfig. All values are passed as
 // discrete exec.Command arguments — never shell-interpolated —
 // preventing command injection (per contracts/sandbox-api.md).
-func buildRunArgs(opts Options, platform PlatformConfig) []string {
+//
+// When gatewayActive is true, gateway env vars are added
+// (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN) and credential
+// mounts and provider API key forwarding are skipped (FR-011).
+func buildRunArgs(opts Options, platform PlatformConfig, gatewayActive bool, gatewayPort int) []string {
 	args := []string{
 		"run", "-d",
 		"--name", ContainerName,
@@ -182,11 +227,17 @@ func buildRunArgs(opts Options, platform PlatformConfig) []string {
 	// Volume mounts.
 	args = append(args, buildVolumeMounts(opts, platform)...)
 
-	// Environment variables.
-	args = append(args, forwardedEnvVars(opts)...)
+	// Environment variables (gateway-aware).
+	args = append(args, forwardedEnvVars(opts, gatewayActive)...)
+
+	// Gateway env vars or credential mounts.
+	if gatewayActive {
+		args = append(args, gatewayEnvVars(gatewayPort)...)
+	}
 
 	// Google Cloud credential mounts (FR-021, FR-022).
-	args = append(args, googleCloudCredentialMounts(opts, platform)...)
+	// Skipped when gateway is active.
+	args = append(args, googleCloudCredentialMounts(opts, platform, gatewayActive)...)
 
 	// Resource limits.
 	args = append(args, "--memory", opts.Memory)

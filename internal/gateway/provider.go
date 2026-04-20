@@ -1,0 +1,401 @@
+package gateway
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"sync"
+
+	"github.com/charmbracelet/log"
+)
+
+// Provider abstracts the upstream cloud provider's
+// authentication and URL rewriting strategy.
+//
+// Design decision: Strategy pattern per SOLID Open/Closed
+// Principle. Adding a new provider (e.g., OpenAI-compatible)
+// requires only a new implementation, not modification of
+// the gateway core. This matches the Backend interface
+// pattern in internal/sandbox/backend.go.
+type Provider interface {
+	// Name returns the provider identifier
+	// ("anthropic", "vertex", "bedrock").
+	Name() string
+
+	// PrepareRequest modifies the outbound request before
+	// it is forwarded to the upstream provider.
+	// Responsibilities:
+	//   - Set the upstream URL (scheme, host, path)
+	//   - Inject authentication headers
+	//   - Set req.Host to the upstream host
+	PrepareRequest(req *http.Request) error
+
+	// Start initializes the provider (e.g., acquire
+	// initial OAuth token for Vertex). Called once at
+	// gateway startup. Returns error if credentials
+	// are not available.
+	Start(ctx context.Context) error
+
+	// Stop cleans up provider resources (e.g., stop
+	// token refresh goroutine). Called on gateway
+	// shutdown. Must be idempotent.
+	Stop()
+}
+
+// DetectProvider auto-detects the cloud provider from
+// environment variables. Priority order (per data-model.md):
+//
+//  1. CLAUDE_CODE_USE_VERTEX=1 + ANTHROPIC_VERTEX_PROJECT_ID → Vertex
+//  2. CLAUDE_CODE_USE_BEDROCK=1 → Bedrock
+//  3. ANTHROPIC_API_KEY present → Anthropic
+//  4. None matched → error listing supported providers
+//
+// Vertex is checked first because a developer may have
+// both ANTHROPIC_API_KEY and Vertex env vars set (FR-003).
+func DetectProvider(
+	getenv func(string) string,
+	execCmd func(string, ...string) ([]byte, error),
+) (Provider, error) {
+	// Priority 1: Vertex AI.
+	if getenv("CLAUDE_CODE_USE_VERTEX") == "1" &&
+		getenv("ANTHROPIC_VERTEX_PROJECT_ID") != "" {
+		return newVertexProvider(getenv, execCmd), nil
+	}
+
+	// Priority 2: Bedrock.
+	if getenv("CLAUDE_CODE_USE_BEDROCK") == "1" {
+		return newBedrockProvider(getenv, execCmd), nil
+	}
+
+	// Priority 3: Direct Anthropic.
+	if getenv("ANTHROPIC_API_KEY") != "" {
+		return newAnthropicProvider(getenv), nil
+	}
+
+	// No provider detected.
+	return nil, fmt.Errorf(
+		"no cloud provider detected. Set one of:\n" +
+			"  - ANTHROPIC_API_KEY (direct Anthropic)\n" +
+			"  - CLAUDE_CODE_USE_VERTEX=1 + ANTHROPIC_VERTEX_PROJECT_ID (Vertex AI)\n" +
+			"  - CLAUDE_CODE_USE_BEDROCK=1 (AWS Bedrock)")
+}
+
+// NewProviderByName creates a provider by explicit name.
+// Returns an error listing valid names for invalid input
+// (FR-009).
+func NewProviderByName(
+	name string,
+	getenv func(string) string,
+	execCmd func(string, ...string) ([]byte, error),
+) (Provider, error) {
+	switch name {
+	case "anthropic":
+		return newAnthropicProvider(getenv), nil
+	case "vertex":
+		return newVertexProvider(getenv, execCmd), nil
+	case "bedrock":
+		return newBedrockProvider(getenv, execCmd), nil
+	default:
+		return nil, fmt.Errorf(
+			"unknown provider %q. Valid providers: anthropic, vertex, bedrock",
+			name)
+	}
+}
+
+// --- Anthropic Provider ---
+
+// AnthropicProvider forwards requests to the Anthropic
+// Messages API with an API key header.
+type AnthropicProvider struct {
+	apiKey string
+	getenv func(string) string
+}
+
+func newAnthropicProvider(getenv func(string) string) *AnthropicProvider {
+	return &AnthropicProvider{getenv: getenv}
+}
+
+// Name returns "anthropic".
+func (p *AnthropicProvider) Name() string { return "anthropic" }
+
+// Start reads the API key from the environment. Returns
+// an error if ANTHROPIC_API_KEY is empty.
+func (p *AnthropicProvider) Start(_ context.Context) error {
+	p.apiKey = p.getenv("ANTHROPIC_API_KEY")
+	if p.apiKey == "" {
+		return fmt.Errorf("ANTHROPIC_API_KEY is not set")
+	}
+	return nil
+}
+
+// PrepareRequest sets the upstream URL to api.anthropic.com
+// and adds the x-api-key header (FR-004).
+func (p *AnthropicProvider) PrepareRequest(req *http.Request) error {
+	req.URL.Scheme = "https"
+	req.URL.Host = "api.anthropic.com"
+	req.Host = "api.anthropic.com"
+	// Path is preserved as-is (/v1/messages or
+	// /v1/messages/count_tokens).
+	req.Header.Set("x-api-key", p.apiKey)
+	return nil
+}
+
+// Stop is a no-op for Anthropic (no refresh needed).
+func (p *AnthropicProvider) Stop() {}
+
+// --- Vertex AI Provider ---
+
+// VertexProvider forwards requests to the Vertex AI
+// rawPredict endpoint with an OAuth bearer token.
+type VertexProvider struct {
+	projectID string
+	region    string
+	token     string
+	tokenMu   sync.RWMutex
+	cancel    context.CancelFunc
+	execCmd   func(string, ...string) ([]byte, error)
+	getenv    func(string) string
+}
+
+func newVertexProvider(
+	getenv func(string) string,
+	execCmd func(string, ...string) ([]byte, error),
+) *VertexProvider {
+	region := getenv("CLOUD_ML_REGION")
+	if region == "" {
+		region = "us-east5"
+	}
+	return &VertexProvider{
+		projectID: getenv("ANTHROPIC_VERTEX_PROJECT_ID"),
+		region:    region,
+		execCmd:   execCmd,
+		getenv:    getenv,
+	}
+}
+
+// Name returns "vertex".
+func (p *VertexProvider) Name() string { return "vertex" }
+
+// Start acquires the initial OAuth token via gcloud and
+// starts the refresh goroutine (FR-005).
+func (p *VertexProvider) Start(ctx context.Context) error {
+	token, err := refreshVertexToken(p.execCmd)
+	if err != nil {
+		return fmt.Errorf("vertex AI token acquisition failed: %w", err)
+	}
+	p.tokenMu.Lock()
+	p.token = token
+	p.tokenMu.Unlock()
+
+	// Start background refresh goroutine (50-minute
+	// interval per research.md R2).
+	refreshCtx, cancel := context.WithCancel(ctx)
+	p.cancel = cancel
+	go refreshLoop(refreshCtx, 50*refreshMinute, func() error {
+		newToken, err := refreshVertexToken(p.execCmd)
+		if err != nil {
+			log.Error("vertex token refresh failed", "error", err)
+			return err
+		}
+		p.tokenMu.Lock()
+		p.token = newToken
+		p.tokenMu.Unlock()
+		log.Info("vertex token refreshed")
+		return nil
+	})
+
+	return nil
+}
+
+// PrepareRequest sets the upstream URL to the Vertex
+// rawPredict endpoint and adds the Authorization header
+// with the current OAuth token.
+func (p *VertexProvider) PrepareRequest(req *http.Request) error {
+	p.tokenMu.RLock()
+	token := p.token
+	p.tokenMu.RUnlock()
+
+	if token == "" {
+		return fmt.Errorf(
+			"vertex AI token unavailable. Re-authenticate: " +
+				"gcloud auth application-default login")
+	}
+
+	// Extract model from request body for the rawPredict
+	// endpoint URL. Default to claude-sonnet-4-20250514.
+	model := extractModelFromBody(req)
+
+	// Build the Vertex rawPredict URL.
+	// Format: https://{region}-aiplatform.googleapis.com/v1/
+	//   projects/{project}/locations/{region}/publishers/
+	//   anthropic/models/{model}:rawPredict
+	req.URL.Scheme = "https"
+	req.URL.Host = fmt.Sprintf("%s-aiplatform.googleapis.com", p.region)
+	req.Host = req.URL.Host
+	req.URL.Path = fmt.Sprintf(
+		"/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:rawPredict",
+		p.projectID, p.region, model)
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	return nil
+}
+
+// Stop cancels the refresh goroutine.
+func (p *VertexProvider) Stop() {
+	if p.cancel != nil {
+		p.cancel()
+	}
+}
+
+// --- Bedrock Provider ---
+
+// BedrockProvider forwards requests to the AWS Bedrock
+// invoke endpoint with SigV4 signing.
+type BedrockProvider struct {
+	region       string
+	accessKey    string
+	secretKey    string
+	sessionToken string
+	credMu       sync.RWMutex
+	cancel       context.CancelFunc
+	execCmd      func(string, ...string) ([]byte, error)
+	getenv       func(string) string
+}
+
+func newBedrockProvider(
+	getenv func(string) string,
+	execCmd func(string, ...string) ([]byte, error),
+) *BedrockProvider {
+	region := getenv("AWS_REGION")
+	if region == "" {
+		region = getenv("AWS_DEFAULT_REGION")
+	}
+	if region == "" {
+		region = "us-east-1"
+	}
+	return &BedrockProvider{
+		region:  region,
+		execCmd: execCmd,
+		getenv:  getenv,
+	}
+}
+
+// Name returns "bedrock".
+func (p *BedrockProvider) Name() string { return "bedrock" }
+
+// Start acquires initial AWS credentials via the aws CLI
+// and starts the refresh goroutine.
+func (p *BedrockProvider) Start(ctx context.Context) error {
+	ak, sk, st, err := refreshBedrockCredentials(p.execCmd)
+	if err != nil {
+		return fmt.Errorf("bedrock credential acquisition failed: %w", err)
+	}
+	p.credMu.Lock()
+	p.accessKey = ak
+	p.secretKey = sk
+	p.sessionToken = st
+	p.credMu.Unlock()
+
+	// Start background refresh goroutine (50-minute
+	// interval — session tokens typically expire in
+	// 1-12 hours).
+	refreshCtx, cancel := context.WithCancel(ctx)
+	p.cancel = cancel
+	go refreshLoop(refreshCtx, 50*refreshMinute, func() error {
+		newAK, newSK, newST, err := refreshBedrockCredentials(p.execCmd)
+		if err != nil {
+			log.Error("bedrock credential refresh failed", "error", err)
+			return err
+		}
+		p.credMu.Lock()
+		p.accessKey = newAK
+		p.secretKey = newSK
+		p.sessionToken = newST
+		p.credMu.Unlock()
+		log.Info("bedrock credentials refreshed")
+		return nil
+	})
+
+	return nil
+}
+
+// PrepareRequest sets the upstream URL to the Bedrock
+// invoke endpoint and signs the request with SigV4.
+func (p *BedrockProvider) PrepareRequest(req *http.Request) error {
+	p.credMu.RLock()
+	ak := p.accessKey
+	sk := p.secretKey
+	st := p.sessionToken
+	p.credMu.RUnlock()
+
+	if ak == "" || sk == "" {
+		return fmt.Errorf(
+			"bedrock credentials unavailable. Re-authenticate: aws sso login")
+	}
+
+	// Extract model from request body. Default to
+	// claude-sonnet-4-20250514.
+	model := extractModelFromBody(req)
+
+	// Build the Bedrock invoke URL.
+	// Format: https://bedrock-runtime.{region}.amazonaws.com/
+	//   model/{model}/invoke
+	req.URL.Scheme = "https"
+	req.URL.Host = fmt.Sprintf("bedrock-runtime.%s.amazonaws.com", p.region)
+	req.Host = req.URL.Host
+	req.URL.Path = fmt.Sprintf("/model/%s/invoke", model)
+
+	// Sign the request with SigV4.
+	if err := signV4(req, p.region, "bedrock-runtime", ak, sk, st); err != nil {
+		return fmt.Errorf("sigv4 signing failed: %w", err)
+	}
+	return nil
+}
+
+// Stop cancels the refresh goroutine.
+func (p *BedrockProvider) Stop() {
+	if p.cancel != nil {
+		p.cancel()
+	}
+}
+
+// --- Helpers ---
+
+// extractModelFromBody reads the request body to extract
+// the "model" field, then replaces the body so it can be
+// read again by the proxy. Returns a default model if the
+// body cannot be parsed.
+func extractModelFromBody(req *http.Request) string {
+	defaultModel := "claude-sonnet-4-20250514"
+
+	if req.Body == nil {
+		return defaultModel
+	}
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return defaultModel
+	}
+	// Replace the body so the proxy can read it.
+	req.Body = io.NopCloser(bytes.NewReader(body))
+
+	var payload struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Model == "" {
+		return defaultModel
+	}
+
+	// Bedrock uses a different model ID format — strip
+	// the "anthropic." prefix if present.
+	model := payload.Model
+	if strings.HasPrefix(model, "anthropic.") {
+		return model
+	}
+
+	return model
+}

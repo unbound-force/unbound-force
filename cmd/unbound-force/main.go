@@ -30,6 +30,7 @@ func main() {
 	root.AddCommand(newDoctorCmd())
 	root.AddCommand(newSetupCmd())
 	root.AddCommand(newSandboxCmd())
+	root.AddCommand(newGatewayCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

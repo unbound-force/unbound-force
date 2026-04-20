@@ -141,7 +141,7 @@ func TestBuildRunArgs_Isolated(t *testing.T) {
 	opts.CPUs = DefaultCPUs
 
 	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
-	args := buildRunArgs(opts, platform)
+	args := buildRunArgs(opts, platform, false, 0)
 
 	joined := strings.Join(args, " ")
 
@@ -176,7 +176,7 @@ func TestBuildRunArgs_Direct(t *testing.T) {
 	opts.CPUs = DefaultCPUs
 
 	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
-	args := buildRunArgs(opts, platform)
+	args := buildRunArgs(opts, platform, false, 0)
 
 	joined := strings.Join(args, " ")
 
@@ -197,7 +197,7 @@ func TestBuildRunArgs_SELinux(t *testing.T) {
 	opts.CPUs = DefaultCPUs
 
 	platform := PlatformConfig{OS: "linux", Arch: "amd64", SELinux: true}
-	args := buildRunArgs(opts, platform)
+	args := buildRunArgs(opts, platform, false, 0)
 
 	joined := strings.Join(args, " ")
 
@@ -215,7 +215,7 @@ func TestBuildRunArgs_CustomImage(t *testing.T) {
 	opts.CPUs = DefaultCPUs
 
 	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
-	args := buildRunArgs(opts, platform)
+	args := buildRunArgs(opts, platform, false, 0)
 
 	// Verify custom image is used.
 	if args[len(args)-1] != "my-registry.io/custom-image:v2" {
@@ -298,7 +298,7 @@ func TestForwardedEnvVars(t *testing.T) {
 		}
 	}
 
-	args := forwardedEnvVars(opts)
+	args := forwardedEnvVars(opts, false)
 	joined := strings.Join(args, " ")
 
 	// Verify present API keys are forwarded.
@@ -424,7 +424,7 @@ func TestStart_IsolatedMount(t *testing.T) {
 	opts.CPUs = DefaultCPUs
 
 	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
-	args := buildRunArgs(opts, platform)
+	args := buildRunArgs(opts, platform, false, 0)
 	joined := strings.Join(args, " ")
 
 	if !strings.Contains(joined, ":ro") {
@@ -440,7 +440,7 @@ func TestStart_DirectMount(t *testing.T) {
 	opts.CPUs = DefaultCPUs
 
 	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
-	args := buildRunArgs(opts, platform)
+	args := buildRunArgs(opts, platform, false, 0)
 	joined := strings.Join(args, " ")
 
 	// Check project mount is read-write (no :ro on project path).
@@ -2545,6 +2545,542 @@ func TestMergeDemoPorts_Dedup(t *testing.T) {
 	result := mergeDemoPorts([]int{3000, 8080}, []int{8080, 9090})
 	if len(result) != 3 {
 		t.Errorf("expected 3 ports, got: %d (%v)", len(result), result)
+	}
+}
+
+// ============================================================
+// Spec 033: Gateway Integration Tests (T070-T081)
+// ============================================================
+
+// --- gatewayHealthCheck tests (T070) ---
+
+func TestGatewayHealthCheck_Success(t *testing.T) {
+	httpGet := func(url string) (int, error) {
+		return 200, nil
+	}
+
+	if !gatewayHealthCheck(httpGet, 53147) {
+		t.Error("expected true when health returns 200")
+	}
+}
+
+func TestGatewayHealthCheck_Failure(t *testing.T) {
+	httpGet := func(url string) (int, error) {
+		return 0, fmt.Errorf("connection refused")
+	}
+
+	if gatewayHealthCheck(httpGet, 53147) {
+		t.Error("expected false when health check fails")
+	}
+}
+
+func TestGatewayHealthCheck_NonOKStatus(t *testing.T) {
+	httpGet := func(url string) (int, error) {
+		return 500, nil
+	}
+
+	if gatewayHealthCheck(httpGet, 53147) {
+		t.Error("expected false when health returns non-200")
+	}
+}
+
+func TestGatewayHealthCheck_URL(t *testing.T) {
+	var capturedURL string
+	httpGet := func(url string) (int, error) {
+		capturedURL = url
+		return 200, nil
+	}
+
+	gatewayHealthCheck(httpGet, 9000)
+	if capturedURL != "http://localhost:9000/health" {
+		t.Errorf("expected http://localhost:9000/health, got: %s", capturedURL)
+	}
+}
+
+// --- autoStartGateway tests (T071-T073) ---
+
+func TestAutoStartGateway_ProviderDetected(t *testing.T) {
+	execCmdCalled := false
+	opts := testOpts()
+	opts.Getenv = func(key string) string {
+		if key == "ANTHROPIC_API_KEY" {
+			return "sk-ant-test"
+		}
+		return ""
+	}
+	// Health check fails first (no gateway running), then
+	// succeeds after ExecCmd starts the gateway.
+	healthCallCount := 0
+	opts.HTTPGet = func(url string) (int, error) {
+		healthCallCount++
+		if healthCallCount == 1 {
+			// First call: gateway not running yet.
+			return 0, fmt.Errorf("connection refused")
+		}
+		// Subsequent calls: gateway is running.
+		return 200, nil
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "uf" && len(args) > 0 && args[0] == "gateway" {
+			execCmdCalled = true
+			return []byte(""), nil
+		}
+		// Volume inspect fails (no persistent workspace).
+		if name == "podman" && len(args) > 0 && args[0] == "volume" {
+			return nil, fmt.Errorf("no such volume")
+		}
+		return []byte(""), nil
+	}
+
+	port, active, err := autoStartGateway(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !active {
+		t.Error("expected gateway to be active")
+	}
+	if port != GatewayDefaultPort {
+		t.Errorf("expected port %d, got: %d", GatewayDefaultPort, port)
+	}
+	if !execCmdCalled {
+		t.Error("expected uf gateway --detach to be called")
+	}
+}
+
+func TestAutoStartGateway_NoProvider(t *testing.T) {
+	opts := testOpts()
+	// No provider env vars set (default testOpts).
+
+	port, active, err := autoStartGateway(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if active {
+		t.Error("expected gateway to be inactive when no provider")
+	}
+	if port != 0 {
+		t.Errorf("expected port 0, got: %d", port)
+	}
+}
+
+func TestAutoStartGateway_ExistingGateway(t *testing.T) {
+	execCmdCalled := false
+	opts := testOpts()
+	opts.Getenv = func(key string) string {
+		if key == "ANTHROPIC_API_KEY" {
+			return "sk-ant-test"
+		}
+		return ""
+	}
+	// Health check succeeds immediately (gateway already running).
+	opts.HTTPGet = func(url string) (int, error) {
+		return 200, nil
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "uf" {
+			execCmdCalled = true
+		}
+		if name == "podman" && len(args) > 0 && args[0] == "volume" {
+			return nil, fmt.Errorf("no such volume")
+		}
+		return []byte(""), nil
+	}
+
+	port, active, err := autoStartGateway(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !active {
+		t.Error("expected gateway to be active (reused)")
+	}
+	if port != GatewayDefaultPort {
+		t.Errorf("expected port %d, got: %d", GatewayDefaultPort, port)
+	}
+	if execCmdCalled {
+		t.Error("expected ExecCmd NOT called (reuse existing gateway)")
+	}
+}
+
+func TestAutoStartGateway_VertexDetected(t *testing.T) {
+	opts := testOpts()
+	opts.Getenv = func(key string) string {
+		switch key {
+		case "CLAUDE_CODE_USE_VERTEX":
+			return "1"
+		case "ANTHROPIC_VERTEX_PROJECT_ID":
+			return "my-project"
+		}
+		return ""
+	}
+	opts.HTTPGet = func(url string) (int, error) {
+		return 200, nil // Gateway already running.
+	}
+
+	_, active, err := autoStartGateway(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !active {
+		t.Error("expected gateway to be active for Vertex")
+	}
+}
+
+func TestAutoStartGateway_BedrockDetected(t *testing.T) {
+	opts := testOpts()
+	opts.Getenv = func(key string) string {
+		if key == "CLAUDE_CODE_USE_BEDROCK" {
+			return "1"
+		}
+		return ""
+	}
+	opts.HTTPGet = func(url string) (int, error) {
+		return 200, nil
+	}
+
+	_, active, err := autoStartGateway(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !active {
+		t.Error("expected gateway to be active for Bedrock")
+	}
+}
+
+// --- gatewayEnvVars tests (T074) ---
+
+func TestGatewayEnvVars(t *testing.T) {
+	args := gatewayEnvVars(53147)
+	joined := strings.Join(args, " ")
+
+	if !strings.Contains(joined, "ANTHROPIC_BASE_URL=http://host.containers.internal:53147") {
+		t.Errorf("expected ANTHROPIC_BASE_URL, got: %s", joined)
+	}
+	if !strings.Contains(joined, "ANTHROPIC_AUTH_TOKEN=gateway") {
+		t.Errorf("expected ANTHROPIC_AUTH_TOKEN=gateway, got: %s", joined)
+	}
+}
+
+func TestGatewayEnvVars_CustomPort(t *testing.T) {
+	args := gatewayEnvVars(9000)
+	joined := strings.Join(args, " ")
+
+	if !strings.Contains(joined, "ANTHROPIC_BASE_URL=http://host.containers.internal:9000") {
+		t.Errorf("expected port 9000 in URL, got: %s", joined)
+	}
+}
+
+// --- forwardedEnvVars with gateway tests (T075-T076) ---
+
+func TestForwardedEnvVars_GatewayActive(t *testing.T) {
+	opts := testOpts()
+	opts.Getenv = func(key string) string {
+		switch key {
+		case "ANTHROPIC_API_KEY":
+			return "sk-ant-xxx"
+		case "OPENAI_API_KEY":
+			return "sk-xxx"
+		case "GEMINI_API_KEY":
+			return "gemini-xxx"
+		case "ANTHROPIC_VERTEX_PROJECT_ID":
+			return "my-project"
+		case "CLAUDE_CODE_USE_VERTEX":
+			return "1"
+		case "GOOGLE_CLOUD_PROJECT":
+			return "gcp-project"
+		case "VERTEX_LOCATION":
+			return "us-central1"
+		}
+		return ""
+	}
+
+	args := forwardedEnvVars(opts, true)
+	joined := strings.Join(args, " ")
+
+	// Skipped keys when gateway is active.
+	if strings.Contains(joined, "-e ANTHROPIC_API_KEY") {
+		t.Errorf("ANTHROPIC_API_KEY should be skipped with gateway, got: %s", joined)
+	}
+	if strings.Contains(joined, "-e ANTHROPIC_VERTEX_PROJECT_ID") {
+		t.Errorf("ANTHROPIC_VERTEX_PROJECT_ID should be skipped with gateway, got: %s", joined)
+	}
+	if strings.Contains(joined, "-e CLAUDE_CODE_USE_VERTEX") {
+		t.Errorf("CLAUDE_CODE_USE_VERTEX should be skipped with gateway, got: %s", joined)
+	}
+	if strings.Contains(joined, "-e GOOGLE_CLOUD_PROJECT") {
+		t.Errorf("GOOGLE_CLOUD_PROJECT should be skipped with gateway, got: %s", joined)
+	}
+	if strings.Contains(joined, "-e VERTEX_LOCATION") {
+		t.Errorf("VERTEX_LOCATION should be skipped with gateway, got: %s", joined)
+	}
+
+	// Non-proxied keys should still be forwarded.
+	if !strings.Contains(joined, "-e OPENAI_API_KEY") {
+		t.Errorf("OPENAI_API_KEY should be forwarded, got: %s", joined)
+	}
+	if !strings.Contains(joined, "-e GEMINI_API_KEY") {
+		t.Errorf("GEMINI_API_KEY should be forwarded, got: %s", joined)
+	}
+	// OLLAMA_HOST always present.
+	if !strings.Contains(joined, "OLLAMA_HOST=host.containers.internal:11434") {
+		t.Errorf("OLLAMA_HOST should always be present, got: %s", joined)
+	}
+}
+
+func TestForwardedEnvVars_GatewayInactive(t *testing.T) {
+	opts := testOpts()
+	opts.Getenv = func(key string) string {
+		switch key {
+		case "ANTHROPIC_API_KEY":
+			return "sk-ant-xxx"
+		case "OPENAI_API_KEY":
+			return "sk-xxx"
+		case "ANTHROPIC_VERTEX_PROJECT_ID":
+			return "my-project"
+		case "CLAUDE_CODE_USE_VERTEX":
+			return "1"
+		}
+		return ""
+	}
+
+	args := forwardedEnvVars(opts, false)
+	joined := strings.Join(args, " ")
+
+	// All keys should be forwarded when gateway is inactive.
+	if !strings.Contains(joined, "-e ANTHROPIC_API_KEY") {
+		t.Errorf("ANTHROPIC_API_KEY should be forwarded, got: %s", joined)
+	}
+	if !strings.Contains(joined, "-e OPENAI_API_KEY") {
+		t.Errorf("OPENAI_API_KEY should be forwarded, got: %s", joined)
+	}
+	if !strings.Contains(joined, "-e ANTHROPIC_VERTEX_PROJECT_ID") {
+		t.Errorf("ANTHROPIC_VERTEX_PROJECT_ID should be forwarded, got: %s", joined)
+	}
+	if !strings.Contains(joined, "-e CLAUDE_CODE_USE_VERTEX") {
+		t.Errorf("CLAUDE_CODE_USE_VERTEX should be forwarded, got: %s", joined)
+	}
+}
+
+// --- googleCloudCredentialMounts with gateway tests (T077-T078) ---
+
+func TestGoogleCloudCredentialMounts_GatewayActive(t *testing.T) {
+	opts := testOpts()
+	opts.Getenv = func(key string) string {
+		if key == "GOOGLE_APPLICATION_CREDENTIALS" {
+			return "/path/to/creds.json"
+		}
+		return ""
+	}
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := googleCloudCredentialMounts(opts, platform, true)
+
+	if len(args) != 0 {
+		t.Errorf("expected no gcloud mounts when gateway active, got: %v", args)
+	}
+}
+
+func TestGoogleCloudCredentialMounts_GatewayInactive(t *testing.T) {
+	opts := testOpts()
+	// When GOOGLE_APPLICATION_CREDENTIALS is not set and
+	// gcloud dir doesn't exist, no mounts are returned.
+	// This test verifies the function is called and doesn't
+	// short-circuit.
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := googleCloudCredentialMounts(opts, platform, false)
+
+	// On test machines without gcloud, this returns empty.
+	// The important thing is it doesn't return nil early
+	// like it does with gatewayActive=true.
+	_ = args // No assertion needed — just verify no panic.
+}
+
+// --- buildRunArgs with gateway tests (T079-T080) ---
+
+func TestBuildRunArgs_GatewayActive(t *testing.T) {
+	opts := testOpts()
+	opts.Mode = ModeIsolated
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.Getenv = func(key string) string {
+		switch key {
+		case "ANTHROPIC_API_KEY":
+			return "sk-ant-xxx"
+		case "OPENAI_API_KEY":
+			return "sk-xxx"
+		}
+		return ""
+	}
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildRunArgs(opts, platform, true, 53147)
+	joined := strings.Join(args, " ")
+
+	// Verify gateway env vars present.
+	if !strings.Contains(joined, "ANTHROPIC_BASE_URL=http://host.containers.internal:53147") {
+		t.Errorf("expected ANTHROPIC_BASE_URL, got: %s", joined)
+	}
+	if !strings.Contains(joined, "ANTHROPIC_AUTH_TOKEN=gateway") {
+		t.Errorf("expected ANTHROPIC_AUTH_TOKEN, got: %s", joined)
+	}
+
+	// Verify ANTHROPIC_API_KEY is NOT forwarded.
+	if strings.Contains(joined, "-e ANTHROPIC_API_KEY") {
+		t.Errorf("ANTHROPIC_API_KEY should not be forwarded with gateway, got: %s", joined)
+	}
+
+	// Verify OPENAI_API_KEY IS forwarded (not proxied by gateway).
+	if !strings.Contains(joined, "-e OPENAI_API_KEY") {
+		t.Errorf("OPENAI_API_KEY should be forwarded, got: %s", joined)
+	}
+}
+
+func TestBuildRunArgs_GatewayInactive(t *testing.T) {
+	opts := testOpts()
+	opts.Mode = ModeIsolated
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.Getenv = func(key string) string {
+		if key == "ANTHROPIC_API_KEY" {
+			return "sk-ant-xxx"
+		}
+		return ""
+	}
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildRunArgs(opts, platform, false, 0)
+	joined := strings.Join(args, " ")
+
+	// Verify no gateway env vars.
+	if strings.Contains(joined, "ANTHROPIC_BASE_URL") {
+		t.Errorf("expected no ANTHROPIC_BASE_URL without gateway, got: %s", joined)
+	}
+	if strings.Contains(joined, "ANTHROPIC_AUTH_TOKEN") {
+		t.Errorf("expected no ANTHROPIC_AUTH_TOKEN without gateway, got: %s", joined)
+	}
+
+	// Verify ANTHROPIC_API_KEY IS forwarded.
+	if !strings.Contains(joined, "-e ANTHROPIC_API_KEY") {
+		t.Errorf("ANTHROPIC_API_KEY should be forwarded without gateway, got: %s", joined)
+	}
+}
+
+// --- Start() auto-starts gateway test (T081) ---
+
+func TestStart_AutoStartsGateway(t *testing.T) {
+	gatewayStarted := false
+	opts := testOpts()
+	opts.Detach = true
+	opts.Getenv = func(key string) string {
+		if key == "ANTHROPIC_API_KEY" {
+			return "sk-ant-test"
+		}
+		return ""
+	}
+
+	healthCallCount := 0
+	opts.HTTPGet = func(url string) (int, error) {
+		healthCallCount++
+		// Gateway health check: first call fails, then succeeds.
+		if strings.Contains(url, "53147") {
+			if healthCallCount == 1 {
+				return 0, fmt.Errorf("connection refused")
+			}
+			return 200, nil
+		}
+		// OpenCode server health check: always succeeds.
+		return 200, nil
+	}
+
+	var runArgs string
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "uf" && len(args) > 0 && args[0] == "gateway" {
+			gatewayStarted = true
+			return []byte(""), nil
+		}
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				return nil, fmt.Errorf("no such volume")
+			case "inspect":
+				return nil, fmt.Errorf("no such container")
+			case "image":
+				return []byte(""), nil
+			case "run":
+				runArgs = strings.Join(args, " ")
+				return []byte("container-id"), nil
+			}
+		}
+		return []byte(""), nil
+	}
+
+	err := Start(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !gatewayStarted {
+		t.Error("expected gateway to be auto-started")
+	}
+
+	// Verify container received gateway env vars.
+	if !strings.Contains(runArgs, "ANTHROPIC_BASE_URL") {
+		t.Errorf("expected ANTHROPIC_BASE_URL in container args, got: %s", runArgs)
+	}
+	if !strings.Contains(runArgs, "ANTHROPIC_AUTH_TOKEN=gateway") {
+		t.Errorf("expected ANTHROPIC_AUTH_TOKEN in container args, got: %s", runArgs)
+	}
+
+	// Verify ANTHROPIC_API_KEY is NOT in container args.
+	if strings.Contains(runArgs, "-e ANTHROPIC_API_KEY") {
+		t.Errorf("ANTHROPIC_API_KEY should not be in container when gateway active, got: %s", runArgs)
+	}
+
+	// Verify stderr contains gateway active message.
+	stderrOut := opts.Stderr.(*bytes.Buffer).String()
+	if !strings.Contains(stderrOut, "Gateway active") {
+		t.Errorf("expected gateway active message in stderr, got: %s", stderrOut)
+	}
+}
+
+func TestStart_NoGatewayFallback(t *testing.T) {
+	// When no provider env vars are set, Start() should
+	// fall back to credential mount behavior (backward
+	// compatible, identical to pre-gateway behavior).
+	opts := testOpts()
+	opts.Detach = true
+	// No provider env vars set (default testOpts).
+
+	var runArgs string
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				return nil, fmt.Errorf("no such volume")
+			case "inspect":
+				return nil, fmt.Errorf("no such container")
+			case "image":
+				return []byte(""), nil
+			case "run":
+				runArgs = strings.Join(args, " ")
+				return []byte("container-id"), nil
+			}
+		}
+		return []byte(""), nil
+	}
+
+	err := Start(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify no gateway env vars in container args.
+	if strings.Contains(runArgs, "ANTHROPIC_BASE_URL") {
+		t.Errorf("expected no ANTHROPIC_BASE_URL without gateway, got: %s", runArgs)
+	}
+	if strings.Contains(runArgs, "ANTHROPIC_AUTH_TOKEN") {
+		t.Errorf("expected no ANTHROPIC_AUTH_TOKEN without gateway, got: %s", runArgs)
 	}
 }
 

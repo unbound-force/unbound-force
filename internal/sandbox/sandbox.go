@@ -220,6 +220,82 @@ func defaultHTTPGet(url string) (int, error) {
 	return resp.StatusCode, nil
 }
 
+// GatewayDefaultPort is the default port for the LLM gateway.
+// Matches gateway.DefaultPort — duplicated here to avoid a
+// circular import between sandbox and gateway packages.
+const GatewayDefaultPort = 53147
+
+// gatewayHealthCheck checks if a gateway is already running
+// on the given port by probing its health endpoint. Returns
+// true if the health endpoint responds with HTTP 200.
+func gatewayHealthCheck(httpGet func(string) (int, error), port int) bool {
+	url := fmt.Sprintf("http://localhost:%d/health", port)
+	code, err := httpGet(url)
+	return err == nil && code == http.StatusOK
+}
+
+// autoStartGateway detects a cloud provider from environment
+// variables and starts the gateway if one is found. Returns
+// the port the gateway is listening on, whether the gateway
+// is active, and any error.
+//
+// Detection priority (same as gateway.DetectProvider):
+//  1. CLAUDE_CODE_USE_VERTEX=1 + ANTHROPIC_VERTEX_PROJECT_ID → Vertex
+//  2. CLAUDE_CODE_USE_BEDROCK=1 → Bedrock
+//  3. ANTHROPIC_API_KEY → Anthropic
+//  4. None → no gateway (fallback to credential mounts)
+//
+// If a gateway is already running (health check passes),
+// it is reused without starting a new one (FR-010).
+func autoStartGateway(opts Options) (int, bool, error) {
+	port := GatewayDefaultPort
+
+	// Detect provider from env vars.
+	hasVertex := opts.Getenv("CLAUDE_CODE_USE_VERTEX") == "1" &&
+		opts.Getenv("ANTHROPIC_VERTEX_PROJECT_ID") != ""
+	hasBedrock := opts.Getenv("CLAUDE_CODE_USE_BEDROCK") == "1"
+	hasAnthropic := opts.Getenv("ANTHROPIC_API_KEY") != ""
+
+	if !hasVertex && !hasBedrock && !hasAnthropic {
+		// No provider detected — fall back to credential mounts.
+		return 0, false, nil
+	}
+
+	// Check if a gateway is already running.
+	if gatewayHealthCheck(opts.HTTPGet, port) {
+		return port, true, nil
+	}
+
+	// Start the gateway in detached mode.
+	_, err := opts.ExecCmd("uf", "gateway", "--detach",
+		"--port", fmt.Sprintf("%d", port))
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to start gateway: %w", err)
+	}
+
+	// Wait for the gateway health endpoint with exponential
+	// backoff (same pattern as waitForHealth).
+	deadline := time.Now().Add(10 * time.Second)
+	interval := 200 * time.Millisecond
+	maxInterval := 2 * time.Second
+
+	for time.Now().Before(deadline) {
+		if gatewayHealthCheck(opts.HTTPGet, port) {
+			return port, true, nil
+		}
+		time.Sleep(interval)
+		if interval < maxInterval {
+			interval *= 2
+			if interval > maxInterval {
+				interval = maxInterval
+			}
+		}
+	}
+
+	return 0, false, fmt.Errorf(
+		"gateway started but health check timed out on port %d", port)
+}
+
 // isContainerRunning checks if a container named uf-sandbox
 // exists and is in the running state.
 func isContainerRunning(opts Options) (bool, error) {
@@ -403,11 +479,34 @@ func Start(opts Options) error {
 		}
 	}
 
+	// Auto-start gateway for cloud provider credential
+	// isolation (FR-010, FR-012). The gateway runs on the
+	// host and proxies LLM requests so the container does
+	// not need credential files or API keys.
+	gatewayPort, gatewayActive, gwErr := autoStartGateway(opts)
+	if gwErr != nil {
+		// Gateway start failed — fall back to credential
+		// mounts. Log the error but don't block sandbox start.
+		fmt.Fprintf(opts.Stderr,
+			"Gateway start failed (%v) — using credential mounts\n", gwErr)
+	}
+	if gatewayActive {
+		fmt.Fprintf(opts.Stderr,
+			"Gateway active on port %d — credentials proxied\n", gatewayPort)
+	} else if gwErr == nil {
+		// No provider detected — this is normal for direct
+		// API key usage. Only log if the user might benefit.
+		if opts.Getenv("ANTHROPIC_API_KEY") == "" {
+			fmt.Fprintf(opts.Stderr,
+				"Gateway not available — using credential mounts\n")
+		}
+	}
+
 	// Detect platform for volume flags.
 	platform := DetectPlatform(opts)
 
 	// Build and execute podman run.
-	args := buildRunArgs(opts, platform)
+	args := buildRunArgs(opts, platform, gatewayActive, gatewayPort)
 	if out, err := opts.ExecCmd("podman", args...); err != nil {
 		return fmt.Errorf("failed to start container: %s", strings.TrimSpace(string(out)))
 	}
