@@ -1753,7 +1753,7 @@ func TestStart_ChildPath_PortConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to bind port: %v", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	// Extract the port from the listener.
 	port := listener.Addr().(*net.TCPAddr).Port
