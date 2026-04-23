@@ -193,12 +193,32 @@ func googleCloudCredentialMounts(opts Options, platform PlatformConfig, gatewayA
 	return args
 }
 
-// buildVolumeMounts constructs -v flags for the project
-// directory mount. Isolated mode uses :ro (read-only),
-// direct mode uses read-write. The :Z suffix is appended
-// when SELinux is enforcing (per research.md R3).
+// useParentMount returns true if the parent directory
+// should be mounted instead of the project directory.
+// Falls back to project-only mount when NoParent is set
+// or when the parent is the filesystem root (FR-042).
+func useParentMount(opts Options) bool {
+	if opts.NoParent {
+		return false
+	}
+	parent := filepath.Dir(opts.ProjectDir)
+	return parent != "/" && parent != opts.ProjectDir
+}
+
+// buildVolumeMounts constructs -v flags for the workspace
+// mount. By default, mounts the project's parent directory
+// at /workspace so sibling repos are accessible via
+// relative paths (e.g., ../dewey). The container's workdir
+// is set to /workspace/<project-basename> by buildRunArgs.
+// When NoParent is true or the project is at the filesystem
+// root, mounts only the project directory (FR-040, FR-041,
+// FR-042). Isolated mode uses :ro, SELinux uses :Z (FR-043).
 func buildVolumeMounts(opts Options, platform PlatformConfig) []string {
-	mount := fmt.Sprintf("%s:/workspace", opts.ProjectDir)
+	mountSource := opts.ProjectDir
+	if useParentMount(opts) {
+		mountSource = filepath.Dir(opts.ProjectDir)
+	}
+	mount := fmt.Sprintf("%s:/workspace", mountSource)
 	if opts.Mode == ModeIsolated {
 		mount += ":ro"
 	}
@@ -242,6 +262,15 @@ func buildRunArgs(opts Options, platform PlatformConfig, gatewayActive bool, gat
 	// Resource limits.
 	args = append(args, "--memory", opts.Memory)
 	args = append(args, "--cpus", opts.CPUs)
+
+	// Working directory: when parent mount is active,
+	// set workdir to the project subdirectory within
+	// the parent mount (FR-040).
+	if useParentMount(opts) {
+		workdir := fmt.Sprintf("/workspace/%s",
+			filepath.Base(opts.ProjectDir))
+		args = append(args, "--workdir", workdir)
+	}
 
 	// Image name (last argument).
 	args = append(args, opts.Image)

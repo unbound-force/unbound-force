@@ -30,6 +30,14 @@ type Options struct {
 	// Yes skips confirmation prompts (for extract).
 	Yes bool
 
+	// NoParent disables parent directory mounting. When
+	// false (default), the project's parent directory is
+	// mounted at /workspace so sibling repos are
+	// accessible via relative paths (e.g., ../dewey).
+	// When true, only the project directory is mounted
+	// (pre-Spec 034 behavior).
+	NoParent bool
+
 	// Image is the container image to use.
 	// Default: "quay.io/unbound-force/opencode-dev:latest".
 	// Overridden by UF_SANDBOX_IMAGE env var or --image flag.

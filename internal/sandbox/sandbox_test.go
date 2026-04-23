@@ -158,9 +158,13 @@ func TestBuildRunArgs_Isolated(t *testing.T) {
 	if !strings.Contains(joined, "--cpus 4") {
 		t.Errorf("expected --cpus 4, got: %s", joined)
 	}
-	// Verify read-only mount for isolated mode.
-	if !strings.Contains(joined, "/tmp/test-project:/workspace:ro") {
-		t.Errorf("expected :ro volume mount for isolated mode, got: %s", joined)
+	// Verify parent directory mounted with :ro for isolated mode.
+	if !strings.Contains(joined, "/tmp:/workspace:ro") {
+		t.Errorf("expected parent mount /tmp:/workspace:ro, got: %s", joined)
+	}
+	// Verify workdir set to project subdirectory.
+	if !strings.Contains(joined, "--workdir /workspace/test-project") {
+		t.Errorf("expected --workdir /workspace/test-project, got: %s", joined)
 	}
 	// Verify image is last argument.
 	if args[len(args)-1] != DefaultImage {
@@ -180,12 +184,101 @@ func TestBuildRunArgs_Direct(t *testing.T) {
 
 	joined := strings.Join(args, " ")
 
-	// Verify read-write mount (no :ro) for the project directory.
-	if !strings.Contains(joined, "/tmp/test-project:/workspace") {
-		t.Errorf("expected volume mount, got: %s", joined)
+	// Verify parent directory mounted read-write (no :ro) for direct mode.
+	if !strings.Contains(joined, "/tmp:/workspace") {
+		t.Errorf("expected parent mount /tmp:/workspace, got: %s", joined)
 	}
-	if strings.Contains(joined, "/tmp/test-project:/workspace:ro") {
-		t.Errorf("expected no :ro on project mount for direct mode, got: %s", joined)
+	if strings.Contains(joined, "/tmp:/workspace:ro") {
+		t.Errorf("expected no :ro on parent mount for direct mode, got: %s", joined)
+	}
+	// Verify workdir set to project subdirectory.
+	if !strings.Contains(joined, "--workdir /workspace/test-project") {
+		t.Errorf("expected --workdir /workspace/test-project, got: %s", joined)
+	}
+}
+
+func TestBuildVolumeMounts_NoParentFlag(t *testing.T) {
+	opts := testOpts()
+	opts.Mode = ModeDirect
+	opts.NoParent = true
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	mounts := buildVolumeMounts(opts, platform)
+	joined := strings.Join(mounts, " ")
+
+	// With --no-parent, project dir mounted directly.
+	if !strings.Contains(joined, "/tmp/test-project:/workspace") {
+		t.Errorf("expected project-only mount, got: %s", joined)
+	}
+	// No parent mount.
+	if strings.Contains(joined, "/tmp:/workspace") {
+		t.Errorf("expected no parent mount with --no-parent, got: %s", joined)
+	}
+}
+
+func TestBuildRunArgs_NoParentNoWorkdir(t *testing.T) {
+	opts := testOpts()
+	opts.Mode = ModeDirect
+	opts.NoParent = true
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildRunArgs(opts, platform, false, 0)
+	joined := strings.Join(args, " ")
+
+	// No --workdir when --no-parent is set.
+	if strings.Contains(joined, "--workdir") {
+		t.Errorf("expected no --workdir with --no-parent, got: %s", joined)
+	}
+}
+
+func TestBuildVolumeMounts_RootFallback(t *testing.T) {
+	opts := testOpts()
+	opts.ProjectDir = "/myproject"
+	opts.Mode = ModeDirect
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	mounts := buildVolumeMounts(opts, platform)
+	joined := strings.Join(mounts, " ")
+
+	// Parent of /myproject is /, should fall back to
+	// project-only mount.
+	if !strings.Contains(joined, "/myproject:/workspace") {
+		t.Errorf("expected project-only mount for root parent, got: %s", joined)
+	}
+}
+
+func TestBuildRunArgs_RootFallbackNoWorkdir(t *testing.T) {
+	opts := testOpts()
+	opts.ProjectDir = "/myproject"
+	opts.Mode = ModeDirect
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildRunArgs(opts, platform, false, 0)
+	joined := strings.Join(args, " ")
+
+	// No --workdir when parent is root (fallback).
+	if strings.Contains(joined, "--workdir") {
+		t.Errorf("expected no --workdir for root parent fallback, got: %s", joined)
+	}
+}
+
+func TestBuildVolumeMounts_ParentMountSELinux(t *testing.T) {
+	opts := testOpts()
+	opts.Mode = ModeIsolated // SELinux + isolated = :ro,Z
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64", SELinux: true}
+	mounts := buildVolumeMounts(opts, platform)
+	joined := strings.Join(mounts, " ")
+
+	// Parent mount with isolated mode + SELinux: :ro,Z.
+	if !strings.Contains(joined, "/tmp:/workspace:ro,Z") {
+		t.Errorf("expected :ro,Z on parent mount with SELinux, got: %s", joined)
 	}
 }
 

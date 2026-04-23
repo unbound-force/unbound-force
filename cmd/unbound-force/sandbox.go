@@ -209,6 +209,7 @@ type sandboxStartParams struct {
 	projectDir string
 	mode       string
 	detach     bool
+	noParent   bool
 	image      string
 	memory     string
 	cpus       string
@@ -222,6 +223,7 @@ func runSandboxStart(p sandboxStartParams) error {
 		ProjectDir:  p.projectDir,
 		Mode:        p.mode,
 		Detach:      p.detach,
+		NoParent:    p.noParent,
 		Image:       p.image,
 		Memory:      p.memory,
 		CPUs:        p.cpus,
@@ -246,6 +248,7 @@ directly to the host filesystem).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			mode, _ := cmd.Flags().GetString("mode")
 			detach, _ := cmd.Flags().GetBool("detach")
+			noParent, _ := cmd.Flags().GetBool("no-parent")
 			image, _ := cmd.Flags().GetString("image")
 			memory, _ := cmd.Flags().GetString("memory")
 			cpus, _ := cmd.Flags().GetString("cpus")
@@ -260,6 +263,7 @@ directly to the host filesystem).`,
 				projectDir: cwd,
 				mode:       mode,
 				detach:     detach,
+				noParent:   noParent,
 				image:      image,
 				memory:     memory,
 				cpus:       cpus,
@@ -282,6 +286,8 @@ directly to the host filesystem).`,
 		"Container CPU limit (default \"4\")")
 	cmd.Flags().String("backend", "auto",
 		"Backend: auto, podman, or che")
+	cmd.Flags().Bool("no-parent", false,
+		"Mount only the project directory (disable parent directory mount)")
 
 	return cmd
 }
