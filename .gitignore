@@ -86,3 +86,5 @@ internal/**/.specify/
 internal/**/openspec/
 
 *.log
+gateway.pid
+unbound-force
