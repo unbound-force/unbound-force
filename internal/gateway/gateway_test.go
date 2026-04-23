@@ -506,6 +506,8 @@ func TestVertexProvider_PrepareRequest(t *testing.T) {
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages",
 		strings.NewReader(body))
+	req.Header.Set("anthropic-beta", "messages-2024-01-01")
+	req.Header.Set("anthropic-version", "2023-06-01")
 
 	if err := prov.PrepareRequest(req); err != nil {
 		t.Fatalf("PrepareRequest failed: %v", err)
@@ -529,6 +531,143 @@ func TestVertexProvider_PrepareRequest(t *testing.T) {
 	auth := req.Header.Get("Authorization")
 	if auth != "Bearer ya29.test-token" {
 		t.Errorf("Authorization: got %q, want %q", auth, "Bearer ya29.test-token")
+	}
+
+	// Verify body transformation: model removed,
+	// anthropic_version injected (Spec 034 T030).
+	transformed, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("read body: %v", readErr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(transformed, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := payload["model"]; ok {
+		t.Error("model field should be removed from body")
+	}
+	if av, ok := payload["anthropic_version"].(string); !ok || av != "vertex-2023-10-16" {
+		t.Errorf("anthropic_version: got %q, want vertex-2023-10-16", av)
+	}
+
+	// Verify anthropic-beta and anthropic-version headers
+	// are stripped (FR-004).
+	if req.Header.Get("anthropic-beta") != "" {
+		t.Error("anthropic-beta header should be stripped")
+	}
+	if req.Header.Get("anthropic-version") != "" {
+		t.Error("anthropic-version header should be stripped")
+	}
+}
+
+func TestVertexProvider_PrepareRequest_StreamingEndpoint(t *testing.T) {
+	prov := &VertexProvider{
+		projectID: "my-project",
+		region:    "us-east5",
+		token:     "ya29.test-token",
+	}
+
+	body := `{"model":"claude-sonnet-4-20250514","messages":[],"stream":true}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+
+	if err := prov.PrepareRequest(req); err != nil {
+		t.Fatalf("PrepareRequest failed: %v", err)
+	}
+
+	if !strings.HasSuffix(req.URL.Path, ":streamRawPredict") {
+		t.Errorf("path should end with :streamRawPredict for streaming, got: %s", req.URL.Path)
+	}
+}
+
+func TestVertexProvider_PrepareRequest_NonStreamingEndpoint(t *testing.T) {
+	prov := &VertexProvider{
+		projectID: "my-project",
+		region:    "us-east5",
+		token:     "ya29.test-token",
+	}
+
+	body := `{"model":"claude-sonnet-4-20250514","messages":[],"stream":false}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+
+	if err := prov.PrepareRequest(req); err != nil {
+		t.Fatalf("PrepareRequest failed: %v", err)
+	}
+
+	if !strings.HasSuffix(req.URL.Path, ":rawPredict") {
+		t.Errorf("path should end with :rawPredict for non-streaming, got: %s", req.URL.Path)
+	}
+}
+
+func TestVertexProvider_PrepareRequest_CountTokensAlwaysRawPredict(t *testing.T) {
+	prov := &VertexProvider{
+		projectID: "my-project",
+		region:    "us-east5",
+		token:     "ya29.test-token",
+	}
+
+	// Even with stream=true, count_tokens should use rawPredict.
+	body := `{"model":"claude-sonnet-4-20250514","messages":[],"stream":true}`
+	req := httptest.NewRequest("POST", "/v1/messages/count_tokens",
+		strings.NewReader(body))
+
+	if err := prov.PrepareRequest(req); err != nil {
+		t.Fatalf("PrepareRequest failed: %v", err)
+	}
+
+	if !strings.HasSuffix(req.URL.Path, ":rawPredict") {
+		t.Errorf("count_tokens should always use :rawPredict, got: %s", req.URL.Path)
+	}
+}
+
+func TestVertexProvider_PrepareRequest_HeaderStripping(t *testing.T) {
+	prov := &VertexProvider{
+		projectID: "my-project",
+		region:    "us-east5",
+		token:     "ya29.test-token",
+	}
+
+	body := `{"model":"claude-sonnet-4-20250514","messages":[]}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+	req.Header.Set("anthropic-beta", "messages-2024-01-01")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	if err := prov.PrepareRequest(req); err != nil {
+		t.Fatalf("PrepareRequest failed: %v", err)
+	}
+
+	if req.Header.Get("anthropic-beta") != "" {
+		t.Error("anthropic-beta header should be stripped (FR-004)")
+	}
+	if req.Header.Get("anthropic-version") != "" {
+		t.Error("anthropic-version header should be stripped (FR-004)")
+	}
+}
+
+func TestVertexProvider_PrepareRequest_PreservesOtherHeaders(t *testing.T) {
+	prov := &VertexProvider{
+		projectID: "my-project",
+		region:    "us-east5",
+		token:     "ya29.test-token",
+	}
+
+	body := `{"model":"claude-sonnet-4-20250514","messages":[]}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Claude-Code-Session-Id", "session-123")
+
+	if err := prov.PrepareRequest(req); err != nil {
+		t.Fatalf("PrepareRequest failed: %v", err)
+	}
+
+	if req.Header.Get("Content-Type") != "application/json" {
+		t.Error("Content-Type header should be preserved")
+	}
+	if req.Header.Get("X-Claude-Code-Session-Id") != "session-123" {
+		t.Error("X-Claude-Code-Session-Id header should be preserved")
 	}
 }
 
@@ -2517,6 +2656,1043 @@ func (p *capturingProvider) PrepareRequest(req *http.Request) error {
 }
 
 var _ Provider = (*capturingProvider)(nil)
+
+// ============================================================
+// End-to-End Proxy Translation Tests (T036-T037)
+// ============================================================
+
+func TestNewMux_VertexProxyTranslation(t *testing.T) {
+	// Create a mock upstream that captures the received
+	// request for inspection.
+	var capturedBody []byte
+	var capturedHeaders http.Header
+	var capturedPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		capturedHeaders = r.Header.Clone()
+		var err error
+		capturedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read upstream body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"id":   "msg_test",
+			"type": "message",
+		})
+	}))
+	defer upstream.Close()
+
+	// Create a VertexProvider that rewrites to the mock
+	// upstream. We use a mock that calls transformVertexBody
+	// and rewrites to the upstream URL.
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+	prov := &capturingProvider{
+		name: "vertex",
+		onPrepare: func(req *http.Request) error {
+			// Simulate VertexProvider.PrepareRequest behavior.
+			isCountTokens := strings.Contains(req.URL.Path, "count_tokens")
+			model, stream, _ := transformVertexBody(req)
+			action := "rawPredict"
+			if stream && !isCountTokens {
+				action = "streamRawPredict"
+			}
+			req.URL.Scheme = "http"
+			req.URL.Host = upstreamHost
+			req.Host = upstreamHost
+			req.URL.Path = fmt.Sprintf("/v1/projects/test/locations/us-east5/publishers/anthropic/models/%s:%s", model, action)
+			req.Header.Del("anthropic-beta")
+			req.Header.Del("anthropic-version")
+			req.Header.Set("Authorization", "Bearer test-token")
+			return nil
+		},
+	}
+
+	mux := newMux(prov, 53147, time.Now())
+
+	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}],"max_tokens":1024}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-beta", "messages-2024-01-01")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+
+	// Verify upstream received transformed body.
+	var upstreamPayload map[string]any
+	if err := json.Unmarshal(capturedBody, &upstreamPayload); err != nil {
+		t.Fatalf("unmarshal upstream body: %v", err)
+	}
+	if _, ok := upstreamPayload["model"]; ok {
+		t.Error("upstream body should not contain model field")
+	}
+	if av, ok := upstreamPayload["anthropic_version"].(string); !ok || av != "vertex-2023-10-16" {
+		t.Errorf("upstream body anthropic_version: got %q, want vertex-2023-10-16", av)
+	}
+
+	// Verify headers were stripped.
+	if capturedHeaders.Get("Anthropic-Beta") != "" {
+		t.Error("upstream should not receive anthropic-beta header")
+	}
+	if capturedHeaders.Get("Anthropic-Version") != "" {
+		t.Error("upstream should not receive anthropic-version header")
+	}
+
+	// Verify path contains rawPredict (non-streaming).
+	if !strings.Contains(capturedPath, "rawPredict") {
+		t.Errorf("upstream path should contain rawPredict, got: %s", capturedPath)
+	}
+}
+
+func TestNewMux_VertexStreamingEndpoint(t *testing.T) {
+	var capturedPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_test"}`))
+	}))
+	defer upstream.Close()
+
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+	prov := &capturingProvider{
+		name: "vertex",
+		onPrepare: func(req *http.Request) error {
+			isCountTokens := strings.Contains(req.URL.Path, "count_tokens")
+			model, stream, _ := transformVertexBody(req)
+			action := "rawPredict"
+			if stream && !isCountTokens {
+				action = "streamRawPredict"
+			}
+			req.URL.Scheme = "http"
+			req.URL.Host = upstreamHost
+			req.Host = upstreamHost
+			req.URL.Path = fmt.Sprintf("/v1/projects/test/locations/us-east5/publishers/anthropic/models/%s:%s", model, action)
+			req.Header.Set("Authorization", "Bearer test-token")
+			return nil
+		},
+	}
+
+	mux := newMux(prov, 53147, time.Now())
+
+	body := `{"model":"claude-sonnet-4-20250514","messages":[],"stream":true}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+
+	if !strings.Contains(capturedPath, "streamRawPredict") {
+		t.Errorf("upstream path should contain streamRawPredict for streaming, got: %s", capturedPath)
+	}
+}
+
+// ============================================================
+// Backward Compatibility Tests (T038-T039)
+// ============================================================
+
+func TestAnthropicProvider_NoBodyTransformation(t *testing.T) {
+	prov := &AnthropicProvider{apiKey: "sk-ant-test123"}
+
+	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+	req.Header.Set("anthropic-beta", "messages-2024-01-01")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	if err := prov.PrepareRequest(req); err != nil {
+		t.Fatalf("PrepareRequest failed: %v", err)
+	}
+
+	// Verify body passes through unchanged (no model
+	// removal, no anthropic_version injection).
+	transformed, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("read body: %v", readErr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(transformed, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := payload["model"]; !ok {
+		t.Error("Anthropic provider should NOT remove model from body (FR-010)")
+	}
+	if _, ok := payload["anthropic_version"]; ok {
+		t.Error("Anthropic provider should NOT inject anthropic_version (FR-010)")
+	}
+
+	// Verify anthropic-beta and anthropic-version headers
+	// are preserved (FR-010).
+	if req.Header.Get("anthropic-beta") != "messages-2024-01-01" {
+		t.Error("Anthropic provider should preserve anthropic-beta header (FR-010)")
+	}
+	if req.Header.Get("anthropic-version") != "2023-06-01" {
+		t.Error("Anthropic provider should preserve anthropic-version header (FR-010)")
+	}
+}
+
+func TestBedrockProvider_NoBodyTransformation(t *testing.T) {
+	prov := &BedrockProvider{
+		region:       "us-east-1",
+		accessKey:    "AKIAIOSFODNN7EXAMPLE",
+		secretKey:    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		sessionToken: "test-session-token",
+	}
+
+	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+
+	if err := prov.PrepareRequest(req); err != nil {
+		t.Fatalf("PrepareRequest failed: %v", err)
+	}
+
+	// Verify body still uses extractModelFromBody (model
+	// is read but NOT removed from body).
+	transformed, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("read body: %v", readErr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(transformed, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// extractModelFromBody reads the body but replaces it
+	// unchanged — model should still be present.
+	if _, ok := payload["model"]; !ok {
+		t.Error("Bedrock provider should NOT remove model from body (FR-010)")
+	}
+	if _, ok := payload["anthropic_version"]; ok {
+		t.Error("Bedrock provider should NOT inject anthropic_version (FR-010)")
+	}
+}
+
+// ============================================================
+// transformVertexBody Tests (T007-T016)
+// ============================================================
+
+func TestTransformVertexBody_RemovesModel(t *testing.T) {
+	body := `{"model":"claude-opus-4-20250514","messages":[{"role":"user","content":"hi"}],"max_tokens":1024}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+
+	model, _, err := transformVertexBody(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model != "claude-opus-4-20250514" {
+		t.Errorf("model: got %q, want claude-opus-4-20250514", model)
+	}
+
+	// Read the transformed body and verify model is removed.
+	transformed, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("read body: %v", readErr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(transformed, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := payload["model"]; ok {
+		t.Error("model field should be removed from body")
+	}
+	// Verify other fields are preserved.
+	if _, ok := payload["messages"]; !ok {
+		t.Error("messages field should be preserved")
+	}
+	if _, ok := payload["max_tokens"]; !ok {
+		t.Error("max_tokens field should be preserved")
+	}
+}
+
+func TestTransformVertexBody_InjectsAnthropicVersion(t *testing.T) {
+	body := `{"model":"claude-sonnet-4-20250514","messages":[]}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+
+	_, _, err := transformVertexBody(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	transformed, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("read body: %v", readErr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(transformed, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	av, ok := payload["anthropic_version"].(string)
+	if !ok {
+		t.Fatal("anthropic_version should be injected")
+	}
+	if av != "vertex-2023-10-16" {
+		t.Errorf("anthropic_version: got %q, want vertex-2023-10-16", av)
+	}
+}
+
+func TestTransformVertexBody_PreservesExistingAnthropicVersion(t *testing.T) {
+	body := `{"model":"claude-sonnet-4-20250514","messages":[],"anthropic_version":"custom-2024-01-01"}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+
+	_, _, err := transformVertexBody(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	transformed, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("read body: %v", readErr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(transformed, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	av, ok := payload["anthropic_version"].(string)
+	if !ok {
+		t.Fatal("anthropic_version should be present")
+	}
+	if av != "custom-2024-01-01" {
+		t.Errorf("anthropic_version: got %q, want custom-2024-01-01 (should preserve existing)", av)
+	}
+}
+
+func TestTransformVertexBody_DetectsStreamTrue(t *testing.T) {
+	body := `{"model":"claude-sonnet-4-20250514","messages":[],"stream":true}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+
+	_, stream, err := transformVertexBody(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !stream {
+		t.Error("stream should be true when body contains \"stream\": true")
+	}
+}
+
+func TestTransformVertexBody_DetectsStreamFalse(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"stream false", `{"model":"claude-sonnet-4-20250514","messages":[],"stream":false}`},
+		{"stream absent", `{"model":"claude-sonnet-4-20250514","messages":[]}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/v1/messages",
+				strings.NewReader(tt.body))
+
+			_, stream, err := transformVertexBody(req)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if stream {
+				t.Errorf("stream should be false for %s", tt.name)
+			}
+		})
+	}
+}
+
+func TestTransformVertexBody_MalformedJSON(t *testing.T) {
+	body := `{not valid json`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+
+	model, stream, err := transformVertexBody(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model != "claude-sonnet-4-20250514" {
+		t.Errorf("model: got %q, want default model", model)
+	}
+	if stream {
+		t.Error("stream should be false for malformed JSON")
+	}
+
+	// Verify original body is forwarded unchanged.
+	transformed, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("read body: %v", readErr)
+	}
+	if string(transformed) != body {
+		t.Errorf("body should be forwarded unchanged, got: %s", string(transformed))
+	}
+}
+
+func TestTransformVertexBody_NilBody(t *testing.T) {
+	req := httptest.NewRequest("POST", "/v1/messages", nil)
+
+	model, stream, err := transformVertexBody(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model != "claude-sonnet-4-20250514" {
+		t.Errorf("model: got %q, want default model", model)
+	}
+	if stream {
+		t.Error("stream should be false for nil body")
+	}
+}
+
+func TestTransformVertexBody_EmptyBody(t *testing.T) {
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(""))
+
+	model, stream, err := transformVertexBody(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model != "claude-sonnet-4-20250514" {
+		t.Errorf("model: got %q, want default model", model)
+	}
+	if stream {
+		t.Error("stream should be false for empty body")
+	}
+}
+
+func TestTransformVertexBody_UpdatesContentLength(t *testing.T) {
+	body := `{"model":"claude-sonnet-4-20250514","messages":[],"max_tokens":1024}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+
+	_, _, err := transformVertexBody(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Read the transformed body to get its length.
+	transformed, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("read body: %v", readErr)
+	}
+
+	if req.ContentLength != int64(len(transformed)) {
+		t.Errorf("ContentLength: got %d, want %d (body length)",
+			req.ContentLength, len(transformed))
+	}
+}
+
+func TestTransformVertexBody_PreservesOtherFields(t *testing.T) {
+	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}],"max_tokens":4096,"temperature":0.7,"tools":[{"name":"test"}],"system":"You are helpful"}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+
+	_, _, err := transformVertexBody(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	transformed, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("read body: %v", readErr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(transformed, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Verify all fields except model are preserved.
+	if _, ok := payload["messages"]; !ok {
+		t.Error("messages field should be preserved")
+	}
+	if _, ok := payload["max_tokens"]; !ok {
+		t.Error("max_tokens field should be preserved")
+	}
+	if _, ok := payload["temperature"]; !ok {
+		t.Error("temperature field should be preserved")
+	}
+	if _, ok := payload["tools"]; !ok {
+		t.Error("tools field should be preserved")
+	}
+	if _, ok := payload["system"]; !ok {
+		t.Error("system field should be preserved")
+	}
+}
+
+// ============================================================
+// SSE Filter Tests (T019-T026)
+// ============================================================
+
+func TestSSEFilterReader_DropsVertexEvent(t *testing.T) {
+	sseStream := "event: vertex_event\ndata: {\"type\":\"vertex_event\"}\n\nevent: message_start\ndata: {\"type\":\"message_start\"}\n\n"
+	source := io.NopCloser(strings.NewReader(sseStream))
+	filtered := map[string]bool{"vertex_event": true, "ping": true}
+	reader := newSSEFilterReader(source, filtered)
+
+	result, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	output := string(result)
+	if strings.Contains(output, "vertex_event") {
+		t.Errorf("vertex_event should be dropped, got: %s", output)
+	}
+	if !strings.Contains(output, "message_start") {
+		t.Errorf("message_start should be forwarded, got: %s", output)
+	}
+}
+
+func TestSSEFilterReader_DropsPing(t *testing.T) {
+	sseStream := "event: ping\ndata: \n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+	source := io.NopCloser(strings.NewReader(sseStream))
+	filtered := map[string]bool{"vertex_event": true, "ping": true}
+	reader := newSSEFilterReader(source, filtered)
+
+	result, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	output := string(result)
+	if strings.Contains(output, "event: ping") {
+		t.Errorf("ping should be dropped, got: %s", output)
+	}
+	if !strings.Contains(output, "message_stop") {
+		t.Errorf("message_stop should be forwarded, got: %s", output)
+	}
+}
+
+func TestSSEFilterReader_ForwardsStandardEvents(t *testing.T) {
+	events := []string{
+		"message_start",
+		"content_block_delta",
+		"content_block_stop",
+		"message_delta",
+		"message_stop",
+	}
+
+	var sseStream strings.Builder
+	for _, evt := range events {
+		sseStream.WriteString("event: " + evt + "\n")
+		sseStream.WriteString("data: {\"type\":\"" + evt + "\"}\n")
+		sseStream.WriteString("\n")
+	}
+
+	source := io.NopCloser(strings.NewReader(sseStream.String()))
+	filtered := map[string]bool{"vertex_event": true, "ping": true}
+	reader := newSSEFilterReader(source, filtered)
+
+	result, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	output := string(result)
+	for _, evt := range events {
+		if !strings.Contains(output, "event: "+evt) {
+			t.Errorf("standard event %q should be forwarded, got: %s", evt, output)
+		}
+	}
+}
+
+func TestSSEFilterReader_MixedEvents(t *testing.T) {
+	sseStream := "" +
+		"event: message_start\ndata: {\"type\":\"message_start\"}\n\n" +
+		"event: vertex_event\ndata: {\"type\":\"vertex_event\"}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\"}\n\n" +
+		"event: ping\ndata: \n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	source := io.NopCloser(strings.NewReader(sseStream))
+	filtered := map[string]bool{"vertex_event": true, "ping": true}
+	reader := newSSEFilterReader(source, filtered)
+
+	result, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	output := string(result)
+
+	// Standard events should be present.
+	if !strings.Contains(output, "message_start") {
+		t.Error("message_start should be forwarded")
+	}
+	if !strings.Contains(output, "content_block_delta") {
+		t.Error("content_block_delta should be forwarded")
+	}
+	if !strings.Contains(output, "message_stop") {
+		t.Error("message_stop should be forwarded")
+	}
+
+	// Filtered events should be absent.
+	if strings.Contains(output, "vertex_event") {
+		t.Error("vertex_event should be dropped")
+	}
+	if strings.Contains(output, "event: ping") {
+		t.Error("ping should be dropped")
+	}
+}
+
+func TestSSEFilterReader_EmptyStream(t *testing.T) {
+	source := io.NopCloser(strings.NewReader(""))
+	filtered := map[string]bool{"vertex_event": true}
+	reader := newSSEFilterReader(source, filtered)
+
+	result, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty output, got: %q", string(result))
+	}
+}
+
+func TestSSEFilterReader_Close(t *testing.T) {
+	closed := false
+	source := &mockReadCloser{
+		Reader: strings.NewReader(""),
+		onClose: func() error {
+			closed = true
+			return nil
+		},
+	}
+	filtered := map[string]bool{"vertex_event": true}
+	reader := newSSEFilterReader(source, filtered)
+
+	if err := reader.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if !closed {
+		t.Error("Close should delegate to source's Close")
+	}
+}
+
+func TestVertexSSEFilter_NonStreamingPassthrough(t *testing.T) {
+	body := `{"id":"msg_test","type":"message"}`
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	filter := vertexSSEFilter()
+	if err := filter(resp); err != nil {
+		t.Fatalf("filter: %v", err)
+	}
+
+	// Body should NOT be wrapped — read it directly.
+	result, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(result) != body {
+		t.Errorf("body should pass through unchanged, got: %s", string(result))
+	}
+}
+
+func TestVertexSSEFilter_StreamingWraps(t *testing.T) {
+	sseStream := "event: message_start\ndata: {}\n\n"
+	resp := &http.Response{
+		StatusCode:    200,
+		Header:        http.Header{"Content-Type": []string{"text/event-stream"}, "Content-Length": []string{"100"}},
+		Body:          io.NopCloser(strings.NewReader(sseStream)),
+		ContentLength: 100,
+	}
+
+	filter := vertexSSEFilter()
+	if err := filter(resp); err != nil {
+		t.Fatalf("filter: %v", err)
+	}
+
+	// Verify body is wrapped (type should be *sseFilterReader).
+	if _, ok := resp.Body.(*sseFilterReader); !ok {
+		t.Error("body should be wrapped in sseFilterReader for streaming responses")
+	}
+
+	// Verify Content-Length is removed.
+	if resp.Header.Get("Content-Length") != "" {
+		t.Error("Content-Length should be removed for filtered streaming responses")
+	}
+	if resp.ContentLength != -1 {
+		t.Errorf("ContentLength: got %d, want -1", resp.ContentLength)
+	}
+}
+
+// ============================================================
+// SSE Filtering Integration Tests (T042-T045)
+// ============================================================
+
+func TestNewMux_VertexSSEFiltering(t *testing.T) {
+	// Create a mock upstream that returns an SSE stream
+	// with vertex_event and standard events.
+	sseStream := "" +
+		"event: message_start\ndata: {\"type\":\"message_start\"}\n\n" +
+		"event: vertex_event\ndata: {\"type\":\"vertex_event\"}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\"}\n\n" +
+		"event: ping\ndata: \n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(sseStream))
+	}))
+	defer upstream.Close()
+
+	prov := &mockProvider{
+		name:        "vertex",
+		upstreamURL: upstream.URL,
+	}
+
+	mux := newMux(prov, 53147, time.Now())
+
+	body := `{"model":"claude-sonnet-4-20250514","messages":[],"stream":true}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+
+	output := w.Body.String()
+
+	// Standard events should be present.
+	if !strings.Contains(output, "message_start") {
+		t.Error("message_start should be forwarded")
+	}
+	if !strings.Contains(output, "content_block_delta") {
+		t.Error("content_block_delta should be forwarded")
+	}
+	if !strings.Contains(output, "message_stop") {
+		t.Error("message_stop should be forwarded")
+	}
+
+	// Filtered events should be absent.
+	if strings.Contains(output, "vertex_event") {
+		t.Error("vertex_event should be dropped by SSE filter")
+	}
+	if strings.Contains(output, "event: ping") {
+		t.Error("ping should be dropped by SSE filter")
+	}
+}
+
+func TestNewMux_VertexNonStreamingNoFilter(t *testing.T) {
+	// Non-streaming responses should pass through unchanged.
+	jsonBody := `{"id":"msg_test","type":"message","content":[{"type":"text","text":"hello"}]}`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(jsonBody))
+	}))
+	defer upstream.Close()
+
+	prov := &mockProvider{
+		name:        "vertex",
+		upstreamURL: upstream.URL,
+	}
+
+	mux := newMux(prov, 53147, time.Now())
+
+	body := `{"model":"claude-sonnet-4-20250514","messages":[]}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+
+	// Response should pass through unchanged (FR-009).
+	if w.Body.String() != jsonBody {
+		t.Errorf("non-streaming response should pass through unchanged, got: %s", w.Body.String())
+	}
+}
+
+func TestNewMux_AnthropicNoSSEFilter(t *testing.T) {
+	// Anthropic provider should NOT filter SSE events.
+	sseStream := "" +
+		"event: message_start\ndata: {\"type\":\"message_start\"}\n\n" +
+		"event: vertex_event\ndata: {\"type\":\"vertex_event\"}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(sseStream))
+	}))
+	defer upstream.Close()
+
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+	prov := &capturingProvider{
+		name: "anthropic",
+		onPrepare: func(req *http.Request) error {
+			req.URL.Scheme = "http"
+			req.URL.Host = upstreamHost
+			req.Host = upstreamHost
+			return nil
+		},
+	}
+
+	mux := newMux(prov, 53147, time.Now())
+
+	body := `{"model":"claude-sonnet-4-20250514","messages":[],"stream":true}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+
+	output := w.Body.String()
+
+	// vertex_event should NOT be filtered for Anthropic
+	// provider (FR-010).
+	if !strings.Contains(output, "vertex_event") {
+		t.Error("vertex_event should NOT be filtered for Anthropic provider (FR-010)")
+	}
+	if !strings.Contains(output, "message_start") {
+		t.Error("message_start should be present")
+	}
+}
+
+func TestNewMux_VertexErrorResponseNoFilter(t *testing.T) {
+	// Error responses should pass through unchanged.
+	errorBody := `{"error":{"type":"invalid_request_error","message":"Invalid model"}}`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(errorBody))
+	}))
+	defer upstream.Close()
+
+	prov := &mockProvider{
+		name:        "vertex",
+		upstreamURL: upstream.URL,
+	}
+
+	mux := newMux(prov, 53147, time.Now())
+
+	body := `{"model":"claude-sonnet-4-20250514","messages":[]}`
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	// Error response should pass through unchanged.
+	if w.Body.String() != errorBody {
+		t.Errorf("error response should pass through unchanged, got: %s", w.Body.String())
+	}
+}
+
+// ============================================================
+// Synthetic Model Catalog Tests (T054-T057)
+// ============================================================
+
+func TestNewMux_ModelsList(t *testing.T) {
+	prov := &AnthropicProvider{apiKey: "test-key"}
+	mux := newMux(prov, 53147, time.Now())
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("Content-Type: got %q, want application/json", ct)
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	data, ok := resp["data"].([]any)
+	if !ok {
+		t.Fatal("expected data array in response")
+	}
+	if len(data) < 9 {
+		t.Errorf("expected at least 9 models, got: %d", len(data))
+	}
+
+	// Verify each model has required fields.
+	for i, entry := range data {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			t.Errorf("model %d: expected object", i)
+			continue
+		}
+		if _, ok := m["id"]; !ok {
+			t.Errorf("model %d: missing id", i)
+		}
+		if _, ok := m["type"]; !ok {
+			t.Errorf("model %d: missing type", i)
+		}
+		if _, ok := m["display_name"]; !ok {
+			t.Errorf("model %d: missing display_name", i)
+		}
+		if _, ok := m["capabilities"]; !ok {
+			t.Errorf("model %d: missing capabilities", i)
+		}
+	}
+
+	// Verify has_more, first_id, last_id.
+	if resp["has_more"] != false {
+		t.Errorf("has_more: got %v, want false", resp["has_more"])
+	}
+	if _, ok := resp["first_id"].(string); !ok {
+		t.Error("expected first_id string")
+	}
+	if _, ok := resp["last_id"].(string); !ok {
+		t.Error("expected last_id string")
+	}
+}
+
+func TestNewMux_ModelsSingleFound(t *testing.T) {
+	prov := &AnthropicProvider{apiKey: "test-key"}
+	mux := newMux(prov, 53147, time.Now())
+
+	req := httptest.NewRequest("GET", "/v1/models/claude-sonnet-4-20250514", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var model map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&model); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if model["id"] != "claude-sonnet-4-20250514" {
+		t.Errorf("id: got %q, want claude-sonnet-4-20250514", model["id"])
+	}
+	if model["type"] != "model" {
+		t.Errorf("type: got %q, want model", model["type"])
+	}
+	if model["display_name"] != "Claude Sonnet 4" {
+		t.Errorf("display_name: got %q, want Claude Sonnet 4", model["display_name"])
+	}
+}
+
+func TestNewMux_ModelsSingleNotFound(t *testing.T) {
+	prov := &AnthropicProvider{apiKey: "test-key"}
+	mux := newMux(prov, 53147, time.Now())
+
+	req := httptest.NewRequest("GET", "/v1/models/unknown-model", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusNotFound)
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	errObj, ok := resp["error"].(map[string]any)
+	if !ok {
+		t.Fatal("expected error object in response")
+	}
+	if errObj["type"] != "not_found" {
+		t.Errorf("error type: got %q, want not_found", errObj["type"])
+	}
+	if msg, ok := errObj["message"].(string); !ok || !strings.Contains(msg, "unknown-model") {
+		t.Errorf("error message should contain model ID, got: %q", msg)
+	}
+}
+
+func TestNewMux_ModelsCapabilities(t *testing.T) {
+	prov := &AnthropicProvider{apiKey: "test-key"}
+	mux := newMux(prov, 53147, time.Now())
+
+	// Test Haiku 4.5 — should have extended_thinking: false.
+	req := httptest.NewRequest("GET", "/v1/models/claude-haiku-4-5-20241022", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("haiku status: got %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var haiku map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&haiku); err != nil {
+		t.Fatalf("decode haiku: %v", err)
+	}
+
+	caps, ok := haiku["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatal("expected capabilities object for haiku")
+	}
+	if caps["extended_thinking"] != false {
+		t.Errorf("Haiku 4.5 extended_thinking: got %v, want false", caps["extended_thinking"])
+	}
+	if caps["vision"] != true {
+		t.Errorf("Haiku 4.5 vision: got %v, want true", caps["vision"])
+	}
+	if caps["pdf_input"] != true {
+		t.Errorf("Haiku 4.5 pdf_input: got %v, want true", caps["pdf_input"])
+	}
+
+	// Test Opus 4.7 — should have extended_thinking: true.
+	req2 := httptest.NewRequest("GET", "/v1/models/claude-opus-4-7-20250416", nil)
+	w2 := httptest.NewRecorder()
+	mux.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("opus status: got %d, want %d", w2.Code, http.StatusOK)
+	}
+
+	var opus map[string]any
+	if err := json.NewDecoder(w2.Body).Decode(&opus); err != nil {
+		t.Fatalf("decode opus: %v", err)
+	}
+
+	opusCaps, ok := opus["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatal("expected capabilities object for opus")
+	}
+	if opusCaps["extended_thinking"] != true {
+		t.Errorf("Opus 4.7 extended_thinking: got %v, want true", opusCaps["extended_thinking"])
+	}
+}
+
+// mockReadCloser is a test helper that wraps an io.Reader
+// with a custom Close function.
+type mockReadCloser struct {
+	io.Reader
+	onClose func() error
+}
+
+func (m *mockReadCloser) Close() error {
+	return m.onClose()
+}
 
 // Suppress unused import warnings.
 var _ = io.Discard

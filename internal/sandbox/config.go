@@ -77,7 +77,7 @@ var gatewaySkippedKeys = map[string]bool{
 func gatewayEnvVars(port int) []string {
 	return []string{
 		"-e", fmt.Sprintf("ANTHROPIC_BASE_URL=http://host.containers.internal:%d", port),
-		"-e", "ANTHROPIC_AUTH_TOKEN=gateway",
+		"-e", "ANTHROPIC_API_KEY=gateway",
 	}
 }
 
@@ -214,7 +214,7 @@ func buildVolumeMounts(opts Options, platform PlatformConfig) []string {
 // preventing command injection (per contracts/sandbox-api.md).
 //
 // When gatewayActive is true, gateway env vars are added
-// (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN) and credential
+// (ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY=gateway) and credential
 // mounts and provider API key forwarding are skipped (FR-011).
 func buildRunArgs(opts Options, platform PlatformConfig, gatewayActive bool, gatewayPort int) []string {
 	args := []string{

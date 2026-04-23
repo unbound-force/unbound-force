@@ -165,8 +165,21 @@ func newVertexProvider(
 	getenv func(string) string,
 	execCmd func(string, ...string) ([]byte, error),
 ) *VertexProvider {
-	region := getenv("CLOUD_ML_REGION")
+	// Region resolution priority:
+	//   1. ANTHROPIC_VERTEX_REGION (Claude Code convention)
+	//   2. VERTEX_LOCATION (Google Cloud convention)
+	//   3. CLOUD_ML_REGION (legacy)
+	//   4. Default: us-east5
+	// "global" is rejected — Vertex rawPredict requires a
+	// specific region (e.g., us-east5, europe-west1).
+	region := getenv("ANTHROPIC_VERTEX_REGION")
 	if region == "" {
+		region = getenv("VERTEX_LOCATION")
+	}
+	if region == "" {
+		region = getenv("CLOUD_ML_REGION")
+	}
+	if region == "" || region == "global" {
 		region = "us-east5"
 	}
 	return &VertexProvider{
@@ -212,8 +225,17 @@ func (p *VertexProvider) Start(ctx context.Context) error {
 }
 
 // PrepareRequest sets the upstream URL to the Vertex
-// rawPredict endpoint and adds the Authorization header
-// with the current OAuth token.
+// rawPredict or streamRawPredict endpoint and adds the
+// Authorization header with the current OAuth token.
+//
+// Extended by Spec 034 to:
+//   - Transform the request body (remove model, inject
+//     anthropic_version) via transformVertexBody (FR-001,
+//     FR-002, FR-003, FR-014)
+//   - Select rawPredict vs streamRawPredict based on the
+//     stream field (FR-005, FR-006)
+//   - Strip anthropic-beta and anthropic-version HTTP
+//     headers (FR-004)
 func (p *VertexProvider) PrepareRequest(req *http.Request) error {
 	p.tokenMu.RLock()
 	token := p.token
@@ -225,20 +247,37 @@ func (p *VertexProvider) PrepareRequest(req *http.Request) error {
 				"gcloud auth application-default login")
 	}
 
-	// Extract model from request body for the rawPredict
-	// endpoint URL. Default to claude-sonnet-4-20250514.
-	model := extractModelFromBody(req)
+	// Detect count_tokens path before body transformation
+	// changes the URL. count_tokens always uses rawPredict.
+	isCountTokens := strings.Contains(req.URL.Path, "count_tokens")
 
-	// Build the Vertex rawPredict URL.
+	// Transform the request body: remove model, inject
+	// anthropic_version, detect stream flag (FR-001,
+	// FR-002, FR-003, FR-014).
+	model, stream, _ := transformVertexBody(req)
+
+	// Select endpoint action based on stream flag.
+	// count_tokens always uses rawPredict (FR-006).
+	action := "rawPredict"
+	if stream && !isCountTokens {
+		action = "streamRawPredict"
+	}
+
+	// Build the Vertex endpoint URL.
 	// Format: https://{region}-aiplatform.googleapis.com/v1/
 	//   projects/{project}/locations/{region}/publishers/
-	//   anthropic/models/{model}:rawPredict
+	//   anthropic/models/{model}:{action}
 	req.URL.Scheme = "https"
 	req.URL.Host = fmt.Sprintf("%s-aiplatform.googleapis.com", p.region)
 	req.Host = req.URL.Host
 	req.URL.Path = fmt.Sprintf(
-		"/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:rawPredict",
-		p.projectID, p.region, model)
+		"/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:%s",
+		p.projectID, p.region, model, action)
+
+	// Strip SDK-injected headers that Vertex rawPredict
+	// does not accept (FR-004).
+	req.Header.Del("anthropic-beta")
+	req.Header.Del("anthropic-version")
 
 	req.Header.Set("Authorization", "Bearer "+token)
 	return nil
@@ -364,6 +403,69 @@ func (p *BedrockProvider) Stop() {
 }
 
 // --- Helpers ---
+
+// transformVertexBody reads the request body, removes the
+// `model` field, injects `anthropic_version` if absent,
+// and replaces the body. Returns the extracted model name
+// and stream flag.
+//
+// Uses map[string]any to preserve all unknown fields
+// without requiring a struct definition for the full
+// Anthropic Messages API body (per research.md R7).
+func transformVertexBody(req *http.Request) (model string, stream bool, err error) {
+	defaultModel := "claude-sonnet-4-20250514"
+
+	if req.Body == nil {
+		return defaultModel, false, nil
+	}
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return defaultModel, false, nil
+	}
+
+	if len(body) == 0 {
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		return defaultModel, false, nil
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		// Malformed JSON — forward unchanged (edge case).
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		return defaultModel, false, nil
+	}
+
+	// Extract model (FR-001).
+	if m, ok := payload["model"].(string); ok && m != "" {
+		model = m
+	} else {
+		model = defaultModel
+	}
+	delete(payload, "model")
+
+	// Extract stream flag (FR-005, FR-006).
+	if s, ok := payload["stream"].(bool); ok {
+		stream = s
+	}
+
+	// Inject anthropic_version if absent (FR-002, FR-003).
+	if _, ok := payload["anthropic_version"]; !ok {
+		payload["anthropic_version"] = "vertex-2023-10-16"
+	}
+
+	// Re-encode.
+	newBody, marshalErr := json.Marshal(payload)
+	if marshalErr != nil {
+		// Marshal failed — forward original body.
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		return model, stream, nil
+	}
+
+	req.Body = io.NopCloser(bytes.NewReader(newBody))
+	req.ContentLength = int64(len(newBody))
+	return model, stream, nil
+}
 
 // extractModelFromBody reads the request body to extract
 // the "model" field, then replaces the body so it can be

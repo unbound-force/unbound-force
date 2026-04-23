@@ -197,11 +197,9 @@ func newMux(provider Provider, port int, startTime time.Time) http.Handler {
 			req.Header.Del("x-api-key")
 
 			// Call provider to set upstream URL and inject
-			// credentials. Preserve anthropic-beta,
-			// anthropic-version, X-Claude-Code-Session-Id
-			// headers (FR-002, FR-015) — they are already
-			// on the request and PrepareRequest does not
-			// remove them.
+			// credentials. For Vertex, PrepareRequest also
+			// transforms the body and strips anthropic-*
+			// headers (Spec 034 FR-001 through FR-006).
 			if err := provider.PrepareRequest(req); err != nil {
 				log.Error("provider prepare request failed", "error", err)
 				// Mark the request as failed so ErrorHandler
@@ -220,19 +218,180 @@ func newMux(provider Provider, port int, startTime time.Time) http.Handler {
 		},
 	}
 
+	// Apply SSE response filtering for Vertex provider.
+	// Drops vertex_event and ping SSE events that OpenCode
+	// cannot parse (FR-007, FR-008). Only applied when
+	// provider is Vertex — Anthropic responses pass through
+	// unchanged (FR-010).
+	if provider.Name() == "vertex" {
+		proxy.ModifyResponse = vertexSSEFilter()
+	}
+
+	// Build reusable handlers for both /v1/ and bare paths.
+	// Some SDKs set ANTHROPIC_BASE_URL to include /v1
+	// (e.g., "http://host:53147/v1"), producing bare
+	// paths like POST /messages instead of /v1/messages.
+	// Registering both ensures compatibility.
+
+	listModelsHandler := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := map[string]any{
+			"data":     knownModels,
+			"has_more": false,
+			"first_id": knownModels[0].ID,
+			"last_id":  knownModels[len(knownModels)-1].ID,
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}
+
+	lookupModel := func(w http.ResponseWriter, r *http.Request, prefix string) {
+		modelID := strings.TrimPrefix(r.URL.Path, prefix)
+		if modelID == "" {
+			listModelsHandler(w, r)
+			return
+		}
+		for _, m := range knownModels {
+			if m.ID == modelID {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(m)
+				return
+			}
+		}
+		writeJSONError(w, http.StatusNotFound, "not_found",
+			fmt.Sprintf("Model '%s' not found", modelID))
+	}
+
+	// --- /v1/ prefixed routes (standard SDK paths) ---
+
 	// POST /v1/messages — proxy to upstream (FR-001).
 	mux.HandleFunc("POST /v1/messages", proxy.ServeHTTP)
 
-	// POST /v1/messages/count_tokens — proxy to upstream (FR-001).
+	// POST /v1/messages/count_tokens — proxy to upstream.
 	mux.HandleFunc("POST /v1/messages/count_tokens", proxy.ServeHTTP)
 
-	// Catch-all: return 405 with supported endpoints.
+	// GET /v1/models — synthetic model catalog (FR-013).
+	mux.HandleFunc("GET /v1/models", listModelsHandler)
+
+	// GET /v1/models/{model_id} — single model lookup.
+	mux.HandleFunc("GET /v1/models/", func(w http.ResponseWriter, r *http.Request) {
+		lookupModel(w, r, "/v1/models/")
+	})
+
+	// --- Bare routes (no /v1 prefix) ---
+	// Handles the case where ANTHROPIC_BASE_URL includes
+	// the /v1 path component, causing the SDK to send
+	// requests like POST /messages instead of /v1/messages.
+
+	mux.HandleFunc("POST /messages", proxy.ServeHTTP)
+	mux.HandleFunc("POST /messages/count_tokens", proxy.ServeHTTP)
+	mux.HandleFunc("GET /models", listModelsHandler)
+	mux.HandleFunc("GET /models/", func(w http.ResponseWriter, r *http.Request) {
+		lookupModel(w, r, "/models/")
+	})
+
+	// Catch-all: log and return 405 with supported endpoints.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		log.Warn("unsupported endpoint hit",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"query", r.URL.RawQuery,
+			"remote", r.RemoteAddr,
+			"content-type", r.Header.Get("Content-Type"),
+			"anthropic-version", r.Header.Get("anthropic-version"))
 		writeJSONError(w, http.StatusMethodNotAllowed, "not_found",
-			"Unsupported endpoint. Supported: /v1/messages, /v1/messages/count_tokens, /health")
+			"Unsupported endpoint. Supported: /v1/messages, /v1/messages/count_tokens, /v1/models, /health")
 	})
 
 	return mux
+}
+
+// modelCapabilities describes the feature support for a
+// Claude model on Vertex AI.
+type modelCapabilities struct {
+	Vision           bool `json:"vision"`
+	ExtendedThinking bool `json:"extended_thinking"`
+	PDFInput         bool `json:"pdf_input"`
+}
+
+// syntheticModel represents a Claude model available on
+// Vertex AI. Since Vertex has no model listing API, the
+// gateway maintains a hardcoded catalog matching the
+// models Google documents as available (FR-013).
+//
+// Design decision: Hardcoded slice instead of dynamic
+// discovery because Vertex has no REST API for listing
+// Claude models. Model releases are infrequent (every
+// few months), so manual updates are acceptable (per
+// research.md R3).
+type syntheticModel struct {
+	ID             string            `json:"id"`
+	Type           string            `json:"type"`
+	DisplayName    string            `json:"display_name"`
+	CreatedAt      int64             `json:"created_at"`
+	MaxInputTokens int               `json:"max_input_tokens"`
+	MaxTokens      int               `json:"max_tokens"`
+	Capabilities   modelCapabilities `json:"capabilities"`
+}
+
+// knownModels is the catalog of Claude models available on
+// Vertex AI as of April 2026 (per research.md R3). All
+// models support vision and PDF input. All except Haiku 4.5
+// support extended thinking.
+var knownModels = []syntheticModel{
+	{
+		ID: "claude-opus-4-7-20250416", Type: "model",
+		DisplayName: "Claude Opus 4.7", CreatedAt: 1744761600,
+		MaxInputTokens: 200000, MaxTokens: 32000,
+		Capabilities: modelCapabilities{Vision: true, ExtendedThinking: true, PDFInput: true},
+	},
+	{
+		ID: "claude-sonnet-4-6-20250217", Type: "model",
+		DisplayName: "Claude Sonnet 4.6", CreatedAt: 1739750400,
+		MaxInputTokens: 200000, MaxTokens: 64000,
+		Capabilities: modelCapabilities{Vision: true, ExtendedThinking: true, PDFInput: true},
+	},
+	{
+		ID: "claude-opus-4-6-20250205", Type: "model",
+		DisplayName: "Claude Opus 4.6", CreatedAt: 1738713600,
+		MaxInputTokens: 200000, MaxTokens: 32000,
+		Capabilities: modelCapabilities{Vision: true, ExtendedThinking: true, PDFInput: true},
+	},
+	{
+		ID: "claude-opus-4-5-20241124", Type: "model",
+		DisplayName: "Claude Opus 4.5", CreatedAt: 1732406400,
+		MaxInputTokens: 200000, MaxTokens: 32000,
+		Capabilities: modelCapabilities{Vision: true, ExtendedThinking: true, PDFInput: true},
+	},
+	{
+		ID: "claude-sonnet-4-5-20241022", Type: "model",
+		DisplayName: "Claude Sonnet 4.5", CreatedAt: 1729555200,
+		MaxInputTokens: 200000, MaxTokens: 8000,
+		Capabilities: modelCapabilities{Vision: true, ExtendedThinking: true, PDFInput: true},
+	},
+	{
+		ID: "claude-opus-4-1-20250414", Type: "model",
+		DisplayName: "Claude Opus 4.1", CreatedAt: 1744588800,
+		MaxInputTokens: 200000, MaxTokens: 32000,
+		Capabilities: modelCapabilities{Vision: true, ExtendedThinking: true, PDFInput: true},
+	},
+	{
+		ID: "claude-haiku-4-5-20241022", Type: "model",
+		DisplayName: "Claude Haiku 4.5", CreatedAt: 1729555200,
+		MaxInputTokens: 200000, MaxTokens: 8000,
+		Capabilities: modelCapabilities{Vision: true, ExtendedThinking: false, PDFInput: true},
+	},
+	{
+		ID: "claude-opus-4-20250514", Type: "model",
+		DisplayName: "Claude Opus 4", CreatedAt: 1747180800,
+		MaxInputTokens: 200000, MaxTokens: 32000,
+		Capabilities: modelCapabilities{Vision: true, ExtendedThinking: true, PDFInput: true},
+	},
+	{
+		ID: "claude-sonnet-4-20250514", Type: "model",
+		DisplayName: "Claude Sonnet 4", CreatedAt: 1747180800,
+		MaxInputTokens: 200000, MaxTokens: 8000,
+		Capabilities: modelCapabilities{Vision: true, ExtendedThinking: true, PDFInput: true},
+	},
 }
 
 // writeJSONError writes a JSON error response matching the

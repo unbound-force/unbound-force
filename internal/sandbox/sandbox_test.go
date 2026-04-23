@@ -2755,8 +2755,8 @@ func TestGatewayEnvVars(t *testing.T) {
 	if !strings.Contains(joined, "ANTHROPIC_BASE_URL=http://host.containers.internal:53147") {
 		t.Errorf("expected ANTHROPIC_BASE_URL, got: %s", joined)
 	}
-	if !strings.Contains(joined, "ANTHROPIC_AUTH_TOKEN=gateway") {
-		t.Errorf("expected ANTHROPIC_AUTH_TOKEN=gateway, got: %s", joined)
+	if !strings.Contains(joined, "ANTHROPIC_API_KEY=gateway") {
+		t.Errorf("expected ANTHROPIC_API_KEY=gateway, got: %s", joined)
 	}
 }
 
@@ -2920,13 +2920,18 @@ func TestBuildRunArgs_GatewayActive(t *testing.T) {
 	if !strings.Contains(joined, "ANTHROPIC_BASE_URL=http://host.containers.internal:53147") {
 		t.Errorf("expected ANTHROPIC_BASE_URL, got: %s", joined)
 	}
-	if !strings.Contains(joined, "ANTHROPIC_AUTH_TOKEN=gateway") {
-		t.Errorf("expected ANTHROPIC_AUTH_TOKEN, got: %s", joined)
+	if !strings.Contains(joined, "ANTHROPIC_API_KEY=gateway") {
+		t.Errorf("expected ANTHROPIC_API_KEY, got: %s", joined)
 	}
 
-	// Verify ANTHROPIC_API_KEY is NOT forwarded.
-	if strings.Contains(joined, "-e ANTHROPIC_API_KEY") {
-		t.Errorf("ANTHROPIC_API_KEY should not be forwarded with gateway, got: %s", joined)
+	// Verify host's real ANTHROPIC_API_KEY is not forwarded.
+	// The gateway placeholder (ANTHROPIC_API_KEY=gateway) IS
+	// present, but the bare "-e ANTHROPIC_API_KEY" (which
+	// reads from host env) should NOT be. Count occurrences:
+	// exactly 1 (the gateway placeholder).
+	count := strings.Count(joined, "ANTHROPIC_API_KEY")
+	if count != 1 {
+		t.Errorf("expected exactly 1 ANTHROPIC_API_KEY (gateway), got %d in: %s", count, joined)
 	}
 
 	// Verify OPENAI_API_KEY IS forwarded (not proxied by gateway).
@@ -2956,11 +2961,11 @@ func TestBuildRunArgs_GatewayInactive(t *testing.T) {
 	if strings.Contains(joined, "ANTHROPIC_BASE_URL") {
 		t.Errorf("expected no ANTHROPIC_BASE_URL without gateway, got: %s", joined)
 	}
-	if strings.Contains(joined, "ANTHROPIC_AUTH_TOKEN") {
-		t.Errorf("expected no ANTHROPIC_AUTH_TOKEN without gateway, got: %s", joined)
+	if strings.Contains(joined, "ANTHROPIC_API_KEY=gateway") {
+		t.Errorf("expected no ANTHROPIC_API_KEY=gateway without gateway, got: %s", joined)
 	}
 
-	// Verify ANTHROPIC_API_KEY IS forwarded.
+	// Verify ANTHROPIC_API_KEY IS forwarded from host.
 	if !strings.Contains(joined, "-e ANTHROPIC_API_KEY") {
 		t.Errorf("ANTHROPIC_API_KEY should be forwarded without gateway, got: %s", joined)
 	}
@@ -3028,13 +3033,16 @@ func TestStart_AutoStartsGateway(t *testing.T) {
 	if !strings.Contains(runArgs, "ANTHROPIC_BASE_URL") {
 		t.Errorf("expected ANTHROPIC_BASE_URL in container args, got: %s", runArgs)
 	}
-	if !strings.Contains(runArgs, "ANTHROPIC_AUTH_TOKEN=gateway") {
-		t.Errorf("expected ANTHROPIC_AUTH_TOKEN in container args, got: %s", runArgs)
+	if !strings.Contains(runArgs, "ANTHROPIC_API_KEY=gateway") {
+		t.Errorf("expected ANTHROPIC_API_KEY=gateway in container args, got: %s", runArgs)
 	}
 
-	// Verify ANTHROPIC_API_KEY is NOT in container args.
-	if strings.Contains(runArgs, "-e ANTHROPIC_API_KEY") {
-		t.Errorf("ANTHROPIC_API_KEY should not be in container when gateway active, got: %s", runArgs)
+	// Verify host's real ANTHROPIC_API_KEY is not forwarded.
+	// Only the gateway placeholder (ANTHROPIC_API_KEY=gateway)
+	// should be present, not the bare forwarded form.
+	count := strings.Count(runArgs, "ANTHROPIC_API_KEY")
+	if count != 1 {
+		t.Errorf("expected exactly 1 ANTHROPIC_API_KEY (gateway), got %d in: %s", count, runArgs)
 	}
 
 	// Verify stderr contains gateway active message.
@@ -3079,8 +3087,8 @@ func TestStart_NoGatewayFallback(t *testing.T) {
 	if strings.Contains(runArgs, "ANTHROPIC_BASE_URL") {
 		t.Errorf("expected no ANTHROPIC_BASE_URL without gateway, got: %s", runArgs)
 	}
-	if strings.Contains(runArgs, "ANTHROPIC_AUTH_TOKEN") {
-		t.Errorf("expected no ANTHROPIC_AUTH_TOKEN without gateway, got: %s", runArgs)
+	if strings.Contains(runArgs, "ANTHROPIC_API_KEY") {
+		t.Errorf("expected no ANTHROPIC_API_KEY without gateway, got: %s", runArgs)
 	}
 }
 
