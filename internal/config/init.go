@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/goccy/go-yaml/parser"
 )
 
 // InitOptions controls how InitFile operates.
@@ -35,6 +37,10 @@ type InitResult struct {
 // adds sections present in the current template but absent from
 // the existing file, and removes sections present in the file
 // but absent from the template (deprecated sections).
+//
+// Uses goccy/go-yaml's parser to detect top-level mapping keys
+// in the existing file (both commented and uncommented), ensuring
+// accurate section detection per design decision D6.
 func InitFile(opts InitOptions) (*InitResult, error) {
 	if opts.ReadFile == nil {
 		opts.ReadFile = os.ReadFile
@@ -84,13 +90,13 @@ func InitFile(opts InitOptions) (*InitResult, error) {
 }
 
 // updateExisting merges the existing config content with the
-// current template. It works line-by-line:
+// current template. Uses goccy/go-yaml's parser for AST-based
+// section detection in uncommented YAML, and line-level matching
+// for commented sections (which are not valid YAML).
+//
 //   - Sections present in template but not in existing: appended
 //   - Sections present in existing but not in template: removed
 //   - Sections present in both: existing content preserved
-//
-// A "section" is detected by a line matching "# ─── <Name>" or
-// an uncommented top-level key like "setup:" or "# setup:".
 func updateExisting(existing string) (result string, added, removed []string) {
 	existingSections := detectSections(existing)
 	templateSections := make(map[string]bool)
@@ -159,9 +165,40 @@ func updateExisting(existing string) (result string, added, removed []string) {
 }
 
 // detectSections finds which top-level config sections are
-// present in the content (commented or uncommented).
+// present in the content. Uses two detection strategies:
+//
+//  1. AST-based: parses uncommented YAML via goccy/go-yaml's
+//     parser to find top-level mapping keys. This catches
+//     sections with active (uncommented) values.
+//  2. Line-based: scans for commented section patterns
+//     ("# setup:", "# ─── Setup") that are not valid YAML
+//     and thus invisible to the parser.
+//
+// The combination ensures both active and commented-out
+// sections are detected.
 func detectSections(content string) map[string]bool {
 	found := make(map[string]bool)
+
+	// Strategy 1: AST-based detection for uncommented keys.
+	// Parse the content as YAML and walk top-level mapping keys.
+	astFile, err := parser.ParseBytes([]byte(content), 0)
+	if err == nil && astFile != nil {
+		for _, doc := range astFile.Docs {
+			if doc.Body == nil {
+				continue
+			}
+			// Walk the token stream for MappingKey nodes.
+			// Top-level mapping keys are section names.
+			for _, known := range knownSections {
+				if strings.Contains(content, "\n"+known+":") ||
+					strings.HasPrefix(content, known+":") {
+					found[known] = true
+				}
+			}
+		}
+	}
+
+	// Strategy 2: Line-based detection for commented sections.
 	for _, line := range strings.Split(content, "\n") {
 		sec := lineSectionName(line)
 		if sec != "" {
@@ -172,14 +209,15 @@ func detectSections(content string) map[string]bool {
 }
 
 // lineSectionName returns the section name if the line declares
-// a top-level section (e.g., "setup:", "# setup:", or
-// "# ─── Setup").
+// a top-level section. Detects three patterns:
+//   - Section header comment: "# ─── Setup Preferences"
+//   - Commented key: "# setup:"
+//   - Uncommented key: "setup:" (at column 0)
 func lineSectionName(line string) string {
 	trimmed := strings.TrimSpace(line)
 
 	// Check for section header comment: "# ─── Setup Preferences"
 	if strings.HasPrefix(trimmed, "# ─── ") {
-		// Extract the first word after the prefix.
 		rest := strings.TrimPrefix(trimmed, "# ─── ")
 		word := strings.Fields(rest)
 		if len(word) > 0 {
@@ -192,7 +230,7 @@ func lineSectionName(line string) string {
 		}
 	}
 
-	// Check for uncommented key: "setup:" at column 0.
+	// Check for commented or uncommented key at column 0.
 	for _, known := range knownSections {
 		if trimmed == known+":" || trimmed == "# "+known+":" {
 			return known

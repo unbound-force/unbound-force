@@ -115,6 +115,14 @@ Hero constitutions extend (never contradict) the org constitution. See the const
 
 All five heroes have implementations. Gaze has the most mature standalone implementation (Go CLI + static analysis engine). Muti-Mind has a backend CLI (`cmd/mutimind/`) and OpenCode agent. The Divisor has 5 review personas and convention packs (embedded in the `unbound-force` binary). Cobalt-Crush has a developer persona agent. Mx F has a full CLI backend (`cmd/mxf/`) with 7 subcommands and a coaching agent.
 
+**Agent model resolution**: Agent files do not hardcode a
+`model:` field in their frontmatter. Instead, they inherit the
+model from OpenCode's own configuration hierarchy: project-level
+`opencode.json` `"model"` field > user-level
+`~/.config/opencode/opencode.json` > OpenCode's built-in default.
+Subagents inherit from their invoking primary agent. To change the
+model for all agents, set the `"model"` field in `opencode.json`.
+
 ## Project Structure
 
 ```text

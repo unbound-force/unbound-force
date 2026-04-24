@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -47,7 +48,10 @@ Subcommands:
 // applySandboxConfig applies config defaults to sandbox Options
 // fields that are at their zero/default values. CLI flags take
 // precedence (they're already set on the params struct).
-func applySandboxConfig(opts *sandbox.Options) {
+// Also prints a deprecation warning to stderr if .uf/sandbox.yaml
+// exists (per design D9 — config values flow through the cmd
+// layer, not internal packages, per design D8).
+func applySandboxConfig(opts *sandbox.Options, stderr io.Writer) {
 	cfg, _ := config.Load(config.LoadOptions{ProjectDir: opts.ProjectDir})
 	if cfg == nil {
 		return
@@ -66,6 +70,14 @@ func applySandboxConfig(opts *sandbox.Options) {
 	}
 	if opts.Mode == "" && cfg.Sandbox.Mode != "" {
 		opts.Mode = cfg.Sandbox.Mode
+	}
+
+	// Deprecation warning: if legacy .uf/sandbox.yaml exists,
+	// warn via the injectable stderr writer (testable, per D8).
+	legacyPath := filepath.Join(opts.ProjectDir, ".uf", "sandbox.yaml")
+	if _, err := os.Stat(legacyPath); err == nil && stderr != nil {
+		fmt.Fprintln(stderr,
+			"Warning: .uf/sandbox.yaml is deprecated. Run 'uf config init' to migrate to .uf/config.yaml")
 	}
 }
 
@@ -97,7 +109,7 @@ func runSandboxCreate(p sandboxCreateParams) error {
 		Stdout:        p.stdout,
 		Stderr:        p.stderr,
 	}
-	applySandboxConfig(&opts)
+	applySandboxConfig(&opts, p.stderr)
 	return sandbox.Create(opts)
 }
 
@@ -259,7 +271,7 @@ func runSandboxStart(p sandboxStartParams) error {
 		Stdout:      p.stdout,
 		Stderr:      p.stderr,
 	}
-	applySandboxConfig(&opts)
+	applySandboxConfig(&opts, p.stderr)
 	return sandbox.Start(opts)
 }
 

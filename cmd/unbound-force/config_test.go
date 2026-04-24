@@ -263,167 +263,167 @@ func TestRunConfigValidate_InvalidFieldValues(t *testing.T) {
 // --- Field validator tests ---
 
 func TestValidateSetup_ValidValues(t *testing.T) {
-	errs := validateSetup(config.SetupConfig{
+	errs := config.Validate(config.Config{Setup: config.SetupConfig{
 		PackageManager: "homebrew",
 		Tools: map[string]config.ToolConfig{
 			"gaze": {Method: "rpm"},
 			"node": {Method: "fnm", Version: "22"},
 		},
-	})
+	}})
 	if len(errs) > 0 {
 		t.Errorf("expected no errors, got: %v", errs)
 	}
 }
 
 func TestValidateSetup_InvalidPackageManager(t *testing.T) {
-	errs := validateSetup(config.SetupConfig{
+	errs := config.Validate(config.Config{Setup: config.SetupConfig{
 		PackageManager: "invalid",
-	})
+	}})
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d: %v", len(errs), errs)
 	}
 }
 
 func TestValidateSetup_InvalidToolMethod(t *testing.T) {
-	errs := validateSetup(config.SetupConfig{
+	errs := config.Validate(config.Config{Setup: config.SetupConfig{
 		Tools: map[string]config.ToolConfig{
 			"gaze": {Method: "invalid"},
 		},
-	})
+	}})
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d: %v", len(errs), errs)
 	}
 }
 
 func TestValidateSandbox_ValidValues(t *testing.T) {
-	errs := validateSandbox(config.SandboxConfig{
+	errs := config.Validate(config.Config{Sandbox: config.SandboxConfig{
 		Runtime: "podman",
 		Backend: "che",
 		Mode:    "direct",
-	})
+	}})
 	if len(errs) > 0 {
 		t.Errorf("expected no errors, got: %v", errs)
 	}
 }
 
 func TestValidateSandbox_InvalidRuntime(t *testing.T) {
-	errs := validateSandbox(config.SandboxConfig{
+	errs := config.Validate(config.Config{Sandbox: config.SandboxConfig{
 		Runtime: "containerd",
-	})
+	}})
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d: %v", len(errs), errs)
 	}
 }
 
 func TestValidateSandbox_InvalidBackend(t *testing.T) {
-	errs := validateSandbox(config.SandboxConfig{
+	errs := config.Validate(config.Config{Sandbox: config.SandboxConfig{
 		Backend: "k8s",
-	})
+	}})
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d: %v", len(errs), errs)
 	}
 }
 
 func TestValidateSandbox_InvalidMode(t *testing.T) {
-	errs := validateSandbox(config.SandboxConfig{
+	errs := config.Validate(config.Config{Sandbox: config.SandboxConfig{
 		Mode: "shared",
-	})
+	}})
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d: %v", len(errs), errs)
 	}
 }
 
 func TestValidateGateway_ValidValues(t *testing.T) {
-	errs := validateGateway(config.GatewayConfig{
+	errs := config.Validate(config.Config{Gateway: config.GatewayConfig{
 		Port:     8080,
 		Provider: "vertex",
-	})
+	}})
 	if len(errs) > 0 {
 		t.Errorf("expected no errors, got: %v", errs)
 	}
 }
 
 func TestValidateGateway_InvalidProvider(t *testing.T) {
-	errs := validateGateway(config.GatewayConfig{
+	errs := config.Validate(config.Config{Gateway: config.GatewayConfig{
 		Provider: "azure",
-	})
+	}})
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d: %v", len(errs), errs)
 	}
 }
 
 func TestValidateGateway_InvalidPort(t *testing.T) {
-	errs := validateGateway(config.GatewayConfig{
+	errs := config.Validate(config.Config{Gateway: config.GatewayConfig{
 		Port: -1,
-	})
+	}})
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d: %v", len(errs), errs)
 	}
 }
 
 func TestValidateGateway_PortTooHigh(t *testing.T) {
-	errs := validateGateway(config.GatewayConfig{
+	errs := config.Validate(config.Config{Gateway: config.GatewayConfig{
 		Port: 70000,
-	})
+	}})
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d: %v", len(errs), errs)
 	}
 }
 
 func TestValidateEmbedding_ValidValues(t *testing.T) {
-	errs := validateEmbedding(config.EmbeddingConfig{
+	errs := config.Validate(config.Config{Embedding: config.EmbeddingConfig{
 		Provider:   "ollama",
 		Dimensions: 256,
-	})
+	}})
 	if len(errs) > 0 {
 		t.Errorf("expected no errors, got: %v", errs)
 	}
 }
 
 func TestValidateEmbedding_InvalidProvider(t *testing.T) {
-	errs := validateEmbedding(config.EmbeddingConfig{
+	errs := config.Validate(config.Config{Embedding: config.EmbeddingConfig{
 		Provider: "openai",
-	})
+	}})
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d: %v", len(errs), errs)
 	}
 }
 
 func TestValidateEmbedding_NegativeDimensions(t *testing.T) {
-	errs := validateEmbedding(config.EmbeddingConfig{
+	errs := config.Validate(config.Config{Embedding: config.EmbeddingConfig{
 		Dimensions: -1,
-	})
+	}})
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d: %v", len(errs), errs)
 	}
 }
 
 func TestValidateDoctor_ValidValues(t *testing.T) {
-	errs := validateDoctor(config.DoctorConfig{
+	errs := config.Validate(config.Config{Doctor: config.DoctorConfig{
 		Tools: map[string]string{
 			"gaze":    "recommended",
 			"ollama":  "optional",
 			"dewey":   "required",
 		},
-	})
+	}})
 	if len(errs) > 0 {
 		t.Errorf("expected no errors, got: %v", errs)
 	}
 }
 
 func TestValidateDoctor_InvalidSeverity(t *testing.T) {
-	errs := validateDoctor(config.DoctorConfig{
+	errs := config.Validate(config.Config{Doctor: config.DoctorConfig{
 		Tools: map[string]string{
 			"gaze": "critical",
 		},
-	})
+	}})
 	if len(errs) != 1 {
 		t.Errorf("expected 1 error, got %d: %v", len(errs), errs)
 	}
 }
 
 func TestValidateDoctor_EmptyTools(t *testing.T) {
-	errs := validateDoctor(config.DoctorConfig{})
+	errs := config.Validate(config.Config{Doctor: config.DoctorConfig{}})
 	if len(errs) > 0 {
 		t.Errorf("expected no errors for empty tools, got: %v", errs)
 	}
@@ -511,28 +511,28 @@ func TestConfigValidateCmd_Execute(t *testing.T) {
 // --- Validate with zero values (empty structs) ---
 
 func TestValidateSetup_EmptyIsValid(t *testing.T) {
-	errs := validateSetup(config.SetupConfig{})
+	errs := config.Validate(config.Config{Setup: config.SetupConfig{}})
 	if len(errs) > 0 {
 		t.Errorf("expected no errors for empty setup, got: %v", errs)
 	}
 }
 
 func TestValidateSandbox_EmptyIsValid(t *testing.T) {
-	errs := validateSandbox(config.SandboxConfig{})
+	errs := config.Validate(config.Config{Sandbox: config.SandboxConfig{}})
 	if len(errs) > 0 {
 		t.Errorf("expected no errors for empty sandbox, got: %v", errs)
 	}
 }
 
 func TestValidateGateway_EmptyIsValid(t *testing.T) {
-	errs := validateGateway(config.GatewayConfig{})
+	errs := config.Validate(config.Config{Gateway: config.GatewayConfig{}})
 	if len(errs) > 0 {
 		t.Errorf("expected no errors for empty gateway, got: %v", errs)
 	}
 }
 
 func TestValidateEmbedding_EmptyIsValid(t *testing.T) {
-	errs := validateEmbedding(config.EmbeddingConfig{})
+	errs := config.Validate(config.Config{Embedding: config.EmbeddingConfig{}})
 	if len(errs) > 0 {
 		t.Errorf("expected no errors for empty embedding, got: %v", errs)
 	}

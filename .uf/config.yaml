@@ -1,17 +1,10 @@
 # .uf/config.yaml
-# Workflow configuration for Unbound Force hero lifecycle.
-# CLI flags (--define-mode, --spec-review) override these defaults.
-
-# workflow:
-#   execution_modes:
-#     define: swarm      # "human" (default) or "swarm"
-#     implement: swarm   # default: swarm
-#     validate: swarm    # default: swarm
-#     review: swarm      # default: swarm
-#     accept: human      # default: human
-#     reflect: swarm     # default: swarm
-#   spec_review: false   # enable spec review checkpoint (default: false)
-
+# Unbound Force project configuration.
+# All values shown are defaults — only uncomment what you want to change.
+# CLI flags and environment variables override these settings.
+# Env var overrides: UF_PACKAGE_MANAGER, OLLAMA_MODEL, OLLAMA_HOST,
+#   UF_SANDBOX_IMAGE, UF_SANDBOX_BACKEND, UF_SANDBOX_RUNTIME,
+#   UF_CHE_URL, UF_CHE_TOKEN, UF_GATEWAY_PORT, UF_GATEWAY_PROVIDER
 
 # ─── Setup Preferences ───────────────────────────────────────
 # Controls how `uf setup` installs tools.
@@ -35,12 +28,10 @@
 #     replicator:
 #       method: auto             # auto | homebrew | skip
 
-
 # ─── Scaffold Preferences ────────────────────────────────────
 # Controls what `uf init` deploys.
 # scaffold:
 #   language: auto               # auto | go | typescript | python | rust
-
 
 # ─── Embedding ────────────────────────────────────────────────
 # Controls the embedding model used by Dewey.
@@ -49,7 +40,6 @@
 #   dimensions: 256
 #   provider: ollama             # ollama (only supported today)
 #   host: http://localhost:11434
-
 
 # ─── Sandbox ──────────────────────────────────────────────────
 # Controls `uf sandbox` behavior.
@@ -66,13 +56,11 @@
 #     token: ""
 #   demo_ports: []
 
-
 # ─── Gateway ──────────────────────────────────────────────────
 # Controls `uf gateway` behavior.
 # gateway:
 #   port: 53147
 #   provider: auto               # auto | anthropic | vertex | bedrock
-
 
 # ─── Doctor ───────────────────────────────────────────────────
 # Controls `uf doctor` check behavior.
@@ -80,3 +68,15 @@
 #   skip: []                     # check names to skip
 #   tools:                       # override tool severity
 #     gaze: recommended          # required | recommended | optional
+
+# ─── Workflow ─────────────────────────────────────────────────
+# Controls hero lifecycle workflow.
+# workflow:
+#   execution_modes:
+#     define: human               # human | swarm
+#     implement: swarm
+#     validate: swarm
+#     review: swarm
+#     accept: human
+#     reflect: swarm
+#   spec_review: false

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/charmbracelet/log"
 	goyaml "github.com/goccy/go-yaml"
 )
 
@@ -142,7 +143,10 @@ func Load(opts LoadOptions) (*Config, error) {
 		userPath := filepath.Join(userDir, "uf", "config.yaml")
 		if data, readErr := opts.ReadFile(userPath); readErr == nil {
 			var userCfg Config
-			if parseErr := goyaml.Unmarshal(data, &userCfg); parseErr == nil {
+			if parseErr := goyaml.Unmarshal(data, &userCfg); parseErr != nil {
+				log.Warn("config file exists but failed to parse, using defaults",
+					"path", userPath, "error", parseErr)
+			} else {
 				cfg = merge(cfg, userCfg)
 			}
 		}
@@ -152,7 +156,10 @@ func Load(opts LoadOptions) (*Config, error) {
 	repoPath := filepath.Join(opts.ProjectDir, ".uf", "config.yaml")
 	if data, readErr := opts.ReadFile(repoPath); readErr == nil {
 		var repoCfg Config
-		if parseErr := goyaml.Unmarshal(data, &repoCfg); parseErr == nil {
+		if parseErr := goyaml.Unmarshal(data, &repoCfg); parseErr != nil {
+			log.Warn("config file exists but failed to parse, using defaults",
+				"path", repoPath, "error", parseErr)
+		} else {
 			cfg = merge(cfg, repoCfg)
 		}
 	}
@@ -166,6 +173,14 @@ func Load(opts LoadOptions) (*Config, error) {
 // merge deep-merges overlay onto base. Non-zero values from
 // overlay replace base. Slice fields are replaced (not appended).
 // Map fields are merged key-by-key.
+//
+// Limitation: boolean fields use zero-value semantics, so
+// `false` cannot override `true` from a lower-priority layer
+// (e.g., setting `spec_review: false` in repo config will not
+// override `spec_review: true` from user config). This is
+// acceptable for the current schema where the only boolean
+// (SpecReview) defaults to false. If more booleans are added
+// with non-false defaults, consider using *bool pointer types.
 func merge(base, overlay Config) Config {
 	result := base
 

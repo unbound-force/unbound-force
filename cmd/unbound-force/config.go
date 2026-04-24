@@ -108,12 +108,22 @@ func runConfigValidate(p configValidateParams) error {
 	}
 
 	// Validate known field values.
-	var errors []string
-	errors = append(errors, validateSetup(cfg.Setup)...)
-	errors = append(errors, validateSandbox(cfg.Sandbox)...)
-	errors = append(errors, validateGateway(cfg.Gateway)...)
-	errors = append(errors, validateEmbedding(cfg.Embedding)...)
-	errors = append(errors, validateDoctor(cfg.Doctor)...)
+	errors := config.Validate(cfg)
+
+	if p.format == "json" {
+		type result struct {
+			Path   string   `json:"path"`
+			Valid  bool     `json:"valid"`
+			Errors []string `json:"errors,omitempty"`
+		}
+		r := result{Path: configPath, Valid: len(errors) == 0, Errors: errors}
+		data, _ := json.MarshalIndent(r, "", "  ")
+		fmt.Fprintln(p.stdout, string(data))
+		if len(errors) > 0 {
+			return fmt.Errorf("config validation failed")
+		}
+		return nil
+	}
 
 	if len(errors) > 0 {
 		fmt.Fprintf(p.stdout, "Config validation: %s\n\n", configPath)
@@ -127,118 +137,6 @@ func runConfigValidate(p configValidateParams) error {
 	fmt.Fprintf(p.stdout, "Config validation: %s\n", configPath)
 	fmt.Fprintln(p.stdout, "  All checks passed.")
 	return nil
-}
-
-// --- Field validators ---
-
-func validateSetup(cfg config.SetupConfig) []string {
-	var errs []string
-	valid := map[string]bool{
-		"auto": true, "homebrew": true, "dnf": true,
-		"apt": true, "manual": true, "": true,
-	}
-	if !valid[cfg.PackageManager] {
-		errs = append(errs, fmt.Sprintf(
-			"setup.package_manager: %q is not valid (auto|homebrew|dnf|apt|manual)",
-			cfg.PackageManager))
-	}
-
-	validMethods := map[string]bool{
-		"auto": true, "homebrew": true, "dnf": true, "rpm": true,
-		"apt": true, "curl": true, "skip": true, "nvm": true,
-		"fnm": true, "mise": true, "": true,
-	}
-	for name, tool := range cfg.Tools {
-		if !validMethods[tool.Method] {
-			errs = append(errs, fmt.Sprintf(
-				"setup.tools.%s.method: %q is not valid",
-				name, tool.Method))
-		}
-	}
-	return errs
-}
-
-func validateSandbox(cfg config.SandboxConfig) []string {
-	var errs []string
-	validRuntime := map[string]bool{
-		"auto": true, "podman": true, "docker": true, "": true,
-	}
-	if !validRuntime[cfg.Runtime] {
-		errs = append(errs, fmt.Sprintf(
-			"sandbox.runtime: %q is not valid (auto|podman|docker)",
-			cfg.Runtime))
-	}
-
-	validBackend := map[string]bool{
-		"auto": true, "podman": true, "che": true, "": true,
-	}
-	if !validBackend[cfg.Backend] {
-		errs = append(errs, fmt.Sprintf(
-			"sandbox.backend: %q is not valid (auto|podman|che)",
-			cfg.Backend))
-	}
-
-	validMode := map[string]bool{
-		"isolated": true, "direct": true, "": true,
-	}
-	if !validMode[cfg.Mode] {
-		errs = append(errs, fmt.Sprintf(
-			"sandbox.mode: %q is not valid (isolated|direct)",
-			cfg.Mode))
-	}
-	return errs
-}
-
-func validateGateway(cfg config.GatewayConfig) []string {
-	var errs []string
-	validProvider := map[string]bool{
-		"auto": true, "anthropic": true, "vertex": true,
-		"bedrock": true, "": true,
-	}
-	if !validProvider[cfg.Provider] {
-		errs = append(errs, fmt.Sprintf(
-			"gateway.provider: %q is not valid (auto|anthropic|vertex|bedrock)",
-			cfg.Provider))
-	}
-	if cfg.Port < 0 || cfg.Port > 65535 {
-		errs = append(errs, fmt.Sprintf(
-			"gateway.port: %d is not a valid port number (0-65535)",
-			cfg.Port))
-	}
-	return errs
-}
-
-func validateEmbedding(cfg config.EmbeddingConfig) []string {
-	var errs []string
-	validProvider := map[string]bool{
-		"ollama": true, "": true,
-	}
-	if !validProvider[cfg.Provider] {
-		errs = append(errs, fmt.Sprintf(
-			"embedding.provider: %q is not valid (ollama)",
-			cfg.Provider))
-	}
-	if cfg.Dimensions < 0 {
-		errs = append(errs, fmt.Sprintf(
-			"embedding.dimensions: %d must be non-negative",
-			cfg.Dimensions))
-	}
-	return errs
-}
-
-func validateDoctor(cfg config.DoctorConfig) []string {
-	var errs []string
-	validSeverity := map[string]bool{
-		"required": true, "recommended": true, "optional": true,
-	}
-	for name, sev := range cfg.Tools {
-		if !validSeverity[sev] {
-			errs = append(errs, fmt.Sprintf(
-				"doctor.tools.%s: %q is not valid (required|recommended|optional)",
-				name, sev))
-		}
-	}
-	return errs
 }
 
 // --- Command factory ---
