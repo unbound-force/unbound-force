@@ -30,9 +30,9 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 
 	// Verify the summary includes a non-trivial file count
-	// 33 = 42 prior - 9 speckit.*.md commands (externalized to specify init + /uf-init)
-	if !strings.Contains(output, "33 files processed") {
-		t.Errorf("expected '33 files processed' in output, got:\n%s", output)
+	// 34 = 33 prior + 1 agent-brief.md command
+	if !strings.Contains(output, "34 files processed") {
+		t.Errorf("expected '34 files processed' in output, got:\n%s", output)
 	}
 
 	// Verify a user-owned file was created

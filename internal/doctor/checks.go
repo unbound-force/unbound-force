@@ -480,23 +480,6 @@ func checkScaffoldedFiles(opts *Options) CheckGroup {
 		})
 	}
 
-	// Check AGENTS.md existence.
-	agentsMd := filepath.Join(opts.TargetDir, "AGENTS.md")
-	if info, err := os.Stat(agentsMd); err == nil && !info.IsDir() {
-		group.Results = append(group.Results, CheckResult{
-			Name:     "AGENTS.md",
-			Severity: Pass,
-			Message:  "present",
-		})
-	} else {
-		group.Results = append(group.Results, CheckResult{
-			Name:        "AGENTS.md",
-			Severity:    Fail,
-			Message:     "not found",
-			InstallHint: "Run: uf init",
-		})
-	}
-
 	return group
 }
 
@@ -1111,4 +1094,307 @@ func parseFrontmatter(data []byte) (map[string]interface{}, error) {
 	}
 
 	return fm, nil
+}
+
+// agentContextSection describes a required section in AGENTS.md
+// with its display name and detection patterns.
+type agentContextSection struct {
+	name     string
+	patterns []*regexp.Regexp
+}
+
+// agentContextTier1Sections are the essential sections every
+// AGENTS.md must have.
+var agentContextTier1Sections = []agentContextSection{
+	{
+		name: "Project Overview",
+		patterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)^##\s+.*overview`),
+			regexp.MustCompile(`(?i)^##\s+about`),
+		},
+	},
+	{
+		name: "Build Commands",
+		patterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)^##\s+.*build`),
+			regexp.MustCompile(`(?i)^##\s+development`),
+		},
+	},
+	{
+		name: "Project Structure",
+		patterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)^##\s+.*structure`),
+			regexp.MustCompile(`(?i)^##\s+.*layout`),
+			regexp.MustCompile(`(?i)^##\s+.*directory`),
+		},
+	},
+	{
+		name: "Code Conventions",
+		patterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)^##\s+.*convention`),
+			regexp.MustCompile(`(?i)^##\s+.*coding\s+standard`),
+			regexp.MustCompile(`(?i)^##\s+.*style\s+guide`),
+			regexp.MustCompile(`(?i)^##\s+.*coding\s+convention`),
+		},
+	},
+	{
+		name: "Technology Stack",
+		patterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)^##\s+.*technolog`),
+			regexp.MustCompile(`(?i)^##\s+.*tech\s+stack`),
+			regexp.MustCompile(`(?i)^##\s+.*active\s+technologies`),
+		},
+	},
+}
+
+// agentContextLineCountThreshold is the line count above which
+// a warning is emitted suggesting the file be condensed.
+const agentContextLineCountThreshold = 300
+
+// detectAGENTSmdSections scans AGENTS.md content and returns
+// which sections are present. Keys are section display names.
+func detectAGENTSmdSections(content []byte) map[string]bool {
+	found := make(map[string]bool)
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		for _, sec := range agentContextTier1Sections {
+			if found[sec.name] {
+				continue
+			}
+			for _, p := range sec.patterns {
+				if p.MatchString(line) {
+					found[sec.name] = true
+					break
+				}
+			}
+		}
+	}
+	return found
+}
+
+// hasBuildCodeBlocks checks whether the Build section of
+// AGENTS.md contains at least one fenced code block.
+func hasBuildCodeBlocks(content []byte) bool {
+	lines := strings.Split(string(content), "\n")
+	inBuild := false
+	buildPattern := regexp.MustCompile(`(?i)^##\s+.*build`)
+	nextSection := regexp.MustCompile(`^##\s+`)
+
+	for _, line := range lines {
+		if !inBuild && buildPattern.MatchString(line) {
+			inBuild = true
+			continue
+		}
+		if inBuild && nextSection.MatchString(line) {
+			break
+		}
+		if inBuild && strings.HasPrefix(strings.TrimSpace(line), "```") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasSpecNumberedDirs checks whether a specs/ directory contains
+// any numbered subdirectories matching the NNN-* pattern.
+func hasSpecNumberedDirs(specsDir string) bool {
+	entries, err := os.ReadDir(specsDir)
+	if err != nil {
+		return false
+	}
+	specDirPattern := regexp.MustCompile(`^\d{3}-`)
+	for _, e := range entries {
+		if e.IsDir() && specDirPattern.MatchString(e.Name()) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkAgentContext validates AGENTS.md content quality with a
+// context-sensitive section taxonomy. Checks file existence,
+// Tier 1 section headers, build code blocks, line count,
+// constitution reference, spec framework description, and
+// bridge files (CLAUDE.md, .cursorrules).
+func checkAgentContext(opts *Options) CheckGroup {
+	group := CheckGroup{
+		Name:    "Agent Context",
+		Results: []CheckResult{},
+	}
+
+	// Check #1: AGENTS.md existence.
+	agentsMdPath := filepath.Join(opts.TargetDir, "AGENTS.md")
+	content, readErr := opts.ReadFile(agentsMdPath)
+	if readErr != nil {
+		group.Results = append(group.Results, CheckResult{
+			Name:        "AGENTS.md",
+			Severity:    Fail,
+			Message:     "not found",
+			InstallHint: "Run: /agent-brief in OpenCode",
+		})
+		return group
+	}
+
+	lineCount := strings.Count(string(content), "\n") + 1
+	group.Results = append(group.Results, CheckResult{
+		Name:     "AGENTS.md",
+		Severity: Pass,
+		Message:  fmt.Sprintf("present (%d lines)", lineCount),
+	})
+
+	// Checks #2-6: Tier 1 section presence.
+	sections := detectAGENTSmdSections(content)
+	for _, sec := range agentContextTier1Sections {
+		if sections[sec.name] {
+			group.Results = append(group.Results, CheckResult{
+				Name:     "Tier 1: " + sec.name,
+				Severity: Pass,
+				Message:  "found",
+			})
+		} else {
+			group.Results = append(group.Results, CheckResult{
+				Name:        "Tier 1: " + sec.name,
+				Severity:    Fail,
+				Message:     "not found",
+				InstallHint: "Run: /agent-brief in OpenCode",
+			})
+		}
+	}
+
+	// Check #7: Build section has code blocks.
+	if sections["Build Commands"] {
+		if hasBuildCodeBlocks(content) {
+			group.Results = append(group.Results, CheckResult{
+				Name:     "Build code blocks",
+				Severity: Pass,
+				Message:  "found",
+			})
+		} else {
+			group.Results = append(group.Results, CheckResult{
+				Name:        "Build code blocks",
+				Severity:    Warn,
+				Message:     "no code blocks in Build section",
+				InstallHint: "Add fenced code blocks with build/test commands",
+			})
+		}
+	}
+
+	// Check #8: Line count.
+	if lineCount > agentContextLineCountThreshold {
+		group.Results = append(group.Results, CheckResult{
+			Name:        "Line count",
+			Severity:    Warn,
+			Message:     fmt.Sprintf("%d lines (threshold: %d)", lineCount, agentContextLineCountThreshold),
+			InstallHint: "Run: /agent-brief in OpenCode for condensing suggestions",
+		})
+	} else {
+		group.Results = append(group.Results, CheckResult{
+			Name:     "Line count",
+			Severity: Pass,
+			Message:  fmt.Sprintf("%d lines", lineCount),
+		})
+	}
+
+	// Check #9: Constitution reference (context-sensitive).
+	constitutionPath := filepath.Join(opts.TargetDir,
+		".specify", "memory", "constitution.md")
+	if _, err := os.Stat(constitutionPath); err == nil {
+		contentStr := strings.ToLower(string(content))
+		if strings.Contains(contentStr, "constitution") {
+			group.Results = append(group.Results, CheckResult{
+				Name:     "Constitution reference",
+				Severity: Pass,
+				Message:  "found (.specify/ detected)",
+			})
+		} else {
+			group.Results = append(group.Results, CheckResult{
+				Name:        "Constitution reference",
+				Severity:    Warn,
+				Message:     "not referenced (.specify/ detected)",
+				InstallHint: "Run: /agent-brief in OpenCode",
+			})
+		}
+	}
+
+	// Check #10: Spec framework description (context-sensitive).
+	specsDir := filepath.Join(opts.TargetDir, "specs")
+	openspecConfig := filepath.Join(opts.TargetDir, "openspec", "config.yaml")
+	hasSpeckit := hasSpecNumberedDirs(specsDir)
+	_, openspecErr := os.Stat(openspecConfig)
+	hasOpenspec := openspecErr == nil
+
+	if hasSpeckit || hasOpenspec {
+		specPattern := regexp.MustCompile(
+			`(?i)(speckit|openspec|spec\s*(ification)?\s*framework)`)
+		if specPattern.Match(content) {
+			group.Results = append(group.Results, CheckResult{
+				Name:     "Spec framework described",
+				Severity: Pass,
+				Message:  "found",
+			})
+		} else {
+			group.Results = append(group.Results, CheckResult{
+				Name:        "Spec framework described",
+				Severity:    Warn,
+				Message:     "not described (specs/ or openspec/ detected)",
+				InstallHint: "Run: /agent-brief in OpenCode",
+			})
+		}
+	}
+
+	// Check #11: CLAUDE.md bridge.
+	claudePath := filepath.Join(opts.TargetDir, "CLAUDE.md")
+	claudeContent, claudeErr := opts.ReadFile(claudePath)
+	if claudeErr == nil {
+		if strings.Contains(string(claudeContent), "AGENTS.md") {
+			group.Results = append(group.Results, CheckResult{
+				Name:     "Bridge: CLAUDE.md",
+				Severity: Pass,
+				Message:  "imports AGENTS.md",
+			})
+		} else {
+			group.Results = append(group.Results, CheckResult{
+				Name:        "Bridge: CLAUDE.md",
+				Severity:    Warn,
+				Message:     "exists but does not reference AGENTS.md",
+				InstallHint: "Run: /agent-brief in OpenCode",
+			})
+		}
+	} else {
+		group.Results = append(group.Results, CheckResult{
+			Name:        "Bridge: CLAUDE.md",
+			Severity:    Warn,
+			Message:     "not found",
+			InstallHint: "Run: /agent-brief in OpenCode",
+		})
+	}
+
+	// Check #12: .cursorrules bridge.
+	cursorPath := filepath.Join(opts.TargetDir, ".cursorrules")
+	cursorContent, cursorErr := opts.ReadFile(cursorPath)
+	if cursorErr == nil {
+		if strings.Contains(string(cursorContent), "AGENTS.md") {
+			group.Results = append(group.Results, CheckResult{
+				Name:     "Bridge: .cursorrules",
+				Severity: Pass,
+				Message:  "references AGENTS.md",
+			})
+		} else {
+			group.Results = append(group.Results, CheckResult{
+				Name:        "Bridge: .cursorrules",
+				Severity:    Warn,
+				Message:     "exists but does not reference AGENTS.md",
+				InstallHint: "Run: /agent-brief in OpenCode",
+			})
+		}
+	} else {
+		group.Results = append(group.Results, CheckResult{
+			Name:        "Bridge: .cursorrules",
+			Severity:    Warn,
+			Message:     "not found",
+			InstallHint: "Run: /agent-brief in OpenCode",
+		})
+	}
+
+	return group
 }

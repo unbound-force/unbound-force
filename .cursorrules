@@ -1,0 +1,16 @@
+# Unbound Force — managed by uf init
+
+This project follows coding conventions defined in
+AGENTS.md and enforced through convention packs. Before
+writing or reviewing code, read the applicable convention
+pack(s) from .opencode/uf/packs/ and apply all rules
+marked [MUST].
+
+Available packs:
+- .opencode/uf/packs/default.md
+- .opencode/uf/packs/default-custom.md
+- .opencode/uf/packs/severity.md
+- .opencode/uf/packs/content.md
+- .opencode/uf/packs/content-custom.md
+- .opencode/uf/packs/go.md
+- .opencode/uf/packs/go-custom.md
