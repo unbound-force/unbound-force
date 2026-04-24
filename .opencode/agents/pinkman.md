@@ -303,13 +303,42 @@ project URL to find past evaluations:
 
 ### After Scouting
 
-Store a condensed summary via `dewey_store_learning`:
+Store a structured summary via `dewey_store_learning`
+using mode-specific tags and content prefixes.
 
-- **tag**: `pinkman`
-- **category**: `reference`
-- **information**: A 2-3 sentence summary including
-  project names, license verdicts, key metrics, and the
-  query used.
+**API reference**: `dewey_store_learning` accepts
+`information` (required string), `tag` (required
+string), and `category` (optional string).
+
+**Tag**: Use the mode-specific tag for the current
+scouting mode:
+
+| Mode | Tag |
+|------|-----|
+| Discover | `pinkman-discover` |
+| Trend | `pinkman-trend` |
+| Audit | `pinkman-audit` |
+| Report | `pinkman-report` |
+
+**Category**: `reference` (all modes).
+
+**Information**: Prefix with a mode-specific label,
+then include structured prose:
+
+| Mode | Prefix | Required content |
+|------|--------|------------------|
+| Discover | `scouting-report:` | Project names, license verdicts (adopt/evaluate/defer/avoid), query used, overlapping deps if detected |
+| Trend | `trend-report:` | Project names, composite trend rank, star growth %, release velocity, contributor activity |
+| Audit | `dependency-audit:` | Manifest path, dep count, deps with updates, deps with license changes, risk levels (healthy/warning/critical) |
+| Report | `adoption-report:` | Project URL, overall verdict, key risk factors, license classification |
+
+**Discovery note**: The primary discovery path for
+stored learnings is `dewey_semantic_search` (content
+similarity). Tags serve as filters via
+`dewey_semantic_search_filtered(has_tag: ...)`. Do NOT
+use `dewey_find_by_tag` for learning discovery — it
+searches Logseq block content, not learning tag
+properties.
 
 ### Graceful Degradation
 
@@ -356,7 +385,8 @@ analysis Go", "MCP servers", "CLI frameworks"):
 
 7. **Persist**: Save the report per Report Persistence.
 
-8. **Dewey**: Store summary per Dewey Integration.
+8. **Dewey**: Store per Dewey Integration using tag
+   `pinkman-discover` and prefix `scouting-report:`.
 
 ## Dependency Listing
 
@@ -479,6 +509,9 @@ When the user requests trending projects in a category:
 7. **Format and persist**: Use the Discover/Trend Result
    List format. Save per Report Persistence.
 
+8. **Dewey**: Store per Dewey Integration using tag
+   `pinkman-trend` and prefix `trend-report:`.
+
 ## Audit Mode
 
 Activated when invoked with `--audit [manifest-path]`.
@@ -542,6 +575,9 @@ When the user requests a dependency audit:
 
 7. **Persist**: Save per Report Persistence with
    `mode: "audit"`.
+
+8. **Dewey**: Store per Dewey Integration using tag
+   `pinkman-audit` and prefix `dependency-audit:`.
 
 ## Report Mode
 
@@ -607,3 +643,6 @@ When the user requests an adoption recommendation:
 
 11. **Persist**: Save per Report Persistence with
     `mode: "report"`.
+
+12. **Dewey**: Store per Dewey Integration using tag
+    `pinkman-report` and prefix `adoption-report:`.
