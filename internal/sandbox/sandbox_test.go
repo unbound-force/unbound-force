@@ -166,6 +166,10 @@ func TestBuildRunArgs_Isolated(t *testing.T) {
 	if !strings.Contains(joined, "--workdir /workspace/test-project") {
 		t.Errorf("expected --workdir /workspace/test-project, got: %s", joined)
 	}
+	// Verify WORKSPACE env var set for entrypoint (FR-044).
+	if !strings.Contains(joined, "WORKSPACE=/workspace/test-project") {
+		t.Errorf("expected WORKSPACE=/workspace/test-project, got: %s", joined)
+	}
 	// Verify image is last argument.
 	if args[len(args)-1] != DefaultImage {
 		t.Errorf("expected image as last arg, got: %s", args[len(args)-1])
@@ -194,6 +198,10 @@ func TestBuildRunArgs_Direct(t *testing.T) {
 	// Verify workdir set to project subdirectory.
 	if !strings.Contains(joined, "--workdir /workspace/test-project") {
 		t.Errorf("expected --workdir /workspace/test-project, got: %s", joined)
+	}
+	// Verify WORKSPACE env var set for entrypoint (FR-044).
+	if !strings.Contains(joined, "WORKSPACE=/workspace/test-project") {
+		t.Errorf("expected WORKSPACE=/workspace/test-project, got: %s", joined)
 	}
 }
 
@@ -232,6 +240,10 @@ func TestBuildRunArgs_NoParentNoWorkdir(t *testing.T) {
 	if strings.Contains(joined, "--workdir") {
 		t.Errorf("expected no --workdir with --no-parent, got: %s", joined)
 	}
+	// No WORKSPACE env var when --no-parent is set (FR-044).
+	if strings.Contains(joined, "WORKSPACE=") {
+		t.Errorf("expected no WORKSPACE with --no-parent, got: %s", joined)
+	}
 }
 
 func TestBuildVolumeMounts_RootFallback(t *testing.T) {
@@ -265,6 +277,10 @@ func TestBuildRunArgs_RootFallbackNoWorkdir(t *testing.T) {
 	// No --workdir when parent is root (fallback).
 	if strings.Contains(joined, "--workdir") {
 		t.Errorf("expected no --workdir for root parent fallback, got: %s", joined)
+	}
+	// No WORKSPACE when parent is root (FR-044).
+	if strings.Contains(joined, "WORKSPACE=") {
+		t.Errorf("expected no WORKSPACE for root parent fallback, got: %s", joined)
 	}
 }
 

@@ -265,11 +265,15 @@ func buildRunArgs(opts Options, platform PlatformConfig, gatewayActive bool, gat
 
 	// Working directory: when parent mount is active,
 	// set workdir to the project subdirectory within
-	// the parent mount (FR-040).
+	// the parent mount (FR-040). Also set WORKSPACE
+	// env var so the entrypoint's cd "$WORKSPACE" goes
+	// to the project, not the parent (FR-044).
 	if useParentMount(opts) {
-		workdir := fmt.Sprintf("/workspace/%s",
+		projectSubdir := fmt.Sprintf("/workspace/%s",
 			filepath.Base(opts.ProjectDir))
-		args = append(args, "--workdir", workdir)
+		args = append(args, "--workdir", projectSubdir)
+		args = append(args, "-e",
+			fmt.Sprintf("WORKSPACE=%s", projectSubdir))
 	}
 
 	// Image name (last argument).
