@@ -313,22 +313,20 @@ If improvements were suggested:
    - Do NOT modify existing project-specific sections
 3. After applying, re-run the audit to show updated score.
 
-### Step 5: Bridge File Handling
+### Step 5: Bridge File Verification
 
 After creating or improving AGENTS.md, verify cross-tool bridge
-files:
+files exist. Bridge file creation is owned by `uf init`
+(`ensureCLAUDEmd()` and `ensureCursorrules()`). This command
+only checks their status and suggests running `uf init` if
+they are missing or misconfigured.
 
 **CLAUDE.md**:
 1. Check if CLAUDE.md exists at repo root.
 2. If it exists, check if it contains `@AGENTS.md`.
 3. If missing or lacking the import:
-   - Create or append a managed block:
-     ```
-     # Project Context — managed by /agent-brief
-     @AGENTS.md
-     ```
-   - Report: `"✅ CLAUDE.md: created with @AGENTS.md import"`
-   or `"✅ CLAUDE.md: @AGENTS.md import added"`
+   - Report: `"⚠ CLAUDE.md: missing or does not import AGENTS.md"`
+   - Suggest: `"Run: uf init to create bridge files"`
 4. If already configured:
    - Report: `"⊘ CLAUDE.md: already imports AGENTS.md"`
 
@@ -336,15 +334,16 @@ files:
 1. Check if .cursorrules exists at repo root.
 2. If it exists, check if it references AGENTS.md.
 3. If missing or lacking the reference:
-   - Create or append a managed block:
-     ```
-     # Project Context — managed by /agent-brief
-     Read AGENTS.md for project conventions and coding standards.
-     Follow all rules and constraints defined there.
-     ```
-   - Report status.
+   - Report: `"⚠ .cursorrules: missing or does not reference AGENTS.md"`
+   - Suggest: `"Run: uf init to create bridge files"`
 4. If already configured:
    - Report: `"⊘ .cursorrules: already references AGENTS.md"`
+
+**Note**: `uf init` is the canonical owner of bridge file
+creation. It generates CLAUDE.md with `@AGENTS.md` plus
+convention pack `@` imports, and .cursorrules with AGENTS.md
+reading instructions. Do NOT create bridge files with a
+different marker -- defer to `uf init`.
 
 ### Step 6: Summary Report
 

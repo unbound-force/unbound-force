@@ -1151,6 +1151,16 @@ var agentContextTier1Sections = []agentContextSection{
 // a warning is emitted suggesting the file be condensed.
 const agentContextLineCountThreshold = 300
 
+// Package-level compiled regexes used by agent context checks.
+// These avoid recompilation on every function call.
+var (
+	// nextSectionPattern matches any level-2 Markdown heading.
+	nextSectionPattern = regexp.MustCompile(`^##\s+`)
+	// specFrameworkPattern matches spec framework references.
+	specFrameworkPattern = regexp.MustCompile(
+		`(?i)(speckit|openspec|spec\s*(ification)?\s*framework)`)
+)
+
 // detectAGENTSmdSections scans AGENTS.md content and returns
 // which sections are present. Keys are section display names.
 func detectAGENTSmdSections(content []byte) map[string]bool {
@@ -1173,22 +1183,30 @@ func detectAGENTSmdSections(content []byte) map[string]bool {
 }
 
 // hasBuildCodeBlocks checks whether the Build section of
-// AGENTS.md contains at least one fenced code block.
+// AGENTS.md contains at least one fenced code block. It
+// reuses the build section patterns from
+// agentContextTier1Sections to avoid duplicating regexes.
 func hasBuildCodeBlocks(content []byte) bool {
 	lines := strings.Split(string(content), "\n")
 	inBuild := false
-	buildPattern := regexp.MustCompile(`(?i)^##\s+.*build`)
-	nextSection := regexp.MustCompile(`^##\s+`)
+	// Reuse the "Build Commands" detection patterns from
+	// agentContextTier1Sections[1] (index 1 = Build Commands).
+	buildPatterns := agentContextTier1Sections[1].patterns
 
 	for _, line := range lines {
-		if !inBuild && buildPattern.MatchString(line) {
-			inBuild = true
+		if !inBuild {
+			for _, p := range buildPatterns {
+				if p.MatchString(line) {
+					inBuild = true
+					break
+				}
+			}
 			continue
 		}
-		if inBuild && nextSection.MatchString(line) {
+		if nextSectionPattern.MatchString(line) {
 			break
 		}
-		if inBuild && strings.HasPrefix(strings.TrimSpace(line), "```") {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
 			return true
 		}
 	}
@@ -1324,9 +1342,7 @@ func checkAgentContext(opts *Options) CheckGroup {
 	hasOpenspec := openspecErr == nil
 
 	if hasSpeckit || hasOpenspec {
-		specPattern := regexp.MustCompile(
-			`(?i)(speckit|openspec|spec\s*(ification)?\s*framework)`)
-		if specPattern.Match(content) {
+		if specFrameworkPattern.Match(content) {
 			group.Results = append(group.Results, CheckResult{
 				Name:     "Spec framework described",
 				Severity: Pass,
