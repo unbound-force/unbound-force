@@ -15,10 +15,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// graniteModel is the enterprise-grade embedding model used by
-// Dewey for semantic search. Defined locally to avoid a circular
-// dependency on internal/setup.
-const graniteModel = "granite-embedding:30m"
+// defaultEmbeddingModel is the enterprise-grade embedding model
+// used by Dewey for semantic search. Defined locally to avoid a
+// circular dependency on internal/setup. Overridden by
+// Options.EmbeddingModel when set.
+const defaultEmbeddingModel = "granite-embedding:30m"
+
+// embeddingModel returns the configured embedding model name.
+// Falls back to defaultEmbeddingModel when Options.EmbeddingModel
+// is empty.
+func embeddingModel(opts *Options) string {
+	if opts.EmbeddingModel != "" {
+		return opts.EmbeddingModel
+	}
+	return defaultEmbeddingModel
+}
 
 // checkDetectedEnvironment builds the "Detected Environment" group
 // listing all detected managers per FR-000a. All items are Pass
@@ -147,30 +158,48 @@ func checkCoreTools(opts *Options, env DetectedEnvironment) CheckGroup {
 	return group
 }
 
-// checkOllamaModel checks whether the granite-embedding:30m model
+// checkOllamaModel checks whether the configured embedding model
 // is available in the local Ollama installation. Enriches the
 // existing CheckResult with model status.
 func checkOllamaModel(opts *Options, base CheckResult) CheckResult {
+	model := embeddingModel(opts)
 	output, err := opts.ExecCmd("ollama", "list")
 	if err != nil {
 		// ollama list failed — keep existing result, add hint.
-		base.InstallHint = "ollama pull granite-embedding:30m"
+		base.InstallHint = "ollama pull " + model
 		return base
 	}
 
 	if strings.Contains(string(output), "granite-embedding") {
-		base.Message = base.Message + " (granite-embedding:30m model ready)"
+		base.Message = base.Message + " (" + model + " model ready)"
 		return base
 	}
 
 	// Model not pulled.
-	base.InstallHint = "ollama pull granite-embedding:30m"
+	base.InstallHint = "ollama pull " + model
 	base.Message = base.Message + " (model not pulled)"
 	return base
 }
 
 // checkOneTool checks a single tool binary.
 func checkOneTool(spec toolSpec, opts *Options, env DetectedEnvironment) CheckResult {
+	// Apply ToolSeverities config override before checking.
+	if opts.ToolSeverities != nil {
+		if override, ok := opts.ToolSeverities[spec.name]; ok {
+			switch override {
+			case "required":
+				spec.required = true
+				spec.recommended = false
+			case "recommended":
+				spec.required = false
+				spec.recommended = true
+			case "optional":
+				spec.required = false
+				spec.recommended = false
+			}
+		}
+	}
+
 	path, err := opts.LookPath(spec.name)
 	if err != nil {
 		// Tool not found — determine severity based on classification.
@@ -438,6 +467,44 @@ func checkReplicator(opts *Options) CheckGroup {
 				})
 			}
 		}
+	}
+
+	return group
+}
+
+// checkConfiguration checks for .uf/config.yaml existence and
+// warns about deprecated .uf/sandbox.yaml.
+func checkConfiguration(opts *Options) CheckGroup {
+	group := CheckGroup{
+		Name:    "Configuration",
+		Results: []CheckResult{},
+	}
+
+	// Check 1: .uf/config.yaml existence.
+	configPath := filepath.Join(opts.TargetDir, ".uf", "config.yaml")
+	if _, err := os.Stat(configPath); err == nil {
+		group.Results = append(group.Results, CheckResult{
+			Name:     ".uf/config.yaml",
+			Severity: Pass,
+			Message:  "found",
+		})
+	} else {
+		group.Results = append(group.Results, CheckResult{
+			Name:    ".uf/config.yaml",
+			Severity: Pass,
+			Message: "not found (using defaults)",
+		})
+	}
+
+	// Check 2: deprecated .uf/sandbox.yaml.
+	sandboxPath := filepath.Join(opts.TargetDir, ".uf", "sandbox.yaml")
+	if _, err := os.Stat(sandboxPath); err == nil {
+		group.Results = append(group.Results, CheckResult{
+			Name:        ".uf/sandbox.yaml",
+			Severity:    Warn,
+			Message:     "deprecated — run 'uf config init' to migrate",
+			InstallHint: "uf config init",
+		})
 	}
 
 	return group
@@ -945,12 +1012,13 @@ func defaultEmbedCheck(getenv func(string) string) func(model string) error {
 // Returns Pass on success, Warn with categorized hints on failure
 // per contracts/doctor-checks.md behavior matrix.
 func checkEmbeddingCapability(opts *Options) CheckResult {
-	err := opts.EmbedCheck(graniteModel)
+	model := embeddingModel(opts)
+	err := opts.EmbedCheck(model)
 	if err == nil {
 		return CheckResult{
 			Name:     "embedding capability",
 			Severity: Pass,
-			Message:  graniteModel + " generating embeddings",
+			Message:  model + " generating embeddings",
 		}
 	}
 
@@ -970,7 +1038,7 @@ func checkEmbeddingCapability(opts *Options) CheckResult {
 			Name:        "embedding capability",
 			Severity:    Warn,
 			Message:     "cannot generate embeddings (model not loaded)",
-			InstallHint: "ollama pull " + graniteModel,
+			InstallHint: "ollama pull " + model,
 		}
 	}
 
@@ -979,7 +1047,7 @@ func checkEmbeddingCapability(opts *Options) CheckResult {
 		Name:        "embedding capability",
 		Severity:    Warn,
 		Message:     "cannot generate embeddings",
-		InstallHint: "Start Ollama: ollama serve, then: ollama pull " + graniteModel,
+		InstallHint: "Start Ollama: ollama serve, then: ollama pull " + model,
 	}
 }
 
@@ -1031,13 +1099,14 @@ func checkDewey(opts *Options) CheckGroup {
 	})
 
 	// Check 2: embedding model via Ollama.
+	model := embeddingModel(opts)
 	ollamaOutput, ollamaErr := opts.ExecCmd("ollama", "list")
 	if ollamaErr != nil {
 		group.Results = append(group.Results, CheckResult{
 			Name:        "embedding model",
 			Severity:    Warn,
 			Message:     "could not check (ollama not available)",
-			InstallHint: "ollama pull " + graniteModel,
+			InstallHint: "ollama pull " + model,
 		})
 	} else if strings.Contains(string(ollamaOutput), "granite-embedding") {
 		// Annotate with Ollama demotion per US3 — Dewey manages
@@ -1046,14 +1115,14 @@ func checkDewey(opts *Options) CheckGroup {
 		group.Results = append(group.Results, CheckResult{
 			Name:     "embedding model",
 			Severity: Pass,
-			Message:  graniteModel + " installed (Dewey manages Ollama lifecycle)",
+			Message:  model + " installed (Dewey manages Ollama lifecycle)",
 		})
 	} else {
 		group.Results = append(group.Results, CheckResult{
 			Name:        "embedding model",
 			Severity:    Warn,
 			Message:     "not pulled (graph-only mode available)",
-			InstallHint: "ollama pull " + graniteModel,
+			InstallHint: "ollama pull " + model,
 		})
 	}
 

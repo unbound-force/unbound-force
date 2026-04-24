@@ -167,6 +167,7 @@ func volumeNameForProject(dir string) string {
 // Returns a zero-value SandboxConfig with defaults if the
 // file does not exist. Environment variables override
 // config file values.
+//
 func LoadConfig(opts Options) (SandboxConfig, error) {
 	configPath := opts.ConfigPath
 	if configPath == "" {
@@ -176,13 +177,10 @@ func LoadConfig(opts Options) (SandboxConfig, error) {
 	var cfg SandboxConfig
 
 	data, err := opts.ReadFile(configPath)
-	if err != nil {
-		// Config file missing — return defaults (not an error).
-		return cfg, nil
-	}
-
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return cfg, fmt.Errorf("parse %s: %w", configPath, err)
+	if err == nil {
+		if parseErr := yaml.Unmarshal(data, &cfg); parseErr != nil {
+			return cfg, fmt.Errorf("parse %s: %w", configPath, parseErr)
+		}
 	}
 
 	// Environment variable overrides.

@@ -1,4 +1,12 @@
-# .uf/config.yaml
+// SPDX-License-Identifier: Apache-2.0
+
+package config
+
+// Template returns the full commented-out YAML template for the
+// current config version. All 7 sections are present with inline
+// comments documenting valid values and defaults.
+func Template() string {
+	return `# .uf/config.yaml
 # Unbound Force project configuration.
 # All values shown are defaults — only uncomment what you want to change.
 # CLI flags and environment variables override these settings.
@@ -7,7 +15,7 @@
 #   UF_CHE_URL, UF_CHE_TOKEN, UF_GATEWAY_PORT, UF_GATEWAY_PROVIDER
 
 # ─── Setup Preferences ───────────────────────────────────────
-# Controls how `uf setup` installs tools.
+# Controls how ` + "`uf setup`" + ` installs tools.
 # setup:
 #   package_manager: auto        # auto | homebrew | dnf | apt | manual
 #   skip: []                     # tool names to skip: [ollama, dewey, ...]
@@ -29,7 +37,7 @@
 #       method: auto             # auto | homebrew | skip
 
 # ─── Scaffold Preferences ────────────────────────────────────
-# Controls what `uf init` deploys.
+# Controls what ` + "`uf init`" + ` deploys.
 # scaffold:
 #   language: auto               # auto | go | typescript | python | rust
 
@@ -42,7 +50,7 @@
 #   host: http://localhost:11434
 
 # ─── Sandbox ──────────────────────────────────────────────────
-# Controls `uf sandbox` behavior.
+# Controls ` + "`uf sandbox`" + ` behavior.
 # sandbox:
 #   runtime: auto                # auto | podman | docker
 #   backend: auto                # auto | podman | che
@@ -57,13 +65,13 @@
 #   demo_ports: []
 
 # ─── Gateway ──────────────────────────────────────────────────
-# Controls `uf gateway` behavior.
+# Controls ` + "`uf gateway`" + ` behavior.
 # gateway:
 #   port: 53147
 #   provider: auto               # auto | anthropic | vertex | bedrock
 
 # ─── Doctor ───────────────────────────────────────────────────
-# Controls `uf doctor` check behavior.
+# Controls ` + "`uf doctor`" + ` check behavior.
 # doctor:
 #   skip: []                     # check names to skip
 #   tools:                       # override tool severity
@@ -80,3 +88,18 @@
 #     accept: human
 #     reflect: swarm
 #   spec_review: false
+`
+}
+
+// knownSections lists the top-level section names in the current
+// config template. Used by InitFile to detect added/removed
+// sections.
+var knownSections = []string{
+	"setup",
+	"scaffold",
+	"embedding",
+	"sandbox",
+	"gateway",
+	"doctor",
+	"workflow",
+}

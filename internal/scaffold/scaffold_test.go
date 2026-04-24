@@ -1716,22 +1716,20 @@ func TestInitSubTools_DeweyAvailable(t *testing.T) {
 
 	results := initSubTools(opts)
 
-	// Should have 4 results: config.yaml + dewey init + dewey index + opencode.json.
-	if len(results) != 4 {
-		t.Fatalf("expected 4 results, got %d: %v", len(results), results)
+	// Should have 3 results: dewey init + dewey index + opencode.json.
+	// (.uf/config.yaml is no longer created by uf init — use uf config init)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d: %v", len(results), results)
 	}
 
-	if results[0].name != ".uf/config.yaml" || results[0].action != "initialized" {
-		t.Errorf("expected .uf/config.yaml initialized, got %s %s", results[0].name, results[0].action)
+	if results[0].name != ".uf/dewey/" || results[0].action != "initialized" {
+		t.Errorf("expected .uf/dewey/ initialized, got %s %s", results[0].name, results[0].action)
 	}
-	if results[1].name != ".uf/dewey/" || results[1].action != "initialized" {
-		t.Errorf("expected .uf/dewey/ initialized, got %s %s", results[1].name, results[1].action)
+	if results[1].name != "dewey index" || results[1].action != "completed" {
+		t.Errorf("expected dewey index completed, got %s %s", results[1].name, results[1].action)
 	}
-	if results[2].name != "dewey index" || results[2].action != "completed" {
-		t.Errorf("expected dewey index completed, got %s %s", results[2].name, results[2].action)
-	}
-	if results[3].name != "opencode.json" || results[3].action != "created" {
-		t.Errorf("expected opencode.json created, got %s %s", results[3].name, results[3].action)
+	if results[2].name != "opencode.json" || results[2].action != "created" {
+		t.Errorf("expected opencode.json created, got %s %s", results[2].name, results[2].action)
 	}
 
 	// Verify commands were called.
@@ -1762,15 +1760,13 @@ func TestInitSubTools_DeweyNotAvailable(t *testing.T) {
 
 	results := initSubTools(opts)
 
-	// Should have 2 results: config.yaml initialized + opencode.json skipped.
-	if len(results) != 2 {
-		t.Errorf("expected 2 results, got %d: %v", len(results), results)
+	// Should have 1 result: opencode.json skipped.
+	// (.uf/config.yaml is no longer created by uf init)
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d: %v", len(results), results)
 	}
-	if len(results) > 0 && results[0].name != ".uf/config.yaml" {
-		t.Errorf("expected config.yaml result, got %s", results[0].name)
-	}
-	if len(results) > 1 && results[1].name != "opencode.json" {
-		t.Errorf("expected opencode.json result, got %s", results[1].name)
+	if len(results) > 0 && results[0].name != "opencode.json" {
+		t.Errorf("expected opencode.json result, got %s", results[0].name)
 	}
 
 	// No commands should have been called.
@@ -1796,16 +1792,14 @@ func TestInitSubTools_DeweyAlreadyInitialized(t *testing.T) {
 
 	results := initSubTools(opts)
 
-	// Should have 2 results: config.yaml initialized + opencode.json created
+	// Should have 1 result: opencode.json created
 	// (.uf/dewey/ already exists, dewey in PATH → mcp.dewey added).
-	if len(results) != 2 {
-		t.Errorf("expected 2 results, got %d: %v", len(results), results)
+	// (.uf/config.yaml no longer created by uf init)
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d: %v", len(results), results)
 	}
-	if len(results) > 0 && results[0].name != ".uf/config.yaml" {
-		t.Errorf("expected config.yaml result, got %s", results[0].name)
-	}
-	if len(results) > 1 && results[1].name != "opencode.json" {
-		t.Errorf("expected opencode.json result, got %s", results[1].name)
+	if len(results) > 0 && results[0].name != "opencode.json" {
+		t.Errorf("expected opencode.json result, got %s", results[0].name)
 	}
 
 	// dewey init should NOT have been called.
@@ -1832,19 +1826,17 @@ func TestInitSubTools_DeweyInitFails(t *testing.T) {
 
 	results := initSubTools(opts)
 
-	// Should have 3 results: config.yaml initialized + dewey init failed + opencode.json created.
-	if len(results) != 3 {
-		t.Fatalf("expected 3 results, got %d: %v", len(results), results)
+	// Should have 2 results: dewey init failed + opencode.json created.
+	// (.uf/config.yaml no longer created by uf init)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d: %v", len(results), results)
 	}
 
-	if results[0].name != ".uf/config.yaml" || results[0].action != "initialized" {
-		t.Errorf("expected config.yaml initialized, got %s %s", results[0].name, results[0].action)
+	if results[0].name != ".uf/dewey/" || results[0].action != "failed" {
+		t.Errorf("expected .uf/dewey/ failed, got %s %s", results[0].name, results[0].action)
 	}
-	if results[1].name != ".uf/dewey/" || results[1].action != "failed" {
-		t.Errorf("expected .uf/dewey/ failed, got %s %s", results[1].name, results[1].action)
-	}
-	if results[2].name != "opencode.json" || results[2].action != "created" {
-		t.Errorf("expected opencode.json created, got %s %s", results[2].name, results[2].action)
+	if results[1].name != "opencode.json" || results[1].action != "created" {
+		t.Errorf("expected opencode.json created, got %s %s", results[1].name, results[1].action)
 	}
 
 	// dewey index should NOT have been called.
@@ -1958,7 +1950,9 @@ func TestPrintSummary_NextSteps(t *testing.T) {
 
 // --- Workflow config file scaffold tests ---
 
-func TestInitSubTools_CreatesWorkflowConfig(t *testing.T) {
+func TestInitSubTools_DoesNotCreateWorkflowConfig(t *testing.T) {
+	// .uf/config.yaml is no longer created by uf init.
+	// It is now created exclusively by uf config init.
 	dir := t.TempDir()
 	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
 
@@ -1970,36 +1964,17 @@ func TestInitSubTools_CreatesWorkflowConfig(t *testing.T) {
 
 	results := initSubTools(opts)
 
-	// Should have 1 result: config.yaml initialized.
-	foundConfig := false
+	// Should NOT have a config.yaml result.
 	for _, r := range results {
-		if r.name == ".uf/config.yaml" && r.action == "initialized" {
-			foundConfig = true
+		if r.name == ".uf/config.yaml" {
+			t.Errorf("uf init should NOT create .uf/config.yaml, got result: %s %s", r.name, r.action)
 		}
 	}
-	if !foundConfig {
-		t.Errorf("expected .uf/config.yaml initialized, got %v", results)
-	}
 
-	// Verify file exists with commented content.
+	// Verify file does NOT exist.
 	configPath := filepath.Join(dir, ".uf", "config.yaml")
-	content, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("read config.yaml: %v", err)
-	}
-
-	text := string(content)
-	if !strings.Contains(text, "# workflow:") {
-		t.Error("config.yaml should contain commented-out workflow section")
-	}
-	if !strings.Contains(text, "#   execution_modes:") {
-		t.Error("config.yaml should contain commented-out execution_modes")
-	}
-	if !strings.Contains(text, "#     define: swarm") {
-		t.Error("config.yaml should contain commented-out define: swarm example")
-	}
-	if !strings.Contains(text, "#   spec_review: false") {
-		t.Error("config.yaml should contain commented-out spec_review")
+	if _, err := os.Stat(configPath); err == nil {
+		t.Error(".uf/config.yaml should not exist after uf init")
 	}
 }
 

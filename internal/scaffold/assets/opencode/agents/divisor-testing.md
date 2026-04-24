@@ -1,7 +1,6 @@
 ---
 description: "Test quality and coverage auditor — owns test architecture, assertions, isolation, and regression protection."
 mode: subagent
-model: google-vertex-anthropic/claude-opus-4-6@default
 temperature: 0.1
 tools:
   write: false

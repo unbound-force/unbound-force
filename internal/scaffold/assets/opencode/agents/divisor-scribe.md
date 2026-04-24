@@ -1,7 +1,6 @@
 ---
 description: "Technical documentation specialist — owns READMEs, specs, CLI help, and API docs."
 mode: subagent
-model: google-vertex-anthropic/claude-opus-4-6@default
 temperature: 0.1
 tools:
   read: true

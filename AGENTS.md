@@ -115,6 +115,14 @@ Hero constitutions extend (never contradict) the org constitution. See the const
 
 All five heroes have implementations. Gaze has the most mature standalone implementation (Go CLI + static analysis engine). Muti-Mind has a backend CLI (`cmd/mutimind/`) and OpenCode agent. The Divisor has 5 review personas and convention packs (embedded in the `unbound-force` binary). Cobalt-Crush has a developer persona agent. Mx F has a full CLI backend (`cmd/mxf/`) with 7 subcommands and a coaching agent.
 
+**Agent model resolution**: Agent files do not hardcode a
+`model:` field in their frontmatter. Instead, they inherit the
+model from OpenCode's own configuration hierarchy: project-level
+`opencode.json` `"model"` field > user-level
+`~/.config/opencode/opencode.json` > OpenCode's built-in default.
+Subagents inherit from their invoking primary agent. To change the
+model for all agents, set the `"model"` field in `opencode.json`.
+
 ## Project Structure
 
 ```text
@@ -189,6 +197,7 @@ unbound-force/
 │           └── typescript-custom.md # TypeScript custom rules (user-owned)
 ├── cmd/unbound-force/
 │   ├── main.go                      # Cobra CLI entry point
+│   ├── config.go                    # Config command group (init, show, validate)
 │   ├── gateway.go                   # Gateway command group (start, stop, status)
 │   └── sandbox.go                   # Sandbox command group (start, stop, attach, extract, status)
 ├── cmd/mutimind/
@@ -216,6 +225,7 @@ unbound-force/
 │   ├── pid.go                       # PID file management (WritePID, ReadPID, IsAlive, CleanupStale)
 │   ├── signal_unix.go               # Unix signal constants (signal 0 liveness check)
 │   └── gateway_test.go              # Tests for all gateway functions
+├── internal/config/                  # Unified configuration loading and validation
 ├── internal/schemas/               # JSON Schema generation, validation, convention pack validation (Spec 009)
 ├── internal/orchestration/          # Swarm orchestration engine (Spec 008)
 ├── openspec/                        # OpenSpec tactical workflow
@@ -725,6 +735,17 @@ export OLLAMA_EMBED_DIM=256
 Setting them in your shell profile ensures consistency
 when running Swarm commands directly.
 
+The embedding model defaults can be overridden in
+`.uf/config.yaml`:
+
+```yaml
+embedding:
+  model: granite-embedding:30m
+  dimensions: 256
+```
+
+Run `uf config init` to create the config file.
+
 ## Writing Style for Specs
 
 This repo is primarily specifications and governance documents. Follow these conventions:
@@ -803,6 +824,7 @@ without exception.
 
 ## Recent Changes
 
+- opsx/unified-config: Created `internal/config/` package with unified `Config` struct covering 7 sections (setup, scaffold, embedding, sandbox, gateway, doctor, workflow) and layered `Load()` function (user `~/.config/uf/config.yaml` > repo `.uf/config.yaml` > env vars). Added `uf config` command group with 3 subcommands: `init` (creates/updates `.uf/config.yaml` with commented template), `show` (displays merged config as YAML), `validate` (schema validation with actionable error messages). Added `github.com/goccy/go-yaml` dependency (replacing archived `gopkg.in/yaml.v3` for new code). Setup integration: config-driven `package_manager`, `skip` list, per-tool install methods, embedding model from config. Scaffold integration: removed `workflowConfigContent` constant, config-based language selection via `scaffold.language` field. Gateway integration: config-driven `port` and `provider` defaults. Agent model cleanup: removed hardcoded `model` frontmatter from 24 agent files (12 live + 12 scaffold copies). Absorbs `.uf/sandbox.yaml` into unified config with backward-compatible fallback. Go 1.24+ (CLI), `github.com/goccy/go-yaml` (YAML parsing). All tasks completed.
 - 034-gateway-vertex-translation: Extended `uf gateway` Vertex provider with full request/response translation. Request body transformation: removes `model` field (Vertex uses URL path), injects `anthropic_version: "vertex-2023-10-16"` if absent, preserves existing `anthropic_version`, updates `Content-Length` after body modification. Streaming endpoint detection: selects `streamRawPredict` when `"stream": true`, `rawPredict` otherwise (`count_tokens` always uses `rawPredict`). Header stripping: removes `anthropic-beta` and `anthropic-version` HTTP headers before forwarding to Vertex. SSE response filtering: created `internal/gateway/sse.go` with `sseFilterReader` (io.ReadCloser wrapper applied via `ModifyResponse`) that drops `vertex_event` and `ping` SSE events from Vertex streaming responses while forwarding all standard Anthropic events (`message_start`, `content_block_delta`, `content_block_stop`, `message_delta`, `message_stop`) unchanged. Non-streaming responses pass through unfiltered. Synthetic model catalog: added `/v1/models` endpoint returning 9 Vertex-available Claude models (Opus 4.7, Sonnet 4.6, Opus 4.6, Opus 4.5, Sonnet 4.5, Opus 4.1, Haiku 4.5, Opus 4, Sonnet 4) with `capabilities` metadata (vision, extended_thinking, pdf_input). Added `/v1/models/{model_id}` for single-model lookup with 404 for unknown models. Sandbox provider isolation verified: `gatewaySkippedKeys` prevents Vertex env vars (`CLAUDE_CODE_USE_VERTEX`, `ANTHROPIC_VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, `GOOGLE_CLOUD_PROJECT`) from leaking into container when gateway active. New file: `internal/gateway/sse.go`. Modified files: `internal/gateway/provider.go`, `internal/gateway/gateway.go`, `internal/gateway/gateway_test.go`. All stdlib — no new dependencies (`net/http`, `net/http/httputil`, `bufio`, `bytes`). Backward compatible: Anthropic and Bedrock providers unchanged (FR-010). All 5 user stories and 65 tasks completed.
 - opsx/quickstart-usage-docs: Created QUICKSTART.md and USAGE.md onboarding documentation. QUICKSTART.md (~110 lines) covers installation for macOS (Homebrew) and Fedora/RHEL (Homebrew recommended, dnf minimal with dynamic RPM version via GitHub API), maintainer journey (`uf init`), contributor journey (`uf setup` + `uf doctor`), and first-use walkthrough (`/review-council`). USAGE.md (~150 lines) covers OpenCode modes and agents orientation (primary modes vs subagents, Tab switching vs @mention vs slash commands), 5 task-oriented workflow recipes (review, propose, feature, unleash, quality), workflow decision table, convention pack customization, and 13-command quick reference. Updated README.md to replace install section with pointer to QUICKSTART.md. Filed upstream issues for agent mode fixes: unbound-force/gaze#91 (add `mode: subagent` to gaze-reporter.md and gaze-test-generator.md) and unbound-force/replicator#12 (add `mode: subagent` to coordinator.md, worker.md, background-worker.md). No Go code changes -- documentation only. 29 tasks completed.
 - 033-gateway-command: Added `uf gateway` command with 3 subcommands (`start`, `stop`, `status`) for LLM reverse proxy gateway. Created new `internal/gateway/` package (5 source files: `gateway.go`, `provider.go`, `refresh.go`, `pid.go`, `signal_unix.go`) following the established `Options`/injectable-function pattern. Gateway auto-detects cloud provider from environment variables (Vertex AI → Bedrock → Anthropic priority) and injects host-side credentials into upstream requests. Three provider implementations: `AnthropicProvider` (API key injection), `VertexProvider` (gcloud token refresh, rawPredict URL rewriting), `BedrockProvider` (AWS credential refresh, SigV4 request signing). Background mode via re-exec with `_UF_GATEWAY_CHILD` sentinel. PID file management at `.uf/gateway.pid` with atomic writes and stale cleanup. Health endpoint at `GET /health` returns JSON status. Reverse proxy routes `POST /v1/messages` and `POST /v1/messages/count_tokens` to upstream with credential injection. Token refresh goroutines for Vertex (gcloud) and Bedrock (aws CLI) with configurable intervals. Minimal SigV4 signing implementation using `crypto/hmac` + `crypto/sha256` (~200 lines, no AWS SDK dependency). Sandbox integration: `autoStartGateway()` in `internal/sandbox/sandbox.go` auto-starts gateway when cloud provider detected, passes `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` to container, skips credential mounts when gateway active, falls back to credential mounts when no provider detected. Created `cmd/unbound-force/gateway.go` with Cobra command registration (`--port`, `--provider`, `--detach` flags). Added 29 gateway test functions and 12 sandbox integration test functions. Go 1.24+ (CLI), `net/http`, `net/http/httputil` (stdlib), `github.com/charmbracelet/log`. All 5 user stories and 87 tasks completed.

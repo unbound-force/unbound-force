@@ -1,7 +1,6 @@
 ---
 description: "Documentation & content pipeline triage — owns documentation gaps, blog/tutorial opportunities, and website issue filing."
 mode: subagent
-model: google-vertex-anthropic/claude-opus-4-6@default
 temperature: 0.2
 tools:
   read: true

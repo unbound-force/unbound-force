@@ -837,12 +837,13 @@ func TestDoctorRun(t *testing.T) {
 		t.Log("Run returned nil error (all checks passed or only warnings)")
 	}
 
-	// Verify 8 groups in correct order.
+	// Verify 9 groups in correct order.
 	expectedGroups := []string{
 		"Detected Environment",
 		"Core Tools",
 		"Replicator",
 		"Dewey Knowledge Layer",
+		"Configuration",
 		"Scaffolded Files",
 		"Hero Availability",
 		"MCP Server Config",
@@ -1000,8 +1001,8 @@ func TestDoctorRun_NonGitDir(t *testing.T) {
 	}
 
 	// All checks should still execute.
-	if len(report.Groups) != 8 {
-		t.Errorf("expected 8 groups, got %d", len(report.Groups))
+	if len(report.Groups) != 9 {
+		t.Errorf("expected 9 groups, got %d", len(report.Groups))
 	}
 }
 
@@ -2831,5 +2832,183 @@ func TestCheckMCPConfig_StringCommand(t *testing.T) {
 	}
 	if !found {
 		t.Error("dewey result not found — string command backward compat failed")
+	}
+}
+
+// --- Config integration tests ---
+
+func TestFilterSkippedChecks_SkipGroup(t *testing.T) {
+	groups := []CheckGroup{
+		{Name: "Core Tools", Results: []CheckResult{{Name: "go", Severity: Pass}}},
+		{Name: "Configuration", Results: []CheckResult{{Name: "config", Severity: Pass}}},
+	}
+	filtered := filterSkippedChecks(groups, []string{"Configuration"})
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(filtered))
+	}
+	if filtered[0].Name != "Core Tools" {
+		t.Errorf("expected Core Tools, got %s", filtered[0].Name)
+	}
+}
+
+func TestFilterSkippedChecks_SkipIndividualResult(t *testing.T) {
+	groups := []CheckGroup{
+		{Name: "Core Tools", Results: []CheckResult{
+			{Name: "go", Severity: Pass},
+			{Name: "gaze", Severity: Warn},
+			{Name: "mxf", Severity: Warn},
+		}},
+	}
+	filtered := filterSkippedChecks(groups, []string{"gaze"})
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(filtered))
+	}
+	if len(filtered[0].Results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(filtered[0].Results))
+	}
+	for _, r := range filtered[0].Results {
+		if r.Name == "gaze" {
+			t.Error("gaze should have been filtered out")
+		}
+	}
+}
+
+func TestFilterSkippedChecks_CaseInsensitive(t *testing.T) {
+	groups := []CheckGroup{
+		{Name: "Core Tools", Results: []CheckResult{
+			{Name: "go", Severity: Pass},
+		}},
+	}
+	filtered := filterSkippedChecks(groups, []string{"core tools"})
+	if len(filtered) != 0 {
+		t.Errorf("expected 0 groups after case-insensitive skip, got %d", len(filtered))
+	}
+}
+
+func TestFilterSkippedChecks_EmptySkipList(t *testing.T) {
+	groups := []CheckGroup{
+		{Name: "Core Tools", Results: []CheckResult{{Name: "go"}}},
+	}
+	filtered := filterSkippedChecks(groups, nil)
+	if len(filtered) != 1 {
+		t.Errorf("empty skip list should not filter anything, got %d groups", len(filtered))
+	}
+}
+
+func TestToolSeverityOverride_Optional(t *testing.T) {
+	dir := t.TempDir()
+	opts := &Options{
+		TargetDir:       dir,
+		LookPath:        func(string) (string, error) { return "", fmt.Errorf("not found") },
+		ExecCmd:         func(string, ...string) ([]byte, error) { return nil, nil },
+		EvalSymlinks:    func(s string) (string, error) { return s, nil },
+		Getenv:          func(string) string { return "" },
+		ReadFile:        func(string) ([]byte, error) { return nil, os.ErrNotExist },
+		ToolSeverities:  map[string]string{"gaze": "optional"},
+	}
+
+	spec := toolSpec{name: "gaze", recommended: true}
+	result := checkOneTool(spec, opts, DetectedEnvironment{})
+
+	// With override to "optional", missing gaze should be Pass (info), not Warn.
+	if result.Severity != Pass {
+		t.Errorf("expected Pass (optional override), got %v", result.Severity)
+	}
+}
+
+func TestToolSeverityOverride_Required(t *testing.T) {
+	dir := t.TempDir()
+	opts := &Options{
+		TargetDir:       dir,
+		LookPath:        func(string) (string, error) { return "", fmt.Errorf("not found") },
+		ExecCmd:         func(string, ...string) ([]byte, error) { return nil, nil },
+		EvalSymlinks:    func(s string) (string, error) { return s, nil },
+		Getenv:          func(string) string { return "" },
+		ReadFile:        func(string) ([]byte, error) { return nil, os.ErrNotExist },
+		ToolSeverities:  map[string]string{"gaze": "required"},
+	}
+
+	spec := toolSpec{name: "gaze", recommended: true}
+	result := checkOneTool(spec, opts, DetectedEnvironment{})
+
+	// With override to "required", missing gaze should be Fail, not Warn.
+	if result.Severity != Fail {
+		t.Errorf("expected Fail (required override), got %v", result.Severity)
+	}
+}
+
+func TestToolSeverityOverride_NoOverride(t *testing.T) {
+	dir := t.TempDir()
+	opts := &Options{
+		TargetDir:    dir,
+		LookPath:     func(string) (string, error) { return "", fmt.Errorf("not found") },
+		ExecCmd:      func(string, ...string) ([]byte, error) { return nil, nil },
+		EvalSymlinks: func(s string) (string, error) { return s, nil },
+		Getenv:       func(string) string { return "" },
+		ReadFile:     func(string) ([]byte, error) { return nil, os.ErrNotExist },
+	}
+
+	spec := toolSpec{name: "gaze", recommended: true}
+	result := checkOneTool(spec, opts, DetectedEnvironment{})
+
+	// Without override, missing recommended tool should be Warn.
+	if result.Severity != Warn {
+		t.Errorf("expected Warn (no override), got %v", result.Severity)
+	}
+}
+
+func TestCheckConfiguration_ConfigExists(t *testing.T) {
+	dir := t.TempDir()
+	ufDir := filepath.Join(dir, ".uf")
+	if err := os.MkdirAll(ufDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ufDir, "config.yaml"), []byte("# test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  func(string) (string, error) { return "", fmt.Errorf("not found") },
+		ReadFile:  os.ReadFile,
+	}
+	group := checkConfiguration(opts)
+
+	found := false
+	for _, r := range group.Results {
+		if r.Name == ".uf/config.yaml" && r.Severity == Pass && strings.Contains(r.Message, "found") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected config.yaml found result, got %v", group.Results)
+	}
+}
+
+func TestCheckConfiguration_SandboxYamlDeprecation(t *testing.T) {
+	dir := t.TempDir()
+	ufDir := filepath.Join(dir, ".uf")
+	if err := os.MkdirAll(ufDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ufDir, "sandbox.yaml"), []byte("backend: podman"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  func(string) (string, error) { return "", fmt.Errorf("not found") },
+		ReadFile:  os.ReadFile,
+	}
+	group := checkConfiguration(opts)
+
+	found := false
+	for _, r := range group.Results {
+		if r.Name == ".uf/sandbox.yaml" && r.Severity == Warn {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected sandbox.yaml deprecation warning, got %v", group.Results)
 	}
 }

@@ -1,7 +1,6 @@
 ---
 description: "Public relations and communications specialist — owns press releases, social media, and community updates."
 mode: subagent
-model: google-vertex-anthropic/claude-opus-4-6@default
 temperature: 0.5
 tools:
   read: true

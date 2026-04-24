@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -56,6 +57,18 @@ type Options struct {
 	// URL is derived from OLLAMA_HOST env var (default:
 	// http://localhost:11434).
 	EmbedCheck func(model string) error
+
+	// SkipChecks lists check group names to skip entirely.
+	// Populated from config.Doctor.Skip. Empty means run all.
+	SkipChecks []string
+
+	// ToolSeverities maps tool names to severity overrides.
+	// Populated from config.Doctor.Tools.
+	ToolSeverities map[string]string
+
+	// EmbeddingModel is the embedding model name from config.
+	// Used instead of the compiled default when non-empty.
+	EmbeddingModel string
 }
 
 // defaults fills zero-value fields with production implementations.
@@ -118,16 +131,21 @@ func Run(opts Options) (*Report, error) {
 
 	env := DetectEnvironment(&opts)
 
-	groups := []CheckGroup{
+	allGroups := []CheckGroup{
 		checkDetectedEnvironment(env),
 		checkCoreTools(&opts, env),
 		checkReplicator(&opts),
 		checkDewey(&opts),
+		checkConfiguration(&opts),
 		checkScaffoldedFiles(&opts),
 		checkHeroAvailability(&opts),
 		checkMCPConfig(&opts),
 		checkAgentSkillIntegrity(&opts),
 	}
+
+	// Apply SkipChecks filter: remove check groups or
+	// individual results whose name matches a skip entry.
+	groups := filterSkippedChecks(allGroups, opts.SkipChecks)
 
 	summary := computeSummary(groups)
 
@@ -143,6 +161,40 @@ func Run(opts Options) (*Report, error) {
 	}
 
 	return report, nil
+}
+
+// filterSkippedChecks removes check groups or individual results
+// whose name matches a skip entry. Names are compared case-insensitively.
+func filterSkippedChecks(groups []CheckGroup, skipChecks []string) []CheckGroup {
+	if len(skipChecks) == 0 {
+		return groups
+	}
+
+	skipSet := make(map[string]bool, len(skipChecks))
+	for _, s := range skipChecks {
+		skipSet[strings.ToLower(s)] = true
+	}
+
+	var filtered []CheckGroup
+	for _, g := range groups {
+		// Skip entire group if its name matches.
+		if skipSet[strings.ToLower(g.Name)] {
+			continue
+		}
+
+		// Filter individual results within the group.
+		var results []CheckResult
+		for _, r := range g.Results {
+			if !skipSet[strings.ToLower(r.Name)] {
+				results = append(results, r)
+			}
+		}
+		if len(results) > 0 {
+			g.Results = results
+			filtered = append(filtered, g)
+		}
+	}
+	return filtered
 }
 
 // computeSummary aggregates check result counts across all groups.

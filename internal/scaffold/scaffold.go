@@ -996,24 +996,6 @@ func collectDeployedPacks(lang string) []string {
 	return packs
 }
 
-// workflowConfigContent is the default content for .uf/config.yaml.
-// All values are commented out — the team lead uncomments what they want.
-// Commenting is the mechanism for "use defaults" — no ambiguity.
-const workflowConfigContent = `# .uf/config.yaml
-# Workflow configuration for Unbound Force hero lifecycle.
-# CLI flags (--define-mode, --spec-review) override these defaults.
-
-# workflow:
-#   execution_modes:
-#     define: swarm      # "human" (default) or "swarm"
-#     implement: swarm   # default: swarm
-#     validate: swarm    # default: swarm
-#     review: swarm      # default: swarm
-#     accept: human      # default: human
-#     reflect: swarm     # default: swarm
-#   spec_review: false   # enable spec review checkpoint (default: false)
-`
-
 // initSubTools initializes sub-tools after file scaffolding.
 // Errors are captured and reported as warnings in printSummary,
 // not hard failures (per Constitution Principle II — Composability First).
@@ -1037,24 +1019,9 @@ func initSubTools(opts *Options) []subToolResult {
 
 	var results []subToolResult
 
-	// Workflow config: create .uf/config.yaml if absent.
-	// User-owned — skip if file already exists (preserves customizations).
-	ufDir := filepath.Join(opts.TargetDir, ".uf")
-	configPath := filepath.Join(ufDir, "config.yaml")
-	if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
-		if mkErr := os.MkdirAll(ufDir, 0o755); mkErr != nil {
-			results = append(results, subToolResult{
-				name: ".uf/config.yaml", action: "failed",
-				detail: "create directory failed"})
-		} else if writeErr := os.WriteFile(configPath, []byte(workflowConfigContent), 0o644); writeErr != nil {
-			results = append(results, subToolResult{
-				name: ".uf/config.yaml", action: "failed",
-				detail: "write failed"})
-		} else {
-			results = append(results, subToolResult{
-				name: ".uf/config.yaml", action: "initialized"})
-		}
-	}
+	// NOTE: .uf/config.yaml is no longer created by uf init.
+	// Users create it via `uf config init` when they need
+	// customization. See internal/config/ package.
 
 	// Dewey: init + index if binary available and workspace absent.
 	// Force re-index if workspace exists and Force is set.

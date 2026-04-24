@@ -1,7 +1,6 @@
 ---
 description: "Blog and announcement writer — owns release notes, blog posts, and feature announcements."
 mode: subagent
-model: google-vertex-anthropic/claude-opus-4-6@default
 temperature: 0.4
 tools:
   read: true

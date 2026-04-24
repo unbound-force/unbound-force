@@ -1,7 +1,6 @@
 ---
 description: "Adaptive implementation engine — coding persona with engineering philosophy, convention pack adherence, and Gaze/Divisor feedback loops."
 mode: subagent
-model: google-vertex-anthropic/claude-opus-4-6@default
 temperature: 0.4
 ---
 

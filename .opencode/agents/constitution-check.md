@@ -1,7 +1,6 @@
 ---
 description: "Constitution alignment checker — compares a hero constitution against the Unbound Force org constitution"
 mode: subagent
-model: google-vertex-anthropic/claude-opus-4-6@default
 temperature: 0.1
 tools:
   read: true

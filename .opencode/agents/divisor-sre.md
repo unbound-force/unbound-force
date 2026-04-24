@@ -1,7 +1,6 @@
 ---
 description: "Operations and efficiency auditor — owns deployment, dependencies, performance, and runtime observability."
 mode: subagent
-model: google-vertex-anthropic/claude-opus-4-6@default
 temperature: 0.1
 tools:
   write: false

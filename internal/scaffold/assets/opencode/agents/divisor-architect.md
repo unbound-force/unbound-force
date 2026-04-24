@@ -1,7 +1,6 @@
 ---
 description: "Structural and architectural reviewer — owns patterns, conventions, and DRY."
 mode: subagent
-model: google-vertex-anthropic/claude-opus-4-6@default
 temperature: 0.1
 tools:
   write: false

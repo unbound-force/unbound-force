@@ -1,7 +1,6 @@
 ---
 description: "Intent drift detector — owns plan alignment, zero-waste, constitution, and cross-component value."
 mode: subagent
-model: google-vertex-anthropic/claude-opus-4-6@default
 temperature: 0.1
 tools:
   write: false

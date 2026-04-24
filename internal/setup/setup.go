@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/unbound-force/unbound-force/internal/config"
 	"github.com/unbound-force/unbound-force/internal/doctor"
 )
 
@@ -66,6 +67,24 @@ type Options struct {
 	// used to construct GitHub Release RPM URLs. Set by the CLI
 	// from the build-time version variable.
 	Version string
+
+	// PackageManager is the preferred package manager from config.
+	// Valid: "auto", "homebrew", "dnf", "apt", "manual".
+	PackageManager string
+
+	// SkipTools lists tool names to skip during setup.
+	SkipTools []string
+
+	// ToolMethods provides per-tool install method overrides from config.
+	ToolMethods map[string]config.ToolConfig
+
+	// EmbeddingModel is the embedding model name from config.
+	// Defaults to "granite-embedding:30m".
+	EmbeddingModel string
+
+	// EmbeddingDimensions is the embedding vector dimension from config.
+	// Defaults to 256.
+	EmbeddingDimensions int
 }
 
 // defaults fills zero-value fields with production implementations.
@@ -118,14 +137,64 @@ type stepResult struct {
 	err    error
 }
 
-// graniteModel is the enterprise-grade embedding model used by both
-// Dewey and Replicator. IBM Granite, Apache 2.0, permissibly licensed
-// training data. Setting these env vars aligns all tools
-// with the same embedding model.
+// Default embedding model constants — used when config does not
+// override. IBM Granite, Apache 2.0, permissibly licensed training data.
 const (
-	graniteModel    = "granite-embedding:30m"
-	graniteEmbedDim = "256"
+	defaultEmbeddingModel = "granite-embedding:30m"
+	defaultEmbeddingDim   = "256"
 )
+
+// embeddingModel returns the configured or default embedding model name.
+func (o *Options) embeddingModel() string {
+	if o.EmbeddingModel != "" {
+		return o.EmbeddingModel
+	}
+	return defaultEmbeddingModel
+}
+
+// embeddingDim returns the configured or default embedding dimension as a string.
+func (o *Options) embeddingDim() string {
+	if o.EmbeddingDimensions > 0 {
+		return strconv.Itoa(o.EmbeddingDimensions)
+	}
+	return defaultEmbeddingDim
+}
+
+// shouldSkipTool returns true if the tool should be skipped
+// based on the config skip list or per-tool method override.
+func (o *Options) shouldSkipTool(toolName string) bool {
+	for _, s := range o.SkipTools {
+		if s == toolName {
+			return true
+		}
+	}
+	if o.ToolMethods != nil {
+		if tc, ok := o.ToolMethods[toolName]; ok && tc.Method == "skip" {
+			return true
+		}
+	}
+	if o.PackageManager == "manual" {
+		// In manual mode, skip tools with auto method (no per-tool override).
+		if o.ToolMethods == nil {
+			return true
+		}
+		if tc, ok := o.ToolMethods[toolName]; !ok || tc.Method == "" || tc.Method == "auto" {
+			return true
+		}
+	}
+	return false
+}
+
+// toolMethod returns the configured install method for a tool,
+// or "auto" if no override is set.
+func (o *Options) toolMethod(toolName string) string {
+	if o.ToolMethods != nil {
+		if tc, ok := o.ToolMethods[toolName]; ok && tc.Method != "" {
+			return tc.Method
+		}
+	}
+	return "auto"
+}
 
 // Run executes the full setup workflow per FR-021/030/032/034/035.
 func Run(opts Options) error {
@@ -137,10 +206,11 @@ func Run(opts Options) error {
 	}
 
 	// Set Ollama env vars so all embedding consumers use the same
-	// enterprise-grade embedding model. These are inherited by
-	// child processes (replicator setup, dewey serve).
-	_ = os.Setenv("OLLAMA_MODEL", graniteModel)
-	_ = os.Setenv("OLLAMA_EMBED_DIM", graniteEmbedDim)
+	// embedding model. These are inherited by child processes
+	// (replicator setup, dewey serve). Values come from config
+	// or compiled defaults.
+	_ = os.Setenv("OLLAMA_MODEL", opts.embeddingModel())
+	_ = os.Setenv("OLLAMA_EMBED_DIM", opts.embeddingDim())
 
 	// Detect environment (reuse from doctor package).
 	doctorOpts := &doctor.Options{
@@ -182,28 +252,51 @@ func Run(opts Options) error {
 
 	// Step 1: Install OpenCode (FR-022).
 	fmt.Fprintf(opts.Stdout, "  [1/14] OpenCode...\n")
-	results = append(results, installOpenCode(&opts, env))
+	if opts.shouldSkipTool("opencode") {
+		results = append(results, stepResult{name: "OpenCode", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installOpenCode(&opts, env))
+	}
 
 	// Step 2: Install Gaze (FR-023).
 	fmt.Fprintf(opts.Stdout, "  [2/14] Gaze...\n")
-	results = append(results, installGaze(&opts, env))
+	if opts.shouldSkipTool("gaze") {
+		results = append(results, stepResult{name: "Gaze", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installGaze(&opts, env))
+	}
 
 	// Step 3: Install Mx F Manager hero.
 	fmt.Fprintf(opts.Stdout, "  [3/14] Mx F...\n")
-	results = append(results, installMxF(&opts, env))
+	if opts.shouldSkipTool("mxf") {
+		results = append(results, stepResult{name: "Mx F", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installMxF(&opts, env))
+	}
 
 	// Step 4: Install GitHub CLI.
 	fmt.Fprintf(opts.Stdout, "  [4/14] GitHub CLI...\n")
-	results = append(results, installGH(&opts, env))
+	if opts.shouldSkipTool("gh") {
+		results = append(results, stepResult{name: "GitHub CLI", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installGH(&opts, env))
+	}
 
 	// Step 5: Ensure Node.js (FR-024).
 	fmt.Fprintf(opts.Stdout, "  [5/14] Node.js...\n")
-	nodeResult := ensureNodeJS(&opts, env)
-	results = append(results, nodeResult)
-	nodeAvailable := nodeResult.err == nil && nodeResult.action != "failed"
+	nodeAvailable := false
+	if opts.shouldSkipTool("node") {
+		results = append(results, stepResult{name: "Node.js", action: "skipped", detail: "excluded by config"})
+	} else {
+		nodeResult := ensureNodeJS(&opts, env)
+		results = append(results, nodeResult)
+		nodeAvailable = nodeResult.err == nil && nodeResult.action != "failed"
+	}
 
 	// Step 6: Install OpenSpec CLI (Node.js-dependent).
-	if nodeAvailable {
+	if opts.shouldSkipTool("openspec") {
+		results = append(results, stepResult{name: "OpenSpec CLI", action: "skipped", detail: "excluded by config"})
+	} else if nodeAvailable {
 		fmt.Fprintf(opts.Stdout, "  [6/14] OpenSpec CLI...\n")
 		results = append(results, installOpenSpec(&opts, env))
 	} else {
@@ -212,12 +305,19 @@ func Run(opts Options) error {
 
 	// Step 7: Install uv (Python package manager for Specify CLI).
 	fmt.Fprintf(opts.Stdout, "  [7/14] uv...\n")
-	uvResult := installUV(&opts, env)
-	results = append(results, uvResult)
-	uvAvailable := uvResult.err == nil && uvResult.action != "failed"
+	uvAvailable := false
+	if opts.shouldSkipTool("uv") {
+		results = append(results, stepResult{name: "uv", action: "skipped", detail: "excluded by config"})
+	} else {
+		uvResult := installUV(&opts, env)
+		results = append(results, uvResult)
+		uvAvailable = uvResult.err == nil && uvResult.action != "failed"
+	}
 
 	// Step 8: Install Specify CLI (uv-dependent).
-	if uvAvailable {
+	if opts.shouldSkipTool("specify") {
+		results = append(results, stepResult{name: "Specify CLI", action: "skipped", detail: "excluded by config"})
+	} else if uvAvailable {
 		fmt.Fprintf(opts.Stdout, "  [8/14] Specify CLI...\n")
 		results = append(results, installSpecify(&opts, env))
 	} else {
@@ -226,32 +326,55 @@ func Run(opts Options) error {
 
 	// Step 9: Install Replicator (Homebrew, replaces Swarm plugin).
 	fmt.Fprintf(opts.Stdout, "  [9/14] Replicator...\n")
-	replicatorResult := installReplicator(&opts, env)
-	results = append(results, replicatorResult)
+	replicatorSkipped := false
+	if opts.shouldSkipTool("replicator") {
+		results = append(results, stepResult{name: "Replicator", action: "skipped", detail: "excluded by config"})
+		replicatorSkipped = true
+	} else {
+		replicatorResult := installReplicator(&opts, env)
+		results = append(results, replicatorResult)
+		replicatorSkipped = replicatorResult.err != nil || replicatorResult.action == "failed" || replicatorResult.action == "skipped"
+	}
 
 	// Step 10: Run replicator setup.
-	if replicatorResult.err == nil && replicatorResult.action != "failed" && replicatorResult.action != "skipped" {
+	if replicatorSkipped {
+		results = append(results, stepResult{name: "replicator setup", action: "skipped", detail: "no replicator"})
+	} else {
 		fmt.Fprintf(opts.Stdout, "  [10/14] Replicator setup...\n")
 		results = append(results, runReplicatorSetup(&opts))
-	} else {
-		results = append(results, stepResult{name: "replicator setup", action: "skipped", detail: "no replicator"})
 	}
 
 	// Step 11: Install Ollama (prerequisite for Dewey + Replicator embeddings).
 	fmt.Fprintf(opts.Stdout, "  [11/14] Ollama...\n")
-	results = append(results, installOllama(&opts, env))
+	if opts.shouldSkipTool("ollama") {
+		results = append(results, stepResult{name: "Ollama", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installOllama(&opts, env))
+	}
 
 	// Step 12: Install Dewey (after Ollama).
 	fmt.Fprintf(opts.Stdout, "  [12/14] Dewey...\n")
-	results = append(results, installDewey(&opts, env))
+	if opts.shouldSkipTool("dewey") {
+		results = append(results, stepResult{name: "Dewey", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installDewey(&opts, env))
+	}
 
 	// Step 13: Install golangci-lint (Spec 019 FR-012).
 	fmt.Fprintf(opts.Stdout, "  [13/14] golangci-lint...\n")
-	results = append(results, installGolangciLint(&opts, env))
+	if opts.shouldSkipTool("golangci-lint") {
+		results = append(results, stepResult{name: "golangci-lint", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installGolangciLint(&opts, env))
+	}
 
 	// Step 14: Install govulncheck (Spec 019 FR-012).
 	fmt.Fprintf(opts.Stdout, "  [14/14] govulncheck...\n")
-	results = append(results, installGovulncheck(&opts, env))
+	if opts.shouldSkipTool("govulncheck") {
+		results = append(results, stepResult{name: "govulncheck", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installGovulncheck(&opts, env))
+	}
 
 	// Print results.
 	for _, r := range results {
@@ -283,10 +406,10 @@ func Run(opts Options) error {
 
 	// Embedding model alignment note.
 	fmt.Fprintln(opts.Stdout)
-	fmt.Fprintln(opts.Stdout, "Note: Replicator and Dewey are configured to use "+graniteModel+".")
+	fmt.Fprintln(opts.Stdout, "Note: Replicator and Dewey are configured to use "+opts.embeddingModel()+".")
 	fmt.Fprintln(opts.Stdout, "  Add to your shell profile for consistent behavior:")
-	fmt.Fprintln(opts.Stdout, "  export OLLAMA_MODEL="+graniteModel)
-	fmt.Fprintln(opts.Stdout, "  export OLLAMA_EMBED_DIM="+graniteEmbedDim)
+	fmt.Fprintln(opts.Stdout, "  export OLLAMA_MODEL="+opts.embeddingModel())
+	fmt.Fprintln(opts.Stdout, "  export OLLAMA_EMBED_DIM="+opts.embeddingDim())
 
 	return nil
 }
@@ -399,6 +522,23 @@ func installGaze(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		return stepResult{name: "Gaze", action: "already installed"}
 	}
 
+	// Method dispatch: respect per-tool config override.
+	method := opts.toolMethod("gaze")
+	switch method {
+	case "rpm", "dnf":
+		return installViaRpm(opts, "Gaze", "unbound-force/gaze", opts.Version)
+	case "homebrew":
+		// Force Homebrew regardless of detection.
+		if opts.DryRun {
+			return stepResult{name: "Gaze", action: "dry-run", detail: "Would install: brew install unbound-force/tap/gaze"}
+		}
+		if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/gaze"); err != nil {
+			return stepResult{name: "Gaze", action: "failed", detail: "brew install failed", err: err}
+		}
+		return stepResult{name: "Gaze", action: "installed", detail: "via Homebrew"}
+	}
+
+	// Auto: try Homebrew, fall back to skip with hint.
 	if opts.DryRun {
 		if doctor.HasManager(env, doctor.ManagerHomebrew) {
 			return stepResult{name: "Gaze", action: "dry-run", detail: "Would install: brew install unbound-force/tap/gaze"}
@@ -821,7 +961,7 @@ func installDewey(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	// After installing, pull the embedding model.
 	modelResult := pullEmbeddingModel(opts)
 	if modelResult.action == "failed" {
-		return stepResult{name: "Dewey", action: "installed", detail: "via Homebrew (model pull failed — run 'ollama serve' then 'ollama pull " + graniteModel + "')"}
+		return stepResult{name: "Dewey", action: "installed", detail: "via Homebrew (model pull failed — run 'ollama serve' then 'ollama pull " + opts.embeddingModel() + "')"}
 	}
 
 	return stepResult{name: "Dewey", action: "installed", detail: "via Homebrew"}
@@ -836,7 +976,7 @@ func pullEmbeddingModel(opts *Options) stepResult {
 	}
 
 	if opts.DryRun {
-		return stepResult{name: "Dewey", action: "dry-run", detail: "Would run: ollama pull " + graniteModel}
+		return stepResult{name: "Dewey", action: "dry-run", detail: "Would run: ollama pull " + opts.embeddingModel()}
 	}
 
 	// Check if model is already pulled.
@@ -845,11 +985,11 @@ func pullEmbeddingModel(opts *Options) stepResult {
 		return stepResult{name: "Dewey", action: "already installed", detail: "embedding model ready"}
 	}
 
-	if _, err := opts.ExecCmd("ollama", "pull", graniteModel); err != nil {
+	if _, err := opts.ExecCmd("ollama", "pull", opts.embeddingModel()); err != nil {
 		return stepResult{
 			name:   "Dewey",
 			action: "failed",
-			detail: "ollama pull failed — ensure the Ollama server is running (ollama serve), then run: ollama pull " + graniteModel,
+			detail: "ollama pull failed — ensure the Ollama server is running (ollama serve), then run: ollama pull " + opts.embeddingModel(),
 			err:    err,
 		}
 	}

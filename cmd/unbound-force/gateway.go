@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/unbound-force/unbound-force/internal/config"
 	"github.com/unbound-force/unbound-force/internal/gateway"
 )
 
@@ -78,14 +79,25 @@ type gatewayParams struct {
 // runGateway executes the gateway start with testable
 // parameters.
 func runGateway(p gatewayParams) error {
-	return gateway.Start(gateway.Options{
+	opts := gateway.Options{
 		Port:         p.port,
 		ProviderName: p.provider,
 		Detach:       p.detach,
 		ProjectDir:   p.projectDir,
 		Stdout:       p.stdout,
 		Stderr:       p.stderr,
-	})
+	}
+	// Apply config defaults when CLI flags are at zero value.
+	cfg, _ := config.Load(config.LoadOptions{ProjectDir: p.projectDir})
+	if cfg != nil {
+		if opts.Port == gateway.DefaultPort && cfg.Gateway.Port != 0 {
+			opts.Port = cfg.Gateway.Port
+		}
+		if opts.ProviderName == "" && cfg.Gateway.Provider != "" && cfg.Gateway.Provider != "auto" {
+			opts.ProviderName = cfg.Gateway.Provider
+		}
+	}
+	return gateway.Start(opts)
 }
 
 // --- stop ---

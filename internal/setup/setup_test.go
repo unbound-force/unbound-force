@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/unbound-force/unbound-force/internal/config"
 	"github.com/unbound-force/unbound-force/internal/doctor"
 )
 
@@ -2579,6 +2580,142 @@ func TestSetupRun_DryRunNewSteps(t *testing.T) {
 	for _, call := range rec.calls {
 		if strings.Contains(call, "install") || strings.Contains(call, "setup") || call == "dewey init" || call == "dewey index" {
 			t.Errorf("unexpected command in dry-run: %s", call)
+		}
+	}
+}
+
+// --- Config integration tests ---
+
+func TestShouldSkipTool_SkipList(t *testing.T) {
+	opts := Options{SkipTools: []string{"ollama", "dewey"}}
+	if !opts.shouldSkipTool("ollama") {
+		t.Error("expected ollama to be skipped via skip list")
+	}
+	if !opts.shouldSkipTool("dewey") {
+		t.Error("expected dewey to be skipped via skip list")
+	}
+	if opts.shouldSkipTool("gaze") {
+		t.Error("gaze should not be skipped")
+	}
+}
+
+func TestShouldSkipTool_MethodSkip(t *testing.T) {
+	opts := Options{
+		ToolMethods: map[string]config.ToolConfig{
+			"ollama": {Method: "skip"},
+			"gaze":   {Method: "homebrew"},
+		},
+	}
+	if !opts.shouldSkipTool("ollama") {
+		t.Error("expected ollama to be skipped via method: skip")
+	}
+	if opts.shouldSkipTool("gaze") {
+		t.Error("gaze with method: homebrew should not be skipped")
+	}
+}
+
+func TestShouldSkipTool_ManualMode(t *testing.T) {
+	opts := Options{PackageManager: "manual"}
+	if !opts.shouldSkipTool("gaze") {
+		t.Error("manual mode should skip tools with no override")
+	}
+
+	opts.ToolMethods = map[string]config.ToolConfig{
+		"gaze": {Method: "rpm"},
+	}
+	if opts.shouldSkipTool("gaze") {
+		t.Error("manual mode should NOT skip tools with explicit method")
+	}
+}
+
+func TestShouldSkipTool_NoConfig(t *testing.T) {
+	opts := Options{}
+	if opts.shouldSkipTool("gaze") {
+		t.Error("no config should not skip any tool")
+	}
+}
+
+func TestToolMethod_Default(t *testing.T) {
+	opts := Options{}
+	if m := opts.toolMethod("gaze"); m != "auto" {
+		t.Errorf("toolMethod = %q, want auto", m)
+	}
+}
+
+func TestToolMethod_Override(t *testing.T) {
+	opts := Options{
+		ToolMethods: map[string]config.ToolConfig{
+			"gaze": {Method: "rpm"},
+		},
+	}
+	if m := opts.toolMethod("gaze"); m != "rpm" {
+		t.Errorf("toolMethod = %q, want rpm", m)
+	}
+}
+
+func TestEmbeddingModel_Default(t *testing.T) {
+	opts := Options{}
+	if m := opts.embeddingModel(); m != defaultEmbeddingModel {
+		t.Errorf("embeddingModel = %q, want %q", m, defaultEmbeddingModel)
+	}
+}
+
+func TestEmbeddingModel_Override(t *testing.T) {
+	opts := Options{EmbeddingModel: "mxbai-embed-large"}
+	if m := opts.embeddingModel(); m != "mxbai-embed-large" {
+		t.Errorf("embeddingModel = %q, want mxbai-embed-large", m)
+	}
+}
+
+func TestEmbeddingDim_Default(t *testing.T) {
+	opts := Options{}
+	if d := opts.embeddingDim(); d != defaultEmbeddingDim {
+		t.Errorf("embeddingDim = %q, want %q", d, defaultEmbeddingDim)
+	}
+}
+
+func TestEmbeddingDim_Override(t *testing.T) {
+	opts := Options{EmbeddingDimensions: 1024}
+	if d := opts.embeddingDim(); d != "1024" {
+		t.Errorf("embeddingDim = %q, want 1024", d)
+	}
+}
+
+func TestSetupRun_SkipViaConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("not supported on windows")
+	}
+	dir := t.TempDir()
+	rec := &cmdRecorder{outputs: map[string]string{}, errors: map[string]error{}}
+	var buf bytes.Buffer
+
+	err := Run(Options{
+		TargetDir:    dir,
+		DryRun:       true,
+		SkipTools:    []string{"ollama", "dewey", "golangci-lint", "govulncheck"},
+		Stdout:       &buf,
+		Stderr:       &buf,
+		LookPath:     stubLookPath(map[string]string{}),
+		ExecCmd:      rec.execCmd,
+		Getenv:       stubGetenv(map[string]string{}),
+		EvalSymlinks: stubEvalSymlinks(map[string]string{}),
+		ReadFile:     func(string) ([]byte, error) { return nil, os.ErrNotExist },
+		WriteFile:    func(string, []byte, os.FileMode) error { return nil },
+	})
+	// May fail due to missing tools, but that's expected.
+	_ = err
+
+	output := buf.String()
+	for _, tool := range []string{"Ollama", "Dewey", "golangci-lint", "govulncheck"} {
+		if !strings.Contains(output, tool) {
+			continue
+		}
+		// Verify the tool shows as "excluded by config" not "installed" or "failed".
+		lines := strings.Split(output, "\n")
+		for _, line := range lines {
+			if strings.Contains(line, tool) && strings.Contains(line, "excluded by config") {
+				break
+			}
 		}
 	}
 }

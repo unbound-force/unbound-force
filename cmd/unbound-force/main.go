@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/unbound-force/unbound-force/internal/config"
 	"github.com/unbound-force/unbound-force/internal/doctor"
 	"github.com/unbound-force/unbound-force/internal/scaffold"
 	"github.com/unbound-force/unbound-force/internal/setup"
@@ -31,6 +32,7 @@ func main() {
 	root.AddCommand(newSetupCmd())
 	root.AddCommand(newSandboxCmd())
 	root.AddCommand(newGatewayCmd())
+	root.AddCommand(newConfigCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -47,11 +49,19 @@ type initParams struct {
 }
 
 func runInit(p initParams) error {
+	lang := p.lang
+	// If --lang was not provided, check config for a language preference.
+	if lang == "" {
+		cfg, _ := config.Load(config.LoadOptions{ProjectDir: p.targetDir})
+		if cfg != nil && cfg.Scaffold.Language != "" && cfg.Scaffold.Language != "auto" {
+			lang = cfg.Scaffold.Language
+		}
+	}
 	_, err := scaffold.Run(scaffold.Options{
 		TargetDir:   p.targetDir,
 		Force:       p.force,
 		DivisorOnly: p.divisorOnly,
-		Lang:        p.lang,
+		Lang:        lang,
 		Version:     p.version,
 		Stdout:      p.stdout,
 	})
@@ -132,6 +142,14 @@ func runDoctor(p doctorParams) error {
 		Stdout:    p.stdout,
 	}
 
+	// Load unified config and populate config-derived fields.
+	cfg, _ := config.Load(config.LoadOptions{ProjectDir: p.targetDir})
+	if cfg != nil {
+		opts.SkipChecks = cfg.Doctor.Skip
+		opts.ToolSeverities = cfg.Doctor.Tools
+		opts.EmbeddingModel = cfg.Embedding.Model
+	}
+
 	report, err := doctor.Run(opts)
 	if report != nil {
 		switch p.format {
@@ -200,6 +218,7 @@ type setupParams struct {
 
 // runSetup executes the setup command with testable parameters.
 func runSetup(p setupParams) error {
+	cfg, _ := config.Load(config.LoadOptions{ProjectDir: p.targetDir})
 	opts := setup.Options{
 		TargetDir: p.targetDir,
 		DryRun:    p.dryRun,
@@ -208,7 +227,13 @@ func runSetup(p setupParams) error {
 		Stderr:    p.stderr,
 		Version:   version,
 	}
-
+	if cfg != nil {
+		opts.PackageManager = cfg.Setup.PackageManager
+		opts.SkipTools = cfg.Setup.Skip
+		opts.ToolMethods = cfg.Setup.Tools
+		opts.EmbeddingModel = cfg.Embedding.Model
+		opts.EmbeddingDimensions = cfg.Embedding.Dimensions
+	}
 	return setup.Run(opts)
 }
 

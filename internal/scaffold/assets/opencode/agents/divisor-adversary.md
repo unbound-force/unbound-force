@@ -1,7 +1,6 @@
 ---
 description: "Security and resilience auditor — owns secrets, CVEs, error handling, and injection safety."
 mode: subagent
-model: google-vertex-anthropic/claude-opus-4-6@default
 temperature: 0.1
 tools:
   read: true
