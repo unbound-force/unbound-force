@@ -584,8 +584,10 @@ func TestCheckScaffoldedFiles(t *testing.T) {
 	if r := results[".specify/"]; r.Severity != Pass {
 		t.Errorf("specify severity = %v, want Pass", r.Severity)
 	}
-	if r := results["AGENTS.md"]; r.Severity != Pass {
-		t.Errorf("AGENTS.md severity = %v, want Pass", r.Severity)
+	// AGENTS.md check moved to checkAgentContext; verify it is
+	// NOT in this group.
+	if _, ok := results["AGENTS.md"]; ok {
+		t.Error("AGENTS.md should not be checked in Scaffolded Files (moved to Agent Context)")
 	}
 }
 
@@ -837,12 +839,13 @@ func TestDoctorRun(t *testing.T) {
 		t.Log("Run returned nil error (all checks passed or only warnings)")
 	}
 
-	// Verify 8 groups in correct order.
+	// Verify 9 groups in correct order.
 	expectedGroups := []string{
 		"Detected Environment",
 		"Core Tools",
 		"Replicator",
 		"Dewey Knowledge Layer",
+		"Agent Context",
 		"Scaffolded Files",
 		"Hero Availability",
 		"MCP Server Config",
@@ -880,7 +883,9 @@ func TestDoctorRun_AllPass(t *testing.T) {
 	createFile(t, dir, ".opencode/command/test.md", "# Command")
 	createFile(t, dir, ".opencode/uf/packs/go.md", "# Go")
 	createFile(t, dir, ".specify/config.yaml", "# config")
-	createFile(t, dir, "AGENTS.md", "# Agents")
+	createFile(t, dir, "AGENTS.md", completeAGENTSmd())
+	createFile(t, dir, "CLAUDE.md", "# Claude\n@AGENTS.md\n")
+	createFile(t, dir, ".cursorrules", "Read AGENTS.md for conventions.\n")
 	createFile(t, dir, "opencode.json", `{"mcp":{"replicator":{"type":"local","command":["replicator","serve"],"enabled":true}}}`)
 	if err := os.MkdirAll(filepath.Join(dir, ".uf", "replicator"), 0755); err != nil {
 		t.Fatalf("mkdir .uf/replicator: %v", err)
@@ -1000,8 +1005,8 @@ func TestDoctorRun_NonGitDir(t *testing.T) {
 	}
 
 	// All checks should still execute.
-	if len(report.Groups) != 8 {
-		t.Errorf("expected 8 groups, got %d", len(report.Groups))
+	if len(report.Groups) != 9 {
+		t.Errorf("expected 9 groups, got %d", len(report.Groups))
 	}
 }
 
@@ -2831,5 +2836,524 @@ func TestCheckMCPConfig_StringCommand(t *testing.T) {
 	}
 	if !found {
 		t.Error("dewey result not found — string command backward compat failed")
+	}
+}
+
+// --- Agent Context check group tests ---
+
+// completeAGENTSmd returns AGENTS.md content with all Tier 1
+// sections and a constitution reference.
+func completeAGENTSmd() string {
+	return `# AGENTS.md
+
+## Project Overview
+
+This is a test project.
+
+## Build & Test Commands
+
+` + "```" + `bash
+make build
+make test
+` + "```" + `
+
+## Project Structure
+
+` + "```" + `text
+project/
+├── cmd/
+├── internal/
+` + "```" + `
+
+## Code Conventions
+
+- Use gofmt
+- Error wrapping with fmt.Errorf
+
+## Active Technologies
+
+- Go 1.24+
+- Cobra CLI
+
+## Architecture
+
+Options/Result pattern.
+
+## Testing Conventions
+
+Standard library testing only.
+
+## Git & Workflow
+
+Conventional commits, feature branches.
+
+## Behavioral Constraints
+
+Never modify coverage thresholds.
+
+## Constitution (Highest Authority)
+
+The org constitution at .specify/memory/constitution.md
+defines the core principles. Speckit and OpenSpec changes
+must both align with these principles regardless of framework.
+`
+}
+
+func TestCheckAgentContext_NoFile(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+	}
+
+	group := checkAgentContext(opts)
+
+	if len(group.Results) != 1 {
+		t.Fatalf("expected 1 result for missing file, got %d", len(group.Results))
+	}
+	r := group.Results[0]
+	if r.Name != "AGENTS.md" {
+		t.Errorf("name = %q, want AGENTS.md", r.Name)
+	}
+	if r.Severity != Fail {
+		t.Errorf("severity = %v, want Fail", r.Severity)
+	}
+	if r.InstallHint != "Run: /agent-brief in OpenCode" {
+		t.Errorf("install hint = %q, want 'Run: /agent-brief in OpenCode'", r.InstallHint)
+	}
+}
+
+func TestCheckAgentContext_AllTier1Present(t *testing.T) {
+	dir := t.TempDir()
+	createFile(t, dir, "AGENTS.md", completeAGENTSmd())
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+	}
+
+	group := checkAgentContext(opts)
+
+	results := make(map[string]CheckResult)
+	for _, r := range group.Results {
+		results[r.Name] = r
+	}
+
+	tier1Sections := []string{
+		"Tier 1: Project Overview",
+		"Tier 1: Build Commands",
+		"Tier 1: Project Structure",
+		"Tier 1: Code Conventions",
+		"Tier 1: Technology Stack",
+	}
+	for _, sec := range tier1Sections {
+		r, ok := results[sec]
+		if !ok {
+			t.Errorf("missing check result for %q", sec)
+			continue
+		}
+		if r.Severity != Pass {
+			t.Errorf("%s severity = %v, want Pass", sec, r.Severity)
+		}
+	}
+}
+
+func TestCheckAgentContext_MissingTier1Section(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		missing string
+	}{
+		{
+			name:    "missing overview",
+			content: "## Build\n## Project Structure\n## Code Conventions\n## Active Technologies\n",
+			missing: "Tier 1: Project Overview",
+		},
+		{
+			name:    "missing build",
+			content: "## Project Overview\n## Project Structure\n## Code Conventions\n## Active Technologies\n",
+			missing: "Tier 1: Build Commands",
+		},
+		{
+			name:    "missing structure",
+			content: "## Project Overview\n## Build\n## Code Conventions\n## Active Technologies\n",
+			missing: "Tier 1: Project Structure",
+		},
+		{
+			name:    "missing conventions",
+			content: "## Project Overview\n## Build\n## Project Structure\n## Active Technologies\n",
+			missing: "Tier 1: Code Conventions",
+		},
+		{
+			name:    "missing tech stack",
+			content: "## Project Overview\n## Build\n## Project Structure\n## Code Conventions\n",
+			missing: "Tier 1: Technology Stack",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			createFile(t, dir, "AGENTS.md", tt.content)
+
+			opts := &Options{
+				TargetDir: dir,
+				ReadFile:  os.ReadFile,
+			}
+
+			group := checkAgentContext(opts)
+
+			results := make(map[string]CheckResult)
+			for _, r := range group.Results {
+				results[r.Name] = r
+			}
+
+			r, ok := results[tt.missing]
+			if !ok {
+				t.Fatalf("missing check result for %q", tt.missing)
+			}
+			if r.Severity != Fail {
+				t.Errorf("%s severity = %v, want Fail", tt.missing, r.Severity)
+			}
+		})
+	}
+}
+
+func TestCheckAgentContext_BuildCodeBlocks(t *testing.T) {
+	t.Run("no code blocks", func(t *testing.T) {
+		dir := t.TempDir()
+		content := "## Build & Test Commands\n\nRun make build.\n\n## Project Structure\n"
+		createFile(t, dir, "AGENTS.md", content)
+
+		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+		group := checkAgentContext(opts)
+
+		results := make(map[string]CheckResult)
+		for _, r := range group.Results {
+			results[r.Name] = r
+		}
+
+		r, ok := results["Build code blocks"]
+		if !ok {
+			t.Fatal("missing Build code blocks check")
+		}
+		if r.Severity != Warn {
+			t.Errorf("severity = %v, want Warn", r.Severity)
+		}
+	})
+
+	t.Run("with code blocks", func(t *testing.T) {
+		dir := t.TempDir()
+		content := "## Build & Test Commands\n\n```bash\nmake build\n```\n\n## Project Structure\n"
+		createFile(t, dir, "AGENTS.md", content)
+
+		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+		group := checkAgentContext(opts)
+
+		results := make(map[string]CheckResult)
+		for _, r := range group.Results {
+			results[r.Name] = r
+		}
+
+		r, ok := results["Build code blocks"]
+		if !ok {
+			t.Fatal("missing Build code blocks check")
+		}
+		if r.Severity != Pass {
+			t.Errorf("severity = %v, want Pass", r.Severity)
+		}
+	})
+}
+
+func TestCheckAgentContext_LineCount(t *testing.T) {
+	t.Run("under threshold", func(t *testing.T) {
+		dir := t.TempDir()
+		content := strings.Repeat("line\n", 100)
+		createFile(t, dir, "AGENTS.md", content)
+
+		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+		group := checkAgentContext(opts)
+
+		results := make(map[string]CheckResult)
+		for _, r := range group.Results {
+			results[r.Name] = r
+		}
+
+		if r := results["Line count"]; r.Severity != Pass {
+			t.Errorf("severity = %v, want Pass for 100 lines", r.Severity)
+		}
+	})
+
+	t.Run("over threshold", func(t *testing.T) {
+		dir := t.TempDir()
+		content := strings.Repeat("line\n", 350)
+		createFile(t, dir, "AGENTS.md", content)
+
+		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+		group := checkAgentContext(opts)
+
+		results := make(map[string]CheckResult)
+		for _, r := range group.Results {
+			results[r.Name] = r
+		}
+
+		if r := results["Line count"]; r.Severity != Warn {
+			t.Errorf("severity = %v, want Warn for 350 lines", r.Severity)
+		}
+	})
+}
+
+func TestCheckAgentContext_ConstitutionReference(t *testing.T) {
+	t.Run("referenced", func(t *testing.T) {
+		dir := t.TempDir()
+		createFile(t, dir, "AGENTS.md", "## Overview\nThe constitution governs all work.\n")
+		createFile(t, dir, ".specify/memory/constitution.md", "# Constitution\n")
+
+		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+		group := checkAgentContext(opts)
+
+		results := make(map[string]CheckResult)
+		for _, r := range group.Results {
+			results[r.Name] = r
+		}
+
+		r, ok := results["Constitution reference"]
+		if !ok {
+			t.Fatal("missing Constitution reference check")
+		}
+		if r.Severity != Pass {
+			t.Errorf("severity = %v, want Pass", r.Severity)
+		}
+	})
+
+	t.Run("not referenced", func(t *testing.T) {
+		dir := t.TempDir()
+		createFile(t, dir, "AGENTS.md", "## Overview\nJust a project.\n")
+		createFile(t, dir, ".specify/memory/constitution.md", "# Constitution\n")
+
+		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+		group := checkAgentContext(opts)
+
+		results := make(map[string]CheckResult)
+		for _, r := range group.Results {
+			results[r.Name] = r
+		}
+
+		r, ok := results["Constitution reference"]
+		if !ok {
+			t.Fatal("missing Constitution reference check")
+		}
+		if r.Severity != Warn {
+			t.Errorf("severity = %v, want Warn", r.Severity)
+		}
+	})
+}
+
+func TestCheckAgentContext_ConstitutionSkipped(t *testing.T) {
+	dir := t.TempDir()
+	createFile(t, dir, "AGENTS.md", "## Overview\nJust a project.\n")
+	// No .specify/memory/constitution.md
+
+	opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+	group := checkAgentContext(opts)
+
+	for _, r := range group.Results {
+		if r.Name == "Constitution reference" {
+			t.Error("Constitution reference check should be omitted when .specify/ does not exist")
+		}
+	}
+}
+
+func TestCheckAgentContext_SpecFrameworkReference(t *testing.T) {
+	t.Run("described", func(t *testing.T) {
+		dir := t.TempDir()
+		createFile(t, dir, "AGENTS.md", "## Overview\nThis project uses Speckit for specs.\n")
+		createFile(t, dir, "specs/001-feature/spec.md", "# Spec")
+		createFile(t, dir, "openspec/config.yaml", "schema: test")
+
+		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+		group := checkAgentContext(opts)
+
+		results := make(map[string]CheckResult)
+		for _, r := range group.Results {
+			results[r.Name] = r
+		}
+
+		r, ok := results["Spec framework described"]
+		if !ok {
+			t.Fatal("missing Spec framework described check")
+		}
+		if r.Severity != Pass {
+			t.Errorf("severity = %v, want Pass", r.Severity)
+		}
+	})
+
+	t.Run("not described", func(t *testing.T) {
+		dir := t.TempDir()
+		createFile(t, dir, "AGENTS.md", "## Overview\nJust a project.\n")
+		createFile(t, dir, "specs/001-feature/spec.md", "# Spec")
+
+		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+		group := checkAgentContext(opts)
+
+		results := make(map[string]CheckResult)
+		for _, r := range group.Results {
+			results[r.Name] = r
+		}
+
+		r, ok := results["Spec framework described"]
+		if !ok {
+			t.Fatal("missing Spec framework described check")
+		}
+		if r.Severity != Warn {
+			t.Errorf("severity = %v, want Warn", r.Severity)
+		}
+	})
+}
+
+func TestCheckAgentContext_SpecFrameworkSkipped(t *testing.T) {
+	dir := t.TempDir()
+	createFile(t, dir, "AGENTS.md", "## Overview\nJust a project.\n")
+	// No specs/ or openspec/ directories
+
+	opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+	group := checkAgentContext(opts)
+
+	for _, r := range group.Results {
+		if r.Name == "Spec framework described" {
+			t.Error("Spec framework check should be omitted when no specs/ or openspec/ exist")
+		}
+	}
+}
+
+func TestCheckAgentContext_BridgeCLAUDEmd(t *testing.T) {
+	t.Run("imports AGENTS.md", func(t *testing.T) {
+		dir := t.TempDir()
+		createFile(t, dir, "AGENTS.md", "## Overview\n")
+		createFile(t, dir, "CLAUDE.md", "# Claude\n@AGENTS.md\n")
+
+		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+		group := checkAgentContext(opts)
+
+		results := make(map[string]CheckResult)
+		for _, r := range group.Results {
+			results[r.Name] = r
+		}
+
+		if r := results["Bridge: CLAUDE.md"]; r.Severity != Pass {
+			t.Errorf("severity = %v, want Pass", r.Severity)
+		}
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		dir := t.TempDir()
+		createFile(t, dir, "AGENTS.md", "## Overview\n")
+
+		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+		group := checkAgentContext(opts)
+
+		results := make(map[string]CheckResult)
+		for _, r := range group.Results {
+			results[r.Name] = r
+		}
+
+		if r := results["Bridge: CLAUDE.md"]; r.Severity != Warn {
+			t.Errorf("severity = %v, want Warn", r.Severity)
+		}
+	})
+
+	t.Run("exists but no reference", func(t *testing.T) {
+		dir := t.TempDir()
+		createFile(t, dir, "AGENTS.md", "## Overview\n")
+		createFile(t, dir, "CLAUDE.md", "# Claude\nSome content.\n")
+
+		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+		group := checkAgentContext(opts)
+
+		results := make(map[string]CheckResult)
+		for _, r := range group.Results {
+			results[r.Name] = r
+		}
+
+		if r := results["Bridge: CLAUDE.md"]; r.Severity != Warn {
+			t.Errorf("severity = %v, want Warn", r.Severity)
+		}
+	})
+}
+
+func TestCheckAgentContext_BridgeCursorrules(t *testing.T) {
+	t.Run("references AGENTS.md", func(t *testing.T) {
+		dir := t.TempDir()
+		createFile(t, dir, "AGENTS.md", "## Overview\n")
+		createFile(t, dir, ".cursorrules", "Read AGENTS.md for conventions.\n")
+
+		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+		group := checkAgentContext(opts)
+
+		results := make(map[string]CheckResult)
+		for _, r := range group.Results {
+			results[r.Name] = r
+		}
+
+		if r := results["Bridge: .cursorrules"]; r.Severity != Pass {
+			t.Errorf("severity = %v, want Pass", r.Severity)
+		}
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		dir := t.TempDir()
+		createFile(t, dir, "AGENTS.md", "## Overview\n")
+
+		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+		group := checkAgentContext(opts)
+
+		results := make(map[string]CheckResult)
+		for _, r := range group.Results {
+			results[r.Name] = r
+		}
+
+		if r := results["Bridge: .cursorrules"]; r.Severity != Warn {
+			t.Errorf("severity = %v, want Warn", r.Severity)
+		}
+	})
+}
+
+func TestCheckAgentContext_FullPass(t *testing.T) {
+	dir := t.TempDir()
+	createFile(t, dir, "AGENTS.md", completeAGENTSmd())
+	createFile(t, dir, ".specify/memory/constitution.md", "# Constitution\n")
+	createFile(t, dir, "specs/001-feature/spec.md", "# Spec")
+	createFile(t, dir, "openspec/config.yaml", "schema: unbound-force")
+	createFile(t, dir, "CLAUDE.md", "# Claude\n@AGENTS.md\n")
+	createFile(t, dir, ".cursorrules", "Read AGENTS.md for conventions.\n")
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+	}
+
+	group := checkAgentContext(opts)
+
+	if group.Name != "Agent Context" {
+		t.Errorf("group name = %q, want Agent Context", group.Name)
+	}
+
+	// All 12 checks should be present and passing.
+	for _, r := range group.Results {
+		if r.Severity != Pass {
+			t.Errorf("check %q: severity = %v, want Pass (message: %s)",
+				r.Name, r.Severity, r.Message)
+		}
+	}
+
+	// Verify expected check count: 1 (existence) + 5 (tier1) +
+	// 1 (code blocks) + 1 (line count) + 1 (constitution) +
+	// 1 (spec framework) + 2 (bridges) = 12.
+	if len(group.Results) != 12 {
+		t.Errorf("expected 12 check results, got %d", len(group.Results))
+		for _, r := range group.Results {
+			t.Logf("  %s: %v — %s", r.Name, r.Severity, r.Message)
+		}
 	}
 }

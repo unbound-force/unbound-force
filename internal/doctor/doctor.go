@@ -123,6 +123,7 @@ func Run(opts Options) (*Report, error) {
 		checkCoreTools(&opts, env),
 		checkReplicator(&opts),
 		checkDewey(&opts),
+		checkAgentContext(&opts),
 		checkScaffoldedFiles(&opts),
 		checkHeroAvailability(&opts),
 		checkMCPConfig(&opts),
