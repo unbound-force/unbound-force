@@ -100,6 +100,7 @@ Classify files as user-facing or internal based on path patterns:
 - Does this change modify user-facing behavior (CLI commands, agent capabilities, installation steps, workflows)?
 - If yes:
   - Was `AGENTS.md` updated (Recent Changes, Project Structure, Active Technologies as applicable)?
+  - Do Recent Changes entries include `Spec:` paths to canonical specs under `openspec/specs/`?
   - Was `README.md` updated if project description or install steps changed?
 - If documentation updates were needed but missing, flag as MEDIUM.
 - Skip for internal-only changes (refactoring, test-only, CI-only).
