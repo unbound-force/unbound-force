@@ -183,6 +183,23 @@ func checkOllamaModel(opts *Options, base CheckResult) CheckResult {
 
 // checkOneTool checks a single tool binary.
 func checkOneTool(spec toolSpec, opts *Options, env DetectedEnvironment) CheckResult {
+	// Apply ToolSeverities config override before checking.
+	if opts.ToolSeverities != nil {
+		if override, ok := opts.ToolSeverities[spec.name]; ok {
+			switch override {
+			case "required":
+				spec.required = true
+				spec.recommended = false
+			case "recommended":
+				spec.required = false
+				spec.recommended = true
+			case "optional":
+				spec.required = false
+				spec.recommended = false
+			}
+		}
+	}
+
 	path, err := opts.LookPath(spec.name)
 	if err != nil {
 		// Tool not found — determine severity based on classification.

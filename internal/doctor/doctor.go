@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -130,7 +131,7 @@ func Run(opts Options) (*Report, error) {
 
 	env := DetectEnvironment(&opts)
 
-	groups := []CheckGroup{
+	allGroups := []CheckGroup{
 		checkDetectedEnvironment(env),
 		checkCoreTools(&opts, env),
 		checkReplicator(&opts),
@@ -141,6 +142,10 @@ func Run(opts Options) (*Report, error) {
 		checkMCPConfig(&opts),
 		checkAgentSkillIntegrity(&opts),
 	}
+
+	// Apply SkipChecks filter: remove check groups or
+	// individual results whose name matches a skip entry.
+	groups := filterSkippedChecks(allGroups, opts.SkipChecks)
 
 	summary := computeSummary(groups)
 
@@ -156,6 +161,40 @@ func Run(opts Options) (*Report, error) {
 	}
 
 	return report, nil
+}
+
+// filterSkippedChecks removes check groups or individual results
+// whose name matches a skip entry. Names are compared case-insensitively.
+func filterSkippedChecks(groups []CheckGroup, skipChecks []string) []CheckGroup {
+	if len(skipChecks) == 0 {
+		return groups
+	}
+
+	skipSet := make(map[string]bool, len(skipChecks))
+	for _, s := range skipChecks {
+		skipSet[strings.ToLower(s)] = true
+	}
+
+	var filtered []CheckGroup
+	for _, g := range groups {
+		// Skip entire group if its name matches.
+		if skipSet[strings.ToLower(g.Name)] {
+			continue
+		}
+
+		// Filter individual results within the group.
+		var results []CheckResult
+		for _, r := range g.Results {
+			if !skipSet[strings.ToLower(r.Name)] {
+				results = append(results, r)
+			}
+		}
+		if len(results) > 0 {
+			g.Results = results
+			filtered = append(filtered, g)
+		}
+	}
+	return filtered
 }
 
 // computeSummary aggregates check result counts across all groups.

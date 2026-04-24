@@ -185,6 +185,17 @@ func (o *Options) shouldSkipTool(toolName string) bool {
 	return false
 }
 
+// toolMethod returns the configured install method for a tool,
+// or "auto" if no override is set.
+func (o *Options) toolMethod(toolName string) string {
+	if o.ToolMethods != nil {
+		if tc, ok := o.ToolMethods[toolName]; ok && tc.Method != "" {
+			return tc.Method
+		}
+	}
+	return "auto"
+}
+
 // Run executes the full setup workflow per FR-021/030/032/034/035.
 func Run(opts Options) error {
 	opts.defaults()
@@ -257,20 +268,35 @@ func Run(opts Options) error {
 
 	// Step 3: Install Mx F Manager hero.
 	fmt.Fprintf(opts.Stdout, "  [3/14] Mx F...\n")
-	results = append(results, installMxF(&opts, env))
+	if opts.shouldSkipTool("mxf") {
+		results = append(results, stepResult{name: "Mx F", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installMxF(&opts, env))
+	}
 
 	// Step 4: Install GitHub CLI.
 	fmt.Fprintf(opts.Stdout, "  [4/14] GitHub CLI...\n")
-	results = append(results, installGH(&opts, env))
+	if opts.shouldSkipTool("gh") {
+		results = append(results, stepResult{name: "GitHub CLI", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installGH(&opts, env))
+	}
 
 	// Step 5: Ensure Node.js (FR-024).
 	fmt.Fprintf(opts.Stdout, "  [5/14] Node.js...\n")
-	nodeResult := ensureNodeJS(&opts, env)
-	results = append(results, nodeResult)
-	nodeAvailable := nodeResult.err == nil && nodeResult.action != "failed"
+	nodeAvailable := false
+	if opts.shouldSkipTool("node") {
+		results = append(results, stepResult{name: "Node.js", action: "skipped", detail: "excluded by config"})
+	} else {
+		nodeResult := ensureNodeJS(&opts, env)
+		results = append(results, nodeResult)
+		nodeAvailable = nodeResult.err == nil && nodeResult.action != "failed"
+	}
 
 	// Step 6: Install OpenSpec CLI (Node.js-dependent).
-	if nodeAvailable {
+	if opts.shouldSkipTool("openspec") {
+		results = append(results, stepResult{name: "OpenSpec CLI", action: "skipped", detail: "excluded by config"})
+	} else if nodeAvailable {
 		fmt.Fprintf(opts.Stdout, "  [6/14] OpenSpec CLI...\n")
 		results = append(results, installOpenSpec(&opts, env))
 	} else {
@@ -279,12 +305,19 @@ func Run(opts Options) error {
 
 	// Step 7: Install uv (Python package manager for Specify CLI).
 	fmt.Fprintf(opts.Stdout, "  [7/14] uv...\n")
-	uvResult := installUV(&opts, env)
-	results = append(results, uvResult)
-	uvAvailable := uvResult.err == nil && uvResult.action != "failed"
+	uvAvailable := false
+	if opts.shouldSkipTool("uv") {
+		results = append(results, stepResult{name: "uv", action: "skipped", detail: "excluded by config"})
+	} else {
+		uvResult := installUV(&opts, env)
+		results = append(results, uvResult)
+		uvAvailable = uvResult.err == nil && uvResult.action != "failed"
+	}
 
 	// Step 8: Install Specify CLI (uv-dependent).
-	if uvAvailable {
+	if opts.shouldSkipTool("specify") {
+		results = append(results, stepResult{name: "Specify CLI", action: "skipped", detail: "excluded by config"})
+	} else if uvAvailable {
 		fmt.Fprintf(opts.Stdout, "  [8/14] Specify CLI...\n")
 		results = append(results, installSpecify(&opts, env))
 	} else {
@@ -293,32 +326,55 @@ func Run(opts Options) error {
 
 	// Step 9: Install Replicator (Homebrew, replaces Swarm plugin).
 	fmt.Fprintf(opts.Stdout, "  [9/14] Replicator...\n")
-	replicatorResult := installReplicator(&opts, env)
-	results = append(results, replicatorResult)
+	replicatorSkipped := false
+	if opts.shouldSkipTool("replicator") {
+		results = append(results, stepResult{name: "Replicator", action: "skipped", detail: "excluded by config"})
+		replicatorSkipped = true
+	} else {
+		replicatorResult := installReplicator(&opts, env)
+		results = append(results, replicatorResult)
+		replicatorSkipped = replicatorResult.err != nil || replicatorResult.action == "failed" || replicatorResult.action == "skipped"
+	}
 
 	// Step 10: Run replicator setup.
-	if replicatorResult.err == nil && replicatorResult.action != "failed" && replicatorResult.action != "skipped" {
+	if replicatorSkipped {
+		results = append(results, stepResult{name: "replicator setup", action: "skipped", detail: "no replicator"})
+	} else {
 		fmt.Fprintf(opts.Stdout, "  [10/14] Replicator setup...\n")
 		results = append(results, runReplicatorSetup(&opts))
-	} else {
-		results = append(results, stepResult{name: "replicator setup", action: "skipped", detail: "no replicator"})
 	}
 
 	// Step 11: Install Ollama (prerequisite for Dewey + Replicator embeddings).
 	fmt.Fprintf(opts.Stdout, "  [11/14] Ollama...\n")
-	results = append(results, installOllama(&opts, env))
+	if opts.shouldSkipTool("ollama") {
+		results = append(results, stepResult{name: "Ollama", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installOllama(&opts, env))
+	}
 
 	// Step 12: Install Dewey (after Ollama).
 	fmt.Fprintf(opts.Stdout, "  [12/14] Dewey...\n")
-	results = append(results, installDewey(&opts, env))
+	if opts.shouldSkipTool("dewey") {
+		results = append(results, stepResult{name: "Dewey", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installDewey(&opts, env))
+	}
 
 	// Step 13: Install golangci-lint (Spec 019 FR-012).
 	fmt.Fprintf(opts.Stdout, "  [13/14] golangci-lint...\n")
-	results = append(results, installGolangciLint(&opts, env))
+	if opts.shouldSkipTool("golangci-lint") {
+		results = append(results, stepResult{name: "golangci-lint", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installGolangciLint(&opts, env))
+	}
 
 	// Step 14: Install govulncheck (Spec 019 FR-012).
 	fmt.Fprintf(opts.Stdout, "  [14/14] govulncheck...\n")
-	results = append(results, installGovulncheck(&opts, env))
+	if opts.shouldSkipTool("govulncheck") {
+		results = append(results, stepResult{name: "govulncheck", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installGovulncheck(&opts, env))
+	}
 
 	// Print results.
 	for _, r := range results {
@@ -466,6 +522,23 @@ func installGaze(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		return stepResult{name: "Gaze", action: "already installed"}
 	}
 
+	// Method dispatch: respect per-tool config override.
+	method := opts.toolMethod("gaze")
+	switch method {
+	case "rpm", "dnf":
+		return installViaRpm(opts, "Gaze", "unbound-force/gaze", opts.Version)
+	case "homebrew":
+		// Force Homebrew regardless of detection.
+		if opts.DryRun {
+			return stepResult{name: "Gaze", action: "dry-run", detail: "Would install: brew install unbound-force/tap/gaze"}
+		}
+		if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/gaze"); err != nil {
+			return stepResult{name: "Gaze", action: "failed", detail: "brew install failed", err: err}
+		}
+		return stepResult{name: "Gaze", action: "installed", detail: "via Homebrew"}
+	}
+
+	// Auto: try Homebrew, fall back to skip with hint.
 	if opts.DryRun {
 		if doctor.HasManager(env, doctor.ManagerHomebrew) {
 			return stepResult{name: "Gaze", action: "dry-run", detail: "Would install: brew install unbound-force/tap/gaze"}

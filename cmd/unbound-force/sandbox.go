@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/unbound-force/unbound-force/internal/config"
 	"github.com/unbound-force/unbound-force/internal/sandbox"
 )
 
@@ -43,6 +44,31 @@ Subcommands:
 	return cmd
 }
 
+// applySandboxConfig applies config defaults to sandbox Options
+// fields that are at their zero/default values. CLI flags take
+// precedence (they're already set on the params struct).
+func applySandboxConfig(opts *sandbox.Options) {
+	cfg, _ := config.Load(config.LoadOptions{ProjectDir: opts.ProjectDir})
+	if cfg == nil {
+		return
+	}
+	if opts.BackendName == "" && cfg.Sandbox.Backend != "" && cfg.Sandbox.Backend != "auto" {
+		opts.BackendName = cfg.Sandbox.Backend
+	}
+	if opts.Image == "" && cfg.Sandbox.Image != "" {
+		opts.Image = cfg.Sandbox.Image
+	}
+	if opts.Memory == "" && cfg.Sandbox.Resources.Memory != "" {
+		opts.Memory = cfg.Sandbox.Resources.Memory
+	}
+	if opts.CPUs == "" && cfg.Sandbox.Resources.CPUs != "" {
+		opts.CPUs = cfg.Sandbox.Resources.CPUs
+	}
+	if opts.Mode == "" && cfg.Sandbox.Mode != "" {
+		opts.Mode = cfg.Sandbox.Mode
+	}
+}
+
 // --- create ---
 
 type sandboxCreateParams struct {
@@ -59,7 +85,7 @@ type sandboxCreateParams struct {
 }
 
 func runSandboxCreate(p sandboxCreateParams) error {
-	return sandbox.Create(sandbox.Options{
+	opts := sandbox.Options{
 		ProjectDir:    p.projectDir,
 		BackendName:   p.backend,
 		Image:         p.image,
@@ -70,7 +96,9 @@ func runSandboxCreate(p sandboxCreateParams) error {
 		DemoPorts:     p.demoPorts,
 		Stdout:        p.stdout,
 		Stderr:        p.stderr,
-	})
+	}
+	applySandboxConfig(&opts)
+	return sandbox.Create(opts)
 }
 
 func newSandboxCreateCmd() *cobra.Command {
@@ -219,7 +247,7 @@ type sandboxStartParams struct {
 }
 
 func runSandboxStart(p sandboxStartParams) error {
-	return sandbox.Start(sandbox.Options{
+	opts := sandbox.Options{
 		ProjectDir:  p.projectDir,
 		Mode:        p.mode,
 		Detach:      p.detach,
@@ -230,7 +258,9 @@ func runSandboxStart(p sandboxStartParams) error {
 		BackendName: p.backend,
 		Stdout:      p.stdout,
 		Stderr:      p.stderr,
-	})
+	}
+	applySandboxConfig(&opts)
+	return sandbox.Start(opts)
 }
 
 func newSandboxStartCmd() *cobra.Command {
