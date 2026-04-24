@@ -1,8 +1,9 @@
 ---
 description: >
   Finalize a branch: commit, push, create PR, watch CI
-  checks, rebase-merge, and return to main. One command
-  to wrap up any feature or OpenSpec branch.
+  checks, and return to main. The PR stays open for
+  review. One command to wrap up any feature or OpenSpec
+  branch.
 ---
 <!-- scaffolded by uf vdev -->
 <!-- scaffolded by uf vdev -->
@@ -21,9 +22,9 @@ $ARGUMENTS
 
 Automate the end-of-branch workflow. Stages all changes,
 generates a conventional commit message, pushes, creates
-a PR, watches CI checks, rebase-merges, and returns to
-`main`. Works with both Speckit (`NNN-*`) and OpenSpec
-(`opsx/*`) branches.
+a PR, watches CI checks, and returns to `main`. The PR
+stays open for human review. Works with both Speckit
+(`NNN-*`) and OpenSpec (`opsx/*`) branches.
 
 ## Usage
 
@@ -178,22 +179,11 @@ gh pr checks <number> --watch
   > 2. Re-run the checks
   > 3. Stop here and fix manually"
 
-  Ask the user how to proceed. Do NOT auto-merge a
-  PR with failing checks.
+  Ask the user how to proceed.
 
-### 7. Merge PR
+### 7. Return to Main
 
-```bash
-gh pr merge <number> --rebase --delete-branch
-```
-
-- If merge fails (e.g., merge conflict, branch
-  protection): report error and **STOP**.
-- If merge succeeds: proceed.
-
-### 8. Return to Main
-
-After merge, verify the branch switch:
+Return to main so the developer can start other work:
 
 ```bash
 git checkout main 2>/dev/null  # may already be on main
@@ -207,29 +197,33 @@ git rev-parse --abbrev-ref HEAD
 
 Should be `main`.
 
-### 9. Summary
+### 8. Summary
 
 Display a completion report:
 
 ```
 ## Finale Complete
 
-**Branch:** opsx/finale-command (deleted)
+**Branch:** opsx/finale-command (pushed)
 **Commit:** feat: add /finale slash command
-**PR:** #65 — merged via rebase
+**PR:** #65 — CI passed, ready for review
 **Checks:** passed
 **Status:** on main, up to date
+
+Next: Request reviewers on the PR, then merge after
+approval with: gh pr merge --rebase --delete-branch
 ```
 
 ## Guardrails
 
 - **NEVER run on `main`** — the command is for feature
   branches only
-- **NEVER merge with failing checks** — stop and report
+- **NEVER merge the PR** — /finale creates PRs for
+  review, not for immediate merge. Users merge manually
+  after reviewer approval.
 - **NEVER stage secret files without warning** — always
   prompt
 - **NEVER commit without user approval** of the message
-- **ALWAYS use rebase merge** — no squash or merge commit
 - **ALWAYS report the PR URL** so the user can review it
 - **If any step fails**, stop immediately with context
   and options — do not attempt to continue or recover
@@ -242,5 +236,5 @@ the OpenSpec and Speckit workflows:
 
 - Checks `git status` before any destructive operation
 - All changes are committed before any branch switch
-- The branch is deleted only via `--delete-branch` on
-  merge (remote deletion handled by GitHub)
+- The remote branch is NOT deleted — it stays open with
+  the PR until a reviewer merges
