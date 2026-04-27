@@ -63,7 +63,7 @@ func DetectProvider(
 	// Priority 1: Vertex AI.
 	if getenv("CLAUDE_CODE_USE_VERTEX") == "1" &&
 		getenv("ANTHROPIC_VERTEX_PROJECT_ID") != "" {
-		return newVertexProvider(getenv, execCmd), nil
+		return newVertexProvider(getenv, execCmd)
 	}
 
 	// Priority 2: Bedrock.
@@ -96,7 +96,7 @@ func NewProviderByName(
 	case "anthropic":
 		return newAnthropicProvider(getenv), nil
 	case "vertex":
-		return newVertexProvider(getenv, execCmd), nil
+		return newVertexProvider(getenv, execCmd)
 	case "bedrock":
 		return newBedrockProvider(getenv, execCmd), nil
 	default:
@@ -164,14 +164,14 @@ type VertexProvider struct {
 func newVertexProvider(
 	getenv func(string) string,
 	execCmd func(string, ...string) ([]byte, error),
-) *VertexProvider {
+) (*VertexProvider, error) {
 	// Region resolution priority:
 	//   1. ANTHROPIC_VERTEX_REGION (Claude Code convention)
 	//   2. VERTEX_LOCATION (Google Cloud convention)
 	//   3. CLOUD_ML_REGION (legacy)
 	//   4. Default: us-east5
-	// "global" is rejected — Vertex rawPredict requires a
-	// specific region (e.g., us-east5, europe-west1).
+	// "global" returns an error — Vertex rawPredict
+	// requires a specific regional endpoint.
 	region := getenv("ANTHROPIC_VERTEX_REGION")
 	if region == "" {
 		region = getenv("VERTEX_LOCATION")
@@ -179,7 +179,17 @@ func newVertexProvider(
 	if region == "" {
 		region = getenv("CLOUD_ML_REGION")
 	}
-	if region == "" || region == "global" {
+	if region == "global" {
+		return nil, fmt.Errorf(
+			"vertex region %q is not supported for "+
+				"rawPredict/streamRawPredict. These "+
+				"endpoints require a specific region "+
+				"(e.g., us-east5, europe-west1). Set "+
+				"ANTHROPIC_VERTEX_REGION to override "+
+				"VERTEX_LOCATION and CLOUD_ML_REGION",
+			region)
+	}
+	if region == "" {
 		region = "us-east5"
 	}
 	return &VertexProvider{
@@ -187,7 +197,7 @@ func newVertexProvider(
 		region:    region,
 		execCmd:   execCmd,
 		getenv:    getenv,
-	}
+	}, nil
 }
 
 // Name returns "vertex".

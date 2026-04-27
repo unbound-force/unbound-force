@@ -688,7 +688,10 @@ func TestVertexProvider_Start_Success(t *testing.T) {
 		return nil, fmt.Errorf("unexpected command: %s", name)
 	}
 
-	prov := newVertexProvider(getenv, execCmd)
+	prov, err := newVertexProvider(getenv, execCmd)
+	if err != nil {
+		t.Fatalf("newVertexProvider: %v", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -718,7 +721,10 @@ func TestVertexProvider_Start_GcloudFails(t *testing.T) {
 		return []byte("ERROR: not authenticated"), fmt.Errorf("exit 1")
 	}
 
-	prov := newVertexProvider(getenv, execCmd)
+	prov, provErr := newVertexProvider(getenv, execCmd)
+	if provErr != nil {
+		t.Fatalf("newVertexProvider: %v", provErr)
+	}
 	err := prov.Start(context.Background())
 	if err == nil {
 		t.Fatal("expected error when gcloud fails")
@@ -746,7 +752,10 @@ func TestVertexProvider_TokenRefresh(t *testing.T) {
 		return []byte(fmt.Sprintf("token-%d\n", n)), nil
 	}
 
-	prov := newVertexProvider(getenv, execCmd)
+	prov, provErr := newVertexProvider(getenv, execCmd)
+	if provErr != nil {
+		t.Fatalf("newVertexProvider: %v", provErr)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	if err := prov.Start(ctx); err != nil {
@@ -3692,6 +3701,161 @@ type mockReadCloser struct {
 
 func (m *mockReadCloser) Close() error {
 	return m.onClose()
+}
+
+func TestNewVertexProvider_GlobalRegionError(t *testing.T) {
+	getenv := func(key string) string {
+		switch key {
+		case "VERTEX_LOCATION":
+			return "global"
+		case "CLOUD_ML_REGION":
+			return "global"
+		case "ANTHROPIC_VERTEX_PROJECT_ID":
+			return "my-project"
+		}
+		return ""
+	}
+	execCmd := func(string, ...string) ([]byte, error) {
+		return nil, nil
+	}
+
+	_, err := newVertexProvider(getenv, execCmd)
+	if err == nil {
+		t.Fatal("expected error for global region")
+	}
+	if !strings.Contains(err.Error(), "global") {
+		t.Errorf("error should mention 'global', got: %s",
+			err.Error())
+	}
+	if !strings.Contains(err.Error(),
+		"ANTHROPIC_VERTEX_REGION") {
+		t.Errorf("error should mention "+
+			"ANTHROPIC_VERTEX_REGION, got: %s",
+			err.Error())
+	}
+}
+
+func TestNewVertexProvider_CloudMLRegionGlobalAlone(t *testing.T) {
+	getenv := func(key string) string {
+		switch key {
+		case "CLOUD_ML_REGION":
+			return "global"
+		case "ANTHROPIC_VERTEX_PROJECT_ID":
+			return "my-project"
+		}
+		return ""
+	}
+	execCmd := func(string, ...string) ([]byte, error) {
+		return nil, nil
+	}
+
+	_, err := newVertexProvider(getenv, execCmd)
+	if err == nil {
+		t.Fatal("expected error for CLOUD_ML_REGION=global")
+	}
+	if !strings.Contains(err.Error(), "global") {
+		t.Errorf("error should mention 'global', got: %s",
+			err.Error())
+	}
+}
+
+func TestNewVertexProvider_GlobalOverriddenBySpecificRegion(t *testing.T) {
+	getenv := func(key string) string {
+		switch key {
+		case "VERTEX_LOCATION":
+			return "global"
+		case "ANTHROPIC_VERTEX_REGION":
+			return "us-east5"
+		case "ANTHROPIC_VERTEX_PROJECT_ID":
+			return "my-project"
+		}
+		return ""
+	}
+	execCmd := func(string, ...string) ([]byte, error) {
+		return nil, nil
+	}
+
+	prov, err := newVertexProvider(getenv, execCmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prov.region != "us-east5" {
+		t.Errorf("region: got %q, want %q",
+			prov.region, "us-east5")
+	}
+}
+
+func TestNewVertexProvider_EmptyRegionDefault(t *testing.T) {
+	getenv := func(key string) string {
+		if key == "ANTHROPIC_VERTEX_PROJECT_ID" {
+			return "my-project"
+		}
+		return ""
+	}
+	execCmd := func(string, ...string) ([]byte, error) {
+		return nil, nil
+	}
+
+	prov, err := newVertexProvider(getenv, execCmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prov.region != "us-east5" {
+		t.Errorf("region: got %q, want %q",
+			prov.region, "us-east5")
+	}
+}
+
+func TestDetectProvider_GlobalRegionError(t *testing.T) {
+	getenv := func(key string) string {
+		switch key {
+		case "CLAUDE_CODE_USE_VERTEX":
+			return "1"
+		case "ANTHROPIC_VERTEX_PROJECT_ID":
+			return "my-project"
+		case "VERTEX_LOCATION":
+			return "global"
+		}
+		return ""
+	}
+	execCmd := func(string, ...string) ([]byte, error) {
+		return nil, nil
+	}
+
+	_, err := DetectProvider(getenv, execCmd)
+	if err == nil {
+		t.Fatal("expected error from DetectProvider " +
+			"with global region")
+	}
+	if !strings.Contains(err.Error(), "global") {
+		t.Errorf("error should mention 'global', got: %s",
+			err.Error())
+	}
+}
+
+func TestNewProviderByName_VertexGlobalRegionError(t *testing.T) {
+	getenv := func(key string) string {
+		switch key {
+		case "VERTEX_LOCATION":
+			return "global"
+		case "ANTHROPIC_VERTEX_PROJECT_ID":
+			return "my-project"
+		}
+		return ""
+	}
+	execCmd := func(string, ...string) ([]byte, error) {
+		return nil, nil
+	}
+
+	_, err := NewProviderByName("vertex", getenv, execCmd)
+	if err == nil {
+		t.Fatal("expected error from NewProviderByName " +
+			"with global region")
+	}
+	if !strings.Contains(err.Error(), "global") {
+		t.Errorf("error should mention 'global', got: %s",
+			err.Error())
+	}
 }
 
 // Suppress unused import warnings.
