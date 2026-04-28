@@ -9,9 +9,28 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/log"
 )
+
+// vertexTokenLifetime is the assumed lifetime of a gcloud
+// OAuth token. Set to 55 minutes (tokens typically expire
+// at 60 minutes, with 5 minutes of safety margin).
+const vertexTokenLifetime = 55 * time.Minute
+
+// proactiveRefreshWindow is the window before token expiry
+// during which PrepareRequest will attempt a proactive
+// refresh. If the token expires within this window, a
+// non-blocking refresh is attempted before forwarding the
+// request.
+const proactiveRefreshWindow = 5 * time.Minute
+
+// bedrockCredLifetime is the assumed lifetime of AWS
+// session credentials. Set to 50 minutes (session tokens
+// typically expire in 1-12 hours; 50 minutes matches the
+// existing refresh interval).
+const bedrockCredLifetime = 50 * time.Minute
 
 // Provider abstracts the upstream cloud provider's
 // authentication and URL rewriting strategy.
@@ -152,13 +171,15 @@ func (p *AnthropicProvider) Stop() {}
 // VertexProvider forwards requests to the Vertex AI
 // rawPredict endpoint with an OAuth bearer token.
 type VertexProvider struct {
-	projectID string
-	region    string
-	token     string
-	tokenMu   sync.RWMutex
-	cancel    context.CancelFunc
-	execCmd   func(string, ...string) ([]byte, error)
-	getenv    func(string) string
+	projectID      string
+	region         string
+	token          string
+	tokenExpiry    time.Time
+	tokenMu        sync.RWMutex
+	tokenRefreshing sync.Mutex
+	cancel         context.CancelFunc
+	execCmd        func(string, ...string) ([]byte, error)
+	getenv         func(string) string
 }
 
 func newVertexProvider(
@@ -212,6 +233,7 @@ func (p *VertexProvider) Start(ctx context.Context) error {
 	}
 	p.tokenMu.Lock()
 	p.token = token
+	p.tokenExpiry = time.Now().Add(vertexTokenLifetime)
 	p.tokenMu.Unlock()
 
 	// Start background refresh goroutine (50-minute
@@ -222,10 +244,18 @@ func (p *VertexProvider) Start(ctx context.Context) error {
 		newToken, err := refreshVertexToken(p.execCmd)
 		if err != nil {
 			log.Error("vertex token refresh failed", "error", err)
+			// Invalidate stale token so PrepareRequest
+			// returns a clear error instead of forwarding
+			// an expired token silently.
+			p.tokenMu.Lock()
+			p.token = ""
+			p.tokenExpiry = time.Time{}
+			p.tokenMu.Unlock()
 			return err
 		}
 		p.tokenMu.Lock()
 		p.token = newToken
+		p.tokenExpiry = time.Now().Add(vertexTokenLifetime)
 		p.tokenMu.Unlock()
 		log.Info("vertex token refreshed")
 		return nil
@@ -251,9 +281,38 @@ func (p *VertexProvider) PrepareRequest(req *http.Request) error {
 	token := p.token
 	p.tokenMu.RUnlock()
 
+	// Defense in depth: empty token check first (covers
+	// the case where refresh cleared the token).
 	if token == "" {
 		return fmt.Errorf(
 			"vertex AI token unavailable. Re-authenticate: " +
+				"gcloud auth application-default login")
+	}
+
+	// Proactive refresh: if the token expires within the
+	// proactive refresh window, attempt a non-blocking
+	// refresh before the request is forwarded. This
+	// prevents the token from expiring mid-flight.
+	p.tokenMu.RLock()
+	expiry := p.tokenExpiry
+	p.tokenMu.RUnlock()
+	if !expiry.IsZero() &&
+		time.Now().Add(proactiveRefreshWindow).After(expiry) {
+		p.tryProactiveRefresh()
+		// Re-read token — it may have been updated by
+		// the proactive refresh.
+		p.tokenMu.RLock()
+		token = p.token
+		expiry = p.tokenExpiry
+		p.tokenMu.RUnlock()
+	}
+
+	// Expiry check: reject the request if the token has
+	// already expired (proactive refresh may have failed
+	// or not been attempted).
+	if !expiry.IsZero() && time.Now().After(expiry) {
+		return fmt.Errorf(
+			"vertex AI token expired. Re-authenticate: " +
 				"gcloud auth application-default login")
 	}
 
@@ -300,19 +359,68 @@ func (p *VertexProvider) Stop() {
 	}
 }
 
+// proactiveRefreshTimeout is the maximum time to wait
+// for a proactive refresh subprocess. Prevents a hung
+// gcloud or aws CLI from blocking HTTP requests.
+const proactiveRefreshTimeout = 5 * time.Second
+
+// tryProactiveRefresh attempts a non-blocking token
+// refresh with a 5-second timeout. Uses TryLock to
+// deduplicate concurrent attempts — if another goroutine
+// is already refreshing, this call returns immediately
+// without blocking.
+//
+// On failure (including timeout), the existing token is
+// preserved (it may still be valid until expiry). Only
+// the background refresh loop clears the token on failure.
+func (p *VertexProvider) tryProactiveRefresh() {
+	if !p.tokenRefreshing.TryLock() {
+		return // another goroutine is already refreshing
+	}
+	defer p.tokenRefreshing.Unlock()
+
+	type result struct {
+		token string
+		err   error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		t, err := refreshVertexToken(p.execCmd)
+		ch <- result{t, err}
+	}()
+
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			log.Warn("vertex proactive token refresh failed",
+				"error", r.err)
+			return
+		}
+		p.tokenMu.Lock()
+		p.token = r.token
+		p.tokenExpiry = time.Now().Add(vertexTokenLifetime)
+		p.tokenMu.Unlock()
+	case <-time.After(proactiveRefreshTimeout):
+		log.Warn("vertex proactive token refresh timed out")
+		return
+	}
+}
+
 // --- Bedrock Provider ---
 
 // BedrockProvider forwards requests to the AWS Bedrock
 // invoke endpoint with SigV4 signing.
 type BedrockProvider struct {
-	region       string
-	accessKey    string
-	secretKey    string
-	sessionToken string
-	credMu       sync.RWMutex
-	cancel       context.CancelFunc
-	execCmd      func(string, ...string) ([]byte, error)
-	getenv       func(string) string
+	region         string
+	accessKey      string
+	secretKey      string
+	sessionToken   string
+	credExpiry     time.Time
+	credMu         sync.RWMutex
+	credRefreshing sync.Mutex
+	cancel         context.CancelFunc
+	execCmd        func(string, ...string) ([]byte, error)
+	getenv         func(string) string
 }
 
 func newBedrockProvider(
@@ -347,6 +455,7 @@ func (p *BedrockProvider) Start(ctx context.Context) error {
 	p.accessKey = ak
 	p.secretKey = sk
 	p.sessionToken = st
+	p.credExpiry = time.Now().Add(bedrockCredLifetime)
 	p.credMu.Unlock()
 
 	// Start background refresh goroutine (50-minute
@@ -358,12 +467,22 @@ func (p *BedrockProvider) Start(ctx context.Context) error {
 		newAK, newSK, newST, err := refreshBedrockCredentials(p.execCmd)
 		if err != nil {
 			log.Error("bedrock credential refresh failed", "error", err)
+			// Invalidate stale credentials so
+			// PrepareRequest returns a clear error
+			// instead of forwarding expired credentials.
+			p.credMu.Lock()
+			p.accessKey = ""
+			p.secretKey = ""
+			p.sessionToken = ""
+			p.credExpiry = time.Time{}
+			p.credMu.Unlock()
 			return err
 		}
 		p.credMu.Lock()
 		p.accessKey = newAK
 		p.secretKey = newSK
 		p.sessionToken = newST
+		p.credExpiry = time.Now().Add(bedrockCredLifetime)
 		p.credMu.Unlock()
 		log.Info("bedrock credentials refreshed")
 		return nil
@@ -381,9 +500,38 @@ func (p *BedrockProvider) PrepareRequest(req *http.Request) error {
 	st := p.sessionToken
 	p.credMu.RUnlock()
 
+	// Defense in depth: empty credentials check first
+	// (covers the case where refresh cleared credentials).
 	if ak == "" || sk == "" {
 		return fmt.Errorf(
 			"bedrock credentials unavailable. Re-authenticate: aws sso login")
+	}
+
+	// Proactive refresh: if credentials expire within the
+	// proactive refresh window, attempt a non-blocking
+	// refresh before the request is forwarded.
+	p.credMu.RLock()
+	expiry := p.credExpiry
+	p.credMu.RUnlock()
+	if !expiry.IsZero() &&
+		time.Now().Add(proactiveRefreshWindow).After(expiry) {
+		p.tryProactiveRefreshBedrock()
+		// Re-read credentials — they may have been
+		// updated by the proactive refresh.
+		p.credMu.RLock()
+		ak = p.accessKey
+		sk = p.secretKey
+		st = p.sessionToken
+		expiry = p.credExpiry
+		p.credMu.RUnlock()
+	}
+
+	// Expiry check: reject the request if credentials
+	// have already expired.
+	if !expiry.IsZero() && time.Now().After(expiry) {
+		return fmt.Errorf(
+			"bedrock credentials expired. Re-authenticate: " +
+				"aws sso login")
 	}
 
 	// Extract model from request body. Default to
@@ -409,6 +557,51 @@ func (p *BedrockProvider) PrepareRequest(req *http.Request) error {
 func (p *BedrockProvider) Stop() {
 	if p.cancel != nil {
 		p.cancel()
+	}
+}
+
+// tryProactiveRefreshBedrock attempts a non-blocking
+// credential refresh with a 5-second timeout. Uses
+// TryLock to deduplicate concurrent attempts — if
+// another goroutine is already refreshing, this call
+// returns immediately.
+//
+// On failure (including timeout), existing credentials
+// are preserved (they may still be valid until expiry).
+// Only the background refresh loop clears credentials
+// on failure.
+func (p *BedrockProvider) tryProactiveRefreshBedrock() {
+	if !p.credRefreshing.TryLock() {
+		return // another goroutine is already refreshing
+	}
+	defer p.credRefreshing.Unlock()
+
+	type result struct {
+		ak, sk, st string
+		err        error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		ak, sk, st, err := refreshBedrockCredentials(p.execCmd)
+		ch <- result{ak, sk, st, err}
+	}()
+
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			log.Warn("bedrock proactive credential refresh failed",
+				"error", r.err)
+			return
+		}
+		p.credMu.Lock()
+		p.accessKey = r.ak
+		p.secretKey = r.sk
+		p.sessionToken = r.st
+		p.credExpiry = time.Now().Add(bedrockCredLifetime)
+		p.credMu.Unlock()
+	case <-time.After(proactiveRefreshTimeout):
+		log.Warn("bedrock proactive credential refresh timed out")
+		return
 	}
 }
 

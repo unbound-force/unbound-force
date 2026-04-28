@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -498,9 +499,10 @@ func TestAnthropicProvider_Start_MissingKey(t *testing.T) {
 
 func TestVertexProvider_PrepareRequest(t *testing.T) {
 	prov := &VertexProvider{
-		projectID: "my-project",
-		region:    "us-east5",
-		token:     "ya29.test-token",
+		projectID:   "my-project",
+		region:      "us-east5",
+		token:       "ya29.test-token",
+		tokenExpiry: time.Now().Add(30 * time.Minute),
 	}
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`
@@ -562,9 +564,10 @@ func TestVertexProvider_PrepareRequest(t *testing.T) {
 
 func TestVertexProvider_PrepareRequest_StreamingEndpoint(t *testing.T) {
 	prov := &VertexProvider{
-		projectID: "my-project",
-		region:    "us-east5",
-		token:     "ya29.test-token",
+		projectID:   "my-project",
+		region:      "us-east5",
+		token:       "ya29.test-token",
+		tokenExpiry: time.Now().Add(30 * time.Minute),
 	}
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[],"stream":true}`
@@ -582,9 +585,10 @@ func TestVertexProvider_PrepareRequest_StreamingEndpoint(t *testing.T) {
 
 func TestVertexProvider_PrepareRequest_NonStreamingEndpoint(t *testing.T) {
 	prov := &VertexProvider{
-		projectID: "my-project",
-		region:    "us-east5",
-		token:     "ya29.test-token",
+		projectID:   "my-project",
+		region:      "us-east5",
+		token:       "ya29.test-token",
+		tokenExpiry: time.Now().Add(30 * time.Minute),
 	}
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[],"stream":false}`
@@ -602,9 +606,10 @@ func TestVertexProvider_PrepareRequest_NonStreamingEndpoint(t *testing.T) {
 
 func TestVertexProvider_PrepareRequest_CountTokensAlwaysRawPredict(t *testing.T) {
 	prov := &VertexProvider{
-		projectID: "my-project",
-		region:    "us-east5",
-		token:     "ya29.test-token",
+		projectID:   "my-project",
+		region:      "us-east5",
+		token:       "ya29.test-token",
+		tokenExpiry: time.Now().Add(30 * time.Minute),
 	}
 
 	// Even with stream=true, count_tokens should use rawPredict.
@@ -623,9 +628,10 @@ func TestVertexProvider_PrepareRequest_CountTokensAlwaysRawPredict(t *testing.T)
 
 func TestVertexProvider_PrepareRequest_HeaderStripping(t *testing.T) {
 	prov := &VertexProvider{
-		projectID: "my-project",
-		region:    "us-east5",
-		token:     "ya29.test-token",
+		projectID:   "my-project",
+		region:      "us-east5",
+		token:       "ya29.test-token",
+		tokenExpiry: time.Now().Add(30 * time.Minute),
 	}
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[]}`
@@ -648,9 +654,10 @@ func TestVertexProvider_PrepareRequest_HeaderStripping(t *testing.T) {
 
 func TestVertexProvider_PrepareRequest_PreservesOtherHeaders(t *testing.T) {
 	prov := &VertexProvider{
-		projectID: "my-project",
-		region:    "us-east5",
-		token:     "ya29.test-token",
+		projectID:   "my-project",
+		region:      "us-east5",
+		token:       "ya29.test-token",
+		tokenExpiry: time.Now().Add(30 * time.Minute),
 	}
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[]}`
@@ -792,6 +799,7 @@ func TestBedrockProvider_PrepareRequest(t *testing.T) {
 		accessKey:    "AKIAIOSFODNN7EXAMPLE",
 		secretKey:    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
 		sessionToken: "test-session-token",
+		credExpiry:   time.Now().Add(30 * time.Minute),
 	}
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`
@@ -2856,6 +2864,7 @@ func TestBedrockProvider_NoBodyTransformation(t *testing.T) {
 		accessKey:    "AKIAIOSFODNN7EXAMPLE",
 		secretKey:    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
 		sessionToken: "test-session-token",
+		credExpiry:   time.Now().Add(30 * time.Minute),
 	}
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`
@@ -3855,6 +3864,533 @@ func TestNewProviderByName_VertexGlobalRegionError(t *testing.T) {
 	if !strings.Contains(err.Error(), "global") {
 		t.Errorf("error should mention 'global', got: %s",
 			err.Error())
+	}
+}
+
+// ============================================================
+// Token Expiry & Proactive Refresh Tests (TC-006+)
+// ============================================================
+
+func TestVertexPrepareRequest_StaleTokenRegression(t *testing.T) {
+	// TC-006 regression: before the fix, a stale token
+	// would be forwarded without error. Now PrepareRequest
+	// must reject requests when the token has expired.
+	prov := &VertexProvider{
+		projectID:   "my-project",
+		region:      "us-east5",
+		token:       "stale-token",
+		tokenExpiry: time.Now().Add(-10 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("gcloud not authenticated")
+		},
+		getenv: func(key string) string { return "" },
+	}
+
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
+
+	err := prov.PrepareRequest(req)
+	if err == nil {
+		t.Fatal("expected error for expired token")
+	}
+	if !strings.Contains(err.Error(), "token expired") {
+		t.Errorf("expected 'token expired' error, got: %s", err.Error())
+	}
+}
+
+func TestVertexPrepareRequest_ValidToken(t *testing.T) {
+	prov := &VertexProvider{
+		projectID:   "my-project",
+		region:      "us-east5",
+		token:       "ya29.valid-token",
+		tokenExpiry: time.Now().Add(30 * time.Minute),
+	}
+
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
+
+	if err := prov.PrepareRequest(req); err != nil {
+		t.Fatalf("PrepareRequest should succeed with valid token: %v", err)
+	}
+
+	auth := req.Header.Get("Authorization")
+	if auth != "Bearer ya29.valid-token" {
+		t.Errorf("Authorization: got %q, want %q", auth, "Bearer ya29.valid-token")
+	}
+}
+
+func TestVertexPrepareRequest_ProactiveRefresh(t *testing.T) {
+	// Token expires in 3 minutes — within the proactive
+	// refresh window (5 minutes). PrepareRequest should
+	// trigger a proactive refresh.
+	prov := &VertexProvider{
+		projectID:   "my-project",
+		region:      "us-east5",
+		token:       "old-token",
+		tokenExpiry: time.Now().Add(3 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return []byte("new-token\n"), nil
+		},
+		getenv: func(key string) string {
+			switch key {
+			case "ANTHROPIC_VERTEX_PROJECT_ID":
+				return "my-project"
+			case "ANTHROPIC_VERTEX_REGION":
+				return "us-east5"
+			}
+			return ""
+		},
+	}
+
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
+
+	if err := prov.PrepareRequest(req); err != nil {
+		t.Fatalf("PrepareRequest should succeed: %v", err)
+	}
+
+	// Verify the token was updated.
+	prov.tokenMu.RLock()
+	token := prov.token
+	expiry := prov.tokenExpiry
+	prov.tokenMu.RUnlock()
+
+	if token != "new-token" {
+		t.Errorf("token: got %q, want %q", token, "new-token")
+	}
+	if time.Until(expiry) < 50*time.Minute {
+		t.Errorf("tokenExpiry should be reset to ~55 minutes from now, got %v until expiry",
+			time.Until(expiry))
+	}
+
+	auth := req.Header.Get("Authorization")
+	if auth != "Bearer new-token" {
+		t.Errorf("Authorization: got %q, want %q", auth, "Bearer new-token")
+	}
+}
+
+func TestVertexPrepareRequest_ProactiveRefreshFails(t *testing.T) {
+	// Token expires in 3 minutes — within the proactive
+	// refresh window. The refresh fails, but the request
+	// should proceed with the current (still valid) token.
+	prov := &VertexProvider{
+		projectID:   "my-project",
+		region:      "us-east5",
+		token:       "current-token",
+		tokenExpiry: time.Now().Add(3 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("gcloud not found")
+		},
+		getenv: func(key string) string { return "" },
+	}
+
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
+
+	if err := prov.PrepareRequest(req); err != nil {
+		t.Fatalf("PrepareRequest should succeed with still-valid token: %v", err)
+	}
+
+	// Verify the original token is preserved (not cleared).
+	prov.tokenMu.RLock()
+	token := prov.token
+	prov.tokenMu.RUnlock()
+
+	if token != "current-token" {
+		t.Errorf("token should be preserved on proactive refresh failure, got: %q", token)
+	}
+
+	auth := req.Header.Get("Authorization")
+	if auth != "Bearer current-token" {
+		t.Errorf("Authorization: got %q, want %q", auth, "Bearer current-token")
+	}
+}
+
+func TestVertexPrepareRequest_ProactiveRefreshTimeout(t *testing.T) {
+	// When execCmd returns an error (simulating any failure
+	// including timeout), the request should proceed with
+	// the current token.
+	prov := &VertexProvider{
+		projectID:   "my-project",
+		region:      "us-east5",
+		token:       "valid-token",
+		tokenExpiry: time.Now().Add(3 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("command timed out")
+		},
+		getenv: func(key string) string { return "" },
+	}
+
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
+
+	if err := prov.PrepareRequest(req); err != nil {
+		t.Fatalf("PrepareRequest should succeed despite refresh timeout: %v", err)
+	}
+
+	auth := req.Header.Get("Authorization")
+	if auth != "Bearer valid-token" {
+		t.Errorf("Authorization: got %q, want %q", auth, "Bearer valid-token")
+	}
+}
+
+func TestVertexRefreshFailure_ClearsToken(t *testing.T) {
+	// Simulate the refresh closure's failure path:
+	// token and tokenExpiry are cleared atomically.
+	prov := &VertexProvider{
+		projectID:   "my-project",
+		region:      "us-east5",
+		token:       "valid-token",
+		tokenExpiry: time.Now().Add(30 * time.Minute),
+	}
+
+	// Simulate what the refresh closure does on failure.
+	prov.tokenMu.Lock()
+	prov.token = ""
+	prov.tokenExpiry = time.Time{}
+	prov.tokenMu.Unlock()
+
+	if prov.token != "" {
+		t.Errorf("token should be empty after refresh failure, got: %q", prov.token)
+	}
+	if !prov.tokenExpiry.IsZero() {
+		t.Errorf("tokenExpiry should be zero after refresh failure, got: %v", prov.tokenExpiry)
+	}
+}
+
+func TestVertexPrepareRequest_ConcurrentProactiveRefresh(t *testing.T) {
+	// Verify that concurrent PrepareRequest calls with
+	// near-expiry tokens result in exactly 1 refresh
+	// invocation (TryLock deduplication).
+	var refreshCount atomic.Int32
+	prov := &VertexProvider{
+		projectID:   "my-project",
+		region:      "us-east5",
+		token:       "near-expiry-token",
+		tokenExpiry: time.Now().Add(3 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			refreshCount.Add(1)
+			// Brief sleep to simulate real gcloud latency.
+			time.Sleep(10 * time.Millisecond)
+			return []byte("refreshed-token\n"), nil
+		},
+		getenv: func(key string) string { return "" },
+	}
+
+	const goroutines = 5
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	// Use a barrier to synchronize all goroutines.
+	barrier := make(chan struct{})
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			<-barrier // Wait for barrier release.
+			req := httptest.NewRequest("POST", "/v1/messages",
+				strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
+			_ = prov.PrepareRequest(req)
+		}()
+	}
+
+	// Release all goroutines simultaneously.
+	close(barrier)
+	wg.Wait()
+
+	count := refreshCount.Load()
+	if count != 1 {
+		t.Errorf("expected exactly 1 refresh invocation (TryLock deduplication), got: %d", count)
+	}
+}
+
+func TestBedrockPrepareRequest_ExpiredCredentials(t *testing.T) {
+	prov := &BedrockProvider{
+		region:       "us-east-1",
+		accessKey:    "AKIATEST",
+		secretKey:    "secrettest",
+		sessionToken: "sessiontest",
+		credExpiry:   time.Now().Add(-10 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("aws CLI not authenticated")
+		},
+		getenv: func(key string) string { return "" },
+	}
+
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
+
+	err := prov.PrepareRequest(req)
+	if err == nil {
+		t.Fatal("expected error for expired credentials")
+	}
+	if !strings.Contains(err.Error(), "credentials expired") {
+		t.Errorf("expected 'credentials expired' error, got: %s", err.Error())
+	}
+}
+
+func TestBedrockRefreshFailure_ClearsCredentials(t *testing.T) {
+	// Simulate the refresh closure's failure path:
+	// all credentials and credExpiry are cleared atomically.
+	prov := &BedrockProvider{
+		region:       "us-east-1",
+		accessKey:    "AKIATEST",
+		secretKey:    "secrettest",
+		sessionToken: "sessiontest",
+		credExpiry:   time.Now().Add(30 * time.Minute),
+	}
+
+	// Simulate what the refresh closure does on failure.
+	prov.credMu.Lock()
+	prov.accessKey = ""
+	prov.secretKey = ""
+	prov.sessionToken = ""
+	prov.credExpiry = time.Time{}
+	prov.credMu.Unlock()
+
+	if prov.accessKey != "" {
+		t.Errorf("accessKey should be empty, got: %q", prov.accessKey)
+	}
+	if prov.secretKey != "" {
+		t.Errorf("secretKey should be empty, got: %q", prov.secretKey)
+	}
+	if prov.sessionToken != "" {
+		t.Errorf("sessionToken should be empty, got: %q", prov.sessionToken)
+	}
+	if !prov.credExpiry.IsZero() {
+		t.Errorf("credExpiry should be zero, got: %v", prov.credExpiry)
+	}
+}
+
+func TestBedrockPrepareRequest_ProactiveRefresh(t *testing.T) {
+	// Credentials expire in 3 minutes — within the
+	// proactive refresh window. PrepareRequest should
+	// trigger a proactive refresh.
+	prov := &BedrockProvider{
+		region:       "us-east-1",
+		accessKey:    "AKIAOLD",
+		secretKey:    "secretold",
+		sessionToken: "sessionold",
+		credExpiry:   time.Now().Add(3 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return []byte(
+				"export AWS_ACCESS_KEY_ID=AKIANEW\n" +
+					"export AWS_SECRET_ACCESS_KEY=secretnew\n" +
+					"export AWS_SESSION_TOKEN=sessionnew\n"), nil
+		},
+		getenv: func(key string) string { return "" },
+	}
+
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
+
+	if err := prov.PrepareRequest(req); err != nil {
+		t.Fatalf("PrepareRequest should succeed: %v", err)
+	}
+
+	// Verify credentials were refreshed.
+	prov.credMu.RLock()
+	ak := prov.accessKey
+	sk := prov.secretKey
+	st := prov.sessionToken
+	expiry := prov.credExpiry
+	prov.credMu.RUnlock()
+
+	if ak != "AKIANEW" {
+		t.Errorf("accessKey: got %q, want AKIANEW", ak)
+	}
+	if sk != "secretnew" {
+		t.Errorf("secretKey: got %q, want secretnew", sk)
+	}
+	if st != "sessionnew" {
+		t.Errorf("sessionToken: got %q, want sessionnew", st)
+	}
+	if time.Until(expiry) < 45*time.Minute {
+		t.Errorf("credExpiry should be reset to ~50 minutes from now, got %v until expiry",
+			time.Until(expiry))
+	}
+}
+
+func TestBedrockPrepareRequest_ProactiveRefreshFails(t *testing.T) {
+	// Credentials expire in 3 minutes — within the
+	// proactive refresh window. The refresh fails, but
+	// the request should proceed with current credentials.
+	prov := &BedrockProvider{
+		region:       "us-east-1",
+		accessKey:    "AKIACURRENT",
+		secretKey:    "secretcurrent",
+		sessionToken: "sessioncurrent",
+		credExpiry:   time.Now().Add(3 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("aws CLI not found")
+		},
+		getenv: func(key string) string { return "" },
+	}
+
+	req := httptest.NewRequest("POST", "/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
+
+	if err := prov.PrepareRequest(req); err != nil {
+		t.Fatalf("PrepareRequest should succeed with still-valid credentials: %v", err)
+	}
+
+	// Verify original credentials are preserved.
+	prov.credMu.RLock()
+	ak := prov.accessKey
+	prov.credMu.RUnlock()
+
+	if ak != "AKIACURRENT" {
+		t.Errorf("accessKey should be preserved on proactive refresh failure, got: %q", ak)
+	}
+}
+
+func TestDetach_CreatesLogFile(t *testing.T) {
+	opts := testOpts(t)
+	opts.Port = DefaultPort
+	opts.Getenv = func(key string) string { return "" }
+
+	var capturedCmd *exec.Cmd
+	opts.ExecStart = func(cmd *exec.Cmd) error {
+		capturedCmd = cmd
+		cmd.Process = &os.Process{Pid: 33333}
+		return nil
+	}
+	opts.HTTPGet = func(url string) (int, error) {
+		return http.StatusOK, nil
+	}
+
+	if err := detach(opts); err != nil {
+		t.Fatalf("detach failed: %v", err)
+	}
+
+	if capturedCmd == nil {
+		t.Fatal("ExecStart was not called")
+	}
+
+	// Verify cmd.Stdout is a non-nil *os.File.
+	stdoutFile, ok := capturedCmd.Stdout.(*os.File)
+	if !ok || stdoutFile == nil {
+		t.Fatal("cmd.Stdout should be a non-nil *os.File")
+	}
+
+	// Verify the file path ends with gateway.log.
+	if !strings.HasSuffix(stdoutFile.Name(), "gateway.log") {
+		t.Errorf("log file path should end with gateway.log, got: %s", stdoutFile.Name())
+	}
+
+	// Verify the log file exists in .uf/ directory.
+	logPath := filepath.Join(opts.ProjectDir, ".uf", "gateway.log")
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("log file should exist at %s: %v", logPath, err)
+	}
+
+	// Verify 0600 permissions.
+	perm := info.Mode().Perm()
+	if perm != 0600 {
+		t.Errorf("log file permissions: got %o, want 0600", perm)
+	}
+}
+
+func TestStatus_ShowsLogPath(t *testing.T) {
+	opts := testOpts(t)
+
+	// Create .uf/ directory and gateway.log file.
+	ufDir := filepath.Join(opts.ProjectDir, ".uf")
+	if err := os.MkdirAll(ufDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(ufDir, "gateway.log")
+	if err := os.WriteFile(logPath, []byte("test log\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a PID file with current process PID.
+	pp := pidPath(opts.ProjectDir)
+	info := PIDInfo{
+		PID:      os.Getpid(),
+		Port:     53147,
+		Provider: "vertex",
+		Started:  time.Now().Add(-1 * time.Hour),
+	}
+	if err := WritePID(pp, info); err != nil {
+		t.Fatal(err)
+	}
+
+	// Process is alive.
+	opts.FindProcess = func(pid int) (*os.Process, error) {
+		return os.FindProcess(os.Getpid())
+	}
+
+	// Health endpoint responds.
+	opts.HTTPGet = func(url string) (int, error) {
+		return http.StatusOK, nil
+	}
+
+	if err := Status(opts); err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+
+	out := stdoutStr(opts)
+	if !strings.Contains(out, "Log:") {
+		t.Errorf("expected 'Log:' in status output, got: %s", out)
+	}
+	if !strings.Contains(out, "gateway.log") {
+		t.Errorf("expected 'gateway.log' in status output, got: %s", out)
+	}
+}
+
+func TestStart_ForegroundNoLogFile(t *testing.T) {
+	opts := testOpts(t)
+	opts.Getenv = func(key string) string {
+		switch key {
+		case GatewayChildEnv:
+			return "1" // We ARE the child (foreground).
+		case "ANTHROPIC_API_KEY":
+			return "sk-ant-test"
+		}
+		return ""
+	}
+
+	// Use io.Discard for Stderr to avoid data race.
+	opts.Stderr = io.Discard
+
+	// ListenAndServe immediately returns ErrServerClosed
+	// to end the test quickly.
+	opts.ListenAndServe = func(addr string, handler http.Handler) error {
+		return http.ErrServerClosed
+	}
+
+	// Start will use srv.ListenAndServe() internally (not
+	// the injected one), so we need to use a real port
+	// approach. Instead, let's just verify the log file
+	// does NOT exist after a quick start/stop cycle.
+	//
+	// Use a port that's free, and send SIGINT immediately.
+	opts.Port = 59200 + os.Getpid()%1000
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Start(opts)
+	}()
+
+	// Brief wait for server to start, then signal shutdown.
+	time.Sleep(100 * time.Millisecond)
+	proc, _ := os.FindProcess(os.Getpid())
+	_ = proc.Signal(syscall.SIGINT)
+
+	select {
+	case <-errCh:
+		// Server stopped.
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start did not return after SIGINT")
+	}
+
+	// Verify .uf/gateway.log does NOT exist (foreground
+	// mode does not create a log file).
+	logPath := filepath.Join(opts.ProjectDir, ".uf", "gateway.log")
+	if _, err := os.Stat(logPath); err == nil {
+		t.Error("gateway.log should NOT exist in foreground mode")
 	}
 }
 

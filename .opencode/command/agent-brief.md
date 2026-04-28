@@ -6,6 +6,7 @@ description: >
   one is present. Also ensures cross-tool bridge files (CLAUDE.md,
   .cursorrules) are properly configured.
 ---
+<!-- scaffolded by uf vdev -->
 
 # Command: /agent-brief
 
