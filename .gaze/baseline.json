@@ -1,0 +1,5004 @@
+{
+  "scores": [
+    {
+      "package": "main",
+      "function": "newSyncerFromParams",
+      "file": "cmd/mutimind/main.go",
+      "line": 26,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "main",
+      "function": "newRootCmd",
+      "file": "cmd/mutimind/main.go",
+      "line": 34,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "main",
+      "function": "newRootCmdWithParams",
+      "file": "cmd/mutimind/main.go",
+      "line": 42,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "main",
+      "function": "newInitCmd",
+      "file": "cmd/mutimind/main.go",
+      "line": 68,
+      "complexity": 4,
+      "line_coverage": 80,
+      "crap": 4.128
+    },
+    {
+      "package": "main",
+      "function": "newAddCmd",
+      "file": "cmd/mutimind/main.go",
+      "line": 90,
+      "complexity": 6,
+      "line_coverage": 86.95652173913044,
+      "crap": 6.079888222240487
+    },
+    {
+      "package": "main",
+      "function": "newListCmd",
+      "file": "cmd/mutimind/main.go",
+      "line": 138,
+      "complexity": 10,
+      "line_coverage": 89.28571428571429,
+      "crap": 10.122995626822158
+    },
+    {
+      "package": "main",
+      "function": "newUpdateCmd",
+      "file": "cmd/mutimind/main.go",
+      "line": 185,
+      "complexity": 6,
+      "line_coverage": 80,
+      "crap": 6.288
+    },
+    {
+      "package": "main",
+      "function": "newShowCmd",
+      "file": "cmd/mutimind/main.go",
+      "line": 222,
+      "complexity": 6,
+      "line_coverage": 84.61538461538461,
+      "crap": 6.131087847064179
+    },
+    {
+      "package": "main",
+      "function": "newSyncPushCmd",
+      "file": "cmd/mutimind/main.go",
+      "line": 264,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "main",
+      "function": "newSyncPullCmd",
+      "file": "cmd/mutimind/main.go",
+      "line": 281,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "main",
+      "function": "newSyncStatusCmd",
+      "file": "cmd/mutimind/main.go",
+      "line": 293,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "main",
+      "function": "newSyncCmd",
+      "file": "cmd/mutimind/main.go",
+      "line": 305,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "main",
+      "function": "newSyncProjectCmd",
+      "file": "cmd/mutimind/main.go",
+      "line": 317,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "main",
+      "function": "newGenerateArtifactCmd",
+      "file": "cmd/mutimind/main.go",
+      "line": 329,
+      "complexity": 3,
+      "line_coverage": 80,
+      "crap": 3.072
+    },
+    {
+      "package": "main",
+      "function": "newDecideCmd",
+      "file": "cmd/mutimind/main.go",
+      "line": 350,
+      "complexity": 5,
+      "line_coverage": 91.66666666666667,
+      "crap": 5.014467592592593
+    },
+    {
+      "package": "main",
+      "function": "main",
+      "file": "cmd/mutimind/main.go",
+      "line": 398,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "main",
+      "function": "newRootCmd",
+      "file": "cmd/mxf/main.go",
+      "line": 37,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "main",
+      "function": "newRootCmdWithParams",
+      "file": "cmd/mxf/main.go",
+      "line": 41,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "main",
+      "function": "(*MxFParams).defaults",
+      "file": "cmd/mxf/main.go",
+      "line": 69,
+      "complexity": 6,
+      "line_coverage": 100,
+      "crap": 6
+    },
+    {
+      "package": "main",
+      "function": "newCollectCmd",
+      "file": "cmd/mxf/main.go",
+      "line": 87,
+      "complexity": 1,
+      "line_coverage": 50,
+      "crap": 1.125
+    },
+    {
+      "package": "main",
+      "function": "newMetricsCmd",
+      "file": "cmd/mxf/main.go",
+      "line": 105,
+      "complexity": 2,
+      "line_coverage": 66.66666666666667,
+      "crap": 2.148148148148148
+    },
+    {
+      "package": "main",
+      "function": "newImpedimentCmd",
+      "file": "cmd/mxf/main.go",
+      "line": 135,
+      "complexity": 1,
+      "line_coverage": 51.724137931034484,
+      "crap": 1.1125097379966378
+    },
+    {
+      "package": "main",
+      "function": "newDashboardCmd",
+      "file": "cmd/mxf/main.go",
+      "line": 196,
+      "complexity": 2,
+      "line_coverage": 55.55555555555556,
+      "crap": 2.3511659807956105
+    },
+    {
+      "package": "main",
+      "function": "newSprintCmd",
+      "file": "cmd/mxf/main.go",
+      "line": 233,
+      "complexity": 1,
+      "line_coverage": 54.54545454545455,
+      "crap": 1.0939143501126973
+    },
+    {
+      "package": "main",
+      "function": "newStandupCmd",
+      "file": "cmd/mxf/main.go",
+      "line": 261,
+      "complexity": 1,
+      "line_coverage": 33.333333333333336,
+      "crap": 1.2962962962962963
+    },
+    {
+      "package": "main",
+      "function": "newRetroCmd",
+      "file": "cmd/mxf/main.go",
+      "line": 272,
+      "complexity": 1,
+      "line_coverage": 54.54545454545455,
+      "crap": 1.0939143501126973
+    },
+    {
+      "package": "main",
+      "function": "runCollect",
+      "file": "cmd/mxf/main.go",
+      "line": 301,
+      "complexity": 2,
+      "line_coverage": 85.71428571428571,
+      "crap": 2.011661807580175
+    },
+    {
+      "package": "main",
+      "function": "runMetrics",
+      "file": "cmd/mxf/main.go",
+      "line": 318,
+      "complexity": 22,
+      "line_coverage": 78,
+      "crap": 27.153631999999998,
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "main",
+      "function": "runImpedimentAdd",
+      "file": "cmd/mxf/main.go",
+      "line": 395,
+      "complexity": 2,
+      "line_coverage": 83.33333333333333,
+      "crap": 2.0185185185185186
+    },
+    {
+      "package": "main",
+      "function": "runImpedimentList",
+      "file": "cmd/mxf/main.go",
+      "line": 406,
+      "complexity": 6,
+      "line_coverage": 93.75,
+      "crap": 6.0087890625
+    },
+    {
+      "package": "main",
+      "function": "runImpedimentResolve",
+      "file": "cmd/mxf/main.go",
+      "line": 431,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "main",
+      "function": "runImpedimentDetect",
+      "file": "cmd/mxf/main.go",
+      "line": 440,
+      "complexity": 4,
+      "line_coverage": 41.666666666666664,
+      "crap": 7.175925925925927
+    },
+    {
+      "package": "main",
+      "function": "runDashboard",
+      "file": "cmd/mxf/main.go",
+      "line": 458,
+      "complexity": 14,
+      "line_coverage": 94.11764705882354,
+      "crap": 14.039894158355384
+    },
+    {
+      "package": "main",
+      "function": "runSprint",
+      "file": "cmd/mxf/main.go",
+      "line": 513,
+      "complexity": 10,
+      "line_coverage": 73.33333333333333,
+      "crap": 11.896296296296297
+    },
+    {
+      "package": "main",
+      "function": "runStandup",
+      "file": "cmd/mxf/main.go",
+      "line": 557,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "main",
+      "function": "runRetro",
+      "file": "cmd/mxf/main.go",
+      "line": 564,
+      "complexity": 17,
+      "line_coverage": 80.85106382978724,
+      "crap": 19.029232443678183,
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "main",
+      "function": "outputJSON",
+      "file": "cmd/mxf/main.go",
+      "line": 637,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "main",
+      "function": "outputMetricsSummary",
+      "file": "cmd/mxf/main.go",
+      "line": 643,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "main",
+      "function": "main",
+      "file": "cmd/mxf/main.go",
+      "line": 659,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "main",
+      "function": "runConfigInit",
+      "file": "cmd/unbound-force/config.go",
+      "line": 21,
+      "complexity": 6,
+      "line_coverage": 88.23529411764706,
+      "crap": 6.058619987787503
+    },
+    {
+      "package": "main",
+      "function": "runConfigShow",
+      "file": "cmd/unbound-force/config.go",
+      "line": 59,
+      "complexity": 5,
+      "line_coverage": 76.92307692307692,
+      "crap": 5.307237141556668
+    },
+    {
+      "package": "main",
+      "function": "runConfigValidate",
+      "file": "cmd/unbound-force/config.go",
+      "line": 92,
+      "complexity": 7,
+      "line_coverage": 75.86206896551724,
+      "crap": 7.6891221452294065
+    },
+    {
+      "package": "main",
+      "function": "newConfigCmd",
+      "file": "cmd/unbound-force/config.go",
+      "line": 144,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "main",
+      "function": "newGatewayCmd",
+      "file": "cmd/unbound-force/gateway.go",
+      "line": 15,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "main",
+      "function": "runGateway",
+      "file": "cmd/unbound-force/gateway.go",
+      "line": 81,
+      "complexity": 7,
+      "line_coverage": 0,
+      "crap": 56,
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "main",
+      "function": "runGatewayStop",
+      "file": "cmd/unbound-force/gateway.go",
+      "line": 114,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "main",
+      "function": "newGatewayStopCmd",
+      "file": "cmd/unbound-force/gateway.go",
+      "line": 123,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "main",
+      "function": "runGatewayStatus",
+      "file": "cmd/unbound-force/gateway.go",
+      "line": 153,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "main",
+      "function": "newGatewayStatusCmd",
+      "file": "cmd/unbound-force/gateway.go",
+      "line": 162,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "main",
+      "function": "main",
+      "file": "cmd/unbound-force/main.go",
+      "line": 21,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "main",
+      "function": "runInit",
+      "file": "cmd/unbound-force/main.go",
+      "line": 51,
+      "complexity": 5,
+      "line_coverage": 85.71428571428571,
+      "crap": 5.072886297376093
+    },
+    {
+      "package": "main",
+      "function": "newVersionCmd",
+      "file": "cmd/unbound-force/main.go",
+      "line": 71,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "main",
+      "function": "newInitCmd",
+      "file": "cmd/unbound-force/main.go",
+      "line": 83,
+      "complexity": 2,
+      "line_coverage": 91.66666666666667,
+      "crap": 2.002314814814815
+    },
+    {
+      "package": "main",
+      "function": "runDoctor",
+      "file": "cmd/unbound-force/main.go",
+      "line": 138,
+      "complexity": 6,
+      "line_coverage": 0,
+      "crap": 42,
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "main",
+      "function": "newDoctorCmd",
+      "file": "cmd/unbound-force/main.go",
+      "line": 170,
+      "complexity": 6,
+      "line_coverage": 28.571428571428573,
+      "crap": 19.119533527696788,
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "main",
+      "function": "runSetup",
+      "file": "cmd/unbound-force/main.go",
+      "line": 220,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "main",
+      "function": "newSetupCmd",
+      "file": "cmd/unbound-force/main.go",
+      "line": 240,
+      "complexity": 4,
+      "line_coverage": 35.714285714285715,
+      "crap": 8.250728862973759
+    },
+    {
+      "package": "main",
+      "function": "newSandboxCmd",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 17,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "main",
+      "function": "applySandboxConfig",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 54,
+      "complexity": 15,
+      "line_coverage": 0,
+      "crap": 240,
+      "fix_strategy": "decompose_and_test"
+    },
+    {
+      "package": "main",
+      "function": "runSandboxCreate",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 99,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "main",
+      "function": "newSandboxCreateCmd",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 116,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "main",
+      "function": "runSandboxDestroy",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 184,
+      "complexity": 5,
+      "line_coverage": 0,
+      "crap": 30,
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "main",
+      "function": "newSandboxDestroyCmd",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 210,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "main",
+      "function": "runSandboxStart",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 261,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "main",
+      "function": "newSandboxStartCmd",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 278,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "main",
+      "function": "runSandboxStop",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 344,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "main",
+      "function": "newSandboxStopCmd",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 351,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "main",
+      "function": "runSandboxAttach",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 378,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "main",
+      "function": "newSandboxAttachCmd",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 384,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "main",
+      "function": "runSandboxExtract",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 408,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "main",
+      "function": "newSandboxExtractCmd",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 417,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "main",
+      "function": "runSandboxStatus",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 450,
+      "complexity": 4,
+      "line_coverage": 0,
+      "crap": 20,
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "main",
+      "function": "newSandboxStatusCmd",
+      "file": "cmd/unbound-force/sandbox.go",
+      "line": 475,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "artifacts",
+      "function": "WriteArtifact",
+      "file": "internal/artifacts/artifacts.go",
+      "line": 51,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 100,
+      "gaze_crap": 1,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "artifacts",
+      "function": "WriteArtifactWithContext",
+      "file": "internal/artifacts/artifacts.go",
+      "line": 57,
+      "complexity": 7,
+      "line_coverage": 78.94736842105263,
+      "crap": 7.457209505758857,
+      "contract_coverage": 100,
+      "gaze_crap": 7,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "artifacts",
+      "function": "ReadEnvelope",
+      "file": "internal/artifacts/artifacts.go",
+      "line": 98,
+      "complexity": 3,
+      "line_coverage": 85.71428571428571,
+      "crap": 3.0262390670553936,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "artifacts",
+      "function": "FindArtifacts",
+      "file": "internal/artifacts/artifacts.go",
+      "line": 112,
+      "complexity": 7,
+      "line_coverage": 81.25,
+      "crap": 7.322998046875,
+      "contract_coverage": 100,
+      "gaze_crap": 7,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "artifacts",
+      "function": "FindArtifactsByHero",
+      "file": "internal/artifacts/artifacts.go",
+      "line": 140,
+      "complexity": 5,
+      "line_coverage": 81.81818181818181,
+      "crap": 5.150262960180315,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "artifacts",
+      "function": "FindArtifactsSince",
+      "file": "internal/artifacts/artifacts.go",
+      "line": 161,
+      "complexity": 7,
+      "line_coverage": 78.57142857142857,
+      "crap": 7.482142857142858,
+      "contract_coverage": 100,
+      "gaze_crap": 7,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "artifacts",
+      "function": "CheckSchemaVersion",
+      "file": "internal/artifacts/artifacts.go",
+      "line": 187,
+      "complexity": 5,
+      "line_coverage": 88.88888888888889,
+      "crap": 5.034293552812072,
+      "contract_coverage": 50,
+      "gaze_crap": 8.125,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "artifacts",
+      "function": "GenerateBacklogItemArtifact",
+      "file": "internal/artifacts/artifacts.go",
+      "line": 207,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 100,
+      "gaze_crap": 1,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "artifacts",
+      "function": "GenerateAcceptanceDecision",
+      "file": "internal/artifacts/artifacts.go",
+      "line": 212,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 100,
+      "gaze_crap": 1,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "backlog",
+      "function": "NewRepository",
+      "file": "internal/backlog/backlog.go",
+      "line": 28,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 0,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "backlog",
+      "function": "(*Repository).ensureDir",
+      "file": "internal/backlog/backlog.go",
+      "line": 33,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "backlog",
+      "function": "(*Repository).getFilePath",
+      "file": "internal/backlog/backlog.go",
+      "line": 38,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "backlog",
+      "function": "(*Repository).NextID",
+      "file": "internal/backlog/backlog.go",
+      "line": 43,
+      "complexity": 5,
+      "line_coverage": 92.3076923076923,
+      "crap": 5.011379153390988,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "backlog",
+      "function": "(*Repository).Save",
+      "file": "internal/backlog/backlog.go",
+      "line": 66,
+      "complexity": 5,
+      "line_coverage": 88.23529411764706,
+      "crap": 5.0407083248524325,
+      "contract_coverage": 33.333333333333336,
+      "gaze_crap": 12.407407407407405,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "backlog",
+      "function": "(*Repository).Get",
+      "file": "internal/backlog/backlog.go",
+      "line": 95,
+      "complexity": 5,
+      "line_coverage": 85.71428571428571,
+      "crap": 5.072886297376093,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "backlog",
+      "function": "(*Repository).List",
+      "file": "internal/backlog/backlog.go",
+      "line": 120,
+      "complexity": 8,
+      "line_coverage": 78.94736842105263,
+      "crap": 8.597171599358507,
+      "contract_coverage": 100,
+      "gaze_crap": 8,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "coaching",
+      "function": "(*ActionItem).IsStale",
+      "file": "internal/coaching/models.go",
+      "line": 37,
+      "complexity": 3,
+      "line_coverage": 66.66666666666667,
+      "crap": 3.333333333333333,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "coaching",
+      "function": "NewRetroStore",
+      "file": "internal/coaching/retro.go",
+      "line": 21,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 0,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "coaching",
+      "function": "(*RetroStore).StartRetro",
+      "file": "internal/coaching/retro.go",
+      "line": 26,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "coaching",
+      "function": "(*RetroStore).SaveRetro",
+      "file": "internal/coaching/retro.go",
+      "line": 40,
+      "complexity": 3,
+      "line_coverage": 75,
+      "crap": 3.140625,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "coaching",
+      "function": "(*RetroStore).LoadRetro",
+      "file": "internal/coaching/retro.go",
+      "line": 56,
+      "complexity": 4,
+      "line_coverage": 76.92307692307692,
+      "crap": 4.196631770596268,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "coaching",
+      "function": "(*RetroStore).ListRetros",
+      "file": "internal/coaching/retro.go",
+      "line": 78,
+      "complexity": 7,
+      "line_coverage": 70.58823529411765,
+      "crap": 8.246692448605739,
+      "contract_coverage": 100,
+      "gaze_crap": 7,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "coaching",
+      "function": "NextActionID",
+      "file": "internal/coaching/retro.go",
+      "line": 107,
+      "complexity": 6,
+      "line_coverage": 100,
+      "crap": 6,
+      "contract_coverage": 100,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "coaching",
+      "function": "ReviewPreviousActions",
+      "file": "internal/coaching/retro.go",
+      "line": 125,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "config",
+      "function": "(*LoadOptions).defaults",
+      "file": "internal/config/config.go",
+      "line": 117,
+      "complexity": 4,
+      "line_coverage": 66.66666666666667,
+      "crap": 4.592592592592593
+    },
+    {
+      "package": "config",
+      "function": "Load",
+      "file": "internal/config/config.go",
+      "line": 135,
+      "complexity": 6,
+      "line_coverage": 88.88888888888889,
+      "crap": 6.049382716049383,
+      "contract_coverage": 100,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "config",
+      "function": "merge",
+      "file": "internal/config/config.go",
+      "line": 184,
+      "complexity": 30,
+      "line_coverage": 66.66666666666667,
+      "crap": 63.333333333333314,
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "config",
+      "function": "applyEnvOverrides",
+      "file": "internal/config/config.go",
+      "line": 291,
+      "complexity": 14,
+      "line_coverage": 100,
+      "crap": 14
+    },
+    {
+      "package": "config",
+      "function": "Defaults",
+      "file": "internal/config/config.go",
+      "line": 335,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 100,
+      "gaze_crap": 1,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "config",
+      "function": "(SandboxConfig).IsEmpty",
+      "file": "internal/config/config.go",
+      "line": 380,
+      "complexity": 9,
+      "line_coverage": 100,
+      "crap": 9
+    },
+    {
+      "package": "config",
+      "function": "RepoConfigPath",
+      "file": "internal/config/config.go",
+      "line": 394,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 100,
+      "gaze_crap": 1,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "config",
+      "function": "UserConfigPath",
+      "file": "internal/config/config.go",
+      "line": 400,
+      "complexity": 3,
+      "line_coverage": 83.33333333333333,
+      "crap": 3.0416666666666665,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "config",
+      "function": "InitFile",
+      "file": "internal/config/init.go",
+      "line": 44,
+      "complexity": 9,
+      "line_coverage": 88.46153846153847,
+      "crap": 9.12443104233045,
+      "contract_coverage": 50,
+      "gaze_crap": 19.125,
+      "quadrant": "Q3_SimpleButUnderspecified"
+    },
+    {
+      "package": "config",
+      "function": "updateExisting",
+      "file": "internal/config/init.go",
+      "line": 100,
+      "complexity": 15,
+      "line_coverage": 81.08108108108108,
+      "crap": 16.52360176100132,
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "config",
+      "function": "detectSections",
+      "file": "internal/config/init.go",
+      "line": 179,
+      "complexity": 10,
+      "line_coverage": 100,
+      "crap": 10
+    },
+    {
+      "package": "config",
+      "function": "lineSectionName",
+      "file": "internal/config/init.go",
+      "line": 216,
+      "complexity": 8,
+      "line_coverage": 100,
+      "crap": 8
+    },
+    {
+      "package": "config",
+      "function": "extractTemplateSection",
+      "file": "internal/config/init.go",
+      "line": 246,
+      "complexity": 7,
+      "line_coverage": 100,
+      "crap": 7
+    },
+    {
+      "package": "config",
+      "function": "writeFileAtomic",
+      "file": "internal/config/init.go",
+      "line": 269,
+      "complexity": 6,
+      "line_coverage": 47.36842105263158,
+      "crap": 11.248578509986878
+    },
+    {
+      "package": "config",
+      "function": "contains",
+      "file": "internal/config/init.go",
+      "line": 297,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "config",
+      "function": "Template",
+      "file": "internal/config/template.go",
+      "line": 8,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 0,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "config",
+      "function": "Validate",
+      "file": "internal/config/validate.go",
+      "line": 10,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "config",
+      "function": "validateSetup",
+      "file": "internal/config/validate.go",
+      "line": 20,
+      "complexity": 4,
+      "line_coverage": 0,
+      "crap": 20,
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "config",
+      "function": "validateSandbox",
+      "file": "internal/config/validate.go",
+      "line": 47,
+      "complexity": 4,
+      "line_coverage": 0,
+      "crap": 20,
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "config",
+      "function": "validateGateway",
+      "file": "internal/config/validate.go",
+      "line": 78,
+      "complexity": 4,
+      "line_coverage": 0,
+      "crap": 20,
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "config",
+      "function": "validateEmbedding",
+      "file": "internal/config/validate.go",
+      "line": 97,
+      "complexity": 3,
+      "line_coverage": 0,
+      "crap": 12
+    },
+    {
+      "package": "config",
+      "function": "validateDoctor",
+      "file": "internal/config/validate.go",
+      "line": 115,
+      "complexity": 3,
+      "line_coverage": 0,
+      "crap": 12
+    },
+    {
+      "package": "dashboard",
+      "function": "capitalize",
+      "file": "internal/dashboard/html.go",
+      "line": 69,
+      "complexity": 2,
+      "line_coverage": 66.66666666666667,
+      "crap": 2.148148148148148
+    },
+    {
+      "package": "dashboard",
+      "function": "RenderHTML",
+      "file": "internal/dashboard/html.go",
+      "line": 77,
+      "complexity": 6,
+      "line_coverage": 83.33333333333333,
+      "crap": 6.166666666666667,
+      "contract_coverage": 100,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "dashboard",
+      "function": "RenderBarChart",
+      "file": "internal/dashboard/text.go",
+      "line": 21,
+      "complexity": 9,
+      "line_coverage": 95.23809523809524,
+      "crap": 9.008746355685131,
+      "contract_coverage": 100,
+      "gaze_crap": 9,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "dashboard",
+      "function": "RenderSparkline",
+      "file": "internal/dashboard/text.go",
+      "line": 57,
+      "complexity": 8,
+      "line_coverage": 88,
+      "crap": 8.110592,
+      "contract_coverage": 100,
+      "gaze_crap": 8,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "dashboard",
+      "function": "RenderHealthIndicators",
+      "file": "internal/dashboard/text.go",
+      "line": 98,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "dashboard",
+      "function": "formatValue",
+      "file": "internal/dashboard/text.go",
+      "line": 123,
+      "complexity": 6,
+      "line_coverage": 57.142857142857146,
+      "crap": 8.833819241982505
+    },
+    {
+      "package": "doctor",
+      "function": "embeddingModel",
+      "file": "internal/doctor/checks.go",
+      "line": 27,
+      "complexity": 2,
+      "line_coverage": 66.66666666666667,
+      "crap": 2.148148148148148
+    },
+    {
+      "package": "doctor",
+      "function": "checkDetectedEnvironment",
+      "file": "internal/doctor/checks.go",
+      "line": 37,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "doctor",
+      "function": "managerDescription",
+      "file": "internal/doctor/checks.go",
+      "line": 66,
+      "complexity": 8,
+      "line_coverage": 100,
+      "crap": 8
+    },
+    {
+      "package": "doctor",
+      "function": "checkCoreTools",
+      "file": "internal/doctor/checks.go",
+      "line": 139,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5
+    },
+    {
+      "package": "doctor",
+      "function": "checkOllamaModel",
+      "file": "internal/doctor/checks.go",
+      "line": 164,
+      "complexity": 3,
+      "line_coverage": 81.81818181818181,
+      "crap": 3.0540946656649135
+    },
+    {
+      "package": "doctor",
+      "function": "checkOneTool",
+      "file": "internal/doctor/checks.go",
+      "line": 185,
+      "complexity": 17,
+      "line_coverage": 91.17647058823529,
+      "crap": 17.198529411764707,
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "doctor",
+      "function": "parseGoVersion",
+      "file": "internal/doctor/checks.go",
+      "line": 287,
+      "complexity": 7,
+      "line_coverage": 100,
+      "crap": 7
+    },
+    {
+      "package": "doctor",
+      "function": "checkGoVersion",
+      "file": "internal/doctor/checks.go",
+      "line": 302,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "doctor",
+      "function": "parseVersionParts",
+      "file": "internal/doctor/checks.go",
+      "line": 315,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "doctor",
+      "function": "extractLeadingDigits",
+      "file": "internal/doctor/checks.go",
+      "line": 330,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "doctor",
+      "function": "parseNodeVersion",
+      "file": "internal/doctor/checks.go",
+      "line": 341,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "doctor",
+      "function": "checkNodeVersion",
+      "file": "internal/doctor/checks.go",
+      "line": 350,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "doctor",
+      "function": "checkReplicator",
+      "file": "internal/doctor/checks.go",
+      "line": 358,
+      "complexity": 13,
+      "line_coverage": 94.28571428571429,
+      "crap": 13.031533527696793
+    },
+    {
+      "package": "doctor",
+      "function": "checkConfiguration",
+      "file": "internal/doctor/checks.go",
+      "line": 477,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "doctor",
+      "function": "checkScaffoldedFiles",
+      "file": "internal/doctor/checks.go",
+      "line": 515,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "doctor",
+      "function": "checkDirWithCount",
+      "file": "internal/doctor/checks.go",
+      "line": 555,
+      "complexity": 6,
+      "line_coverage": 90,
+      "crap": 6.036
+    },
+    {
+      "package": "doctor",
+      "function": "checkHeroAvailability",
+      "file": "internal/doctor/checks.go",
+      "line": 591,
+      "complexity": 8,
+      "line_coverage": 86.36363636363636,
+      "crap": 8.162283996994741
+    },
+    {
+      "package": "doctor",
+      "function": "countDivisorPersonas",
+      "file": "internal/doctor/checks.go",
+      "line": 654,
+      "complexity": 6,
+      "line_coverage": 87.5,
+      "crap": 6.0703125
+    },
+    {
+      "package": "doctor",
+      "function": "checkMCPConfig",
+      "file": "internal/doctor/checks.go",
+      "line": 670,
+      "complexity": 9,
+      "line_coverage": 88.88888888888889,
+      "crap": 9.11111111111111
+    },
+    {
+      "package": "doctor",
+      "function": "extractMCPBinary",
+      "file": "internal/doctor/checks.go",
+      "line": 753,
+      "complexity": 5,
+      "line_coverage": 85.71428571428571,
+      "crap": 5.072886297376093
+    },
+    {
+      "package": "doctor",
+      "function": "checkAgentSkillIntegrity",
+      "file": "internal/doctor/checks.go",
+      "line": 775,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "doctor",
+      "function": "validateAgents",
+      "file": "internal/doctor/checks.go",
+      "line": 800,
+      "complexity": 10,
+      "line_coverage": 86.20689655172414,
+      "crap": 10.262413383082537
+    },
+    {
+      "package": "doctor",
+      "function": "validateSkills",
+      "file": "internal/doctor/checks.go",
+      "line": 872,
+      "complexity": 11,
+      "line_coverage": 93.54838709677419,
+      "crap": 11.032493034809171
+    },
+    {
+      "package": "doctor",
+      "function": "defaultEmbedCheck",
+      "file": "internal/doctor/checks.go",
+      "line": 950,
+      "complexity": 8,
+      "line_coverage": 4.3478260869565215,
+      "crap": 64.00986274348648,
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "doctor",
+      "function": "checkEmbeddingCapability",
+      "file": "internal/doctor/checks.go",
+      "line": 997,
+      "complexity": 4,
+      "line_coverage": 90,
+      "crap": 4.016
+    },
+    {
+      "package": "doctor",
+      "function": "checkDewey",
+      "file": "internal/doctor/checks.go",
+      "line": 1043,
+      "complexity": 6,
+      "line_coverage": 100,
+      "crap": 6
+    },
+    {
+      "package": "doctor",
+      "function": "parseFrontmatter",
+      "file": "internal/doctor/checks.go",
+      "line": 1137,
+      "complexity": 9,
+      "line_coverage": 87.5,
+      "crap": 9.158203125
+    },
+    {
+      "package": "doctor",
+      "function": "detectAGENTSmdSections",
+      "file": "internal/doctor/checks.go",
+      "line": 1235,
+      "complexity": 6,
+      "line_coverage": 100,
+      "crap": 6
+    },
+    {
+      "package": "doctor",
+      "function": "hasBuildCodeBlocks",
+      "file": "internal/doctor/checks.go",
+      "line": 1258,
+      "complexity": 7,
+      "line_coverage": 100,
+      "crap": 7
+    },
+    {
+      "package": "doctor",
+      "function": "hasSpecNumberedDirs",
+      "file": "internal/doctor/checks.go",
+      "line": 1287,
+      "complexity": 5,
+      "line_coverage": 87.5,
+      "crap": 5.048828125
+    },
+    {
+      "package": "doctor",
+      "function": "checkAgentContext",
+      "file": "internal/doctor/checks.go",
+      "line": 1306,
+      "complexity": 16,
+      "line_coverage": 98,
+      "crap": 16.002048,
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "doctor",
+      "function": "(*Options).defaults",
+      "file": "internal/doctor/doctor.go",
+      "line": 75,
+      "complexity": 11,
+      "line_coverage": 60,
+      "crap": 18.744,
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "doctor",
+      "function": "defaultExecCmd",
+      "file": "internal/doctor/doctor.go",
+      "line": 109,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "doctor",
+      "function": "defaultExecCmdTimeout",
+      "file": "internal/doctor/doctor.go",
+      "line": 115,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "doctor",
+      "function": "Run",
+      "file": "internal/doctor/doctor.go",
+      "line": 124,
+      "complexity": 3,
+      "line_coverage": 90.9090909090909,
+      "crap": 3.006761833208114,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "doctor",
+      "function": "filterSkippedChecks",
+      "file": "internal/doctor/doctor.go",
+      "line": 169,
+      "complexity": 8,
+      "line_coverage": 100,
+      "crap": 8
+    },
+    {
+      "package": "doctor",
+      "function": "computeSummary",
+      "file": "internal/doctor/doctor.go",
+      "line": 202,
+      "complexity": 6,
+      "line_coverage": 100,
+      "crap": 6
+    },
+    {
+      "package": "doctor",
+      "function": "DetectEnvironment",
+      "file": "internal/doctor/environ.go",
+      "line": 12,
+      "complexity": 13,
+      "line_coverage": 88.46153846153847,
+      "crap": 13.259615384615383,
+      "contract_coverage": 100,
+      "gaze_crap": 13,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "doctor",
+      "function": "DetectProvenance",
+      "file": "internal/doctor/environ.go",
+      "line": 123,
+      "complexity": 18,
+      "line_coverage": 100,
+      "crap": 18,
+      "contract_coverage": 100,
+      "gaze_crap": 18,
+      "quadrant": "Q4_Dangerous",
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "doctor",
+      "function": "installHint",
+      "file": "internal/doctor/environ.go",
+      "line": 191,
+      "complexity": 6,
+      "line_coverage": 75,
+      "crap": 6.5625
+    },
+    {
+      "package": "doctor",
+      "function": "toolCategory",
+      "file": "internal/doctor/environ.go",
+      "line": 213,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "doctor",
+      "function": "managerInstallCmd",
+      "file": "internal/doctor/environ.go",
+      "line": 228,
+      "complexity": 11,
+      "line_coverage": 91.66666666666667,
+      "crap": 11.070023148148149
+    },
+    {
+      "package": "doctor",
+      "function": "homebrewInstallCmd",
+      "file": "internal/doctor/environ.go",
+      "line": 259,
+      "complexity": 11,
+      "line_coverage": 92.3076923076923,
+      "crap": 11.055075102412381
+    },
+    {
+      "package": "doctor",
+      "function": "genericInstallCmd",
+      "file": "internal/doctor/environ.go",
+      "line": 290,
+      "complexity": 9,
+      "line_coverage": 100,
+      "crap": 9
+    },
+    {
+      "package": "doctor",
+      "function": "HasManager",
+      "file": "internal/doctor/environ.go",
+      "line": 315,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3,
+      "contract_coverage": 0,
+      "gaze_crap": 12,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "doctor",
+      "function": "installURL",
+      "file": "internal/doctor/environ.go",
+      "line": 325,
+      "complexity": 9,
+      "line_coverage": 90,
+      "crap": 9.081
+    },
+    {
+      "package": "doctor",
+      "function": "FormatJSON",
+      "file": "internal/doctor/format.go",
+      "line": 16,
+      "complexity": 2,
+      "line_coverage": 80,
+      "crap": 2.032,
+      "contract_coverage": 100,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "doctor",
+      "function": "FormatText",
+      "file": "internal/doctor/format.go",
+      "line": 28,
+      "complexity": 11,
+      "line_coverage": 94.87179487179488,
+      "crap": 11.016318548862927,
+      "contract_coverage": 100,
+      "gaze_crap": 11,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "doctor",
+      "function": "formatIndicator",
+      "file": "internal/doctor/format.go",
+      "line": 104,
+      "complexity": 11,
+      "line_coverage": 46.666666666666664,
+      "crap": 29.35614814814816,
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "doctor",
+      "function": "(Severity).String",
+      "file": "internal/doctor/models.go",
+      "line": 44,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "doctor",
+      "function": "(Severity).MarshalJSON",
+      "file": "internal/doctor/models.go",
+      "line": 52,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "doctor",
+      "function": "(*Severity).UnmarshalJSON",
+      "file": "internal/doctor/models.go",
+      "line": 61,
+      "complexity": 3,
+      "line_coverage": 87.5,
+      "crap": 3.017578125
+    },
+    {
+      "package": "gateway",
+      "function": "(*Options).defaults",
+      "file": "internal/gateway/gateway.go",
+      "line": 109,
+      "complexity": 12,
+      "line_coverage": 100,
+      "crap": 12
+    },
+    {
+      "package": "gateway",
+      "function": "defaultExecCmd",
+      "file": "internal/gateway/gateway.go",
+      "line": 146,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "gateway",
+      "function": "defaultExecStart",
+      "file": "internal/gateway/gateway.go",
+      "line": 151,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "gateway",
+      "function": "defaultHTTPGet",
+      "file": "internal/gateway/gateway.go",
+      "line": 156,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "gateway",
+      "function": "pidPath",
+      "file": "internal/gateway/gateway.go",
+      "line": 167,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "gateway",
+      "function": "newMux",
+      "file": "internal/gateway/gateway.go",
+      "line": 175,
+      "complexity": 7,
+      "line_coverage": 93.47826086956522,
+      "crap": 7.013592093367305
+    },
+    {
+      "package": "gateway",
+      "function": "writeJSONError",
+      "file": "internal/gateway/gateway.go",
+      "line": 399,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "gateway",
+      "function": "Start",
+      "file": "internal/gateway/gateway.go",
+      "line": 414,
+      "complexity": 15,
+      "line_coverage": 92,
+      "crap": 15.1152,
+      "contract_coverage": 100,
+      "gaze_crap": 15,
+      "quadrant": "Q4_Dangerous",
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "gateway",
+      "function": "detach",
+      "file": "internal/gateway/gateway.go",
+      "line": 539,
+      "complexity": 10,
+      "line_coverage": 96.7741935483871,
+      "crap": 10.003356718472022
+    },
+    {
+      "package": "gateway",
+      "function": "Stop",
+      "file": "internal/gateway/gateway.go",
+      "line": 601,
+      "complexity": 5,
+      "line_coverage": 95.23809523809524,
+      "crap": 5.0026994924954105,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "Status",
+      "file": "internal/gateway/gateway.go",
+      "line": 643,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5,
+      "contract_coverage": 0,
+      "gaze_crap": 30,
+      "quadrant": "Q3_SimpleButUnderspecified",
+      "contract_coverage_reason": "all_effects_ambiguous",
+      "effect_confidence_range": [
+        53,
+        53
+      ]
+    },
+    {
+      "package": "gateway",
+      "function": "formatUptime",
+      "file": "internal/gateway/gateway.go",
+      "line": 688,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "gateway",
+      "function": "isAddrInUse",
+      "file": "internal/gateway/gateway.go",
+      "line": 702,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "gateway",
+      "function": "WritePID",
+      "file": "internal/gateway/pid.go",
+      "line": 45,
+      "complexity": 4,
+      "line_coverage": 72.72727272727273,
+      "crap": 4.324567993989482,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "ReadPID",
+      "file": "internal/gateway/pid.go",
+      "line": 69,
+      "complexity": 10,
+      "line_coverage": 94.73684210526316,
+      "crap": 10.014579384749963,
+      "contract_coverage": 100,
+      "gaze_crap": 10,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "IsAlive",
+      "file": "internal/gateway/pid.go",
+      "line": 111,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2,
+      "contract_coverage": 100,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "RemovePID",
+      "file": "internal/gateway/pid.go",
+      "line": 125,
+      "complexity": 3,
+      "line_coverage": 75,
+      "crap": 3.140625,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "CleanupStale",
+      "file": "internal/gateway/pid.go",
+      "line": 136,
+      "complexity": 4,
+      "line_coverage": 87.5,
+      "crap": 4.03125,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "DetectProvider",
+      "file": "internal/gateway/provider.go",
+      "line": 59,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "NewProviderByName",
+      "file": "internal/gateway/provider.go",
+      "line": 90,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "newAnthropicProvider",
+      "file": "internal/gateway/provider.go",
+      "line": 118,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "gateway",
+      "function": "(*AnthropicProvider).Name",
+      "file": "internal/gateway/provider.go",
+      "line": 123,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "gateway",
+      "function": "(*AnthropicProvider).Start",
+      "file": "internal/gateway/provider.go",
+      "line": 127,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2,
+      "contract_coverage": 50,
+      "gaze_crap": 2.5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "(*AnthropicProvider).PrepareRequest",
+      "file": "internal/gateway/provider.go",
+      "line": 137,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 50,
+      "gaze_crap": 1.125,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "(*AnthropicProvider).Stop",
+      "file": "internal/gateway/provider.go",
+      "line": 148,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2,
+      "contract_coverage": 0,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe",
+      "contract_coverage_reason": "no_effects_detected"
+    },
+    {
+      "package": "gateway",
+      "function": "newVertexProvider",
+      "file": "internal/gateway/provider.go",
+      "line": 164,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5
+    },
+    {
+      "package": "gateway",
+      "function": "(*VertexProvider).Name",
+      "file": "internal/gateway/provider.go",
+      "line": 194,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "gateway",
+      "function": "(*VertexProvider).Start",
+      "file": "internal/gateway/provider.go",
+      "line": 198,
+      "complexity": 3,
+      "line_coverage": 89.47368421052632,
+      "crap": 3.010497157019974,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "(*VertexProvider).PrepareRequest",
+      "file": "internal/gateway/provider.go",
+      "line": 239,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4,
+      "contract_coverage": 50,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "(*VertexProvider).Stop",
+      "file": "internal/gateway/provider.go",
+      "line": 287,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2,
+      "contract_coverage": 0,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe",
+      "contract_coverage_reason": "no_effects_detected"
+    },
+    {
+      "package": "gateway",
+      "function": "newBedrockProvider",
+      "file": "internal/gateway/provider.go",
+      "line": 308,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "gateway",
+      "function": "(*BedrockProvider).Name",
+      "file": "internal/gateway/provider.go",
+      "line": 327,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "gateway",
+      "function": "(*BedrockProvider).Start",
+      "file": "internal/gateway/provider.go",
+      "line": 331,
+      "complexity": 3,
+      "line_coverage": 91.30434782608695,
+      "crap": 3.0059176460918877,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "(*BedrockProvider).PrepareRequest",
+      "file": "internal/gateway/provider.go",
+      "line": 367,
+      "complexity": 4,
+      "line_coverage": 93.33333333333333,
+      "crap": 4.004740740740741,
+      "contract_coverage": 50,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "(*BedrockProvider).Stop",
+      "file": "internal/gateway/provider.go",
+      "line": 399,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2,
+      "contract_coverage": 0,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe",
+      "contract_coverage_reason": "no_effects_detected"
+    },
+    {
+      "package": "gateway",
+      "function": "transformVertexBody",
+      "file": "internal/gateway/provider.go",
+      "line": 415,
+      "complexity": 10,
+      "line_coverage": 82.14285714285714,
+      "crap": 10.56942419825073
+    },
+    {
+      "package": "gateway",
+      "function": "extractModelFromBody",
+      "file": "internal/gateway/provider.go",
+      "line": 474,
+      "complexity": 6,
+      "line_coverage": 85.71428571428571,
+      "crap": 6.104956268221574
+    },
+    {
+      "package": "gateway",
+      "function": "refreshLoop",
+      "file": "internal/gateway/refresh.go",
+      "line": 32,
+      "complexity": 5,
+      "line_coverage": 85.71428571428571,
+      "crap": 5.072886297376093
+    },
+    {
+      "package": "gateway",
+      "function": "refreshVertexToken",
+      "file": "internal/gateway/refresh.go",
+      "line": 51,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "gateway",
+      "function": "refreshBedrockCredentials",
+      "file": "internal/gateway/refresh.go",
+      "line": 75,
+      "complexity": 5,
+      "line_coverage": 91.66666666666667,
+      "crap": 5.014467592592593
+    },
+    {
+      "package": "gateway",
+      "function": "parseEnvExport",
+      "file": "internal/gateway/refresh.go",
+      "line": 111,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "gateway",
+      "function": "parseAWSCredentialsJSON",
+      "file": "internal/gateway/refresh.go",
+      "line": 128,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "gateway",
+      "function": "signV4",
+      "file": "internal/gateway/refresh.go",
+      "line": 153,
+      "complexity": 5,
+      "line_coverage": 92,
+      "crap": 5.0128
+    },
+    {
+      "package": "gateway",
+      "function": "buildCanonicalHeaders",
+      "file": "internal/gateway/refresh.go",
+      "line": 225,
+      "complexity": 8,
+      "line_coverage": 96.15384615384616,
+      "crap": 8.003641329085116
+    },
+    {
+      "package": "gateway",
+      "function": "hashPayload",
+      "file": "internal/gateway/refresh.go",
+      "line": 284,
+      "complexity": 3,
+      "line_coverage": 71.42857142857143,
+      "crap": 3.2099125364431487
+    },
+    {
+      "package": "gateway",
+      "function": "deriveSigningKey",
+      "file": "internal/gateway/refresh.go",
+      "line": 298,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "gateway",
+      "function": "sha256Hex",
+      "file": "internal/gateway/refresh.go",
+      "line": 307,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "gateway",
+      "function": "hmacSHA256",
+      "file": "internal/gateway/refresh.go",
+      "line": 313,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "gateway",
+      "function": "hmacSHA256Hex",
+      "file": "internal/gateway/refresh.go",
+      "line": 321,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "gateway",
+      "function": "newSSEFilterReader",
+      "file": "internal/gateway/sse.go",
+      "line": 31,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "gateway",
+      "function": "(*sseFilterReader).Read",
+      "file": "internal/gateway/sse.go",
+      "line": 46,
+      "complexity": 11,
+      "line_coverage": 85.18518518518519,
+      "crap": 11.393435959965453
+    },
+    {
+      "package": "gateway",
+      "function": "(*sseFilterReader).Close",
+      "file": "internal/gateway/sse.go",
+      "line": 102,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 100,
+      "gaze_crap": 1,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "gateway",
+      "function": "vertexSSEFilter",
+      "file": "internal/gateway/sse.go",
+      "line": 113,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "impediment",
+      "function": "Detect",
+      "file": "internal/impediment/detect.go",
+      "line": 11,
+      "complexity": 18,
+      "line_coverage": 90.47619047619048,
+      "crap": 18.279883381924197,
+      "contract_coverage": 100,
+      "gaze_crap": 18,
+      "quadrant": "Q4_Dangerous",
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "impediment",
+      "function": "NewRepository",
+      "file": "internal/impediment/impediment.go",
+      "line": 22,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 0,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "impediment",
+      "function": "(*Repository).ensureDir",
+      "file": "internal/impediment/impediment.go",
+      "line": 26,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "impediment",
+      "function": "(*Repository).Add",
+      "file": "internal/impediment/impediment.go",
+      "line": 31,
+      "complexity": 5,
+      "line_coverage": 72.72727272727273,
+      "crap": 5.507137490608565,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "impediment",
+      "function": "(*Repository).List",
+      "file": "internal/impediment/impediment.go",
+      "line": 63,
+      "complexity": 10,
+      "line_coverage": 72.72727272727273,
+      "crap": 12.028549962434258,
+      "contract_coverage": 100,
+      "gaze_crap": 10,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "impediment",
+      "function": "(*Repository).Resolve",
+      "file": "internal/impediment/impediment.go",
+      "line": 102,
+      "complexity": 2,
+      "line_coverage": 85.71428571428571,
+      "crap": 2.011661807580175,
+      "contract_coverage": 100,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "impediment",
+      "function": "(*Repository).Get",
+      "file": "internal/impediment/impediment.go",
+      "line": 116,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 100,
+      "gaze_crap": 1,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "impediment",
+      "function": "(*Repository).save",
+      "file": "internal/impediment/impediment.go",
+      "line": 121,
+      "complexity": 2,
+      "line_coverage": 83.33333333333333,
+      "crap": 2.0185185185185186
+    },
+    {
+      "package": "impediment",
+      "function": "(*Repository).load",
+      "file": "internal/impediment/impediment.go",
+      "line": 132,
+      "complexity": 4,
+      "line_coverage": 75,
+      "crap": 4.25
+    },
+    {
+      "package": "impediment",
+      "function": "(*Repository).nextID",
+      "file": "internal/impediment/impediment.go",
+      "line": 155,
+      "complexity": 7,
+      "line_coverage": 78.57142857142857,
+      "crap": 7.482142857142858
+    },
+    {
+      "package": "impediment",
+      "function": "(*Impediment).AgeDays",
+      "file": "internal/impediment/models.go",
+      "line": 20,
+      "complexity": 2,
+      "line_coverage": 75,
+      "crap": 2.0625,
+      "contract_coverage": 0,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "impediment",
+      "function": "(*Impediment).IsStale",
+      "file": "internal/impediment/models.go",
+      "line": 29,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2,
+      "contract_coverage": 0,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "CollectDivisor",
+      "file": "internal/metrics/collect_divisor.go",
+      "line": 11,
+      "complexity": 6,
+      "line_coverage": 84.21052631578948,
+      "crap": 6.141711619769645,
+      "contract_coverage": 50,
+      "gaze_crap": 10.5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "CollectGaze",
+      "file": "internal/metrics/collect_gaze.go",
+      "line": 11,
+      "complexity": 6,
+      "line_coverage": 84.21052631578948,
+      "crap": 6.141711619769645,
+      "contract_coverage": 50,
+      "gaze_crap": 10.5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "CollectGitHub",
+      "file": "internal/metrics/collect_github.go",
+      "line": 15,
+      "complexity": 26,
+      "line_coverage": 96.72131147540983,
+      "crap": 26.023825782774768,
+      "contract_coverage": 100,
+      "gaze_crap": 26,
+      "quadrant": "Q4_Dangerous",
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "metrics",
+      "function": "CollectMutiMind",
+      "file": "internal/metrics/collect_mutimind.go",
+      "line": 11,
+      "complexity": 15,
+      "line_coverage": 87.17948717948718,
+      "crap": 15.474131391291154,
+      "contract_coverage": 100,
+      "gaze_crap": 15,
+      "quadrant": "Q4_Dangerous",
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "metrics",
+      "function": "ParsePeriod",
+      "file": "internal/metrics/collector.go",
+      "line": 24,
+      "complexity": 7,
+      "line_coverage": 100,
+      "crap": 7,
+      "contract_coverage": 100,
+      "gaze_crap": 7,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "(*Collector).Collect",
+      "file": "internal/metrics/collector.go",
+      "line": 53,
+      "complexity": 14,
+      "line_coverage": 92.10526315789474,
+      "crap": 14.09644263012101,
+      "contract_coverage": 100,
+      "gaze_crap": 14,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "formatPeriod",
+      "file": "internal/metrics/collector.go",
+      "line": 118,
+      "complexity": 2,
+      "line_coverage": 75,
+      "crap": 2.0625
+    },
+    {
+      "package": "metrics",
+      "function": "ComputeVelocity",
+      "file": "internal/metrics/compute.go",
+      "line": 10,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2,
+      "contract_coverage": 100,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "ComputeCycleTimeFromValues",
+      "file": "internal/metrics/compute.go",
+      "line": 22,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "percentile",
+      "file": "internal/metrics/compute.go",
+      "line": 44,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5
+    },
+    {
+      "package": "metrics",
+      "function": "ComputeFlowEfficiency",
+      "file": "internal/metrics/compute.go",
+      "line": 62,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2,
+      "contract_coverage": 100,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "DetermineTrend",
+      "file": "internal/metrics/compute.go",
+      "line": 70,
+      "complexity": 6,
+      "line_coverage": 100,
+      "crap": 6,
+      "contract_coverage": 100,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "defaultThresholds",
+      "file": "internal/metrics/health.go",
+      "line": 4,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "metrics",
+      "function": "ComputeHealth",
+      "file": "internal/metrics/health.go",
+      "line": 15,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2,
+      "contract_coverage": 100,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "computeIndicator",
+      "file": "internal/metrics/health.go",
+      "line": 60,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "metrics",
+      "function": "computeStatus",
+      "file": "internal/metrics/health.go",
+      "line": 86,
+      "complexity": 6,
+      "line_coverage": 100,
+      "crap": 6
+    },
+    {
+      "package": "metrics",
+      "function": "extractValues",
+      "file": "internal/metrics/health.go",
+      "line": 107,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "metrics",
+      "function": "NewQuery",
+      "file": "internal/metrics/query.go",
+      "line": 18,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 0,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "(*Query).now",
+      "file": "internal/metrics/query.go",
+      "line": 22,
+      "complexity": 2,
+      "line_coverage": 66.66666666666667,
+      "crap": 2.148148148148148
+    },
+    {
+      "package": "metrics",
+      "function": "(*Query).Summary",
+      "file": "internal/metrics/query.go",
+      "line": 30,
+      "complexity": 3,
+      "line_coverage": 88.88888888888889,
+      "crap": 3.0123456790123457,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "(*Query).Velocity",
+      "file": "internal/metrics/query.go",
+      "line": 51,
+      "complexity": 5,
+      "line_coverage": 77.77777777777777,
+      "crap": 5.274348422496571,
+      "contract_coverage": 0,
+      "gaze_crap": 30,
+      "quadrant": "Q3_SimpleButUnderspecified",
+      "contract_coverage_reason": "all_effects_ambiguous",
+      "effect_confidence_range": [
+        65,
+        65
+      ]
+    },
+    {
+      "package": "metrics",
+      "function": "(*Query).CycleTime",
+      "file": "internal/metrics/query.go",
+      "line": 69,
+      "complexity": 5,
+      "line_coverage": 83.33333333333333,
+      "crap": 5.1157407407407405,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "(*Query).Bottlenecks",
+      "file": "internal/metrics/query.go",
+      "line": 92,
+      "complexity": 3,
+      "line_coverage": 80,
+      "crap": 3.072,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "(*Query).Health",
+      "file": "internal/metrics/query.go",
+      "line": 121,
+      "complexity": 3,
+      "line_coverage": 71.42857142857143,
+      "crap": 3.2099125364431487,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "NewStore",
+      "file": "internal/metrics/store.go",
+      "line": 19,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 0,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "(*Store).WriteCollection",
+      "file": "internal/metrics/store.go",
+      "line": 24,
+      "complexity": 3,
+      "line_coverage": 81.81818181818181,
+      "crap": 3.0540946656649135,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "(*Store).ReadCollections",
+      "file": "internal/metrics/store.go",
+      "line": 45,
+      "complexity": 10,
+      "line_coverage": 77.27272727272727,
+      "crap": 11.173929376408715,
+      "contract_coverage": 100,
+      "gaze_crap": 10,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "(*Store).WriteSnapshot",
+      "file": "internal/metrics/store.go",
+      "line": 82,
+      "complexity": 3,
+      "line_coverage": 81.81818181818181,
+      "crap": 3.0540946656649135,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "metrics",
+      "function": "(*Store).ReadSnapshots",
+      "file": "internal/metrics/store.go",
+      "line": 101,
+      "complexity": 10,
+      "line_coverage": 77.27272727272727,
+      "crap": 11.173929376408715,
+      "contract_coverage": 100,
+      "gaze_crap": 10,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "LoadWorkflowConfig",
+      "file": "internal/orchestration/config.go",
+      "line": 33,
+      "complexity": 4,
+      "line_coverage": 90,
+      "crap": 4.016,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).store",
+      "file": "internal/orchestration/engine.go",
+      "line": 45,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).now",
+      "file": "internal/orchestration/engine.go",
+      "line": 50,
+      "complexity": 2,
+      "line_coverage": 66.66666666666667,
+      "crap": 2.148148148148148
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).lookPath",
+      "file": "internal/orchestration/engine.go",
+      "line": 58,
+      "complexity": 2,
+      "line_coverage": 66.66666666666667,
+      "crap": 2.148148148148148
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).NewWorkflow",
+      "file": "internal/orchestration/engine.go",
+      "line": 72,
+      "complexity": 11,
+      "line_coverage": 100,
+      "crap": 11,
+      "contract_coverage": 33.333333333333336,
+      "gaze_crap": 46.85185185185185,
+      "quadrant": "Q3_SimpleButUnderspecified"
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).Start",
+      "file": "internal/orchestration/engine.go",
+      "line": 151,
+      "complexity": 14,
+      "line_coverage": 96.875,
+      "crap": 14.0059814453125,
+      "contract_coverage": 66.66666666666667,
+      "gaze_crap": 21.259259259259252,
+      "quadrant": "Q3_SimpleButUnderspecified"
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).Advance",
+      "file": "internal/orchestration/engine.go",
+      "line": 218,
+      "complexity": 32,
+      "line_coverage": 86.44067796610169,
+      "crap": 34.552782903802246,
+      "contract_coverage": 100,
+      "gaze_crap": 32,
+      "quadrant": "Q4_Dangerous",
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).Skip",
+      "file": "internal/orchestration/engine.go",
+      "line": 361,
+      "complexity": 4,
+      "line_coverage": 75,
+      "crap": 4.25,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).Escalate",
+      "file": "internal/orchestration/engine.go",
+      "line": 378,
+      "complexity": 4,
+      "line_coverage": 90.9090909090909,
+      "crap": 4.012021036814425,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).Complete",
+      "file": "internal/orchestration/engine.go",
+      "line": 400,
+      "complexity": 4,
+      "line_coverage": 76.92307692307692,
+      "crap": 4.196631770596268,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).Status",
+      "file": "internal/orchestration/engine.go",
+      "line": 433,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 100,
+      "gaze_crap": 1,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).List",
+      "file": "internal/orchestration/engine.go",
+      "line": 438,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).doEscalate",
+      "file": "internal/orchestration/engine.go",
+      "line": 445,
+      "complexity": 4,
+      "line_coverage": 90,
+      "crap": 4.016
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).HandleHeroUnavailable",
+      "file": "internal/orchestration/engine.go",
+      "line": 470,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).HandleMaxIterations",
+      "file": "internal/orchestration/engine.go",
+      "line": 477,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).HandleAcceptanceRejection",
+      "file": "internal/orchestration/engine.go",
+      "line": 485,
+      "complexity": 4,
+      "line_coverage": 92.85714285714286,
+      "crap": 4.005830903790088,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "(*Orchestrator).HandleContradiction",
+      "file": "internal/orchestration/engine.go",
+      "line": 512,
+      "complexity": 4,
+      "line_coverage": 90.9090909090909,
+      "crap": 4.012021036814425,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "effectiveMode",
+      "file": "internal/orchestration/engine.go",
+      "line": 535,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "orchestration",
+      "function": "sanitizeBranch",
+      "file": "internal/orchestration/engine.go",
+      "line": 545,
+      "complexity": 9,
+      "line_coverage": 100,
+      "crap": 9
+    },
+    {
+      "package": "orchestration",
+      "function": "DetectHeroes",
+      "file": "internal/orchestration/heroes.go",
+      "line": 32,
+      "complexity": 10,
+      "line_coverage": 100,
+      "crap": 10,
+      "contract_coverage": 66.66666666666667,
+      "gaze_crap": 13.703703703703702,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "StageHeroMap",
+      "file": "internal/orchestration/heroes.go",
+      "line": 82,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 100,
+      "gaze_crap": 1,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "StageExecutionModeMap",
+      "file": "internal/orchestration/heroes.go",
+      "line": 97,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 100,
+      "gaze_crap": 1,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "hasDivisorAgent",
+      "file": "internal/orchestration/heroes.go",
+      "line": 109,
+      "complexity": 6,
+      "line_coverage": 85.71428571428571,
+      "crap": 6.104956268221574
+    },
+    {
+      "package": "orchestration",
+      "function": "fileExists",
+      "file": "internal/orchestration/heroes.go",
+      "line": 123,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "orchestration",
+      "function": "AnalyzeWorkflows",
+      "file": "internal/orchestration/learning.go",
+      "line": 25,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2,
+      "contract_coverage": 100,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "analyzeReviewPatterns",
+      "file": "internal/orchestration/learning.go",
+      "line": 47,
+      "complexity": 7,
+      "line_coverage": 100,
+      "crap": 7
+    },
+    {
+      "package": "orchestration",
+      "function": "analyzeVelocityPatterns",
+      "file": "internal/orchestration/learning.go",
+      "line": 84,
+      "complexity": 6,
+      "line_coverage": 73.33333333333333,
+      "crap": 6.682666666666667
+    },
+    {
+      "package": "orchestration",
+      "function": "countReviewIterations",
+      "file": "internal/orchestration/learning.go",
+      "line": 126,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "orchestration",
+      "function": "normalizeError",
+      "file": "internal/orchestration/learning.go",
+      "line": 137,
+      "complexity": 4,
+      "line_coverage": 66.66666666666667,
+      "crap": 4.592592592592593
+    },
+    {
+      "package": "orchestration",
+      "function": "NextFeedbackID",
+      "file": "internal/orchestration/learning.go",
+      "line": 151,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "SaveFeedback",
+      "file": "internal/orchestration/learning.go",
+      "line": 166,
+      "complexity": 5,
+      "line_coverage": 72.72727272727273,
+      "crap": 5.507137490608565,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "LoadFeedback",
+      "file": "internal/orchestration/learning.go",
+      "line": 188,
+      "complexity": 8,
+      "line_coverage": 80.95238095238095,
+      "crap": 8.442284850448116,
+      "contract_coverage": 100,
+      "gaze_crap": 8,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "dedup",
+      "file": "internal/orchestration/learning.go",
+      "line": 226,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "orchestration",
+      "function": "StageOrder",
+      "file": "internal/orchestration/models.go",
+      "line": 22,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 100,
+      "gaze_crap": 1,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "GenerateWorkflowRecord",
+      "file": "internal/orchestration/record.go",
+      "line": 13,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2,
+      "contract_coverage": 100,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "determineOutcome",
+      "file": "internal/orchestration/record.go",
+      "line": 40,
+      "complexity": 6,
+      "line_coverage": 100,
+      "crap": 6
+    },
+    {
+      "package": "orchestration",
+      "function": "(*WorkflowStore).Save",
+      "file": "internal/orchestration/store.go",
+      "line": 20,
+      "complexity": 4,
+      "line_coverage": 66.66666666666667,
+      "crap": 4.592592592592593,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "(*WorkflowStore).Load",
+      "file": "internal/orchestration/store.go",
+      "line": 38,
+      "complexity": 3,
+      "line_coverage": 87.5,
+      "crap": 3.017578125,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "(*WorkflowStore).List",
+      "file": "internal/orchestration/store.go",
+      "line": 55,
+      "complexity": 10,
+      "line_coverage": 80.95238095238095,
+      "crap": 10.691070078825181,
+      "contract_coverage": 100,
+      "gaze_crap": 10,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "orchestration",
+      "function": "(*WorkflowStore).Latest",
+      "file": "internal/orchestration/store.go",
+      "line": 99,
+      "complexity": 6,
+      "line_coverage": 87.5,
+      "crap": 6.0703125,
+      "contract_coverage": 100,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "ResolveBackend",
+      "file": "internal/sandbox/backend.go",
+      "line": 79,
+      "complexity": 12,
+      "line_coverage": 86.95652173913044,
+      "crap": 12.319552888961946,
+      "contract_coverage": 100,
+      "gaze_crap": 12,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "autoDetectBackend",
+      "file": "internal/sandbox/backend.go",
+      "line": 128,
+      "complexity": 4,
+      "line_coverage": 85.71428571428571,
+      "crap": 4.0466472303206995
+    },
+    {
+      "package": "sandbox",
+      "function": "resolveCheURL",
+      "file": "internal/sandbox/backend.go",
+      "line": 145,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "sandbox",
+      "function": "(*CheBackend).Name",
+      "file": "internal/sandbox/che.go",
+      "line": 25,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "sandbox",
+      "function": "(*CheBackend).Create",
+      "file": "internal/sandbox/che.go",
+      "line": 38,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "(*CheBackend).createWithChectl",
+      "file": "internal/sandbox/che.go",
+      "line": 58,
+      "complexity": 4,
+      "line_coverage": 45.45454545454545,
+      "crap": 6.5965439519158515
+    },
+    {
+      "package": "sandbox",
+      "function": "(*CheBackend).createWithAPI",
+      "file": "internal/sandbox/che.go",
+      "line": 85,
+      "complexity": 7,
+      "line_coverage": 75,
+      "crap": 7.765625
+    },
+    {
+      "package": "sandbox",
+      "function": "(*CheBackend).Start",
+      "file": "internal/sandbox/che.go",
+      "line": 127,
+      "complexity": 6,
+      "line_coverage": 33.333333333333336,
+      "crap": 16.666666666666664,
+      "contract_coverage": 100,
+      "gaze_crap": 6,
+      "quadrant": "Q2_ComplexButTested",
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "sandbox",
+      "function": "(*CheBackend).Stop",
+      "file": "internal/sandbox/che.go",
+      "line": 166,
+      "complexity": 5,
+      "line_coverage": 31.57894736842105,
+      "crap": 13.007727073917481,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "(*CheBackend).Destroy",
+      "file": "internal/sandbox/che.go",
+      "line": 200,
+      "complexity": 5,
+      "line_coverage": 35.294117647058826,
+      "crap": 11.772847547323426,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "(*CheBackend).Status",
+      "file": "internal/sandbox/che.go",
+      "line": 232,
+      "complexity": 5,
+      "line_coverage": 35,
+      "crap": 11.865625000000001,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "(*CheBackend).Attach",
+      "file": "internal/sandbox/che.go",
+      "line": 272,
+      "complexity": 4,
+      "line_coverage": 70,
+      "crap": 4.432,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "cheWorkspaceName",
+      "file": "internal/sandbox/che.go",
+      "line": 296,
+      "complexity": 2,
+      "line_coverage": 66.66666666666667,
+      "crap": 2.148148148148148
+    },
+    {
+      "package": "sandbox",
+      "function": "addCheAuth",
+      "file": "internal/sandbox/che.go",
+      "line": 305,
+      "complexity": 3,
+      "line_coverage": 0,
+      "crap": 12
+    },
+    {
+      "package": "sandbox",
+      "function": "parseCheWorkspaceList",
+      "file": "internal/sandbox/che.go",
+      "line": 335,
+      "complexity": 4,
+      "line_coverage": 84.61538461538461,
+      "crap": 4.058261265361857
+    },
+    {
+      "package": "sandbox",
+      "function": "parseCheWorkspaceJSON",
+      "file": "internal/sandbox/che.go",
+      "line": 358,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "sandbox",
+      "function": "extractCheServerURL",
+      "file": "internal/sandbox/che.go",
+      "line": 375,
+      "complexity": 5,
+      "line_coverage": 80,
+      "crap": 5.2
+    },
+    {
+      "package": "sandbox",
+      "function": "extractCheEndpoints",
+      "file": "internal/sandbox/che.go",
+      "line": 388,
+      "complexity": 7,
+      "line_coverage": 90.9090909090909,
+      "crap": 7.036814425244177
+    },
+    {
+      "package": "sandbox",
+      "function": "gatewayEnvVars",
+      "file": "internal/sandbox/config.go",
+      "line": 77,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "sandbox",
+      "function": "DefaultConfig",
+      "file": "internal/sandbox/config.go",
+      "line": 87,
+      "complexity": 6,
+      "line_coverage": 90.9090909090909,
+      "crap": 6.027047332832457,
+      "contract_coverage": 100,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "forwardedEnvVars",
+      "file": "internal/sandbox/config.go",
+      "line": 119,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5
+    },
+    {
+      "package": "sandbox",
+      "function": "googleCloudCredentialMounts",
+      "file": "internal/sandbox/config.go",
+      "line": 151,
+      "complexity": 8,
+      "line_coverage": 64,
+      "crap": 10.985984
+    },
+    {
+      "package": "sandbox",
+      "function": "useParentMount",
+      "file": "internal/sandbox/config.go",
+      "line": 200,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "sandbox",
+      "function": "buildVolumeMounts",
+      "file": "internal/sandbox/config.go",
+      "line": 216,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "sandbox",
+      "function": "buildRunArgs",
+      "file": "internal/sandbox/config.go",
+      "line": 239,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "sandbox",
+      "function": "DetectPlatform",
+      "file": "internal/sandbox/detect.go",
+      "line": 28,
+      "complexity": 6,
+      "line_coverage": 88.88888888888889,
+      "crap": 6.049382716049383,
+      "contract_coverage": 100,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "(*PodmanBackend).Name",
+      "file": "internal/sandbox/podman.go",
+      "line": 15,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "sandbox",
+      "function": "(*PodmanBackend).Create",
+      "file": "internal/sandbox/podman.go",
+      "line": 30,
+      "complexity": 7,
+      "line_coverage": 67.74193548387096,
+      "crap": 8.64479205129066,
+      "contract_coverage": 100,
+      "gaze_crap": 7,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "(*PodmanBackend).Start",
+      "file": "internal/sandbox/podman.go",
+      "line": 100,
+      "complexity": 5,
+      "line_coverage": 75,
+      "crap": 5.390625,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "(*PodmanBackend).Stop",
+      "file": "internal/sandbox/podman.go",
+      "line": 141,
+      "complexity": 2,
+      "line_coverage": 75,
+      "crap": 2.0625,
+      "contract_coverage": 100,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "(*PodmanBackend).Destroy",
+      "file": "internal/sandbox/podman.go",
+      "line": 161,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 100,
+      "gaze_crap": 1,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "(*PodmanBackend).Status",
+      "file": "internal/sandbox/podman.go",
+      "line": 181,
+      "complexity": 8,
+      "line_coverage": 96.15384615384616,
+      "crap": 8.003641329085116,
+      "contract_coverage": 100,
+      "gaze_crap": 8,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "(*PodmanBackend).Attach",
+      "file": "internal/sandbox/podman.go",
+      "line": 240,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6,
+      "contract_coverage": 100,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "buildPersistentRunArgs",
+      "file": "internal/sandbox/podman.go",
+      "line": 254,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "sandbox",
+      "function": "mergeDemoPorts",
+      "file": "internal/sandbox/podman.go",
+      "line": 292,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5
+    },
+    {
+      "package": "sandbox",
+      "function": "(*Options).defaults",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 167,
+      "complexity": 13,
+      "line_coverage": 54.166666666666664,
+      "crap": 29.27162905092593,
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "sandbox",
+      "function": "defaultExecCmd",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 207,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "sandbox",
+      "function": "defaultExecInteractive",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 213,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "sandbox",
+      "function": "defaultHTTPGet",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 222,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "sandbox",
+      "function": "gatewayHealthCheck",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 239,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "sandbox",
+      "function": "autoStartGateway",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 258,
+      "complexity": 11,
+      "line_coverage": 69.56521739130434,
+      "crap": 14.411112024328101
+    },
+    {
+      "package": "sandbox",
+      "function": "isContainerRunning",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 309,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "sandbox",
+      "function": "isContainerExists",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 321,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "sandbox",
+      "function": "waitForHealth",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 330,
+      "complexity": 6,
+      "line_coverage": 92.85714285714286,
+      "crap": 6.013119533527696
+    },
+    {
+      "package": "sandbox",
+      "function": "Create",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 359,
+      "complexity": 8,
+      "line_coverage": 63.1578947368421,
+      "crap": 11.200466540312,
+      "contract_coverage": 100,
+      "gaze_crap": 8,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "Destroy",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 397,
+      "complexity": 2,
+      "line_coverage": 80,
+      "crap": 2.032,
+      "contract_coverage": 100,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "isPersistentWorkspace",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 411,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "sandbox",
+      "function": "Start",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 426,
+      "complexity": 21,
+      "line_coverage": 76,
+      "crap": 27.096384,
+      "contract_coverage": 100,
+      "gaze_crap": 21,
+      "quadrant": "Q4_Dangerous",
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "sandbox",
+      "function": "Stop",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 553,
+      "complexity": 5,
+      "line_coverage": 64.28571428571429,
+      "crap": 6.138848396501457,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "Attach",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 588,
+      "complexity": 4,
+      "line_coverage": 90,
+      "crap": 4.016,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "Extract",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 616,
+      "complexity": 16,
+      "line_coverage": 87.5,
+      "crap": 16.5,
+      "contract_coverage": 100,
+      "gaze_crap": 16,
+      "quadrant": "Q4_Dangerous",
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "sandbox",
+      "function": "WorkspaceStatusCheck",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 709,
+      "complexity": 3,
+      "line_coverage": 85.71428571428571,
+      "crap": 3.0262390670553936,
+      "contract_coverage": 50,
+      "gaze_crap": 4.125,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "Status",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 727,
+      "complexity": 9,
+      "line_coverage": 92,
+      "crap": 9.041472,
+      "contract_coverage": 100,
+      "gaze_crap": 9,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "FormatStatus",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 785,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3,
+      "contract_coverage": 0,
+      "gaze_crap": 12,
+      "quadrant": "Q1_Safe",
+      "contract_coverage_reason": "no_effects_detected"
+    },
+    {
+      "package": "sandbox",
+      "function": "isYes",
+      "file": "internal/sandbox/sandbox.go",
+      "line": 802,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "sandbox",
+      "function": "ProjectNameFromDir",
+      "file": "internal/sandbox/workspace.go",
+      "line": 131,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "sandbox",
+      "function": "projectName",
+      "file": "internal/sandbox/workspace.go",
+      "line": 140,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "sandbox",
+      "function": "containerNameForProject",
+      "file": "internal/sandbox/workspace.go",
+      "line": 154,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "sandbox",
+      "function": "volumeNameForProject",
+      "file": "internal/sandbox/workspace.go",
+      "line": 161,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "sandbox",
+      "function": "LoadConfig",
+      "file": "internal/sandbox/workspace.go",
+      "line": 171,
+      "complexity": 8,
+      "line_coverage": 82.3529411764706,
+      "crap": 8.351719926725014,
+      "contract_coverage": 100,
+      "gaze_crap": 8,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sandbox",
+      "function": "FormatWorkspaceStatus",
+      "file": "internal/sandbox/workspace.go",
+      "line": 205,
+      "complexity": 10,
+      "line_coverage": 100,
+      "crap": 10,
+      "contract_coverage": 0,
+      "gaze_crap": 110,
+      "quadrant": "Q3_SimpleButUnderspecified",
+      "contract_coverage_reason": "no_effects_detected"
+    },
+    {
+      "package": "sandbox",
+      "function": "setupGitSync",
+      "file": "internal/sandbox/workspace.go",
+      "line": 250,
+      "complexity": 5,
+      "line_coverage": 78.57142857142857,
+      "crap": 5.2459912536443145
+    },
+    {
+      "package": "sandbox",
+      "function": "checkGitSync",
+      "file": "internal/sandbox/workspace.go",
+      "line": 290,
+      "complexity": 4,
+      "line_coverage": 77.77777777777777,
+      "crap": 4.175582990397805
+    },
+    {
+      "package": "scaffold",
+      "function": "defaultExecCmd",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 53,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "scaffold",
+      "function": "Run",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 59,
+      "complexity": 31,
+      "line_coverage": 82.55813953488372,
+      "crap": 36.09919724049455,
+      "contract_coverage": 100,
+      "gaze_crap": 31,
+      "quadrant": "Q4_Dangerous",
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "scaffold",
+      "function": "warnLegacyReviewerFiles",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 237,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "scaffold",
+      "function": "mapAssetPath",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 264,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "scaffold",
+      "function": "isToolOwned",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 286,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5
+    },
+    {
+      "package": "scaffold",
+      "function": "isDivisorAsset",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 312,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "scaffold",
+      "function": "isConventionPack",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 327,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "scaffold",
+      "function": "shouldDeployPack",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 336,
+      "complexity": 9,
+      "line_coverage": 100,
+      "crap": 9
+    },
+    {
+      "package": "scaffold",
+      "function": "detectLang",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 358,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "scaffold",
+      "function": "versionMarker",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 380,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "scaffold",
+      "function": "insertMarkerAfterFrontmatter",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 393,
+      "complexity": 6,
+      "line_coverage": 86.66666666666667,
+      "crap": 6.085333333333334
+    },
+    {
+      "package": "scaffold",
+      "function": "configureOpencodeJSON",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 444,
+      "complexity": 44,
+      "line_coverage": 97.02970297029702,
+      "crap": 44.05073468821247,
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "scaffold",
+      "function": "ensureGitignore",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 713,
+      "complexity": 10,
+      "line_coverage": 82.3529411764706,
+      "crap": 10.549562385507835
+    },
+    {
+      "package": "scaffold",
+      "function": "ensureAGENTSmdPackSection",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 771,
+      "complexity": 7,
+      "line_coverage": 86.95652173913044,
+      "crap": 7.10873674693844
+    },
+    {
+      "package": "scaffold",
+      "function": "ensureCLAUDEmd",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 834,
+      "complexity": 12,
+      "line_coverage": 91.66666666666667,
+      "crap": 12.083333333333334
+    },
+    {
+      "package": "scaffold",
+      "function": "ensureCursorrules",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 909,
+      "complexity": 12,
+      "line_coverage": 92.5,
+      "crap": 12.06075
+    },
+    {
+      "package": "scaffold",
+      "function": "collectDeployedPacks",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 985,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "scaffold",
+      "function": "initSubTools",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 1004,
+      "complexity": 25,
+      "line_coverage": 95.08196721311475,
+      "crap": 25.074345429793684,
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "scaffold",
+      "function": "subToolSymbol",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 1158,
+      "complexity": 3,
+      "line_coverage": 75,
+      "crap": 3.140625
+    },
+    {
+      "package": "scaffold",
+      "function": "printSummary",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 1182,
+      "complexity": 25,
+      "line_coverage": 100,
+      "crap": 25,
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "scaffold",
+      "function": "assetPaths",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 1277,
+      "complexity": 3,
+      "line_coverage": 88.88888888888889,
+      "crap": 3.0123456790123457
+    },
+    {
+      "package": "scaffold",
+      "function": "assetContent",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 1294,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "scaffold",
+      "function": "generateDeweySources",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 1308,
+      "complexity": 11,
+      "line_coverage": 88.46153846153847,
+      "crap": 11.185878470641784
+    },
+    {
+      "package": "scaffold",
+      "function": "isDefaultSourcesConfig",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 1378,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "scaffold",
+      "function": "extractGitHubOrg",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 1387,
+      "complexity": 8,
+      "line_coverage": 90,
+      "crap": 8.064
+    },
+    {
+      "package": "scaffold",
+      "function": "writeSourcesConfig",
+      "file": "internal/scaffold/scaffold.go",
+      "line": 1427,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "schemas",
+      "function": "GenerateSchema",
+      "file": "internal/schemas/generate.go",
+      "line": 20,
+      "complexity": 2,
+      "line_coverage": 80,
+      "crap": 2.032
+    },
+    {
+      "package": "schemas",
+      "function": "WriteSchema",
+      "file": "internal/schemas/generate.go",
+      "line": 34,
+      "complexity": 4,
+      "line_coverage": 66.66666666666667,
+      "crap": 4.592592592592593
+    },
+    {
+      "package": "schemas",
+      "function": "ValidateConventionPack",
+      "file": "internal/schemas/packvalidator.go",
+      "line": 31,
+      "complexity": 8,
+      "line_coverage": 94.44444444444444,
+      "crap": 8.010973936899862
+    },
+    {
+      "package": "schemas",
+      "function": "extractFrontmatter",
+      "file": "internal/schemas/packvalidator.go",
+      "line": 73,
+      "complexity": 7,
+      "line_coverage": 87.5,
+      "crap": 7.095703125
+    },
+    {
+      "package": "schemas",
+      "function": "extractH2Sections",
+      "file": "internal/schemas/packvalidator.go",
+      "line": 105,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "schemas",
+      "function": "registeredTypes",
+      "file": "internal/schemas/registry.go",
+      "line": 21,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "schemas",
+      "function": "RegisteredTypeNames",
+      "file": "internal/schemas/registry.go",
+      "line": 36,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "schemas",
+      "function": "GenerateAll",
+      "file": "internal/schemas/registry.go",
+      "line": 49,
+      "complexity": 4,
+      "line_coverage": 75,
+      "crap": 4.25
+    },
+    {
+      "package": "schemas",
+      "function": "ValidateArtifact",
+      "file": "internal/schemas/validate.go",
+      "line": 16,
+      "complexity": 3,
+      "line_coverage": 85.71428571428571,
+      "crap": 3.0262390670553936,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "schemas",
+      "function": "ValidateBytes",
+      "file": "internal/schemas/validate.go",
+      "line": 33,
+      "complexity": 6,
+      "line_coverage": 86.66666666666667,
+      "crap": 6.085333333333334,
+      "contract_coverage": 100,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "schemas",
+      "function": "semverParts",
+      "file": "internal/schemas/version.go",
+      "line": 11,
+      "complexity": 5,
+      "line_coverage": 78.57142857142857,
+      "crap": 5.2459912536443145
+    },
+    {
+      "package": "schemas",
+      "function": "CheckCompatibility",
+      "file": "internal/schemas/version.go",
+      "line": 49,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "setup",
+      "function": "(*Options).defaults",
+      "file": "internal/setup/setup.go",
+      "line": 91,
+      "complexity": 12,
+      "line_coverage": 100,
+      "crap": 12
+    },
+    {
+      "package": "setup",
+      "function": "defaultExecCmd",
+      "file": "internal/setup/setup.go",
+      "line": 128,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "setup",
+      "function": "(*Options).embeddingModel",
+      "file": "internal/setup/setup.go",
+      "line": 148,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "setup",
+      "function": "(*Options).embeddingDim",
+      "file": "internal/setup/setup.go",
+      "line": 156,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "setup",
+      "function": "(*Options).shouldSkipTool",
+      "file": "internal/setup/setup.go",
+      "line": 165,
+      "complexity": 11,
+      "line_coverage": 91.66666666666667,
+      "crap": 11.070023148148149
+    },
+    {
+      "package": "setup",
+      "function": "(*Options).toolMethod",
+      "file": "internal/setup/setup.go",
+      "line": 190,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "setup",
+      "function": "Run",
+      "file": "internal/setup/setup.go",
+      "line": 200,
+      "complexity": 31,
+      "line_coverage": 89.56521739130434,
+      "crap": 32.09187671570642,
+      "contract_coverage": 100,
+      "gaze_crap": 31,
+      "quadrant": "Q4_Dangerous",
+      "fix_strategy": "decompose"
+    },
+    {
+      "package": "setup",
+      "function": "installOpenCode",
+      "file": "internal/setup/setup.go",
+      "line": 418,
+      "complexity": 9,
+      "line_coverage": 93.33333333333333,
+      "crap": 9.024000000000001
+    },
+    {
+      "package": "setup",
+      "function": "installMxF",
+      "file": "internal/setup/setup.go",
+      "line": 456,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "setup",
+      "function": "installGH",
+      "file": "internal/setup/setup.go",
+      "line": 471,
+      "complexity": 6,
+      "line_coverage": 90.9090909090909,
+      "crap": 6.027047332832457
+    },
+    {
+      "package": "setup",
+      "function": "installOpenSpec",
+      "file": "internal/setup/setup.go",
+      "line": 499,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "setup",
+      "function": "installGaze",
+      "file": "internal/setup/setup.go",
+      "line": 520,
+      "complexity": 10,
+      "line_coverage": 63.1578947368421,
+      "crap": 15.0007289692375,
+      "fix_strategy": "add_tests"
+    },
+    {
+      "package": "setup",
+      "function": "ensureNodeJS",
+      "file": "internal/setup/setup.go",
+      "line": 564,
+      "complexity": 5,
+      "line_coverage": 88.88888888888889,
+      "crap": 5.034293552812072
+    },
+    {
+      "package": "setup",
+      "function": "parseNodeMajor",
+      "file": "internal/setup/setup.go",
+      "line": 587,
+      "complexity": 2,
+      "line_coverage": 75,
+      "crap": 2.0625
+    },
+    {
+      "package": "setup",
+      "function": "installNodeJS",
+      "file": "internal/setup/setup.go",
+      "line": 597,
+      "complexity": 11,
+      "line_coverage": 92,
+      "crap": 11.061952
+    },
+    {
+      "package": "setup",
+      "function": "installUV",
+      "file": "internal/setup/setup.go",
+      "line": 651,
+      "complexity": 9,
+      "line_coverage": 86.66666666666667,
+      "crap": 9.192
+    },
+    {
+      "package": "setup",
+      "function": "installSpecify",
+      "file": "internal/setup/setup.go",
+      "line": 690,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5
+    },
+    {
+      "package": "setup",
+      "function": "installReplicator",
+      "file": "internal/setup/setup.go",
+      "line": 722,
+      "complexity": 6,
+      "line_coverage": 100,
+      "crap": 6
+    },
+    {
+      "package": "setup",
+      "function": "runReplicatorSetup",
+      "file": "internal/setup/setup.go",
+      "line": 750,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5
+    },
+    {
+      "package": "setup",
+      "function": "installGolangciLint",
+      "file": "internal/setup/setup.go",
+      "line": 771,
+      "complexity": 6,
+      "line_coverage": 54.54545454545455,
+      "crap": 9.380916604057102
+    },
+    {
+      "package": "setup",
+      "function": "installGovulncheck",
+      "file": "internal/setup/setup.go",
+      "line": 803,
+      "complexity": 4,
+      "line_coverage": 85.71428571428571,
+      "crap": 4.0466472303206995
+    },
+    {
+      "package": "setup",
+      "function": "rpmURL",
+      "file": "internal/setup/setup.go",
+      "line": 820,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1
+    },
+    {
+      "package": "setup",
+      "function": "repoName",
+      "file": "internal/setup/setup.go",
+      "line": 832,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "setup",
+      "function": "rpmArch",
+      "file": "internal/setup/setup.go",
+      "line": 842,
+      "complexity": 2,
+      "line_coverage": 66.66666666666667,
+      "crap": 2.148148148148148
+    },
+    {
+      "package": "setup",
+      "function": "installViaRpm",
+      "file": "internal/setup/setup.go",
+      "line": 853,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "setup",
+      "function": "ollamaBrew",
+      "file": "internal/setup/setup.go",
+      "line": 887,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2
+    },
+    {
+      "package": "setup",
+      "function": "installOllama",
+      "file": "internal/setup/setup.go",
+      "line": 898,
+      "complexity": 6,
+      "line_coverage": 100,
+      "crap": 6
+    },
+    {
+      "package": "setup",
+      "function": "installDewey",
+      "file": "internal/setup/setup.go",
+      "line": 936,
+      "complexity": 7,
+      "line_coverage": 85.71428571428571,
+      "crap": 7.142857142857143
+    },
+    {
+      "package": "setup",
+      "function": "pullEmbeddingModel",
+      "file": "internal/setup/setup.go",
+      "line": 973,
+      "complexity": 6,
+      "line_coverage": 80,
+      "crap": 6.288
+    },
+    {
+      "package": "setup",
+      "function": "printStepResult",
+      "file": "internal/setup/setup.go",
+      "line": 1001,
+      "complexity": 6,
+      "line_coverage": 100,
+      "crap": 6
+    },
+    {
+      "package": "setup",
+      "function": "FormatSetupText",
+      "file": "internal/setup/setup.go",
+      "line": 1026,
+      "complexity": 2,
+      "line_coverage": 100,
+      "crap": 2,
+      "contract_coverage": 0,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe",
+      "contract_coverage_reason": "no_effects_detected"
+    },
+    {
+      "package": "setup",
+      "function": "atomicWriteFile",
+      "file": "internal/setup/setup.go",
+      "line": 1034,
+      "complexity": 7,
+      "line_coverage": 61.111111111111114,
+      "crap": 9.881858710562414
+    },
+    {
+      "package": "sprint",
+      "function": "(*SprintState).ComputeVelocity",
+      "file": "internal/sprint/models.go",
+      "line": 18,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 0,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sprint",
+      "function": "(*SprintState).DurationDays",
+      "file": "internal/sprint/models.go",
+      "line": 23,
+      "complexity": 3,
+      "line_coverage": 0,
+      "crap": 12
+    },
+    {
+      "package": "sprint",
+      "function": "NewSprintStore",
+      "file": "internal/sprint/sprint.go",
+      "line": 21,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 0,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe",
+      "contract_coverage_reason": "all_effects_ambiguous",
+      "effect_confidence_range": [
+        69,
+        69
+      ]
+    },
+    {
+      "package": "sprint",
+      "function": "(*SprintStore).Plan",
+      "file": "internal/sprint/sprint.go",
+      "line": 26,
+      "complexity": 5,
+      "line_coverage": 86.66666666666667,
+      "crap": 5.059259259259259,
+      "contract_coverage": 100,
+      "gaze_crap": 5,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sprint",
+      "function": "(*SprintStore).Review",
+      "file": "internal/sprint/sprint.go",
+      "line": 61,
+      "complexity": 2,
+      "line_coverage": 83.33333333333333,
+      "crap": 2.0185185185185186,
+      "contract_coverage": 100,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sprint",
+      "function": "(*SprintStore).Save",
+      "file": "internal/sprint/sprint.go",
+      "line": 74,
+      "complexity": 3,
+      "line_coverage": 71.42857142857143,
+      "crap": 3.2099125364431487,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sprint",
+      "function": "(*SprintStore).Load",
+      "file": "internal/sprint/sprint.go",
+      "line": 89,
+      "complexity": 3,
+      "line_coverage": 87.5,
+      "crap": 3.017578125,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sprint",
+      "function": "(*SprintStore).Latest",
+      "file": "internal/sprint/sprint.go",
+      "line": 104,
+      "complexity": 8,
+      "line_coverage": 78.57142857142857,
+      "crap": 8.629737609329446,
+      "contract_coverage": 100,
+      "gaze_crap": 8,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sprint",
+      "function": "Standup",
+      "file": "internal/sprint/sprint.go",
+      "line": 130,
+      "complexity": 6,
+      "line_coverage": 75,
+      "crap": 6.5625,
+      "contract_coverage": 100,
+      "gaze_crap": 6,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sync",
+      "function": "(*DefaultGHRunner).Run",
+      "file": "internal/sync/sync.go",
+      "line": 23,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "sync",
+      "function": "NewSyncer",
+      "file": "internal/sync/sync.go",
+      "line": 42,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 0,
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sync",
+      "function": "(*Syncer).SetRunner",
+      "file": "internal/sync/sync.go",
+      "line": 52,
+      "complexity": 1,
+      "line_coverage": 0,
+      "crap": 2
+    },
+    {
+      "package": "sync",
+      "function": "(*Syncer).Push",
+      "file": "internal/sync/sync.go",
+      "line": 57,
+      "complexity": 11,
+      "line_coverage": 84.84848484848484,
+      "crap": 11.420875420875422,
+      "contract_coverage": 100,
+      "gaze_crap": 11,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sync",
+      "function": "(*Syncer).Pull",
+      "file": "internal/sync/sync.go",
+      "line": 114,
+      "complexity": 12,
+      "line_coverage": 82.3529411764706,
+      "crap": 12.791369835131283,
+      "contract_coverage": 100,
+      "gaze_crap": 12,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sync",
+      "function": "(*Syncer).Status",
+      "file": "internal/sync/sync.go",
+      "line": 188,
+      "complexity": 4,
+      "line_coverage": 92.3076923076923,
+      "crap": 4.007282658170232,
+      "contract_coverage": 100,
+      "gaze_crap": 4,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sync",
+      "function": "(*Syncer).Sync",
+      "file": "internal/sync/sync.go",
+      "line": 211,
+      "complexity": 3,
+      "line_coverage": 71.42857142857143,
+      "crap": 3.2099125364431487,
+      "contract_coverage": 100,
+      "gaze_crap": 3,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "sync",
+      "function": "(*Syncer).SyncProject",
+      "file": "internal/sync/sync.go",
+      "line": 224,
+      "complexity": 1,
+      "line_coverage": 100,
+      "crap": 1,
+      "contract_coverage": 100,
+      "gaze_crap": 1,
+      "quadrant": "Q1_Safe"
+    }
+  ],
+  "summary": {
+    "total_functions": 461,
+    "avg_complexity": 5.056399132321041,
+    "avg_line_coverage": 78.02608380785827,
+    "avg_crap": 6.825637132700931,
+    "crapload": 34,
+    "crap_threshold": 15,
+    "gaze_crapload": 16,
+    "gaze_crap_threshold": 15,
+    "avg_gaze_crap": 7.511111111111111,
+    "avg_contract_coverage": 82.90322580645162,
+    "quadrant_counts": {
+      "Q1_Safe": 138,
+      "Q2_ComplexButTested": 1,
+      "Q3_SimpleButUnderspecified": 6,
+      "Q4_Dangerous": 10
+    },
+    "fix_strategy_counts": {
+      "add_tests": 14,
+      "decompose": 19,
+      "decompose_and_test": 1
+    },
+    "worst_crap": [
+      {
+        "package": "main",
+        "function": "applySandboxConfig",
+        "file": "cmd/unbound-force/sandbox.go",
+        "line": 54,
+        "complexity": 15,
+        "line_coverage": 0,
+        "crap": 240,
+        "fix_strategy": "decompose_and_test"
+      },
+      {
+        "package": "doctor",
+        "function": "defaultEmbedCheck",
+        "file": "internal/doctor/checks.go",
+        "line": 950,
+        "complexity": 8,
+        "line_coverage": 4.3478260869565215,
+        "crap": 64.00986274348648,
+        "fix_strategy": "add_tests"
+      },
+      {
+        "package": "config",
+        "function": "merge",
+        "file": "internal/config/config.go",
+        "line": 184,
+        "complexity": 30,
+        "line_coverage": 66.66666666666667,
+        "crap": 63.333333333333314,
+        "fix_strategy": "decompose"
+      },
+      {
+        "package": "main",
+        "function": "runGateway",
+        "file": "cmd/unbound-force/gateway.go",
+        "line": 81,
+        "complexity": 7,
+        "line_coverage": 0,
+        "crap": 56,
+        "fix_strategy": "add_tests"
+      },
+      {
+        "package": "scaffold",
+        "function": "configureOpencodeJSON",
+        "file": "internal/scaffold/scaffold.go",
+        "line": 444,
+        "complexity": 44,
+        "line_coverage": 97.02970297029702,
+        "crap": 44.05073468821247,
+        "fix_strategy": "decompose"
+      }
+    ],
+    "worst_gaze_crap": [
+      {
+        "package": "sandbox",
+        "function": "FormatWorkspaceStatus",
+        "file": "internal/sandbox/workspace.go",
+        "line": 205,
+        "complexity": 10,
+        "line_coverage": 100,
+        "crap": 10,
+        "contract_coverage": 0,
+        "gaze_crap": 110,
+        "quadrant": "Q3_SimpleButUnderspecified",
+        "contract_coverage_reason": "no_effects_detected"
+      },
+      {
+        "package": "orchestration",
+        "function": "(*Orchestrator).NewWorkflow",
+        "file": "internal/orchestration/engine.go",
+        "line": 72,
+        "complexity": 11,
+        "line_coverage": 100,
+        "crap": 11,
+        "contract_coverage": 33.333333333333336,
+        "gaze_crap": 46.85185185185185,
+        "quadrant": "Q3_SimpleButUnderspecified"
+      },
+      {
+        "package": "orchestration",
+        "function": "(*Orchestrator).Advance",
+        "file": "internal/orchestration/engine.go",
+        "line": 218,
+        "complexity": 32,
+        "line_coverage": 86.44067796610169,
+        "crap": 34.552782903802246,
+        "contract_coverage": 100,
+        "gaze_crap": 32,
+        "quadrant": "Q4_Dangerous",
+        "fix_strategy": "decompose"
+      },
+      {
+        "package": "scaffold",
+        "function": "Run",
+        "file": "internal/scaffold/scaffold.go",
+        "line": 59,
+        "complexity": 31,
+        "line_coverage": 82.55813953488372,
+        "crap": 36.09919724049455,
+        "contract_coverage": 100,
+        "gaze_crap": 31,
+        "quadrant": "Q4_Dangerous",
+        "fix_strategy": "decompose"
+      },
+      {
+        "package": "setup",
+        "function": "Run",
+        "file": "internal/setup/setup.go",
+        "line": 200,
+        "complexity": 31,
+        "line_coverage": 89.56521739130434,
+        "crap": 32.09187671570642,
+        "contract_coverage": 100,
+        "gaze_crap": 31,
+        "quadrant": "Q4_Dangerous",
+        "fix_strategy": "decompose"
+      }
+    ],
+    "recommended_actions": [
+      {
+        "function": "defaultEmbedCheck",
+        "package": "doctor",
+        "file": "internal/doctor/checks.go",
+        "line": 950,
+        "fix_strategy": "add_tests",
+        "crap": 64.00986274348648,
+        "complexity": 8
+      },
+      {
+        "function": "runGateway",
+        "package": "main",
+        "file": "cmd/unbound-force/gateway.go",
+        "line": 81,
+        "fix_strategy": "add_tests",
+        "crap": 56,
+        "complexity": 7
+      },
+      {
+        "function": "runDoctor",
+        "package": "main",
+        "file": "cmd/unbound-force/main.go",
+        "line": 138,
+        "fix_strategy": "add_tests",
+        "crap": 42,
+        "complexity": 6
+      },
+      {
+        "function": "runSandboxDestroy",
+        "package": "main",
+        "file": "cmd/unbound-force/sandbox.go",
+        "line": 184,
+        "fix_strategy": "add_tests",
+        "crap": 30,
+        "complexity": 5
+      },
+      {
+        "function": "formatIndicator",
+        "package": "doctor",
+        "file": "internal/doctor/format.go",
+        "line": 104,
+        "fix_strategy": "add_tests",
+        "crap": 29.35614814814816,
+        "complexity": 11
+      },
+      {
+        "function": "(*Options).defaults",
+        "package": "sandbox",
+        "file": "internal/sandbox/sandbox.go",
+        "line": 167,
+        "fix_strategy": "add_tests",
+        "crap": 29.27162905092593,
+        "complexity": 13
+      },
+      {
+        "function": "validateGateway",
+        "package": "config",
+        "file": "internal/config/validate.go",
+        "line": 78,
+        "fix_strategy": "add_tests",
+        "crap": 20,
+        "complexity": 4
+      },
+      {
+        "function": "runSandboxStatus",
+        "package": "main",
+        "file": "cmd/unbound-force/sandbox.go",
+        "line": 450,
+        "fix_strategy": "add_tests",
+        "crap": 20,
+        "complexity": 4
+      },
+      {
+        "function": "validateSetup",
+        "package": "config",
+        "file": "internal/config/validate.go",
+        "line": 20,
+        "fix_strategy": "add_tests",
+        "crap": 20,
+        "complexity": 4
+      },
+      {
+        "function": "validateSandbox",
+        "package": "config",
+        "file": "internal/config/validate.go",
+        "line": 47,
+        "fix_strategy": "add_tests",
+        "crap": 20,
+        "complexity": 4
+      },
+      {
+        "function": "newDoctorCmd",
+        "package": "main",
+        "file": "cmd/unbound-force/main.go",
+        "line": 170,
+        "fix_strategy": "add_tests",
+        "crap": 19.119533527696788,
+        "complexity": 6
+      },
+      {
+        "function": "(*Options).defaults",
+        "package": "doctor",
+        "file": "internal/doctor/doctor.go",
+        "line": 75,
+        "fix_strategy": "add_tests",
+        "crap": 18.744,
+        "complexity": 11
+      },
+      {
+        "function": "(*CheBackend).Start",
+        "package": "sandbox",
+        "file": "internal/sandbox/che.go",
+        "line": 127,
+        "fix_strategy": "add_tests",
+        "crap": 16.666666666666664,
+        "gaze_crap": 6,
+        "complexity": 6,
+        "quadrant": "Q2_ComplexButTested"
+      },
+      {
+        "function": "installGaze",
+        "package": "setup",
+        "file": "internal/setup/setup.go",
+        "line": 520,
+        "fix_strategy": "add_tests",
+        "crap": 15.0007289692375,
+        "complexity": 10
+      },
+      {
+        "function": "applySandboxConfig",
+        "package": "main",
+        "file": "cmd/unbound-force/sandbox.go",
+        "line": 54,
+        "fix_strategy": "decompose_and_test",
+        "crap": 240,
+        "complexity": 15
+      },
+      {
+        "function": "merge",
+        "package": "config",
+        "file": "internal/config/config.go",
+        "line": 184,
+        "fix_strategy": "decompose",
+        "crap": 63.333333333333314,
+        "complexity": 30
+      },
+      {
+        "function": "configureOpencodeJSON",
+        "package": "scaffold",
+        "file": "internal/scaffold/scaffold.go",
+        "line": 444,
+        "fix_strategy": "decompose",
+        "crap": 44.05073468821247,
+        "complexity": 44
+      },
+      {
+        "function": "Run",
+        "package": "scaffold",
+        "file": "internal/scaffold/scaffold.go",
+        "line": 59,
+        "fix_strategy": "decompose",
+        "crap": 36.09919724049455,
+        "gaze_crap": 31,
+        "complexity": 31,
+        "quadrant": "Q4_Dangerous"
+      },
+      {
+        "function": "(*Orchestrator).Advance",
+        "package": "orchestration",
+        "file": "internal/orchestration/engine.go",
+        "line": 218,
+        "fix_strategy": "decompose",
+        "crap": 34.552782903802246,
+        "gaze_crap": 32,
+        "complexity": 32,
+        "quadrant": "Q4_Dangerous"
+      },
+      {
+        "function": "Run",
+        "package": "setup",
+        "file": "internal/setup/setup.go",
+        "line": 200,
+        "fix_strategy": "decompose",
+        "crap": 32.09187671570642,
+        "gaze_crap": 31,
+        "complexity": 31,
+        "quadrant": "Q4_Dangerous"
+      }
+    ]
+  }
+}
