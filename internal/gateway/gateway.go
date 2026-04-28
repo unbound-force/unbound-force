@@ -555,14 +555,33 @@ func detach(opts Options) error {
 	cmd.Env = append(os.Environ(), GatewayChildEnv+"=1")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
-	// Redirect child stdout/stderr to /dev/null so the
-	// parent terminal is clean.
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// Ensure .uf/ directory exists for the log file.
+	// It should already exist from PID file creation,
+	// but guard defensively.
+	ufDir := filepath.Join(opts.ProjectDir, ".uf")
+	if err := os.MkdirAll(ufDir, 0755); err != nil {
+		return fmt.Errorf("create .uf directory: %w", err)
+	}
+
+	// Redirect child stdout/stderr to .uf/gateway.log
+	// so auth diagnostics are captured for debugging.
+	// Owner-only permissions (0600) since the log may
+	// contain credential refresh output.
+	logPath := filepath.Join(ufDir, "gateway.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("open gateway log file: %w", err)
+	}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 
 	if err := opts.ExecStart(cmd); err != nil {
+		_ = logFile.Close()
 		return fmt.Errorf("start background gateway: %w", err)
 	}
+	// Close the parent's handle — the child inherited
+	// the file descriptor independently.
+	_ = logFile.Close()
 
 	childPID := cmd.Process.Pid
 
@@ -576,7 +595,7 @@ func detach(opts Options) error {
 		code, err := opts.HTTPGet(healthURL)
 		if err == nil && code == http.StatusOK {
 			fmt.Fprintf(opts.Stdout,
-				"Gateway started (PID %d) on port %d.\n",
+				"Gateway started (PID %d) on port %d. Logs: .uf/gateway.log\n",
 				childPID, opts.Port)
 			return nil
 		}
@@ -669,6 +688,10 @@ func Status(opts Options) error {
 		fmt.Fprintf(opts.Stdout, "  Port:      %d\n", info.Port)
 		fmt.Fprintf(opts.Stdout, "  PID:       %d\n", info.PID)
 		fmt.Fprintf(opts.Stdout, "  Uptime:    %s\n", formatUptime(uptime))
+		logPath := filepath.Join(opts.ProjectDir, ".uf", "gateway.log")
+		if _, statErr := os.Stat(logPath); statErr == nil {
+			fmt.Fprintf(opts.Stdout, "  Log:       .uf/gateway.log\n")
+		}
 		return nil
 	}
 
@@ -680,6 +703,10 @@ func Status(opts Options) error {
 	fmt.Fprintf(opts.Stdout, "  Port:      %d\n", info.Port)
 	fmt.Fprintf(opts.Stdout, "  PID:       %d\n", info.PID)
 	fmt.Fprintf(opts.Stdout, "  Uptime:    %s\n", formatUptime(uptime))
+	logPath := filepath.Join(opts.ProjectDir, ".uf", "gateway.log")
+	if _, statErr := os.Stat(logPath); statErr == nil {
+		fmt.Fprintf(opts.Stdout, "  Log:       .uf/gateway.log\n")
+	}
 	return nil
 }
 
