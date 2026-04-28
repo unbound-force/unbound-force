@@ -42,6 +42,10 @@ are additive, not required.
    `tsconfig.json` or `package.json` → `typescript.md`
 4. Load corresponding `-custom.md` if present
 5. Also load `severity.md` if present
+6. Exclude `content.md` and `content-custom.md` — these
+   contain writing standards (voice, brand, blog format)
+   for the Scribe/Herald/Envoy agents, not code quality
+   rules relevant to PR review
 
 ### D3. Generic constitution reference
 

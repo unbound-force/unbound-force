@@ -70,7 +70,7 @@ PR comment posting with human confirmation.
 
 ### Modified Capabilities
 
-- Scaffold asset count increases from 34 to 35 files
+- Scaffold asset count increases by 1 file
 - AGENTS.md updated with `/review-pr` documentation and
   relationship to `/review-council`
 

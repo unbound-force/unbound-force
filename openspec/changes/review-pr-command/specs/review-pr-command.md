@@ -24,13 +24,20 @@ compliance.
 - **FR-004** [MUST] The command MUST fetch the PR diff in a
   token-conscious manner: metadata first, diff only when
   needed. Large diffs (500+ lines) MUST be processed
-  file-by-file. Binary files, lock files, and
-  auto-generated files MUST be skipped.
+  file-by-file. Binary files, lock files (`go.sum`,
+  `package-lock.json`, `yarn.lock`, `bun.lock`), and
+  auto-generated files (`*.pb.go`, `vendor/` contents)
+  MUST be skipped. For very large PRs (2000+ lines or
+  50+ files), the command MUST warn the user and offer
+  to focus on specific files.
 
 - **FR-005** [MUST] The command MUST search for associated
-  specifications in both `specs/` and `openspec/`
-  directories. If found, only the Functional Requirements
-  and User Stories sections MUST be read.
+  specifications in `specs/`, `openspec/specs/`, and
+  `openspec/changes/` directories. For Speckit specs,
+  read only Functional Requirements and User Stories
+  sections. For OpenSpec proposals, read only the
+  Capabilities and Impact sections. If no spec is found,
+  use the PR title and description as the intent source.
 
 - **FR-006** [MUST] The AI review MUST focus on alignment
   (scope, requirement coverage, drift detection), security
@@ -58,15 +65,31 @@ compliance.
   and Verdict (APPROVE / REQUEST CHANGES / COMMENT).
 
 - **FR-011** [MUST] For pre-existing CI failures, the
-  command MUST offer to create a local fix branch. The fix
-  branch MUST NOT be pushed automatically. Non-trivial
-  fixes MUST be deferred to the human with an explanation.
+  command MUST offer to create a local fix branch. Before
+  creating the branch, the command MUST verify the working
+  tree is clean (`git status --porcelain` is empty); if
+  dirty, inform the user and skip branch creation. Fix
+  branches MUST use the naming pattern
+  `fix/pr-<N>-<check-name>` (e.g., `fix/pr-42-yamllint`).
+  If the branch already exists, the command MUST inform
+  the user and offer to switch to it or abort. The fix
+  branch MUST NOT be pushed automatically. The user MUST
+  confirm before branch creation. Non-trivial fixes (those
+  requiring business logic changes or modifying more than
+  3 files) MUST be deferred to the human with an
+  explanation.
 
 - **FR-012** [MUST] For HIGH+ findings, the command MUST
-  offer to post in-line PR comments. All comments MUST be
-  shown to the user for explicit confirmation before
-  posting. The command MUST NEVER post comments without
-  human approval.
+  offer to post in-line PR comments. Comments MUST be
+  posted using `gh pr review <N> --comment --body <text>`
+  for summary comments or `gh api` with the
+  `repos/{owner}/{repo}/pulls/<N>/reviews` endpoint for
+  line-specific comments. Comment body text MUST be
+  shell-safe quoted to prevent injection. The command MUST
+  NOT post more than 15 comments per review. All comments
+  MUST be shown to the user for explicit confirmation
+  before posting. The command MUST NEVER post comments
+  without human approval.
 
 - **FR-013** [MUST] The command MUST be deployed as a
   tool-owned scaffold asset at
@@ -78,8 +101,13 @@ compliance.
 
 - **FR-015** [MUST] The `gh` CLI MUST be the only external
   dependency for GitHub interaction. The command MUST
-  gracefully error if `gh` is not available or not
-  authenticated.
+  verify `gh` availability via PATH lookup and
+  authentication via `gh auth status` before making API
+  calls. If `gh` is not available, error with guidance to
+  install it. If not authenticated, error with guidance to
+  run `gh auth login`. If authenticated but lacking
+  permissions for comment posting, inform the user and
+  skip the comment posting step.
 
 ## Acceptance Scenarios
 
@@ -102,8 +130,15 @@ Then the command detects the open PR for the current branch
 
 Given a developer on a branch with no open PR
 When the user runs `/review-pr` (no argument)
-Then the command outputs an error message with instructions
-  to provide an explicit PR number.
+Then the command outputs: "No open PR found for branch
+  '<branch>'. Provide a PR number: /review-pr 42"
+
+### SC-003a: gh CLI not authenticated
+
+Given a developer with `gh` installed but not authenticated
+When the user runs `/review-pr 42`
+Then the command outputs an error with guidance to run
+  `gh auth login` and does not proceed with the review.
 
 ### SC-004: Convention packs enhance review
 
@@ -126,7 +161,17 @@ Given a PR where check `lint` fails on both the PR and the
   base branch
 When the command classifies CI failures
 Then the failure is classified as "Pre-existing", excluded
-  from the verdict, and a fix-branch is offered.
+  from the verdict, and a fix-branch is offered after
+  user confirmation.
+
+### SC-006a: Fix-branch with dirty working tree
+
+Given a PR with pre-existing CI failures and uncommitted
+  changes in the working tree
+When the command offers to create a fix branch
+Then the command informs the user that the working tree is
+  dirty and skips branch creation with guidance to commit
+  or stash first.
 
 ### SC-007: In-line comment confirmation gate
 
