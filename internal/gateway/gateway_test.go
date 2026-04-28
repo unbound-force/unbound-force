@@ -4394,5 +4394,296 @@ func TestStart_ForegroundNoLogFile(t *testing.T) {
 	}
 }
 
+func TestValidToken_Empty(t *testing.T) {
+	prov := &VertexProvider{
+		projectID:   "proj",
+		region:      "us-east5",
+		token:       "",
+		tokenExpiry: time.Now().Add(30 * time.Minute),
+	}
+	_, err := prov.validToken()
+	if err == nil {
+		t.Fatal("expected error for empty token")
+	}
+	if !strings.Contains(err.Error(), "unavailable") {
+		t.Errorf("error = %q, want 'unavailable'", err)
+	}
+}
+
+func TestValidToken_Expired(t *testing.T) {
+	prov := &VertexProvider{
+		projectID:   "proj",
+		region:      "us-east5",
+		token:       "expired-token",
+		tokenExpiry: time.Now().Add(-10 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("refresh failed")
+		},
+	}
+	_, err := prov.validToken()
+	if err == nil {
+		t.Fatal("expected error for expired token")
+	}
+	if !strings.Contains(err.Error(), "expired") {
+		t.Errorf("error = %q, want 'expired'", err)
+	}
+}
+
+func TestValidToken_Valid(t *testing.T) {
+	prov := &VertexProvider{
+		projectID:   "proj",
+		region:      "us-east5",
+		token:       "good-token",
+		tokenExpiry: time.Now().Add(30 * time.Minute),
+	}
+	tok, err := prov.validToken()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tok != "good-token" {
+		t.Errorf("token = %q, want 'good-token'", tok)
+	}
+}
+
+func TestValidToken_ProactiveRefreshTriggered(t *testing.T) {
+	prov := &VertexProvider{
+		projectID:   "proj",
+		region:      "us-east5",
+		token:       "old-token",
+		tokenExpiry: time.Now().Add(3 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return []byte("refreshed-token\n"), nil
+		},
+		getenv: func(key string) string {
+			switch key {
+			case "ANTHROPIC_VERTEX_PROJECT_ID", "GOOGLE_CLOUD_PROJECT":
+				return "proj"
+			case "ANTHROPIC_VERTEX_REGION", "VERTEX_LOCATION", "CLOUD_ML_REGION":
+				return "us-east5"
+			}
+			return ""
+		},
+	}
+	tok, err := prov.validToken()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tok != "refreshed-token" {
+		t.Errorf("token = %q, want 'refreshed-token'", tok)
+	}
+}
+
+func TestValidCredentials_Empty(t *testing.T) {
+	prov := &BedrockProvider{
+		region:     "us-east-1",
+		accessKey:  "",
+		secretKey:  "",
+		credExpiry: time.Now().Add(30 * time.Minute),
+	}
+	_, _, _, err := prov.validCredentials()
+	if err == nil {
+		t.Fatal("expected error for empty credentials")
+	}
+	if !strings.Contains(err.Error(), "unavailable") {
+		t.Errorf("error = %q, want 'unavailable'", err)
+	}
+}
+
+func TestValidCredentials_Expired(t *testing.T) {
+	prov := &BedrockProvider{
+		region:       "us-east-1",
+		accessKey:    "AKID",
+		secretKey:    "SECRET",
+		sessionToken: "TOKEN",
+		credExpiry:   time.Now().Add(-10 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("refresh failed")
+		},
+	}
+	_, _, _, err := prov.validCredentials()
+	if err == nil {
+		t.Fatal("expected error for expired credentials")
+	}
+	if !strings.Contains(err.Error(), "expired") {
+		t.Errorf("error = %q, want 'expired'", err)
+	}
+}
+
+func TestValidCredentials_Valid(t *testing.T) {
+	prov := &BedrockProvider{
+		region:       "us-east-1",
+		accessKey:    "AKID",
+		secretKey:    "SECRET",
+		sessionToken: "TOKEN",
+		credExpiry:   time.Now().Add(30 * time.Minute),
+	}
+	ak, sk, st, err := prov.validCredentials()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ak != "AKID" || sk != "SECRET" || st != "TOKEN" {
+		t.Errorf("credentials = (%q, %q, %q), want (AKID, SECRET, TOKEN)", ak, sk, st)
+	}
+}
+
+func TestPrintGatewayStatus_Basic(t *testing.T) {
+	var buf bytes.Buffer
+	info := &PIDInfo{
+		PID:      12345,
+		Port:     53147,
+		Provider: "vertex",
+		Started:  time.Now().Add(-1 * time.Hour),
+	}
+	printGatewayStatus(&buf, info, t.TempDir())
+	out := buf.String()
+
+	if !strings.Contains(out, "Gateway Status") {
+		t.Error("missing 'Gateway Status' header")
+	}
+	if !strings.Contains(out, "vertex") {
+		t.Error("missing provider")
+	}
+	if !strings.Contains(out, "53147") {
+		t.Error("missing port")
+	}
+	if !strings.Contains(out, "12345") {
+		t.Error("missing PID")
+	}
+}
+
+func TestPrintGatewayStatus_WithLogFile(t *testing.T) {
+	dir := t.TempDir()
+	ufDir := filepath.Join(dir, ".uf")
+	if err := os.MkdirAll(ufDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ufDir, "gateway.log"), []byte("log"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	info := &PIDInfo{
+		PID:      1,
+		Port:     8080,
+		Provider: "anthropic",
+		Started:  time.Now(),
+	}
+	printGatewayStatus(&buf, info, dir)
+	if !strings.Contains(buf.String(), "Log:") {
+		t.Error("expected 'Log:' line when gateway.log exists")
+	}
+}
+
+func TestPrintGatewayStatus_NoLogFile(t *testing.T) {
+	var buf bytes.Buffer
+	info := &PIDInfo{
+		PID:      1,
+		Port:     8080,
+		Provider: "anthropic",
+		Started:  time.Now(),
+	}
+	printGatewayStatus(&buf, info, t.TempDir())
+	if strings.Contains(buf.String(), "Log:") {
+		t.Error("unexpected 'Log:' line when no gateway.log")
+	}
+}
+
+func TestTryProactiveRefresh_Success(t *testing.T) {
+	prov := &VertexProvider{
+		projectID:   "proj",
+		region:      "us-east5",
+		token:       "old",
+		tokenExpiry: time.Now().Add(3 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return []byte("new-token\n"), nil
+		},
+	}
+	prov.tryProactiveRefresh()
+
+	prov.tokenMu.RLock()
+	tok := prov.token
+	exp := prov.tokenExpiry
+	prov.tokenMu.RUnlock()
+
+	if tok != "new-token" {
+		t.Errorf("token = %q, want 'new-token'", tok)
+	}
+	if time.Until(exp) < 50*time.Minute {
+		t.Errorf("expiry too soon: %v", exp)
+	}
+}
+
+func TestTryProactiveRefresh_Failure_PreservesToken(t *testing.T) {
+	origExpiry := time.Now().Add(3 * time.Minute)
+	prov := &VertexProvider{
+		projectID:   "proj",
+		region:      "us-east5",
+		token:       "keep-me",
+		tokenExpiry: origExpiry,
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("gcloud not found")
+		},
+	}
+	prov.tryProactiveRefresh()
+
+	prov.tokenMu.RLock()
+	tok := prov.token
+	prov.tokenMu.RUnlock()
+
+	if tok != "keep-me" {
+		t.Errorf("token = %q, want 'keep-me' (preserved on failure)", tok)
+	}
+}
+
+func TestTryProactiveRefreshBedrock_Success(t *testing.T) {
+	prov := &BedrockProvider{
+		region:       "us-east-1",
+		accessKey:    "old-ak",
+		secretKey:    "old-sk",
+		sessionToken: "old-st",
+		credExpiry:   time.Now().Add(3 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return []byte(`{"AccessKeyId":"new-ak","SecretAccessKey":"new-sk","SessionToken":"new-st"}`), nil
+		},
+	}
+	prov.tryProactiveRefreshBedrock()
+
+	prov.credMu.RLock()
+	ak := prov.accessKey
+	sk := prov.secretKey
+	st := prov.sessionToken
+	exp := prov.credExpiry
+	prov.credMu.RUnlock()
+
+	if ak != "new-ak" || sk != "new-sk" || st != "new-st" {
+		t.Errorf("credentials = (%q, %q, %q), want (new-ak, new-sk, new-st)", ak, sk, st)
+	}
+	if time.Until(exp) < 45*time.Minute {
+		t.Errorf("expiry too soon: %v", exp)
+	}
+}
+
+func TestTryProactiveRefreshBedrock_Failure_PreservesCredentials(t *testing.T) {
+	prov := &BedrockProvider{
+		region:       "us-east-1",
+		accessKey:    "keep-ak",
+		secretKey:    "keep-sk",
+		sessionToken: "keep-st",
+		credExpiry:   time.Now().Add(3 * time.Minute),
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("aws not found")
+		},
+	}
+	prov.tryProactiveRefreshBedrock()
+
+	prov.credMu.RLock()
+	ak := prov.accessKey
+	prov.credMu.RUnlock()
+
+	if ak != "keep-ak" {
+		t.Errorf("accessKey = %q, want 'keep-ak' (preserved on failure)", ak)
+	}
+}
+
 // Suppress unused import warnings.
 var _ = io.Discard

@@ -676,38 +676,30 @@ func Status(opts Options) error {
 		return nil
 	}
 
-	// Query the health endpoint for live data.
+	// Query the health endpoint for live data (informational
+	// only — status is displayed regardless of health).
 	healthURL := fmt.Sprintf("http://localhost:%d/health", info.Port)
-	code, httpErr := opts.HTTPGet(healthURL)
-	if httpErr != nil || code != http.StatusOK {
-		// Process is alive but health endpoint is not
-		// responding — show PID file data.
-		uptime := time.Since(info.Started)
-		fmt.Fprintf(opts.Stdout, "Gateway Status\n")
-		fmt.Fprintf(opts.Stdout, "  Provider:  %s\n", info.Provider)
-		fmt.Fprintf(opts.Stdout, "  Port:      %d\n", info.Port)
-		fmt.Fprintf(opts.Stdout, "  PID:       %d\n", info.PID)
-		fmt.Fprintf(opts.Stdout, "  Uptime:    %s\n", formatUptime(uptime))
-		logPath := filepath.Join(opts.ProjectDir, ".uf", "gateway.log")
-		if _, statErr := os.Stat(logPath); statErr == nil {
-			fmt.Fprintf(opts.Stdout, "  Log:       .uf/gateway.log\n")
-		}
-		return nil
-	}
+	opts.HTTPGet(healthURL) //nolint:errcheck // best-effort
 
-	// Display from PID file data (health endpoint confirms
-	// the process is responsive).
-	uptime := time.Since(info.Started)
-	fmt.Fprintf(opts.Stdout, "Gateway Status\n")
-	fmt.Fprintf(opts.Stdout, "  Provider:  %s\n", info.Provider)
-	fmt.Fprintf(opts.Stdout, "  Port:      %d\n", info.Port)
-	fmt.Fprintf(opts.Stdout, "  PID:       %d\n", info.PID)
-	fmt.Fprintf(opts.Stdout, "  Uptime:    %s\n", formatUptime(uptime))
-	logPath := filepath.Join(opts.ProjectDir, ".uf", "gateway.log")
-	if _, statErr := os.Stat(logPath); statErr == nil {
-		fmt.Fprintf(opts.Stdout, "  Log:       .uf/gateway.log\n")
-	}
+	printGatewayStatus(opts.Stdout, info, opts.ProjectDir)
 	return nil
+}
+
+// printGatewayStatus writes the formatted gateway status
+// to w. Extracted from Status() to avoid duplicating the
+// display logic for the health-success and health-failure
+// paths.
+func printGatewayStatus(w io.Writer, info *PIDInfo, projectDir string) {
+	uptime := time.Since(info.Started)
+	fmt.Fprintf(w, "Gateway Status\n")
+	fmt.Fprintf(w, "  Provider:  %s\n", info.Provider)
+	fmt.Fprintf(w, "  Port:      %d\n", info.Port)
+	fmt.Fprintf(w, "  PID:       %d\n", info.PID)
+	fmt.Fprintf(w, "  Uptime:    %s\n", formatUptime(uptime))
+	logPath := filepath.Join(projectDir, ".uf", "gateway.log")
+	if _, statErr := os.Stat(logPath); statErr == nil {
+		fmt.Fprintf(w, "  Log:       .uf/gateway.log\n")
+	}
 }
 
 // formatUptime formats a duration as a human-readable

@@ -277,43 +277,9 @@ func (p *VertexProvider) Start(ctx context.Context) error {
 //   - Strip anthropic-beta and anthropic-version HTTP
 //     headers (FR-004)
 func (p *VertexProvider) PrepareRequest(req *http.Request) error {
-	p.tokenMu.RLock()
-	token := p.token
-	p.tokenMu.RUnlock()
-
-	// Defense in depth: empty token check first (covers
-	// the case where refresh cleared the token).
-	if token == "" {
-		return fmt.Errorf(
-			"vertex AI token unavailable. Re-authenticate: " +
-				"gcloud auth application-default login")
-	}
-
-	// Proactive refresh: if the token expires within the
-	// proactive refresh window, attempt a non-blocking
-	// refresh before the request is forwarded. This
-	// prevents the token from expiring mid-flight.
-	p.tokenMu.RLock()
-	expiry := p.tokenExpiry
-	p.tokenMu.RUnlock()
-	if !expiry.IsZero() &&
-		time.Now().Add(proactiveRefreshWindow).After(expiry) {
-		p.tryProactiveRefresh()
-		// Re-read token — it may have been updated by
-		// the proactive refresh.
-		p.tokenMu.RLock()
-		token = p.token
-		expiry = p.tokenExpiry
-		p.tokenMu.RUnlock()
-	}
-
-	// Expiry check: reject the request if the token has
-	// already expired (proactive refresh may have failed
-	// or not been attempted).
-	if !expiry.IsZero() && time.Now().After(expiry) {
-		return fmt.Errorf(
-			"vertex AI token expired. Re-authenticate: " +
-				"gcloud auth application-default login")
+	token, err := p.validToken()
+	if err != nil {
+		return err
 	}
 
 	// Detect count_tokens path before body transformation
@@ -350,6 +316,41 @@ func (p *VertexProvider) PrepareRequest(req *http.Request) error {
 
 	req.Header.Set("Authorization", "Bearer "+token)
 	return nil
+}
+
+// validToken reads the current token and expiry under
+// the read lock, triggers a proactive refresh if the
+// token is near expiry, and returns an error if the
+// token is empty or expired. Extracted from
+// PrepareRequest to reduce cyclomatic complexity.
+func (p *VertexProvider) validToken() (string, error) {
+	p.tokenMu.RLock()
+	token := p.token
+	expiry := p.tokenExpiry
+	p.tokenMu.RUnlock()
+
+	if token == "" {
+		return "", fmt.Errorf(
+			"vertex AI token unavailable. Re-authenticate: " +
+				"gcloud auth application-default login")
+	}
+
+	if !expiry.IsZero() &&
+		time.Now().Add(proactiveRefreshWindow).After(expiry) {
+		p.tryProactiveRefresh()
+		p.tokenMu.RLock()
+		token = p.token
+		expiry = p.tokenExpiry
+		p.tokenMu.RUnlock()
+	}
+
+	if !expiry.IsZero() && time.Now().After(expiry) {
+		return "", fmt.Errorf(
+			"vertex AI token expired. Re-authenticate: " +
+				"gcloud auth application-default login")
+	}
+
+	return token, nil
 }
 
 // Stop cancels the refresh goroutine.
@@ -494,44 +495,9 @@ func (p *BedrockProvider) Start(ctx context.Context) error {
 // PrepareRequest sets the upstream URL to the Bedrock
 // invoke endpoint and signs the request with SigV4.
 func (p *BedrockProvider) PrepareRequest(req *http.Request) error {
-	p.credMu.RLock()
-	ak := p.accessKey
-	sk := p.secretKey
-	st := p.sessionToken
-	p.credMu.RUnlock()
-
-	// Defense in depth: empty credentials check first
-	// (covers the case where refresh cleared credentials).
-	if ak == "" || sk == "" {
-		return fmt.Errorf(
-			"bedrock credentials unavailable. Re-authenticate: aws sso login")
-	}
-
-	// Proactive refresh: if credentials expire within the
-	// proactive refresh window, attempt a non-blocking
-	// refresh before the request is forwarded.
-	p.credMu.RLock()
-	expiry := p.credExpiry
-	p.credMu.RUnlock()
-	if !expiry.IsZero() &&
-		time.Now().Add(proactiveRefreshWindow).After(expiry) {
-		p.tryProactiveRefreshBedrock()
-		// Re-read credentials — they may have been
-		// updated by the proactive refresh.
-		p.credMu.RLock()
-		ak = p.accessKey
-		sk = p.secretKey
-		st = p.sessionToken
-		expiry = p.credExpiry
-		p.credMu.RUnlock()
-	}
-
-	// Expiry check: reject the request if credentials
-	// have already expired.
-	if !expiry.IsZero() && time.Now().After(expiry) {
-		return fmt.Errorf(
-			"bedrock credentials expired. Re-authenticate: " +
-				"aws sso login")
+	ak, sk, st, err := p.validCredentials()
+	if err != nil {
+		return err
 	}
 
 	// Extract model from request body. Default to
@@ -551,6 +517,43 @@ func (p *BedrockProvider) PrepareRequest(req *http.Request) error {
 		return fmt.Errorf("sigv4 signing failed: %w", err)
 	}
 	return nil
+}
+
+// validCredentials reads the current credentials and
+// expiry under the read lock, triggers a proactive
+// refresh if near expiry, and returns an error if
+// credentials are empty or expired. Extracted from
+// PrepareRequest to reduce cyclomatic complexity.
+func (p *BedrockProvider) validCredentials() (ak, sk, st string, err error) {
+	p.credMu.RLock()
+	ak = p.accessKey
+	sk = p.secretKey
+	st = p.sessionToken
+	expiry := p.credExpiry
+	p.credMu.RUnlock()
+
+	if ak == "" || sk == "" {
+		return "", "", "", fmt.Errorf(
+			"bedrock credentials unavailable. Re-authenticate: aws sso login")
+	}
+
+	if !expiry.IsZero() &&
+		time.Now().Add(proactiveRefreshWindow).After(expiry) {
+		p.tryProactiveRefreshBedrock()
+		p.credMu.RLock()
+		ak = p.accessKey
+		sk = p.secretKey
+		st = p.sessionToken
+		expiry = p.credExpiry
+		p.credMu.RUnlock()
+	}
+
+	if !expiry.IsZero() && time.Now().After(expiry) {
+		return "", "", "", fmt.Errorf(
+			"bedrock credentials expired. Re-authenticate: aws sso login")
+	}
+
+	return ak, sk, st, nil
 }
 
 // Stop cancels the refresh goroutine.
