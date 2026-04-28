@@ -6,9 +6,6 @@ handoffs:
     prompt: Implement the feature specification based on the updated constitution. I want to build...
 ---
 <!-- scaffolded by uf vdev -->
-<!-- scaffolded by uf vdev -->
-<!-- scaffolded by uf vv0.6.1 -->
-<!-- scaffolded by uf vdev -->
 
 ## User Input
 

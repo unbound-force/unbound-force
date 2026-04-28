@@ -15,7 +15,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Tag}}
+      - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.CommitDate}}
   - id: mxf
@@ -32,7 +32,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Tag}}
+      - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.CommitDate}}
 

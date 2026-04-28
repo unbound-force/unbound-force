@@ -75,6 +75,43 @@ func TestEmbeddedAssets_MatchSource(t *testing.T) {
 	}
 }
 
+// TestEmbeddedAssets_SingleMarker verifies that no embedded
+// Markdown asset contains more than one scaffold provenance
+// marker line. This prevents marker accumulation through the
+// asset-sync feedback loop.
+func TestEmbeddedAssets_SingleMarker(t *testing.T) {
+	paths, err := assetPaths()
+	if err != nil {
+		t.Fatalf("get asset paths: %v", err)
+	}
+
+	for _, relPath := range paths {
+		if filepath.Ext(relPath) != ".md" {
+			continue
+		}
+
+		content, err := assetContent(relPath)
+		if err != nil {
+			t.Errorf("read embedded %s: %v", relPath, err)
+			continue
+		}
+
+		count := 0
+		for _, line := range strings.Split(string(content), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "<!-- scaffolded by uf ") ||
+				strings.HasPrefix(trimmed, "# scaffolded by uf ") {
+				count++
+			}
+		}
+
+		if count > 1 {
+			t.Errorf("embedded asset %s contains %d scaffold markers (expected at most 1)",
+				relPath, count)
+		}
+	}
+}
+
 // mapAssetToSource converts an embedded asset relative path to
 // the canonical source path at the repo root. Delegates to
 // mapAssetPath to avoid duplicating the prefix mapping logic.
@@ -672,13 +709,24 @@ func TestInsertMarkerAfterFrontmatter(t *testing.T) {
 			expected: "---\nkey: value\n---\n" + hashMarker + "\nmore: yaml\n",
 		},
 		{
-			name:   "double insert on repeat call",
+			name:   "idempotent on repeat call",
 			input:  "# Hello\n" + mdMarker + "\n",
 			marker: mdMarker,
-			// insertMarkerAfterFrontmatter is not idempotent by design.
-			// Run() achieves idempotency via the bytes.Equal check for
-			// tool-owned files. This test documents the raw function behavior.
-			expected: "# Hello\n" + mdMarker + "\n" + mdMarker + "\n",
+			// insertMarkerAfterFrontmatter is idempotent: existing
+			// markers are stripped before the new one is inserted.
+			expected: "# Hello\n" + mdMarker + "\n",
+		},
+		{
+			name:     "strips multiple existing markers",
+			input:    "---\ntitle: Test\n---\n<!-- scaffolded by uf vdev -->\n<!-- scaffolded by uf vdev -->\n<!-- scaffolded by uf vv0.6.1 -->\n# Content\n",
+			marker:   mdMarker,
+			expected: "---\ntitle: Test\n---\n" + mdMarker + "\n# Content\n",
+		},
+		{
+			name:     "replaces old version with new",
+			input:    "---\ntitle: Test\n---\n<!-- scaffolded by uf v0.5.0 -->\n# Content\n",
+			marker:   mdMarker,
+			expected: "---\ntitle: Test\n---\n" + mdMarker + "\n# Content\n",
 		},
 	}
 
@@ -687,6 +735,69 @@ func TestInsertMarkerAfterFrontmatter(t *testing.T) {
 			got := insertMarkerAfterFrontmatter([]byte(tt.input), tt.marker)
 			if string(got) != tt.expected {
 				t.Errorf("got:\n%s\nexpected:\n%s", string(got), tt.expected)
+			}
+		})
+	}
+}
+
+func TestStripExistingMarkers(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "no markers",
+			input:    "# Hello\n\nSome content.\n",
+			expected: "# Hello\n\nSome content.\n",
+		},
+		{
+			name:     "single HTML marker",
+			input:    "# Hello\n<!-- scaffolded by uf vdev -->\nContent\n",
+			expected: "# Hello\nContent\n",
+		},
+		{
+			name:     "multiple HTML markers",
+			input:    "<!-- scaffolded by uf vdev -->\n<!-- scaffolded by uf vdev -->\n<!-- scaffolded by uf vv0.6.1 -->\nContent\n",
+			expected: "Content\n",
+		},
+		{
+			name:     "single hash marker",
+			input:    "#!/bin/bash\n# scaffolded by uf vdev\nset -e\n",
+			expected: "#!/bin/bash\nset -e\n",
+		},
+		{
+			name:     "mixed HTML and hash markers",
+			input:    "<!-- scaffolded by uf v1.0.0 -->\n# scaffolded by uf v2.0.0\nContent\n",
+			expected: "Content\n",
+		},
+		{
+			name:     "frontmatter preserved",
+			input:    "---\ntitle: Test\n---\n<!-- scaffolded by uf vdev -->\n# Content\n",
+			expected: "---\ntitle: Test\n---\n# Content\n",
+		},
+		{
+			name:     "empty input",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "content only no markers",
+			input:    "line1\nline2\nline3\n",
+			expected: "line1\nline2\nline3\n",
+		},
+		{
+			name:     "marker-like content preserved",
+			input:    "<!-- scaffolded by someone else -->\nContent\n",
+			expected: "<!-- scaffolded by someone else -->\nContent\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripExistingMarkers(tt.input)
+			if got != tt.expected {
+				t.Errorf("got:\n%q\nexpected:\n%q", got, tt.expected)
 			}
 		})
 	}

@@ -386,12 +386,34 @@ func versionMarker(version string, ext string) string {
 	}
 }
 
+// stripExistingMarkers removes all scaffold provenance marker
+// lines from content, regardless of version or comment format.
+// Marker lines are identified by the prefixes
+// "<!-- scaffolded by uf " (HTML comment) and
+// "# scaffolded by uf " (hash comment).
+func stripExistingMarkers(s string) string {
+	var kept []string
+	for _, line := range strings.Split(s, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "<!-- scaffolded by uf ") ||
+			strings.HasPrefix(trimmed, "# scaffolded by uf ") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
 // insertMarkerAfterFrontmatter inserts the version marker after
 // YAML frontmatter (if present) or appends it at the end.
 // Frontmatter is delimited by "---\n" at the start and a
 // matching "---\n" line.
+//
+// The function is idempotent: existing scaffold markers are
+// stripped before the new marker is inserted, so the output
+// always contains exactly one marker regardless of input state.
 func insertMarkerAfterFrontmatter(content []byte, marker string) []byte {
-	s := string(content)
+	s := stripExistingMarkers(string(content))
 
 	// Check for YAML frontmatter: must start with "---\n"
 	if !strings.HasPrefix(s, "---\n") {

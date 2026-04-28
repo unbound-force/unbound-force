@@ -8,10 +8,6 @@ description: >
   needs human judgment.
 ---
 <!-- scaffolded by uf vdev -->
-<!-- scaffolded by uf vdev -->
-<!-- scaffolded by uf vdev -->
-<!-- scaffolded by uf vdev -->
-<!-- scaffolded by uf vdev -->
 
 # Command: /unleash
 
