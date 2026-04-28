@@ -68,6 +68,7 @@ type SandboxConfig struct {
 	Mode      string          `yaml:"mode"       json:"mode"`
 	Che       CheConfig       `yaml:"che"        json:"che"`
 	DemoPorts []int           `yaml:"demo_ports" json:"demo_ports"`
+	UIDMap    bool            `yaml:"uid_map"    json:"uid_map"`
 }
 
 // ResourcesConfig defines container resource limits.
@@ -247,6 +248,9 @@ func merge(base, overlay Config) Config {
 	if overlay.Sandbox.DemoPorts != nil {
 		result.Sandbox.DemoPorts = overlay.Sandbox.DemoPorts
 	}
+	if overlay.Sandbox.UIDMap {
+		result.Sandbox.UIDMap = true
+	}
 
 	// Gateway
 	if overlay.Gateway.Port != 0 {
@@ -311,6 +315,9 @@ func applyEnvOverrides(cfg Config, getenv func(string) string) Config {
 	}
 	if v := getenv("UF_SANDBOX_RUNTIME"); v != "" {
 		cfg.Sandbox.Runtime = v
+	}
+	if v := getenv("UF_SANDBOX_UIDMAP"); v == "1" || v == "true" {
+		cfg.Sandbox.UIDMap = true
 	}
 	if v := getenv("UF_CHE_URL"); v != "" {
 		cfg.Sandbox.Che.URL = v

@@ -76,6 +76,19 @@ func (b *PodmanBackend) Create(opts Options) error {
 			strings.TrimSpace(string(out)))
 	}
 
+	// Fix workspace permissions after copy. The podman cp
+	// command preserves host ownership which may not match
+	// the container's dev user (UID 1000).
+	fmt.Fprintf(opts.Stderr, "Fixing workspace permissions...\n")
+	if out, err := opts.ExecCmd("podman", "exec", ctrName,
+		"chown", "-R", "dev:dev", "/workspace"); err != nil {
+		// Partial failure cleanup.
+		_, _ = opts.ExecCmd("podman", "rm", "-f", ctrName)
+		_, _ = opts.ExecCmd("podman", "volume", "rm", volName)
+		return fmt.Errorf("failed to fix permissions: %s",
+			strings.TrimSpace(string(out)))
+	}
+
 	fmt.Fprintf(opts.Stderr, "Waiting for OpenCode server...\n")
 
 	// Wait for health check.
@@ -280,6 +293,9 @@ func buildPersistentRunArgs(opts Options, platform PlatformConfig, ctrName, volN
 	// Resource limits.
 	args = append(args, "--memory", opts.Memory)
 	args = append(args, "--cpus", opts.CPUs)
+
+	// UID/GID mapping (before image argument).
+	args = append(args, uidMappingArgs(opts)...)
 
 	// Image name (last argument).
 	args = append(args, opts.Image)

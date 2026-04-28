@@ -71,6 +71,9 @@ func applySandboxConfig(opts *sandbox.Options, stderr io.Writer) {
 	if opts.Mode == "" && cfg.Sandbox.Mode != "" {
 		opts.Mode = cfg.Sandbox.Mode
 	}
+	if !opts.UIDMap && cfg.Sandbox.UIDMap {
+		opts.UIDMap = true
+	}
 
 	// Deprecation warning: if legacy .uf/sandbox.yaml exists,
 	// warn via the injectable stderr writer (testable, per D8).
@@ -91,6 +94,7 @@ type sandboxCreateParams struct {
 	cpus       string
 	name       string
 	detach     bool
+	uidmap     bool
 	demoPorts  []int
 	stdout     io.Writer
 	stderr     io.Writer
@@ -105,6 +109,7 @@ func runSandboxCreate(p sandboxCreateParams) error {
 		CPUs:          p.cpus,
 		WorkspaceName: p.name,
 		Detach:        p.detach,
+		UIDMap:        p.uidmap,
 		DemoPorts:     p.demoPorts,
 		Stdout:        p.stdout,
 		Stderr:        p.stderr,
@@ -130,6 +135,7 @@ The workspace persists across stop/start cycles. Use
 			cpus, _ := cmd.Flags().GetString("cpus")
 			name, _ := cmd.Flags().GetString("name")
 			detach, _ := cmd.Flags().GetBool("detach")
+			uidmap, _ := cmd.Flags().GetBool("uidmap")
 			demoPorts, _ := cmd.Flags().GetIntSlice("demo-ports")
 
 			cwd, err := os.Getwd()
@@ -145,6 +151,7 @@ The workspace persists across stop/start cycles. Use
 				cpus:       cpus,
 				name:       name,
 				detach:     detach,
+				uidmap:     uidmap,
 				demoPorts:  demoPorts,
 				stdout:     cmd.OutOrStdout(),
 				stderr:     cmd.ErrOrStderr(),
@@ -166,6 +173,8 @@ The workspace persists across stop/start cycles. Use
 		"Start without attaching TUI")
 	cmd.Flags().IntSlice("demo-ports", nil,
 		"Additional ports to expose for demos (comma-separated, e.g., 3000,8080)")
+	cmd.Flags().Bool("uidmap", false,
+		"Use explicit UID/GID mapping (for macOS when Podman machine virtiofs does not support --userns=keep-id)")
 
 	return cmd
 }
@@ -250,6 +259,7 @@ type sandboxStartParams struct {
 	mode       string
 	detach     bool
 	noParent   bool
+	uidmap     bool
 	image      string
 	memory     string
 	cpus       string
@@ -264,6 +274,7 @@ func runSandboxStart(p sandboxStartParams) error {
 		Mode:        p.mode,
 		Detach:      p.detach,
 		NoParent:    p.noParent,
+		UIDMap:      p.uidmap,
 		Image:       p.image,
 		Memory:      p.memory,
 		CPUs:        p.cpus,
@@ -291,6 +302,7 @@ directly to the host filesystem).`,
 			mode, _ := cmd.Flags().GetString("mode")
 			detach, _ := cmd.Flags().GetBool("detach")
 			noParent, _ := cmd.Flags().GetBool("no-parent")
+			uidmap, _ := cmd.Flags().GetBool("uidmap")
 			image, _ := cmd.Flags().GetString("image")
 			memory, _ := cmd.Flags().GetString("memory")
 			cpus, _ := cmd.Flags().GetString("cpus")
@@ -306,6 +318,7 @@ directly to the host filesystem).`,
 				mode:       mode,
 				detach:     detach,
 				noParent:   noParent,
+				uidmap:     uidmap,
 				image:      image,
 				memory:     memory,
 				cpus:       cpus,
@@ -330,6 +343,8 @@ directly to the host filesystem).`,
 		"Backend: auto, podman, or che")
 	cmd.Flags().Bool("no-parent", false,
 		"Mount only the project directory (disable parent directory mount)")
+	cmd.Flags().Bool("uidmap", false,
+		"Use explicit UID/GID mapping (for macOS when Podman machine virtiofs does not support --userns=keep-id)")
 
 	return cmd
 }

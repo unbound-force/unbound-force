@@ -7,12 +7,12 @@ does not match the container's `dev` user (UID 1000)
 because no user namespace mapping is configured. This
 manifests differently on each supported platform:
 
-**macOS (Podman machine + virtiofs)**: Files appear as
-`root:nobody` (UID 0:65534) inside the container
-because the Podman machine VM's virtiofs layer does
-not preserve the macOS user's identity. The container's
-`dev` user cannot write to the mounted project
-directory even in `direct` mode.
+**macOS (Podman machine + virtiofs)**: Files may appear
+as `root:nobody` (UID 0:65534) or as the host user's
+UID (e.g., 501) inside the container, depending on
+the Podman machine's virtiofs configuration. In either
+case, the container's `dev` user cannot write to the
+mounted project directory even in `direct` mode.
 
 **Fedora/RHEL (native rootless Podman)**: The host
 user's UID (typically 1000) is mapped to UID 0 (root)

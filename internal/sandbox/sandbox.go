@@ -105,6 +105,18 @@ type Options struct {
 	// response. Used for CDE REST API calls. Defaults to
 	// http.DefaultClient.Do.
 	HTTPDo func(req *http.Request) (*http.Response, error)
+
+	// UIDMap enables explicit UID/GID mapping via
+	// --uidmap/--gidmap flags instead of --userns=keep-id.
+	// Use on macOS when the Podman machine's virtiofs does
+	// not support keep-id UID mapping.
+	UIDMap bool
+
+	// Platform overrides the auto-detected PlatformConfig.
+	// When non-nil, Start() uses this instead of calling
+	// DetectPlatform(). Allows tests to inject macOS
+	// platform properties on Linux CI.
+	Platform *PlatformConfig
 }
 
 // ContainerStatus represents the current state of the
@@ -446,6 +458,25 @@ func Start(opts Options) error {
 			"podman not found. Install: brew install podman or https://podman.io")
 	}
 
+	// Podman version check: --userns=keep-id:uid=N,gid=N
+	// requires Podman >= 4.3.
+	major, minor, verErr := parsePodmanVersion(opts)
+	if verErr != nil {
+		return fmt.Errorf("podman version check: %w", verErr)
+	}
+	if major < 4 || (major == 4 && minor < 3) {
+		return fmt.Errorf(
+			"Podman >= 4.3 required for --userns=keep-id:uid=N,gid=N. Current: %d.%d",
+			major, minor)
+	}
+
+	// Rootless check: --uidmap is only safe under rootless
+	// Podman. Rootful Podman uses different UID semantics.
+	if opts.UIDMap && !isRootlessPodman(opts) {
+		return fmt.Errorf(
+			"--uidmap is only safe under rootless Podman")
+	}
+
 	// Verify opencode is in PATH when attach is needed.
 	if !opts.Detach {
 		if _, err := opts.LookPath("opencode"); err != nil {
@@ -510,8 +541,31 @@ func Start(opts Options) error {
 		}
 	}
 
-	// Detect platform for volume flags.
-	platform := DetectPlatform(opts)
+	// Detect platform for volume flags. Use injected
+	// Platform when provided (for test overrides), otherwise
+	// detect from the host environment.
+	var platform PlatformConfig
+	if opts.Platform != nil {
+		platform = *opts.Platform
+	} else {
+		platform = DetectPlatform(opts)
+	}
+
+	// macOS UID mapping guard: if the Podman machine does
+	// not support keep-id and the user has not opted into
+	// explicit --uidmap, return an actionable error.
+	if platform.OS == "darwin" && !platform.UIDMapSupported && !opts.UIDMap {
+		return fmt.Errorf(
+			"Podman machine UID mapping not supported.\n\n" +
+				"Your Podman machine's virtiofs does not support --userns=keep-id UID mapping.\n" +
+				"Fix the Podman machine (recommended):\n" +
+				"  podman machine stop\n" +
+				"  podman machine rm\n" +
+				"  podman machine init --rootful=false\n" +
+				"  podman machine start\n\n" +
+				"Or use the --uidmap flag as a workaround:\n" +
+				"  uf sandbox start --uidmap")
+	}
 
 	// Build and execute podman run.
 	args := buildRunArgs(opts, platform, gatewayActive, gatewayPort)

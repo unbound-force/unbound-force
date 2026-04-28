@@ -194,6 +194,64 @@ flag generation logic.
   `--uidmap` and `--gidmap` pairs
 - **AND** it does NOT include `--userns`
 
+### FR-010: Podman Version Check
+
+`Start()` MUST validate that the installed Podman
+version is >= 4.3 before using the extended
+`--userns=keep-id:uid=N,gid=N` syntax. If the
+version is too old, return an actionable error.
+
+#### Scenario: Podman version too old
+- **GIVEN** Podman 4.2.0 is installed
+- **WHEN** `uf sandbox start` is executed
+- **THEN** `Start()` returns an error containing
+  "Podman >= 4.3 required"
+- **AND** the error includes upgrade instructions
+
+#### Scenario: Podman version sufficient
+- **GIVEN** Podman 4.3.0 or later is installed
+- **WHEN** `uf sandbox start` is executed
+- **THEN** the version check passes silently
+- **AND** the container starts normally
+
+### FR-011: Rootful Podman Guard for `--uidmap`
+
+When `--uidmap` is set, `Start()` MUST detect whether
+Podman is running in rootful mode (via `podman info
+--format '{{.Host.Security.Rootless}}'`). If rootful
+is detected, MUST return an error rejecting `--uidmap`
+because the explicit UID mapping grants container
+UID 1000 actual host root access under rootful Podman.
+
+#### Scenario: `--uidmap` rejected under rootful
+- **GIVEN** rootful Podman (`Rootless: false`)
+- **WHEN** `uf sandbox start --uidmap` is executed
+- **THEN** `Start()` returns an error containing
+  "--uidmap is only safe under rootless Podman"
+- **AND** the container is NOT started
+
+#### Scenario: `--uidmap` accepted under rootless
+- **GIVEN** rootless Podman (`Rootless: true`)
+- **WHEN** `uf sandbox start --uidmap` is executed
+- **THEN** the rootful check passes
+- **AND** the container starts with explicit mapping
+
+### FR-012: Platform Injection for Testability
+
+`Options` MUST include a `Platform *PlatformConfig`
+field. When non-nil, `Start()` uses the provided
+`PlatformConfig` instead of calling
+`DetectPlatform()`. This allows tests to exercise
+macOS detection logic on Linux CI runners.
+
+#### Scenario: Platform injection overrides detection
+- **GIVEN** `Options.Platform` is set to a
+  `PlatformConfig{OS: "darwin", UIDMapSupported: false}`
+- **WHEN** `Start()` is called on a Linux host
+- **THEN** `Start()` uses the injected platform
+- **AND** the macOS probe error is returned
+- **AND** `DetectPlatform()` is NOT called
+
 ## MODIFIED Requirements
 
 ### FR-007: `buildRunArgs()` Includes User Namespace

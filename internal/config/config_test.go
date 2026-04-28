@@ -451,6 +451,73 @@ func TestLoad_MergePreservesNonOverlapping(t *testing.T) {
 	}
 }
 
+// --- UIDMap tests (sandbox-uid-mapping change, 8.20, 8.21) ---
+
+func TestApplyEnvOverrides_UIDMap(t *testing.T) {
+	// UF_SANDBOX_UIDMAP=1 sets UIDMap to true.
+	cfg := Defaults()
+	result := applyEnvOverrides(cfg, func(k string) string {
+		if k == "UF_SANDBOX_UIDMAP" {
+			return "1"
+		}
+		return ""
+	})
+	if !result.Sandbox.UIDMap {
+		t.Error("expected Sandbox.UIDMap=true when UF_SANDBOX_UIDMAP=1")
+	}
+
+	// UF_SANDBOX_UIDMAP=true also works.
+	cfg2 := Defaults()
+	result2 := applyEnvOverrides(cfg2, func(k string) string {
+		if k == "UF_SANDBOX_UIDMAP" {
+			return "true"
+		}
+		return ""
+	})
+	if !result2.Sandbox.UIDMap {
+		t.Error("expected Sandbox.UIDMap=true when UF_SANDBOX_UIDMAP=true")
+	}
+
+	// UF_SANDBOX_UIDMAP=0 leaves it false.
+	cfg3 := Defaults()
+	result3 := applyEnvOverrides(cfg3, func(k string) string {
+		if k == "UF_SANDBOX_UIDMAP" {
+			return "0"
+		}
+		return ""
+	})
+	if result3.Sandbox.UIDMap {
+		t.Error("expected Sandbox.UIDMap=false when UF_SANDBOX_UIDMAP=0")
+	}
+
+	// No env var leaves it false.
+	cfg4 := Defaults()
+	result4 := applyEnvOverrides(cfg4, func(string) string { return "" })
+	if result4.Sandbox.UIDMap {
+		t.Error("expected Sandbox.UIDMap=false when env var not set")
+	}
+}
+
+func TestConfigMerge_UIDMap(t *testing.T) {
+	base := Defaults()
+	overlay := Config{
+		Sandbox: SandboxConfig{UIDMap: true},
+	}
+	result := merge(base, overlay)
+	if !result.Sandbox.UIDMap {
+		t.Error("expected UIDMap=true after merge with overlay UIDMap=true")
+	}
+
+	// Zero overlay preserves base.
+	base2 := Defaults()
+	base2.Sandbox.UIDMap = false
+	overlay2 := Config{}
+	result2 := merge(base2, overlay2)
+	if result2.Sandbox.UIDMap {
+		t.Error("expected UIDMap=false when overlay has zero value")
+	}
+}
+
 // --- SandboxConfig.IsEmpty tests ---
 
 func TestSandboxConfig_IsEmpty(t *testing.T) {

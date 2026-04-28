@@ -228,6 +228,28 @@ func buildVolumeMounts(opts Options, platform PlatformConfig) []string {
 	return []string{"-v", mount}
 }
 
+// uidMappingArgs returns the Podman user namespace flags for
+// UID/GID mapping inside the container. By default, uses
+// --userns=keep-id:uid=1000,gid=1000 which maps the host
+// user to UID 1000 (the "dev" user) inside the container.
+//
+// When opts.UIDMap is true, returns explicit --uidmap/--gidmap
+// flags instead. This is the fallback for macOS Podman machines
+// where virtiofs does not support keep-id UID mapping.
+func uidMappingArgs(opts Options) []string {
+	if opts.UIDMap {
+		return []string{
+			"--uidmap", "1000:0:1",
+			"--uidmap", "0:1:1000",
+			"--uidmap", "1001:1001:64536",
+			"--gidmap", "1000:0:1",
+			"--gidmap", "0:1:1000",
+			"--gidmap", "1001:1001:64536",
+		}
+	}
+	return []string{"--userns=keep-id:uid=1000,gid=1000"}
+}
+
 // buildRunArgs assembles the complete podman run argument list
 // from Options and PlatformConfig. All values are passed as
 // discrete exec.Command arguments — never shell-interpolated —
@@ -243,6 +265,9 @@ func buildRunArgs(opts Options, platform PlatformConfig, gatewayActive bool, gat
 		"--hostname", ContainerName,
 		"-p", fmt.Sprintf("%d:%d", DefaultServerPort, DefaultServerPort),
 	}
+
+	// UID/GID mapping (before volume mounts).
+	args = append(args, uidMappingArgs(opts)...)
 
 	// Volume mounts.
 	args = append(args, buildVolumeMounts(opts, platform)...)

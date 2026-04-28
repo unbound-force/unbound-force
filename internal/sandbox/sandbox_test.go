@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,16 @@ func testOpts() Options {
 			if name == "podman" && len(args) > 0 && args[0] == "volume" {
 				return nil, fmt.Errorf("no such volume")
 			}
+			// Podman version check: return valid version so
+			// Start() passes the >= 4.3 gate.
+			if name == "podman" && len(args) > 0 && args[0] == "--version" {
+				return []byte("podman version 5.0.0\n"), nil
+			}
+			// Rootless check: return "true" by default so
+			// --uidmap tests pass the rootless gate.
+			if name == "podman" && len(args) > 0 && args[0] == "info" {
+				return []byte("true\n"), nil
+			}
 			return []byte(""), nil
 		},
 		ExecInteractive: func(name string, args ...string) error { return nil },
@@ -61,9 +72,18 @@ func stdout(opts Options) string {
 
 func TestDetectPlatform_MacOSArm64(t *testing.T) {
 	opts := testOpts()
-	// ExecCmd should never be called on macOS (no getenforce).
+	// On macOS, probeUIDMapping calls ExecCmd with podman run.
+	// On Linux, getenforce may be called. Allow both.
 	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
-		t.Fatalf("ExecCmd should not be called on macOS, got: %s %v", name, args)
+		// Allow the UID mapping probe (podman run --rm ...).
+		if name == "podman" && len(args) > 0 && args[0] == "run" {
+			return []byte("1000\n"), nil
+		}
+		// Allow getenforce on Linux.
+		if name == "getenforce" {
+			return []byte("Disabled\n"), nil
+		}
+		t.Fatalf("unexpected ExecCmd call: %s %v", name, args)
 		return nil, nil
 	}
 
@@ -461,6 +481,9 @@ func TestStart_AlreadyRunning(t *testing.T) {
 			if args[0] == "volume" {
 				return nil, fmt.Errorf("no such volume")
 			}
+			if args[0] == "--version" {
+				return []byte("podman version 5.0.0\n"), nil
+			}
 			if args[0] == "inspect" {
 				return []byte("true"), nil
 			}
@@ -480,6 +503,7 @@ func TestStart_AlreadyRunning(t *testing.T) {
 func TestStart_DetachMode(t *testing.T) {
 	opts := testOpts()
 	opts.Detach = true
+	opts.Platform = &PlatformConfig{OS: "linux", Arch: "amd64", UIDMapSupported: true}
 	interactiveCalled := false
 
 	// podman volume inspect returns error (no persistent workspace).
@@ -492,6 +516,8 @@ func TestStart_DetachMode(t *testing.T) {
 			switch args[0] {
 			case "volume":
 				return nil, fmt.Errorf("no such volume")
+			case "--version":
+				return []byte("podman version 5.0.0\n"), nil
 			case "inspect":
 				return nil, fmt.Errorf("no such container")
 			case "image":
@@ -596,11 +622,14 @@ func TestStart_DeadContainerCleanup(t *testing.T) {
 
 	opts := testOpts()
 	opts.Detach = true
+	opts.Platform = &PlatformConfig{OS: "linux", Arch: "amd64", UIDMapSupported: true}
 	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
 		if name == "podman" && len(args) > 0 {
 			switch args[0] {
 			case "volume":
 				return nil, fmt.Errorf("no such volume")
+			case "--version":
+				return []byte("podman version 5.0.0\n"), nil
 			case "inspect":
 				if len(args) > 1 && args[1] == "--format" {
 					// isContainerRunning: container exists but not running.
@@ -639,11 +668,14 @@ func TestStart_HappyPathWithAttach(t *testing.T) {
 
 	opts := testOpts()
 	opts.Detach = false
+	opts.Platform = &PlatformConfig{OS: "linux", Arch: "amd64", UIDMapSupported: true}
 	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
 		if name == "podman" && len(args) > 0 {
 			switch args[0] {
 			case "volume":
 				return nil, fmt.Errorf("no such volume")
+			case "--version":
+				return []byte("podman version 5.0.0\n"), nil
 			case "inspect":
 				return nil, fmt.Errorf("no such container")
 			case "image":
@@ -2316,11 +2348,14 @@ func TestStart_EphemeralMode(t *testing.T) {
 	runCalled := false
 	opts := testOpts()
 	opts.Detach = true
+	opts.Platform = &PlatformConfig{OS: "linux", Arch: "amd64", UIDMapSupported: true}
 	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
 		if name == "podman" && len(args) > 0 {
 			switch args[0] {
 			case "volume":
 				return nil, fmt.Errorf("no such volume")
+			case "--version":
+				return []byte("podman version 5.0.0\n"), nil
 			case "inspect":
 				return nil, fmt.Errorf("no such container")
 			case "image":
@@ -3086,6 +3121,7 @@ func TestStart_AutoStartsGateway(t *testing.T) {
 	gatewayStarted := false
 	opts := testOpts()
 	opts.Detach = true
+	opts.Platform = &PlatformConfig{OS: "linux", Arch: "amd64", UIDMapSupported: true}
 	opts.Getenv = func(key string) string {
 		if key == "ANTHROPIC_API_KEY" {
 			return "sk-ant-test"
@@ -3117,6 +3153,8 @@ func TestStart_AutoStartsGateway(t *testing.T) {
 			switch args[0] {
 			case "volume":
 				return nil, fmt.Errorf("no such volume")
+			case "--version":
+				return []byte("podman version 5.0.0\n"), nil
 			case "inspect":
 				return nil, fmt.Errorf("no such container")
 			case "image":
@@ -3167,6 +3205,7 @@ func TestStart_NoGatewayFallback(t *testing.T) {
 	// compatible, identical to pre-gateway behavior).
 	opts := testOpts()
 	opts.Detach = true
+	opts.Platform = &PlatformConfig{OS: "linux", Arch: "amd64", UIDMapSupported: true}
 	// No provider env vars set (default testOpts).
 
 	var runArgs string
@@ -3175,6 +3214,8 @@ func TestStart_NoGatewayFallback(t *testing.T) {
 			switch args[0] {
 			case "volume":
 				return nil, fmt.Errorf("no such volume")
+			case "--version":
+				return []byte("podman version 5.0.0\n"), nil
 			case "inspect":
 				return nil, fmt.Errorf("no such container")
 			case "image":
@@ -3198,6 +3239,519 @@ func TestStart_NoGatewayFallback(t *testing.T) {
 	}
 	if strings.Contains(runArgs, "ANTHROPIC_API_KEY") {
 		t.Errorf("expected no ANTHROPIC_API_KEY without gateway, got: %s", runArgs)
+	}
+}
+
+// ============================================================
+// UID Mapping Tests (sandbox-uid-mapping change, Task Group 8)
+// ============================================================
+
+// --- uidMappingArgs tests (8.1, 8.2) ---
+
+func TestUIDMappingArgs_Default(t *testing.T) {
+	result := uidMappingArgs(Options{})
+	if len(result) != 1 {
+		t.Fatalf("expected 1 element, got %d: %v", len(result), result)
+	}
+	if result[0] != "--userns=keep-id:uid=1000,gid=1000" {
+		t.Errorf("expected --userns=keep-id:uid=1000,gid=1000, got: %s", result[0])
+	}
+}
+
+func TestUIDMappingArgs_UIDMap(t *testing.T) {
+	result := uidMappingArgs(Options{UIDMap: true})
+	if len(result) != 12 {
+		t.Fatalf("expected 12 elements, got %d: %v", len(result), result)
+	}
+	joined := strings.Join(result, " ")
+	if !strings.Contains(joined, "--uidmap") {
+		t.Errorf("expected --uidmap in result, got: %s", joined)
+	}
+	if !strings.Contains(joined, "--gidmap") {
+		t.Errorf("expected --gidmap in result, got: %s", joined)
+	}
+	if strings.Contains(joined, "--userns") {
+		t.Errorf("expected no --userns when UIDMap=true, got: %s", joined)
+	}
+}
+
+// --- buildRunArgs integration tests (8.3, 8.4) ---
+
+func TestBuildRunArgs_IncludesUserNS(t *testing.T) {
+	opts := testOpts()
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64"}
+	args := buildRunArgs(opts, platform, false, 0)
+	joined := strings.Join(args, " ")
+
+	if !strings.Contains(joined, "--userns=keep-id:uid=1000,gid=1000") {
+		t.Errorf("expected --userns=keep-id:uid=1000,gid=1000, got: %s", joined)
+	}
+	// Verify it appears before the image argument.
+	usrIdx := -1
+	imgIdx := -1
+	for i, a := range args {
+		if a == "--userns=keep-id:uid=1000,gid=1000" {
+			usrIdx = i
+		}
+		if a == DefaultImage {
+			imgIdx = i
+		}
+	}
+	if usrIdx < 0 {
+		t.Fatal("--userns not found in args")
+	}
+	if imgIdx < 0 {
+		t.Fatal("image not found in args")
+	}
+	if usrIdx >= imgIdx {
+		t.Errorf("--userns (idx %d) should appear before image (idx %d)", usrIdx, imgIdx)
+	}
+}
+
+func TestBuildRunArgs_UIDMapOverride(t *testing.T) {
+	opts := testOpts()
+	opts.UIDMap = true
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64"}
+	args := buildRunArgs(opts, platform, false, 0)
+	joined := strings.Join(args, " ")
+
+	if !strings.Contains(joined, "--uidmap") {
+		t.Errorf("expected --uidmap in args, got: %s", joined)
+	}
+	if !strings.Contains(joined, "--gidmap") {
+		t.Errorf("expected --gidmap in args, got: %s", joined)
+	}
+	if strings.Contains(joined, "--userns") {
+		t.Errorf("expected no --userns when UIDMap=true, got: %s", joined)
+	}
+}
+
+// --- buildPersistentRunArgs integration tests (8.5, 8.6) ---
+
+func TestBuildPersistentRunArgs_IncludesUserNS(t *testing.T) {
+	opts := testOpts()
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64"}
+	args := buildPersistentRunArgs(opts, platform, "uf-sandbox-test", "uf-vol-test")
+	joined := strings.Join(args, " ")
+
+	if !strings.Contains(joined, "--userns=keep-id:uid=1000,gid=1000") {
+		t.Errorf("expected --userns=keep-id:uid=1000,gid=1000, got: %s", joined)
+	}
+	// Verify it appears before the image argument.
+	usrIdx := -1
+	imgIdx := -1
+	for i, a := range args {
+		if a == "--userns=keep-id:uid=1000,gid=1000" {
+			usrIdx = i
+		}
+		if a == DefaultImage {
+			imgIdx = i
+		}
+	}
+	if usrIdx < 0 {
+		t.Fatal("--userns not found in args")
+	}
+	if imgIdx < 0 {
+		t.Fatal("image not found in args")
+	}
+	if usrIdx >= imgIdx {
+		t.Errorf("--userns (idx %d) should appear before image (idx %d)", usrIdx, imgIdx)
+	}
+}
+
+func TestBuildPersistentRunArgs_UIDMapOverride(t *testing.T) {
+	opts := testOpts()
+	opts.UIDMap = true
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64"}
+	args := buildPersistentRunArgs(opts, platform, "uf-sandbox-test", "uf-vol-test")
+	joined := strings.Join(args, " ")
+
+	if !strings.Contains(joined, "--uidmap") {
+		t.Errorf("expected --uidmap in args, got: %s", joined)
+	}
+	if !strings.Contains(joined, "--gidmap") {
+		t.Errorf("expected --gidmap in args, got: %s", joined)
+	}
+	if strings.Contains(joined, "--userns") {
+		t.Errorf("expected no --userns when UIDMap=true, got: %s", joined)
+	}
+}
+
+// --- probeUIDMapping tests (8.7-8.11) ---
+
+func TestProbeUIDMapping_Success(t *testing.T) {
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		return []byte("1000\n"), nil
+	}
+
+	if !probeUIDMapping(opts) {
+		t.Error("expected probeUIDMapping to return true when output is 1000")
+	}
+}
+
+func TestProbeUIDMapping_Failure(t *testing.T) {
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		return []byte("0\n"), nil
+	}
+
+	if probeUIDMapping(opts) {
+		t.Error("expected probeUIDMapping to return false when output is 0")
+	}
+}
+
+func TestProbeUIDMapping_Error(t *testing.T) {
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		return nil, fmt.Errorf("podman not available")
+	}
+
+	if probeUIDMapping(opts) {
+		t.Error("expected probeUIDMapping to return false on error (fail-safe)")
+	}
+}
+
+func TestProbeUIDMapping_UnexpectedOutput(t *testing.T) {
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		return []byte("nobody\n"), nil
+	}
+
+	if probeUIDMapping(opts) {
+		t.Error("expected probeUIDMapping to return false for non-numeric output")
+	}
+}
+
+func TestProbeUIDMapping_EmptyOutput(t *testing.T) {
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		return []byte(""), nil
+	}
+
+	if probeUIDMapping(opts) {
+		t.Error("expected probeUIDMapping to return false for empty output")
+	}
+}
+
+// --- DetectPlatform test (8.12) ---
+
+func TestDetectPlatform_LinuxAlwaysSupported(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("test only runs on Linux")
+	}
+	opts := testOpts()
+	p := DetectPlatform(opts)
+	if !p.UIDMapSupported {
+		t.Error("expected UIDMapSupported=true on Linux")
+	}
+}
+
+// --- Start() integration with Platform injection (8.13, 8.14) ---
+
+func TestStart_DarwinUIDMapNotSupported(t *testing.T) {
+	opts := testOpts()
+	opts.Detach = true
+	opts.Platform = &PlatformConfig{
+		OS:              "darwin",
+		Arch:            "arm64",
+		UIDMapSupported: false,
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 {
+			if args[0] == "volume" {
+				return nil, fmt.Errorf("no such volume")
+			}
+			if args[0] == "--version" {
+				return []byte("podman version 5.0.0\n"), nil
+			}
+		}
+		return []byte(""), nil
+	}
+
+	err := Start(opts)
+	if err == nil {
+		t.Fatal("expected error when macOS UID mapping not supported")
+	}
+	if !strings.Contains(err.Error(), "Podman machine UID mapping") {
+		t.Errorf("expected 'Podman machine UID mapping' in error, got: %s", err.Error())
+	}
+}
+
+func TestStart_DarwinUIDMapOverride(t *testing.T) {
+	opts := testOpts()
+	opts.Detach = true
+	opts.UIDMap = true
+	opts.Platform = &PlatformConfig{
+		OS:              "darwin",
+		Arch:            "arm64",
+		UIDMapSupported: false,
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				return nil, fmt.Errorf("no such volume")
+			case "--version":
+				return []byte("podman version 5.0.0\n"), nil
+			case "info":
+				return []byte("true\n"), nil // rootless
+			case "inspect":
+				return nil, fmt.Errorf("no such container")
+			case "image":
+				return []byte(""), nil
+			case "run":
+				return []byte("container-id"), nil
+			}
+		}
+		return []byte(""), nil
+	}
+
+	err := Start(opts)
+	// The UID mapping error should NOT be returned because
+	// --uidmap overrides the detection. It may fail later
+	// for other reasons — just verify the UID mapping error
+	// is NOT the one returned.
+	if err != nil && strings.Contains(err.Error(), "Podman machine UID mapping") {
+		t.Errorf("expected --uidmap to bypass probe error, got: %s", err.Error())
+	}
+}
+
+// --- parsePodmanVersion tests (8.15, 8.16) ---
+
+func TestParsePodmanVersion_Valid(t *testing.T) {
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		return []byte("podman version 4.9.3\n"), nil
+	}
+
+	major, minor, err := parsePodmanVersion(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if major != 4 {
+		t.Errorf("expected major=4, got: %d", major)
+	}
+	if minor != 9 {
+		t.Errorf("expected minor=9, got: %d", minor)
+	}
+}
+
+func TestParsePodmanVersion_TooOld(t *testing.T) {
+	opts := testOpts()
+	opts.Detach = true
+	opts.Platform = &PlatformConfig{OS: "linux", Arch: "amd64", UIDMapSupported: true}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 {
+			if args[0] == "volume" {
+				return nil, fmt.Errorf("no such volume")
+			}
+			if args[0] == "--version" {
+				return []byte("podman version 4.2.1\n"), nil
+			}
+		}
+		return []byte(""), nil
+	}
+
+	err := Start(opts)
+	if err == nil {
+		t.Fatal("expected error for old Podman version")
+	}
+	if !strings.Contains(err.Error(), "Podman >= 4.3 required") {
+		t.Errorf("expected 'Podman >= 4.3 required' in error, got: %s", err.Error())
+	}
+}
+
+// --- isRootlessPodman tests (8.17, 8.18, 8.19) ---
+
+func TestIsRootlessPodman_True(t *testing.T) {
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		return []byte("true\n"), nil
+	}
+
+	if !isRootlessPodman(opts) {
+		t.Error("expected isRootlessPodman to return true")
+	}
+}
+
+func TestIsRootlessPodman_False(t *testing.T) {
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		return []byte("false\n"), nil
+	}
+
+	if isRootlessPodman(opts) {
+		t.Error("expected isRootlessPodman to return false")
+	}
+}
+
+func TestStart_UIDMapRejectedUnderRootful(t *testing.T) {
+	opts := testOpts()
+	opts.Detach = true
+	opts.UIDMap = true
+	opts.Platform = &PlatformConfig{OS: "linux", Arch: "amd64", UIDMapSupported: true}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				return nil, fmt.Errorf("no such volume")
+			case "--version":
+				return []byte("podman version 5.0.0\n"), nil
+			case "info":
+				return []byte("false\n"), nil // rootful
+			}
+		}
+		return []byte(""), nil
+	}
+
+	err := Start(opts)
+	if err == nil {
+		t.Fatal("expected error when --uidmap under rootful Podman")
+	}
+	if !strings.Contains(err.Error(), "only safe under rootless") {
+		t.Errorf("expected 'only safe under rootless' in error, got: %s", err.Error())
+	}
+}
+
+// --- PodmanBackend.Create chown tests (8.23, 8.24) ---
+
+func TestPodmanCreate_ChownAfterCopy(t *testing.T) {
+	var commands []string
+	opts := testOpts()
+	opts.Detach = true
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		cmd := name + " " + strings.Join(args, " ")
+		commands = append(commands, cmd)
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				if len(args) > 1 && args[1] == "inspect" {
+					return nil, fmt.Errorf("no such volume")
+				}
+				return []byte("volume-created"), nil
+			case "run":
+				// UID mapping probe (busybox) or container start.
+				for _, a := range args {
+					if a == probeImage {
+						return []byte("1000\n"), nil
+					}
+				}
+				return []byte("container-id"), nil
+			case "cp":
+				return []byte(""), nil
+			case "exec":
+				return []byte(""), nil
+			case "inspect":
+				return nil, fmt.Errorf("no such container")
+			}
+		}
+		return []byte(""), nil
+	}
+
+	b := &PodmanBackend{}
+	err := b.Create(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify chown is called after cp.
+	cpIdx := -1
+	chownIdx := -1
+	for i, cmd := range commands {
+		if strings.Contains(cmd, "podman cp") {
+			cpIdx = i
+		}
+		if strings.Contains(cmd, "chown -R dev:dev /workspace") {
+			chownIdx = i
+		}
+	}
+	if cpIdx < 0 {
+		t.Fatal("expected podman cp in commands")
+	}
+	if chownIdx < 0 {
+		t.Fatal("expected chown command in commands")
+	}
+	if chownIdx <= cpIdx {
+		t.Errorf("chown (idx %d) should come after cp (idx %d)", chownIdx, cpIdx)
+	}
+
+	// Verify stderr contains the progress message.
+	stderrOut := opts.Stderr.(*bytes.Buffer).String()
+	if !strings.Contains(stderrOut, "Fixing workspace permissions...") {
+		t.Errorf("expected 'Fixing workspace permissions...' in stderr, got: %s", stderrOut)
+	}
+}
+
+func TestPodmanCreate_ChownFailure(t *testing.T) {
+	rmCalled := false
+	volumeRmCalled := false
+	opts := testOpts()
+	opts.Detach = true
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				if len(args) > 1 && args[1] == "inspect" {
+					return nil, fmt.Errorf("no such volume")
+				}
+				if len(args) > 1 && args[1] == "rm" {
+					volumeRmCalled = true
+					return []byte(""), nil
+				}
+				return []byte("volume-created"), nil
+			case "run":
+				// UID mapping probe (busybox) or container start.
+				for _, a := range args {
+					if a == probeImage {
+						return []byte("1000\n"), nil
+					}
+				}
+				return []byte("container-id"), nil
+			case "cp":
+				return []byte(""), nil
+			case "exec":
+				// chown fails.
+				return []byte("permission denied"), fmt.Errorf("exit 1")
+			case "rm":
+				rmCalled = true
+				return []byte(""), nil
+			case "inspect":
+				return nil, fmt.Errorf("no such container")
+			}
+		}
+		return []byte(""), nil
+	}
+
+	b := &PodmanBackend{}
+	err := b.Create(opts)
+	if err == nil {
+		t.Fatal("expected error when chown fails")
+	}
+	if !strings.Contains(err.Error(), "failed to fix permissions") {
+		t.Errorf("expected 'failed to fix permissions' in error, got: %s", err.Error())
+	}
+	if !rmCalled {
+		t.Error("expected podman rm -f for partial cleanup")
+	}
+	if !volumeRmCalled {
+		t.Error("expected podman volume rm for partial cleanup")
 	}
 }
 

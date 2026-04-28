@@ -83,12 +83,20 @@ Options A-E by avoiding their individual drawbacks.
 
 **Trade-off**: Requires Podman >= 4.3. Podman 4.3 was
 released in October 2022 -- all supported Fedora and
-macOS Homebrew versions ship >= 4.3. This is
-acceptable.
+macOS Homebrew versions ship >= 4.3.
+
+**Version enforcement**: `Start()` MUST parse
+`podman --version` output and compare >= 4.3 before
+using the extended syntax. If too old, return an
+actionable error: "Podman >= 4.3 required for
+--userns=keep-id:uid=N,gid=N. Current: X.Y.Z.
+Upgrade: brew upgrade podman (macOS) or
+dnf upgrade podman (Fedora)."
 
 **Testability**: Verifiable by inspecting the args
 slice returned by `buildRunArgs()` -- no subprocess
-execution needed.
+execution needed. Version check testable via
+injectable `ExecCmd`.
 
 ### D2: macOS Podman Machine UID Detection
 
@@ -97,22 +105,36 @@ the container, probe whether the Podman machine is
 mapping UIDs correctly.
 
 **Detection strategy**: Run a lightweight probe
-container:
+container using a minimal image (`busybox:latest`)
+with an explicit `--entrypoint` override to prevent
+the image's default entrypoint from executing:
 ```
 podman run --rm \
+  --entrypoint stat \
   --userns=keep-id:uid=1000,gid=1000 \
   -v <ProjectDir>:/test:ro \
-  <Image> stat -c '%u' /test
+  busybox:latest -c '%u' /test
 ```
 If the output is `1000`, the mapping works. If it is
 `0` or any other value, virtiofs is not mapping UIDs
-correctly.
+correctly. Using `busybox:latest` (~5MB) avoids
+pulling the full dev image (~1GB) for a simple stat
+check and eliminates entrypoint security concerns.
+
+Print a progress message before the probe:
+`"Checking Podman machine UID mapping..."` to
+`opts.Stderr` (consistent with other progress
+messages in `Start()`).
 
 **Decision**: Use the probe approach. Run a
 lightweight probe container on macOS before the main
 container start. Cache the result in
-`PlatformConfig.UIDMapSupported` for the session (the
-Podman machine config does not change mid-session).
+`PlatformConfig.UIDMapSupported` for the session.
+The TOCTOU window (Podman machine state changing
+between probe and container start) is a known
+limitation — if the main container start fails
+despite the probe succeeding, the error message
+should suggest `--uidmap` as a fallback.
 
 **Error message when detection fails**:
 ```
@@ -156,11 +178,23 @@ The explicit mapping:
 --gidmap 1001:1001:64536
 ```
 
-This maps:
-- Container UID 1000 (dev) -> host UID 0 (the UID
-  that virtiofs assigns to mounted files)
-- Container UID 0 (root) -> host UID 1
-- Container UIDs 1001-65535 -> host UIDs 1001-65535
+This maps (under rootless Podman):
+- Container UID 1000 (dev) -> user namespace UID 0
+  (= calling user's real UID on host, NOT actual
+  root). This is the UID that virtiofs assigns to
+  mounted files.
+- Container UID 0 (root) -> user namespace UID 1
+- Container UIDs 1001-65535 -> user namespace UIDs
+  1001-65535
+
+**Rootful Podman safety**: This mapping is ONLY safe
+under rootless Podman. Under rootful Podman, "host
+UID 0" means actual root — the mapping would grant
+container UID 1000 real host root access (privilege
+escalation). `Start()` MUST detect rootful Podman
+(via `podman info --format
+'{{.Host.Security.Rootless}}'`) and reject
+`--uidmap` with a clear error if rootful is detected.
 
 **Rationale**: This is the manual workaround for
 macOS Podman machine configurations where
@@ -219,7 +253,7 @@ This precedence ensures:
   on a broken sandbox
 - Linux users get correct behavior with zero config
 
-### D6: PlatformConfig Extension
+### D6: PlatformConfig Extension and Injection
 
 Extend `PlatformConfig` with a new field:
 
@@ -239,6 +273,15 @@ This keeps detection results in the existing
 `PlatformConfig` struct, which is already threaded
 through `buildRunArgs()` and
 `buildPersistentRunArgs()`.
+
+**Testability injection**: Add a `Platform
+*PlatformConfig` field to `Options`. When non-nil,
+`Start()` uses it instead of calling
+`DetectPlatform()`. This allows tests to override
+`runtime.GOOS` behavior and exercise macOS probe
+and detection precedence logic on Linux CI. When
+nil (zero value), `DetectPlatform()` is called as
+before — no behavioral change for production code.
 
 ## Risks / Trade-offs
 

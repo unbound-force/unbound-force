@@ -34,6 +34,30 @@ adapted for other AI coding tools.
 brew install unbound-force/tap/unbound-force
 ```
 
+#### Podman Machine Setup (for `uf sandbox`)
+
+If you plan to use `uf sandbox` for containerized
+development sessions, ensure your Podman machine is
+configured for correct UID mapping:
+
+```bash
+podman machine stop
+podman machine rm
+podman machine init --rootful=false
+podman machine start
+```
+
+This ensures virtiofs maps file ownership correctly
+inside sandbox containers. Without this, files appear
+as `root:nobody` and `direct` mode is non-functional.
+
+If you cannot reconfigure your Podman machine, use
+the `--uidmap` escape hatch:
+
+```bash
+uf sandbox start --uidmap
+```
+
 ### Fedora / RHEL (Homebrew -- recommended)
 
 Homebrew provides access to all companion tools via
