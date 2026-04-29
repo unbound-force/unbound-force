@@ -17,5 +17,10 @@ ENABLE_LINTERS:
   - BASH_SHELLCHECK
   - GO_GOLANGCI_LINT
   - REPOSITORY_GITLEAKS
+
+# Exclude tool-owned Speckit scripts from shellcheck.
+# These files are managed by `specify init` and should
+# be fixed upstream rather than locally.
+BASH_SHELLCHECK_FILTER_REGEX_EXCLUDE: (\.specify/scripts/)
   # - MARKDOWN_MARKDOWNLINT
   # - YAML_YAMLLINT

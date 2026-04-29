@@ -245,8 +245,8 @@ else
   check_required ".uf/hero.json exists" "fail"
   # Skip JSON validity and field checks
   REQUIRED_TOTAL=$((REQUIRED_TOTAL + 2))
-  printf "  ${RED}[FAIL]${NC} hero.json is valid JSON (file missing)\n"
-  printf "  ${RED}[FAIL]${NC} hero.json contains required fields (file missing)\n"
+  printf "  %s[FAIL]%s hero.json is valid JSON (file missing)\n" "${RED}" "${NC}"
+  printf "  %s[FAIL]%s hero.json contains required fields (file missing)\n" "${RED}" "${NC}"
 fi
 
 # 13. constitution contains parent_constitution reference
