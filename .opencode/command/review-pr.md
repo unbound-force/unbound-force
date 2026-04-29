@@ -10,6 +10,12 @@ You are a token-efficient code reviewer. The user will provide a PR number or yo
 
 - **PR number** (optional): The pull request number to review (e.g., `42`). If omitted, the command auto-detects the open PR for the current branch.
 
+**Argument parsing** (before any tool calls): Check the
+user's message for a PR number argument. If present, set
+`PR_NUMBER` to that value immediately. All subsequent steps
+use `<PR_NUMBER>` — no auto-detection commands are needed
+or permitted.
+
 ## Execution Steps
 
 ### 0. Prerequisites
@@ -32,11 +38,43 @@ gh auth status
 If not authenticated: **STOP** with error:
 > "`gh` is installed but not authenticated. Run `gh auth login` to authenticate."
 
+#### Execution Mode Check
+
+This command requires running local tools (build, test,
+lint) as part of the review. Verify you can execute
+commands by running a harmless probe:
+
+```bash
+echo "mode-check-ok"
+```
+
+If the probe cannot be executed (the agent runtime
+returns a tool-access-denied error, or you are in plan
+mode, read-only mode, or otherwise restricted from
+running commands): **STOP** with message:
+
+> "This review requires running local tools (build,
+> test, lint) to verify the PR. I am currently in
+> plan/read-only mode which prevents executing these
+> checks. Switch to a mode that allows command
+> execution (e.g., full mode / auto mode) and
+> re-invoke `/review-pr <N>`."
+
+Do NOT proceed with a partial review that skips local
+tool execution. The local tool results are the
+foundation of the review — without them, AI-only
+findings lack verification and the review does not
+meet the command's quality standard.
+
 ### 1. Resolve PR Number
 
-**If a PR number was provided**: use it directly as `<PR_NUMBER>`.
+**If `PR_NUMBER` was already set from the argument**: skip
+this step entirely. Do NOT run `gh pr view`,
+`git branch --show-current`, or any branch/PR detection
+commands.
 
-**If no PR number was provided**: auto-detect from the current branch:
+**Only if no PR number was provided**: auto-detect from
+the current branch:
 
 ```bash
 gh pr view --json number --jq '.number'
@@ -99,13 +137,14 @@ gh api repos/{owner}/{repo}/commits/${BASE_BRANCH}/check-runs \
 | Fail | Fail | **Pre-existing** — failure exists independently of the PR |
 | No data | Fail | **Unknown** — treat as PR-caused (conservative) |
 
-Record the classification for each failing check. This feeds into Step 7 (AI review) and Step 9 (fix-branch).
+Record the classification for each failing check. This feeds into Step 8 (AI review) and Step 10 (fix-branch).
 
 ### 4. Run Local Deterministic Tools (Pre-flight)
 
-Run the project's own tools as a rapid pre-flight check. **If CI already ran and passed the same checks, skip re-running them locally** to save time.
+Run the project's own tools as a rapid pre-flight check.
 
-**Detection**: Check which tools are available by looking for their configuration files:
+**Detection**: Check which tools are available by looking
+for their configuration files:
 
 ```bash
 test -f Makefile && echo "MAKEFILE=yes"
@@ -115,7 +154,30 @@ test -f .yamllint.yml && echo "YAML_LINT=yes"
 test -f .pre-commit-config.yaml && echo "PRECOMMIT=yes"
 ```
 
-**Execution** (run only what is detected, skip if CI already covers it):
+**CI coverage check** (mandatory before running any
+tool): Build and display a coverage matrix that maps
+each detected local tool to the CI check from Step 3
+that covers the same verification. Display this matrix
+to make the skip/run decision visible:
+
+| Local tool | CI check that covers it | CI status | Run locally? |
+|------------|------------------------|-----------|--------------|
+| `go test` | e.g., "Local CI / test" | PASS/FAIL/NONE | Yes/No |
+| `golangci-lint` | e.g., "CI Checks / lint" | PASS/FAIL/NONE | Yes/No |
+| ... | ... | ... | ... |
+
+Decision rules:
+- CI status PASS → skip locally ("No" — CI already
+  verified)
+- CI status FAIL → skip locally ("No" — failure already
+  captured in Step 3a, will be analyzed in Step 8d)
+- CI status NONE (no matching check) → MUST run
+  locally ("Yes")
+- No CI checks reported at all → MUST run ALL detected
+  local tools ("Yes" for every row)
+
+**Execution**: Run only the tools marked "Yes" in the
+matrix above:
 
 | Tool detected | Command to run | What it checks |
 |---------------|----------------|----------------|
@@ -127,9 +189,13 @@ test -f .pre-commit-config.yaml && echo "PRECOMMIT=yes"
 | `go.mod` | `go test ./...` | Go tests |
 | `pyproject.toml` / `setup.py` | `pytest` or `python -m pytest` | Python tests |
 
-**Record results**: Capture tool exit codes and output. If tools pass, skip those categories in the AI review entirely. If tools fail, include the failure output as context.
+**Record results**: Capture tool exit codes and output.
+If tools pass, skip those categories in the AI review
+entirely. If tools fail, include the failure output as
+context.
 
-**If no tools are detected**: Note this and proceed to AI-based review for all categories.
+**If no tools are detected**: Note this and proceed to
+AI-based review for all categories.
 
 ### 5. Fetch Diff (Scoped)
 
@@ -139,10 +205,67 @@ Now fetch the diff, being token-conscious:
 gh pr diff <PR_NUMBER>
 ```
 
-**Large diff handling**:
-- If the diff exceeds 500 lines, process file-by-file instead of loading the entire diff
-- Skip binary files, lock files (`package-lock.json`, `go.sum`, `yarn.lock`, `bun.lock`), and auto-generated files (`*.pb.go`, `vendor/` contents)
-- For very large PRs (2000+ lines changed or 50+ files), warn the user and ask whether to review all files or focus on specific ones
+**Large diff handling** (500+ lines):
+
+`gh pr diff` does not support file path filters. For
+large diffs, save the output to a temp file and
+navigate it with targeted reads:
+
+1. Save the full diff once:
+   ```bash
+   gh pr diff <PR_NUMBER> > /tmp/pr<PR_NUMBER>.diff
+   ```
+   (The tool runtime auto-saves truncated output to a
+   file — use that path if available instead.)
+
+2. Find file boundaries in the saved diff:
+   ```bash
+   grep -n '^diff --git' /tmp/pr<PR_NUMBER>.diff
+   ```
+   This returns line numbers for each file's diff
+   section.
+
+3. Read specific file sections using offset/limit on
+   the saved file. Skip these files entirely:
+   - Lock files: `package-lock.json`, `go.sum`,
+     `yarn.lock`, `bun.lock`
+   - Auto-generated: `*.pb.go`, `vendor/` contents
+   - Binary files
+   - CRAP baselines: `.gaze/baseline.json`
+
+4. For very large PRs (2000+ lines or 50+ files),
+   warn the user and ask whether to review all files
+   or focus on specific ones.
+
+**Do NOT attempt**:
+- `gh pr diff <N> -- <path>` (unsupported, will fail)
+- `git show <remote>/<branch>:<path>` (PR branch may
+  not be on any configured remote)
+- `git fetch <remote> <branch>` (PR may come from a
+  fork or push directly to PR refs)
+
+#### Accessing full file contents from the PR branch
+
+If you need to read a complete file from the PR branch
+(not just the diff), use the GitHub API. The PR branch
+may not exist on any locally configured remote:
+
+```bash
+gh api repos/{owner}/{repo}/contents/<path>?ref=<headRefName> \
+  --jq '.content' | base64 -d
+```
+
+Use `<headRefName>` from the Step 2 metadata. If the
+API call returns 404, 403, or empty content (files
+>1 MB), fall back to reading from the saved diff file
+and note in the review that full file content was
+unavailable.
+
+For accessing files on the PR branch, the agent MUST
+use `gh api` exclusively. Any `git` subcommand
+targeting the PR's head ref (`git show`, `git fetch`,
+`git checkout`, `git diff` with remote refs) is
+prohibited.
 
 ### 6. Locate Associated Specification
 
@@ -153,9 +276,15 @@ Search for a specification that matches this PR across all spec directories:
   - `openspec/specs/<branch-name>/spec.md` (OpenSpec specs)
   - `openspec/changes/<branch-name>/proposal.md` (OpenSpec changes)
 - Check if the PR description references a spec
+- If not found locally, check the PR's changed file
+  list (from Step 2 metadata) for spec artifacts. The
+  spec may be introduced by the PR itself. If found
+  in the changed file list, read the spec content from
+  the saved diff (Step 5) rather than from the
+  filesystem.
 - If a Speckit spec is found, read only the **Functional Requirements** and **User Stories** sections (not the entire spec) to minimize token usage
 - If an OpenSpec proposal is found, read only the **Capabilities** and **Impact** sections
-- If no spec is found in any directory, note this and use the PR title and description as the intent source
+- If no spec is found in any directory or in the PR's changed files, note this and use the PR title and description as the intent source
 
 ### 7. Load Convention Packs (Optional)
 
@@ -230,7 +359,7 @@ For each CI failure classified in Step 3a, provide analysis:
 **Pre-existing failures**: Report separately with clear labeling:
 - Confirm the failure also exists on the base branch
 - Brief root cause analysis if determinable from the error output
-- Note that this will be addressed in Step 9 (fix-branch offer)
+- Note that this will be addressed in Step 10 (fix-branch offer)
 
 ### 9. Output Format
 
@@ -326,7 +455,7 @@ I will create the branch and commit locally — you can review the changes and f
    ```
    Branch naming: `fix/pr-<PR_NUMBER>-<sanitized-check-name>` (e.g., `fix/pr-42-yamllint`, `fix/pr-42-test-auth-timeout`)
 
-4. **Analyze and propose the fix**: Use the CI failure output and the failing file(s) to determine the minimal change needed. Keep the scope as small as possible — fix only what is failing.
+5. **Analyze and propose the fix**: Use the CI failure output and the failing file(s) to determine the minimal change needed. Keep the scope as small as possible — fix only what is failing.
 
 6. **Commit with Conventional Commits format**:
    Write the commit message to a temporary file to avoid
