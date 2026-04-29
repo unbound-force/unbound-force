@@ -190,14 +190,85 @@ func TestAssetPaths_MatchExpected(t *testing.T) {
 	}
 }
 
+// openPackageDelegatedEmbeddedCount is the number of embedded assets skipped
+// when opkg install succeeds (must match assetDelegatedToOpenPackage).
+const openPackageDelegatedEmbeddedCount = 16
+
+func TestRun_OpenPackageDelegatesSkipsEmbeddedFiles(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	opkgPath := "/fake/bin/opkg"
+	opkgInstallCalled := false
+	result, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+		LookPath: func(name string) (string, error) {
+			if name == "opkg" {
+				return opkgPath, nil
+			}
+			return "", fmt.Errorf("not found")
+		},
+		ExecCmdInDir: func(workDir, bin string, args ...string) ([]byte, error) {
+			opkgInstallCalled = true
+			if workDir != dir {
+				t.Errorf("ExecCmdInDir workdir: got %q want %q", workDir, dir)
+			}
+			if bin != opkgPath {
+				t.Errorf("ExecCmdInDir binary: got %q want %q", bin, opkgPath)
+			}
+			if len(args) < 2 || args[0] != "install" {
+				t.Errorf("ExecCmdInDir args: %#v", args)
+			}
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !opkgInstallCalled {
+		t.Fatal("expected opkg install")
+	}
+	want := len(expectedAssetPaths) - openPackageDelegatedEmbeddedCount
+	if len(result.Created) != want {
+		t.Errorf("created files: got %d want %d", len(result.Created), want)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, ".opencode/command/agent-brief.md")); statErr != nil {
+		t.Errorf("expected agent-brief.md from embed: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, ".opencode/agents/divisor-guard.md")); statErr == nil {
+		t.Error("did not expect divisor-guard.md when OpenPackage delegated")
+	}
+}
+
+func TestRun_OpenPackageFallbackNoBinary(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	result, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+		LookPath: func(name string) (string, error) {
+			return "", fmt.Errorf("not found")
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(result.Created) != len(expectedAssetPaths) {
+		t.Errorf("created: got %d want %d (full fallback)", len(result.Created), len(expectedAssetPaths))
+	}
+}
+
 func TestRun_CreatesFiles(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
 	result, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -249,9 +320,10 @@ func TestRun_SkipsExisting(t *testing.T) {
 
 	// First run creates everything
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
@@ -260,9 +332,10 @@ func TestRun_SkipsExisting(t *testing.T) {
 	// Second run should skip user-owned, skip identical tool-owned
 	buf.Reset()
 	result, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("second Run() error: %v", err)
@@ -313,9 +386,10 @@ func TestRun_ForceOverwrites(t *testing.T) {
 
 	// First run
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
@@ -324,10 +398,11 @@ func TestRun_ForceOverwrites(t *testing.T) {
 	// Second run with --force
 	buf.Reset()
 	result, err := Run(Options{
-		TargetDir: dir,
-		Force:     true,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Force:           true,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("force Run() error: %v", err)
@@ -347,9 +422,10 @@ func TestRun_VersionMarker(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.2.3",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.2.3",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -383,8 +459,9 @@ func TestRun_VersionMarkerDev(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -420,9 +497,10 @@ func TestRun_OverwriteOnDiff_ToolOwned(t *testing.T) {
 
 	// First run
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
@@ -443,9 +521,10 @@ func TestRun_OverwriteOnDiff_ToolOwned(t *testing.T) {
 	// Re-run
 	buf.Reset()
 	result, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("second Run() error: %v", err)
@@ -504,9 +583,10 @@ func TestRun_OverwriteOnDiff_SkipsIdentical(t *testing.T) {
 
 	// First run
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
@@ -515,9 +595,10 @@ func TestRun_OverwriteOnDiff_SkipsIdentical(t *testing.T) {
 	// Re-run without any modifications
 	buf.Reset()
 	result, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("second Run() error: %v", err)
@@ -581,9 +662,10 @@ func TestRun_SchemaDistribution(t *testing.T) {
 
 	// First run creates everything
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
@@ -604,9 +686,10 @@ func TestRun_SchemaDistribution(t *testing.T) {
 	// Re-run without --force
 	buf.Reset()
 	result, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("second Run() error: %v", err)
@@ -926,9 +1009,10 @@ func TestRun_PrintSummaryIntegration(t *testing.T) {
 	var buf bytes.Buffer
 
 	result, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1227,10 +1311,11 @@ func TestRun_DivisorSubset(t *testing.T) {
 
 	var buf bytes.Buffer
 	result, err := Run(Options{
-		TargetDir:   dir,
-		DivisorOnly: true,
-		Version:     "1.0.0",
-		Stdout:      &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		DivisorOnly:     true,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1304,11 +1389,12 @@ func TestRun_DivisorSubset_WithLangFlag(t *testing.T) {
 	var buf bytes.Buffer
 
 	result, err := Run(Options{
-		TargetDir:   dir,
-		DivisorOnly: true,
-		Lang:        "typescript",
-		Version:     "1.0.0",
-		Stdout:      &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		DivisorOnly:     true,
+		Lang:            "typescript",
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1349,10 +1435,11 @@ func TestRun_DivisorSubset_DefaultFallback(t *testing.T) {
 	var buf bytes.Buffer
 
 	result, err := Run(Options{
-		TargetDir:   dir,
-		DivisorOnly: true,
-		Version:     "1.0.0",
-		Stdout:      &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		DivisorOnly:     true,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1427,9 +1514,10 @@ func TestScaffoldOutput_NoGraphthulhuReferences(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1475,9 +1563,10 @@ func TestScaffoldOutput_NoSwarmPluginReferences(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1525,9 +1614,10 @@ func TestScaffoldOutput_NoHivemindReferences(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1576,9 +1666,10 @@ func TestScaffoldOutput_NoBareUnboundReferences(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1627,9 +1718,10 @@ func TestScaffoldOutput_NoOldPathReferences(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1751,9 +1843,10 @@ func TestRun_LegacyFileWarning(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
