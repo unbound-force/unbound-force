@@ -1,0 +1,10 @@
+{
+  // Dewey semantic knowledge layer — optional.
+  // All review agents gracefully degrade if unavailable.
+  // Install: brew install unbound-force/tap/dewey
+  "dewey": {
+    "type": "local",
+    "command": ["dewey", "serve", "--vault", "."],
+    "enabled": true
+  }
+}

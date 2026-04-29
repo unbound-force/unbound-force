@@ -15,6 +15,22 @@ Designed for [OpenCode](https://opencode.ai). The
 scaffolded files are portable Markdown that can be
 adapted for other AI coding tools.
 
+## Choose Your Path
+
+### Option A: OpenPackage (no binary required)
+
+```bash
+opkg install @unbound-force/review-council
+# or for the full workflow suite:
+opkg install @unbound-force/workflows
+```
+
+### Option B: `uf` binary (full tool suite)
+
+```bash
+brew install unbound-force/tap/unbound-force
+```
+
 ## Prerequisites
 
 - **git** -- version control (required)
