@@ -3489,8 +3489,8 @@ func TestStart_DarwinUIDMapNotSupported(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when macOS UID mapping not supported")
 	}
-	if !strings.Contains(err.Error(), "Podman machine UID mapping") {
-		t.Errorf("expected 'Podman machine UID mapping' in error, got: %s", err.Error())
+	if !strings.Contains(err.Error(), "podman machine UID mapping") {
+		t.Errorf("expected 'podman machine UID mapping' in error, got: %s", err.Error())
 	}
 }
 
@@ -3528,7 +3528,7 @@ func TestStart_DarwinUIDMapOverride(t *testing.T) {
 	// --uidmap overrides the detection. It may fail later
 	// for other reasons — just verify the UID mapping error
 	// is NOT the one returned.
-	if err != nil && strings.Contains(err.Error(), "Podman machine UID mapping") {
+	if err != nil && strings.Contains(err.Error(), "podman machine UID mapping") {
 		t.Errorf("expected --uidmap to bypass probe error, got: %s", err.Error())
 	}
 }
@@ -3573,8 +3573,8 @@ func TestParsePodmanVersion_TooOld(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for old Podman version")
 	}
-	if !strings.Contains(err.Error(), "Podman >= 4.3 required") {
-		t.Errorf("expected 'Podman >= 4.3 required' in error, got: %s", err.Error())
+	if !strings.Contains(err.Error(), "podman >= 4.3 required") {
+		t.Errorf("expected 'podman >= 4.3 required' in error, got: %s", err.Error())
 	}
 }
 

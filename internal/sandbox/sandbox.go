@@ -466,7 +466,7 @@ func Start(opts Options) error {
 	}
 	if major < 4 || (major == 4 && minor < 3) {
 		return fmt.Errorf(
-			"Podman >= 4.3 required for --userns=keep-id:uid=N,gid=N. Current: %d.%d",
+			"podman >= 4.3 required for --userns=keep-id:uid=N,gid=N (current: %d.%d)",
 			major, minor)
 	}
 
@@ -556,7 +556,7 @@ func Start(opts Options) error {
 	// explicit --uidmap, return an actionable error.
 	if platform.OS == "darwin" && !platform.UIDMapSupported && !opts.UIDMap {
 		return fmt.Errorf(
-			"Podman machine UID mapping not supported.\n\n" +
+			"podman machine UID mapping not supported.\n\n" +
 				"Your Podman machine's virtiofs does not support --userns=keep-id UID mapping.\n" +
 				"Fix the Podman machine (recommended):\n" +
 				"  podman machine stop\n" +

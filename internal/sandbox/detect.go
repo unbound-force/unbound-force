@@ -39,9 +39,10 @@ func DetectPlatform(opts Options) PlatformConfig {
 		Arch: runtime.GOARCH,
 	}
 
-	// SELinux only exists on Linux. Skip detection on macOS
-	// and other platforms.
-	if p.OS == "linux" {
+	// Platform-specific detection: SELinux (Linux only),
+	// UID mapping probe (macOS only).
+	switch p.OS {
+	case "linux":
 		// Linux always supports UID mapping natively.
 		p.UIDMapSupported = true
 
@@ -58,7 +59,7 @@ func DetectPlatform(opts Options) PlatformConfig {
 				}
 			}
 		}
-	} else if p.OS == "darwin" {
+	case "darwin":
 		// macOS: probe the Podman machine to check if
 		// virtiofs supports keep-id UID mapping.
 		p.UIDMapSupported = probeUIDMapping(opts)
