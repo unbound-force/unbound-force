@@ -378,7 +378,7 @@
       "line": 92,
       "complexity": 7,
       "line_coverage": 75.86206896551724,
-      "crap": 7.689122145229407
+      "crap": 7.689122145230407
     },
     {
       "package": "main",
@@ -3321,7 +3321,7 @@
       "line": 200,
       "complexity": 5,
       "line_coverage": 35.294117647058826,
-      "crap": 11.772847547323424,
+      "crap": 11.772847547324426,
       "contract_coverage": 100,
       "gaze_crap": 5,
       "quadrant": "Q1_Safe"
@@ -3526,7 +3526,7 @@
       "line": 30,
       "complexity": 8,
       "line_coverage": 72.22222222222223,
-      "crap": 9.37174211248285,
+      "crap": 9.371742112483853,
       "contract_coverage": 100,
       "gaze_crap": 8,
       "quadrant": "Q1_Safe"
