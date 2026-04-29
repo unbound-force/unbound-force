@@ -1481,7 +1481,7 @@
       "package": "doctor",
       "function": "detectAGENTSmdSections",
       "file": "internal/doctor/checks.go",
-      "line": 1235,
+      "line": 1242,
       "complexity": 6,
       "line_coverage": 100,
       "crap": 6
@@ -1490,7 +1490,7 @@
       "package": "doctor",
       "function": "hasBuildCodeBlocks",
       "file": "internal/doctor/checks.go",
-      "line": 1258,
+      "line": 1265,
       "complexity": 7,
       "line_coverage": 100,
       "crap": 7
@@ -1499,20 +1499,28 @@
       "package": "doctor",
       "function": "hasSpecNumberedDirs",
       "file": "internal/doctor/checks.go",
-      "line": 1287,
+      "line": 1294,
       "complexity": 5,
       "line_coverage": 87.5,
       "crap": 5.048828125
     },
     {
       "package": "doctor",
+      "function": "checkBridgeFile",
+      "file": "internal/doctor/checks.go",
+      "line": 1312,
+      "complexity": 3,
+      "line_coverage": 100,
+      "crap": 3
+    },
+    {
+      "package": "doctor",
       "function": "checkAgentContext",
       "file": "internal/doctor/checks.go",
-      "line": 1306,
-      "complexity": 16,
-      "line_coverage": 98,
-      "crap": 16.002048,
-      "fix_strategy": "decompose"
+      "line": 1344,
+      "complexity": 13,
+      "line_coverage": 100,
+      "crap": 13
     },
     {
       "package": "doctor",
@@ -3432,8 +3440,8 @@
       "file": "internal/sandbox/config.go",
       "line": 151,
       "complexity": 8,
-      "line_coverage": 64,
-      "crap": 10.985984
+      "line_coverage": 96,
+      "crap": 8.004096
     },
     {
       "package": "sandbox",
@@ -3477,26 +3485,27 @@
       "file": "internal/sandbox/detect.go",
       "line": 36,
       "complexity": 7,
-      "line_coverage": 45.45454545454545,
-      "crap": 14.951915852742298,
+      "line_coverage": 40,
+      "crap": 17.583999999999996,
       "contract_coverage": 100,
       "gaze_crap": 7,
-      "quadrant": "Q1_Safe"
+      "quadrant": "Q2_ComplexButTested",
+      "fix_strategy": "add_tests"
     },
     {
       "package": "sandbox",
       "function": "probeUIDMapping",
       "file": "internal/sandbox/detect.go",
-      "line": 76,
-      "complexity": 2,
+      "line": 84,
+      "complexity": 3,
       "line_coverage": 100,
-      "crap": 2
+      "crap": 3
     },
     {
       "package": "sandbox",
       "function": "parsePodmanVersion",
       "file": "internal/sandbox/detect.go",
-      "line": 96,
+      "line": 112,
       "complexity": 6,
       "line_coverage": 70.58823529411765,
       "crap": 6.915937309179727
@@ -3505,7 +3514,7 @@
       "package": "sandbox",
       "function": "isRootlessPodman",
       "file": "internal/sandbox/detect.go",
-      "line": 130,
+      "line": 146,
       "complexity": 2,
       "line_coverage": 75,
       "crap": 2.0625
@@ -4762,10 +4771,10 @@
     }
   ],
   "summary": {
-    "total_functions": 471,
-    "avg_complexity": 5.070063694267516,
-    "avg_line_coverage": 78.34213888527049,
-    "avg_crap": 6.354001020086664,
+    "total_functions": 472,
+    "avg_complexity": 5.061440677966102,
+    "avg_line_coverage": 78.44850184217765,
+    "avg_crap": 6.341912348745925,
     "crapload": 35,
     "crap_threshold": 15,
     "gaze_crapload": 15,
@@ -4773,14 +4782,14 @@
     "avg_gaze_crap": 7.460304659498208,
     "avg_contract_coverage": 82.90322580645162,
     "quadrant_counts": {
-      "Q1_Safe": 139,
-      "Q2_ComplexButTested": 1,
+      "Q1_Safe": 138,
+      "Q2_ComplexButTested": 2,
       "Q3_SimpleButUnderspecified": 5,
       "Q4_Dangerous": 10
     },
     "fix_strategy_counts": {
-      "add_tests": 14,
-      "decompose": 21
+      "add_tests": 15,
+      "decompose": 20
     },
     "worst_crap": [
       {
@@ -4959,10 +4968,10 @@
         "complexity": 13
       },
       {
-        "function": "validateSetup",
+        "function": "validateGateway",
         "package": "config",
         "file": "internal/config/validate.go",
-        "line": 20,
+        "line": 78,
         "fix_strategy": "add_tests",
         "crap": 20,
         "complexity": 4
@@ -4977,10 +4986,10 @@
         "complexity": 4
       },
       {
-        "function": "validateGateway",
+        "function": "validateSetup",
         "package": "config",
         "file": "internal/config/validate.go",
-        "line": 78,
+        "line": 20,
         "fix_strategy": "add_tests",
         "crap": 20,
         "complexity": 4
@@ -5011,6 +5020,17 @@
         "fix_strategy": "add_tests",
         "crap": 18.744000000000003,
         "complexity": 11
+      },
+      {
+        "function": "DetectPlatform",
+        "package": "sandbox",
+        "file": "internal/sandbox/detect.go",
+        "line": 36,
+        "fix_strategy": "add_tests",
+        "crap": 17.583999999999996,
+        "gaze_crap": 7,
+        "complexity": 7,
+        "quadrant": "Q2_ComplexButTested"
       },
       {
         "function": "(*CheBackend).Start",
@@ -5081,17 +5101,6 @@
         "crap": 34.552782903802246,
         "gaze_crap": 32,
         "complexity": 32,
-        "quadrant": "Q4_Dangerous"
-      },
-      {
-        "function": "Run",
-        "package": "setup",
-        "file": "internal/setup/setup.go",
-        "line": 200,
-        "fix_strategy": "decompose",
-        "crap": 32.09187671570642,
-        "gaze_crap": 31,
-        "complexity": 31,
         "quadrant": "Q4_Dangerous"
       }
     ]

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -3036,6 +3037,158 @@ func TestGoogleCloudCredentialMounts_GatewayInactive(t *testing.T) {
 	// The important thing is it doesn't return nil early
 	// like it does with gatewayActive=true.
 	_ = args // No assertion needed — just verify no panic.
+}
+
+func TestGoogleCloudCredentialMounts_ExplicitKeyFile(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "service-account.json")
+	if err := os.WriteFile(keyFile, []byte(`{"type":"service_account"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := testOpts()
+	opts.Getenv = func(key string) string {
+		if key == "GOOGLE_APPLICATION_CREDENTIALS" {
+			return keyFile
+		}
+		return ""
+	}
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64"}
+	args := googleCloudCredentialMounts(opts, platform, false)
+
+	// Should mount the key file and set env var.
+	if len(args) < 4 {
+		t.Fatalf("expected at least 4 args (-v mount -e var), got %d: %v", len(args), args)
+	}
+	foundVolume := false
+	foundEnv := false
+	for i, a := range args {
+		if a == "-v" && i+1 < len(args) && strings.Contains(args[i+1], "service-account.json") {
+			foundVolume = true
+		}
+		if a == "-e" && i+1 < len(args) && strings.HasPrefix(args[i+1], "GOOGLE_APPLICATION_CREDENTIALS=") {
+			foundEnv = true
+		}
+	}
+	if !foundVolume {
+		t.Error("missing -v mount for service account key file")
+	}
+	if !foundEnv {
+		t.Error("missing -e GOOGLE_APPLICATION_CREDENTIALS env var")
+	}
+}
+
+func TestGoogleCloudCredentialMounts_ExplicitKeyFileSELinux(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "sa.json")
+	if err := os.WriteFile(keyFile, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := testOpts()
+	opts.Getenv = func(key string) string {
+		if key == "GOOGLE_APPLICATION_CREDENTIALS" {
+			return keyFile
+		}
+		return ""
+	}
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64", SELinux: true}
+	args := googleCloudCredentialMounts(opts, platform, false)
+
+	// SELinux should add :Z to the mount.
+	foundZ := false
+	for i, a := range args {
+		if a == "-v" && i+1 < len(args) && strings.HasSuffix(args[i+1], ",Z") {
+			foundZ = true
+		}
+	}
+	if !foundZ {
+		t.Errorf("expected SELinux :Z flag on mount, args: %v", args)
+	}
+}
+
+func TestGoogleCloudCredentialMounts_ExplicitKeyFileMissing(t *testing.T) {
+	opts := testOpts()
+	opts.Getenv = func(key string) string {
+		if key == "GOOGLE_APPLICATION_CREDENTIALS" {
+			return "/nonexistent/path/creds.json"
+		}
+		return ""
+	}
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64"}
+	args := googleCloudCredentialMounts(opts, platform, false)
+
+	// File doesn't exist — should return empty (no mount).
+	if len(args) != 0 {
+		t.Errorf("expected no args for missing key file, got: %v", args)
+	}
+}
+
+func TestGoogleCloudCredentialMounts_GcloudConfigDir(t *testing.T) {
+	dir := t.TempDir()
+	gcloudDir := filepath.Join(dir, ".config", "gcloud")
+	if err := os.MkdirAll(gcloudDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Temporarily override HOME so os.UserHomeDir returns our temp dir.
+	origHome := os.Getenv("HOME")
+	t.Setenv("HOME", dir)
+	defer os.Setenv("HOME", origHome)
+
+	opts := testOpts()
+	opts.Getenv = func(key string) string {
+		// No explicit GOOGLE_APPLICATION_CREDENTIALS — fall through
+		// to gcloud config dir strategy.
+		return ""
+	}
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64"}
+	args := googleCloudCredentialMounts(opts, platform, false)
+
+	if len(args) < 4 {
+		t.Fatalf("expected at least 4 args (-v mount -e var), got %d: %v", len(args), args)
+	}
+	foundGcloudMount := false
+	for i, a := range args {
+		if a == "-v" && i+1 < len(args) && strings.Contains(args[i+1], "gcloud") {
+			foundGcloudMount = true
+		}
+	}
+	if !foundGcloudMount {
+		t.Errorf("missing gcloud config dir mount, args: %v", args)
+	}
+}
+
+func TestGoogleCloudCredentialMounts_GcloudConfigDirSELinux(t *testing.T) {
+	dir := t.TempDir()
+	gcloudDir := filepath.Join(dir, ".config", "gcloud")
+	if err := os.MkdirAll(gcloudDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	origHome := os.Getenv("HOME")
+	t.Setenv("HOME", dir)
+	defer os.Setenv("HOME", origHome)
+
+	opts := testOpts()
+	opts.Getenv = func(key string) string { return "" }
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64", SELinux: true}
+	args := googleCloudCredentialMounts(opts, platform, false)
+
+	foundZ := false
+	for i, a := range args {
+		if a == "-v" && i+1 < len(args) && strings.HasSuffix(args[i+1], ":Z") {
+			foundZ = true
+		}
+	}
+	if !foundZ {
+		t.Errorf("expected SELinux :Z on gcloud mount, args: %v", args)
+	}
 }
 
 // --- buildRunArgs with gateway tests (T079-T080) ---
