@@ -3333,7 +3333,7 @@
       "line": 232,
       "complexity": 5,
       "line_coverage": 35,
-      "crap": 11.865625,
+      "crap": 11.865625000001002,
       "contract_coverage": 100,
       "gaze_crap": 5,
       "quadrant": "Q1_Safe"
