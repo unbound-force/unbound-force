@@ -263,7 +263,7 @@ func gatewayHealthCheck(httpGet func(string) (int, error), port int) bool {
 //  1. CLAUDE_CODE_USE_VERTEX=1 + ANTHROPIC_VERTEX_PROJECT_ID → Vertex
 //  2. CLAUDE_CODE_USE_BEDROCK=1 → Bedrock
 //  3. ANTHROPIC_API_KEY → Anthropic
-//  4. None → no gateway (fallback to credential mounts)
+//  4. None → no gateway (direct API key usage)
 //
 // If a gateway is already running (health check passes),
 // it is reused without starting a new one (FR-010).
@@ -277,7 +277,7 @@ func autoStartGateway(opts Options) (int, bool, error) {
 	hasAnthropic := opts.Getenv("ANTHROPIC_API_KEY") != ""
 
 	if !hasVertex && !hasBedrock && !hasAnthropic {
-		// No provider detected — fall back to credential mounts.
+		// No provider detected — direct API key usage.
 		return 0, false, nil
 	}
 
@@ -524,21 +524,14 @@ func Start(opts Options) error {
 	// not need credential files or API keys.
 	gatewayPort, gatewayActive, gwErr := autoStartGateway(opts)
 	if gwErr != nil {
-		// Gateway start failed — fall back to credential
-		// mounts. Log the error but don't block sandbox start.
+		// Gateway start failed — cloud provider LLM access
+		// will be unavailable inside the container.
 		fmt.Fprintf(opts.Stderr,
-			"Gateway start failed (%v) — using credential mounts\n", gwErr)
+			"Gateway start failed (%v) — cloud provider LLM access unavailable\n", gwErr)
 	}
 	if gatewayActive {
 		fmt.Fprintf(opts.Stderr,
 			"Gateway active on port %d — credentials proxied\n", gatewayPort)
-	} else if gwErr == nil {
-		// No provider detected — this is normal for direct
-		// API key usage. Only log if the user might benefit.
-		if opts.Getenv("ANTHROPIC_API_KEY") == "" {
-			fmt.Fprintf(opts.Stderr,
-				"Gateway not available — using credential mounts\n")
-		}
 	}
 
 	// Detect platform for volume flags. Use injected

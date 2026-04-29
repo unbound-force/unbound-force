@@ -7,7 +7,6 @@ package sandbox
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 )
@@ -133,66 +132,6 @@ func forwardedEnvVars(opts Options, gatewayActive bool) []string {
 	return args
 }
 
-// googleCloudCredentialMounts returns -v and -e flags for
-// Google Cloud authentication inside the container (FR-021,
-// FR-022). Two strategies:
-//
-//  1. If GOOGLE_APPLICATION_CREDENTIALS is set and the file
-//     exists, mount it read-only and set the env var to the
-//     container-internal path.
-//  2. If GOOGLE_APPLICATION_CREDENTIALS is not set, mount the
-//     entire ~/.config/gcloud/ directory read-write so the
-//     auth library can read credentials and write refreshed
-//     access tokens (needed for authorized_user credentials).
-//
-// When gatewayActive is true, all gcloud credential mounts
-// are skipped because the gateway handles authentication
-// on the host side (FR-011).
-func googleCloudCredentialMounts(opts Options, platform PlatformConfig, gatewayActive bool) []string {
-	if gatewayActive {
-		return nil
-	}
-	var args []string
-
-	// Strategy 1: explicit service account key file.
-	if gac := opts.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); gac != "" {
-		if _, err := os.Stat(gac); err == nil {
-			containerPath := "/home/dev/.config/gcloud/service-account.json"
-			mount := fmt.Sprintf("%s:%s:ro", gac, containerPath)
-			if platform.SELinux {
-				mount += ",Z"
-			}
-			args = append(args, "-v", mount)
-			args = append(args, "-e", "GOOGLE_APPLICATION_CREDENTIALS="+containerPath)
-		}
-		return args
-	}
-
-	// Strategy 2: mount entire gcloud config directory.
-	// The authorized_user credential type needs access_tokens.db
-	// and credentials.db for token refresh. Mount read-write so
-	// the auth library can update cached access tokens.
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return args
-	}
-	gcloudDir := filepath.Join(home, ".config", "gcloud")
-	if _, err := os.Stat(gcloudDir); err == nil {
-		containerPath := "/home/dev/.config/gcloud"
-		mount := fmt.Sprintf("%s:%s", gcloudDir, containerPath)
-		if platform.SELinux {
-			mount += ":Z"
-		}
-		args = append(args, "-v", mount)
-		// Set GOOGLE_APPLICATION_CREDENTIALS to the ADC file
-		// inside the mounted directory so the auth library
-		// finds it without searching.
-		adcContainer := containerPath + "/application_default_credentials.json"
-		args = append(args, "-e", "GOOGLE_APPLICATION_CREDENTIALS="+adcContainer)
-	}
-	return args
-}
-
 // useParentMount returns true if the parent directory
 // should be mounted instead of the project directory.
 // Falls back to project-only mount when NoParent is set
@@ -275,14 +214,12 @@ func buildRunArgs(opts Options, platform PlatformConfig, gatewayActive bool, gat
 	// Environment variables (gateway-aware).
 	args = append(args, forwardedEnvVars(opts, gatewayActive)...)
 
-	// Gateway env vars or credential mounts.
+	// Gateway env vars (container reaches host gateway via
+	// host.containers.internal). Credential mounts removed
+	// in favor of gateway-based credential isolation.
 	if gatewayActive {
 		args = append(args, gatewayEnvVars(gatewayPort)...)
 	}
-
-	// Google Cloud credential mounts (FR-021, FR-022).
-	// Skipped when gateway is active.
-	args = append(args, googleCloudCredentialMounts(opts, platform, gatewayActive)...)
 
 	// Resource limits.
 	args = append(args, "--memory", opts.Memory)
