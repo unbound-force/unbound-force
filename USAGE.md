@@ -8,6 +8,28 @@ Navigate to your project and start OpenCode:
 opencode
 ```
 
+## OpenPackage Installation
+
+You can install the review council and workflow command bundles
+without the `uf` binary using OpenPackage (`opkg`):
+
+**Review council** — nine reviewer personas plus `/review-council`
+and `/review-pr`, convention packs, and optional Dewey MCP config:
+
+```bash
+opkg install @unbound-force/review-council
+```
+
+**Workflows** — Speckit pipeline commands, OpenSpec commands, and
+`/constitution-check`; depends on `@unbound-force/review-council`:
+
+```bash
+opkg install @unbound-force/workflows
+```
+
+Regenerated assets live under `packages/` in this repository; maintainers run
+`make packages` after changing `.opencode/` sources.
+
 ## Modes and Agents
 
 OpenCode has two interaction layers: **primary modes**
