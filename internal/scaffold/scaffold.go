@@ -28,17 +28,24 @@ var assets embed.FS
 
 // Options configures a scaffold run.
 type Options struct {
-	TargetDir   string                                  // Root dir to scaffold into (default: cwd)
-	Force       bool                                    // Overwrite existing files when true
-	DivisorOnly bool                                    // Deploy only Divisor agents, command, and packs
-	DryRun      bool                                    // When true, configureOpencodeJSON() skips writing
-	Lang        string                                  // Language for convention pack selection (auto-detect if empty)
-	Version     string                                  // Version string for marker comment (default: "dev")
-	Stdout      io.Writer                               // Writer for summary output (default: os.Stdout)
-	LookPath    func(string) (string, error)            // Finds a binary in PATH (default: exec.LookPath)
-	ExecCmd     func(string, ...string) ([]byte, error) // Runs a command (default: exec.Command wrapper)
-	ReadFile    func(string) ([]byte, error)            // Reads a file (default: os.ReadFile)
-	WriteFile   func(string, []byte, os.FileMode) error // Writes a file (default: os.WriteFile)
+	TargetDir    string                                          // Root dir to scaffold into (default: cwd)
+	Force        bool                                            // Overwrite existing files when true
+	DivisorOnly  bool                                            // Deploy only Divisor agents, command, and packs
+	DryRun       bool                                            // When true, configureOpencodeJSON() skips writing
+	Lang         string                                          // Language for convention pack selection (auto-detect if empty)
+	Version      string                                          // Version string for marker comment (default: "dev")
+	Stdout       io.Writer                                       // Writer for summary output (default: os.Stdout)
+	LookPath     func(string) (string, error)                    // Finds a binary in PATH (default: exec.LookPath)
+	ExecCmd      func(string, ...string) ([]byte, error)         // Runs a command (default: exec.Command wrapper)
+	ExecCmdInDir func(string, string, ...string) ([]byte, error) // Runs a command with working dir set (OpenPackage/opkg).
+	ReadFile     func(string) ([]byte, error)                    // Reads a file (default: os.ReadFile)
+	WriteFile    func(string, []byte, os.FileMode) error         // Writes a file (default: os.WriteFile)
+	// OpenPackagePlatforms is passed to opkg install --platforms (e.g. "opencode,cursor,claude-code").
+	// Defaults to "opencode" when empty.
+	// Empty means opkg auto-detects from existing platform directories.
+	OpenPackagePlatforms string
+	// SkipOpenPackage disables opkg delegation (tests — keep embedded writes deterministic).
+	SkipOpenPackage bool
 }
 
 // Result tracks the disposition of each scaffolded file.
@@ -52,6 +59,15 @@ type Result struct {
 // defaultExecCmd is the production implementation of ExecCmd.
 func defaultExecCmd(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).CombinedOutput()
+}
+
+// defaultExecCmdInDir runs a command with Dir set — used for opkg install.
+func defaultExecCmdInDir(dir string, name string, args ...string) ([]byte, error) {
+	cmd := exec.Command(name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	return cmd.CombinedOutput()
 }
 
 // Run walks the embedded assets and writes them to the target directory.
@@ -70,6 +86,9 @@ func Run(opts Options) (*Result, error) {
 	}
 	if opts.WriteFile == nil {
 		opts.WriteFile = os.WriteFile
+	}
+	if opts.ExecCmdInDir == nil {
+		opts.ExecCmdInDir = defaultExecCmdInDir
 	}
 
 	if opts.TargetDir == "" {
@@ -97,6 +116,8 @@ func Run(opts Options) (*Result, error) {
 		lang = "default"
 	}
 
+	var opkgResults []subToolResult
+
 	result := &Result{}
 
 	err := fs.WalkDir(assets, "assets", func(path string, d fs.DirEntry, err error) error {
@@ -122,8 +143,9 @@ func Run(opts Options) (*Result, error) {
 		}
 
 		// Map asset paths to output paths:
-		//   opencode/   -> .opencode/
-		//   openspec/   -> openspec/
+		//   opencode/    -> .opencode/
+		//   openpackage/ -> .openpackage/
+		//   openspec/    -> openspec/
 		outRel := mapAssetPath(relPath)
 		outPath := filepath.Join(opts.TargetDir, outRel)
 
@@ -213,18 +235,16 @@ func Run(opts Options) (*Result, error) {
 	warnLegacyReviewerFiles(opts.Stdout, opts.TargetDir)
 
 	// Ensure .gitignore has the standard UF ignore block.
-	// Called after file scaffolding but before sub-tool delegation
-	// so that .gitignore is ready before sub-tools create runtime files.
 	giResult := ensureGitignore(&opts)
-
-	// Ensure cross-tool bridge files exist so Claude Code and Cursor
-	// users discover convention packs out of the box.
 	agentsResult := ensureAGENTSmdPackSection(&opts, lang)
 	claudeResult := ensureCLAUDEmd(&opts, lang)
 	cursorResult := ensureCursorrules(&opts, lang)
 
-	// Initialize sub-tools after file scaffolding, before summary.
-	subResults := append([]subToolResult{giResult, agentsResult, claudeResult, cursorResult}, initSubTools(&opts)...)
+	// Run opkg after scaffold walk so .openpackage/packages/ exists.
+	opkgResults = openPackageInstall(&opts)
+
+	subResults := append([]subToolResult{giResult, agentsResult, claudeResult, cursorResult}, opkgResults...)
+	subResults = append(subResults, initSubTools(&opts)...)
 
 	printSummary(opts.Stdout, opts.DivisorOnly, langExplicit, langDetected, result, subResults)
 	return result, nil
@@ -253,7 +273,7 @@ func warnLegacyReviewerFiles(w io.Writer, targetDir string) {
 // knownAssetPrefixes enumerates the valid top-level prefixes
 // in the embedded assets directory. Used by mapAssetPath to
 // detect assets added under unexpected directories.
-var knownAssetPrefixes = []string{"opencode/", "openspec/"}
+var knownAssetPrefixes = []string{"opencode/", "openpackage/", "openspec/"}
 
 // mapAssetPath converts an embedded asset relative path to the
 // output path in the target directory. The assets/ directory
@@ -265,14 +285,11 @@ func mapAssetPath(relPath string) string {
 	switch {
 	case strings.HasPrefix(relPath, "opencode/"):
 		return "." + relPath
+	case strings.HasPrefix(relPath, "openpackage/"):
+		return "." + relPath
 	case strings.HasPrefix(relPath, "openspec/"):
-		// openspec/ paths pass through without dot prefix
 		return relPath
 	default:
-		// Unknown prefix — pass through unchanged but this
-		// indicates a new asset directory was added without
-		// updating the mapping. The TestMapAssetPath test
-		// should be extended to cover the new prefix.
 		return relPath
 	}
 }
@@ -290,12 +307,13 @@ func isToolOwned(relPath string) bool {
 	if strings.HasPrefix(relPath, "opencode/command/") {
 		return true
 	}
-	// Skill files are tool-owned (maintained by unbound init).
 	if strings.HasPrefix(relPath, "opencode/skill/") {
 		return true
 	}
-	// Convention packs: canonical packs are tool-owned,
-	// custom packs (-custom.md) are user-owned
+	// Package source trees are tool-owned — always kept current.
+	if strings.HasPrefix(relPath, "openpackage/") {
+		return true
+	}
 	if isConventionPack(relPath) {
 		base := filepath.Base(relPath)
 		return !strings.Contains(base, "-custom")
@@ -1016,6 +1034,62 @@ func collectDeployedPacks(lang string) []string {
 		packs = append(packs, lang+".md", lang+"-custom.md")
 	}
 	return packs
+}
+
+// openPackageInstall runs opkg install when opkg is on PATH. Packages are
+// installed from .openpackage/packages/ (deployed by the scaffold walk).
+// opkg routes content to all detected harness directories (.opencode/,
+// .cursor/, .claude/, etc.) automatically.
+func openPackageInstall(opts *Options) []subToolResult {
+	if opts.SkipOpenPackage {
+		return nil
+	}
+	opkgBin, err := opts.LookPath("opkg")
+	if err != nil {
+		return nil
+	}
+
+	// Packages are deployed to .openpackage/packages/ by the scaffold walk.
+	// Use absolute paths — opkg treats relative paths as registry names.
+	pkgBase := filepath.Join(opts.TargetDir, ".openpackage", "packages")
+	var pkgs []string
+	if opts.DivisorOnly {
+		pkgs = []string{filepath.Join(pkgBase, "review-council")}
+	} else {
+		pkgs = []string{
+			filepath.Join(pkgBase, "review-council"),
+			filepath.Join(pkgBase, "workflows"),
+		}
+	}
+
+	var installedPkgs []string
+	platforms := opts.OpenPackagePlatforms
+	if platforms == "" {
+		platforms = "opencode"
+	}
+	for _, pkg := range pkgs {
+		args := []string{"install", pkg, "--platforms", platforms}
+		out, execErr := opts.ExecCmdInDir(opts.TargetDir, opkgBin, args...)
+		if execErr != nil {
+			detail := strings.TrimSpace(string(out))
+			if detail == "" {
+				detail = execErr.Error()
+			}
+			if len(detail) > 200 {
+				detail = detail[:200] + "…"
+			}
+			pkgName := filepath.Base(pkg)
+			return []subToolResult{{
+				name: "opkg", action: "failed",
+				detail: fmt.Sprintf("%s: %s (re-run uf init to retry)", pkgName, detail),
+			}}
+		}
+		installedPkgs = append(installedPkgs, filepath.Base(pkg))
+	}
+	return []subToolResult{{
+		name: "opkg", action: "installed",
+		detail: strings.Join(installedPkgs, " "),
+	}}
 }
 
 // initSubTools initializes sub-tools after file scaffolding.

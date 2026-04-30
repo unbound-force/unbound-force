@@ -198,6 +198,7 @@ func TestSetupRun_AllPresent(t *testing.T) {
 			"ollama":        "/usr/local/bin/ollama",
 			"golangci-lint": "/usr/local/bin/golangci-lint",
 			"govulncheck":   "/usr/local/bin/govulncheck",
+			"opkg":          "/usr/local/bin/opkg",
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -2717,5 +2718,92 @@ func TestSetupRun_SkipViaConfig(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+func TestInstallOpkg_AlreadyInstalled(t *testing.T) {
+	rec := &cmdRecorder{}
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"opkg": "/usr/local/bin/opkg",
+		}),
+		ExecCmd: rec.execCmd,
+	}
+	opts.defaults()
+	result := installOpkg(&opts)
+	if result.action != "already installed" {
+		t.Errorf("expected 'already installed', got %q", result.action)
+	}
+}
+
+func TestInstallOpkg_DryRun(t *testing.T) {
+	rec := &cmdRecorder{}
+	var buf bytes.Buffer
+	opts := Options{
+		DryRun:   true,
+		Stdout:   &buf,
+		Stderr:   &buf,
+		LookPath: stubLookPath(map[string]string{}),
+		ExecCmd:  rec.execCmd,
+	}
+	opts.defaults()
+	result := installOpkg(&opts)
+	if result.action != "dry-run" {
+		t.Errorf("expected 'dry-run', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "npm install -g opkg") {
+		t.Errorf("expected npm install hint, got %q", result.detail)
+	}
+}
+
+func TestInstallOpkg_NpmFailure(t *testing.T) {
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout:   &buf,
+		Stderr:   &buf,
+		LookPath: stubLookPath(map[string]string{}),
+		ExecCmd: func(cmd string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("exit status 1")
+		},
+	}
+	opts.defaults()
+	result := installOpkg(&opts)
+	if result.action != "failed" {
+		t.Errorf("expected 'failed' on npm failure, got %q", result.action)
+	}
+	if result.err == nil {
+		t.Error("expected non-nil err on npm failure")
+	}
+	if !strings.Contains(result.detail, "openpackage.dev") {
+		t.Errorf("expected install URL in detail, got %q", result.detail)
+	}
+}
+
+func TestInstallOpkg_Success(t *testing.T) {
+	rec := &cmdRecorder{}
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout:   &buf,
+		Stderr:   &buf,
+		LookPath: stubLookPath(map[string]string{}),
+		ExecCmd:  rec.execCmd,
+	}
+	opts.defaults()
+	result := installOpkg(&opts)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+	found := false
+	for _, call := range rec.calls {
+		if call == "npm install -g opkg" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'npm install -g opkg' call, got %v", rec.calls)
 	}
 }

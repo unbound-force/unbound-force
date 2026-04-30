@@ -163,6 +163,43 @@ var expectedAssetPaths = []string{
 	"openspec/schemas/unbound-force/templates/tasks.md",
 	// Swarm skills (1)
 	"opencode/skill/speckit-workflow/SKILL.md",
+	// OpenPackage: review-council (17)
+	"openpackage/packages/review-council/openpackage.yml",
+	"openpackage/packages/review-council/README.md",
+	"openpackage/packages/review-council/mcp.jsonc",
+	"openpackage/packages/review-council/agents/divisor-adversary.md",
+	"openpackage/packages/review-council/agents/divisor-architect.md",
+	"openpackage/packages/review-council/agents/divisor-curator.md",
+	"openpackage/packages/review-council/agents/divisor-envoy.md",
+	"openpackage/packages/review-council/agents/divisor-guard.md",
+	"openpackage/packages/review-council/agents/divisor-herald.md",
+	"openpackage/packages/review-council/agents/divisor-scribe.md",
+	"openpackage/packages/review-council/agents/divisor-sre.md",
+	"openpackage/packages/review-council/agents/divisor-testing.md",
+	"openpackage/packages/review-council/commands/review-council.md",
+	"openpackage/packages/review-council/commands/review-pr.md",
+	"openpackage/packages/review-council/rules/default-custom.md",
+	"openpackage/packages/review-council/rules/default.md",
+	"openpackage/packages/review-council/rules/severity.md",
+	// OpenPackage: workflows (16)
+	"openpackage/packages/workflows/openpackage.yml",
+	"openpackage/packages/workflows/README.md",
+	"openpackage/packages/workflows/agents/constitution-check.md",
+	"openpackage/packages/workflows/commands/constitution-check.md",
+	"openpackage/packages/workflows/commands/opsx-apply.md",
+	"openpackage/packages/workflows/commands/opsx-archive.md",
+	"openpackage/packages/workflows/commands/opsx-explore.md",
+	"openpackage/packages/workflows/commands/opsx-propose.md",
+	"openpackage/packages/workflows/commands/speckit.analyze.md",
+	"openpackage/packages/workflows/commands/speckit.checklist.md",
+	"openpackage/packages/workflows/commands/speckit.clarify.md",
+	"openpackage/packages/workflows/commands/speckit.constitution.md",
+	"openpackage/packages/workflows/commands/speckit.implement.md",
+	"openpackage/packages/workflows/commands/speckit.plan.md",
+	"openpackage/packages/workflows/commands/speckit.specify.md",
+	"openpackage/packages/workflows/commands/speckit.tasks.md",
+	"openpackage/packages/workflows/commands/speckit.taskstoissues.md",
+	"openpackage/packages/workflows/commands/speckit.testreview.md",
 }
 
 func TestAssetPaths_MatchExpected(t *testing.T) {
@@ -190,14 +227,231 @@ func TestAssetPaths_MatchExpected(t *testing.T) {
 	}
 }
 
+func TestRun_OpenPackageRunsAfterScaffold(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	opkgPath := "/fake/bin/opkg"
+	type callRecord struct {
+		args []string
+	}
+	var calls []callRecord
+	result, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+		LookPath: func(name string) (string, error) {
+			if name == "opkg" {
+				return opkgPath, nil
+			}
+			return "", fmt.Errorf("not found")
+		},
+		ExecCmdInDir: func(workDir, bin string, args ...string) ([]byte, error) {
+			if bin == opkgPath {
+				if workDir != dir {
+					t.Errorf("ExecCmdInDir workdir: got %q want %q", workDir, dir)
+				}
+				// Verify packages are deployed before opkg runs.
+				pkgPath := filepath.Join(dir, ".openpackage/packages/review-council/openpackage.yml")
+				if _, statErr := os.Stat(pkgPath); statErr != nil {
+					t.Errorf("packages not deployed before opkg install: %v", statErr)
+				}
+				calls = append(calls, callRecord{args: args})
+			}
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// Default mode installs review-council then workflows (2 calls).
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 opkg install calls, got %d", len(calls))
+	}
+	for i, call := range calls {
+		if len(call.args) < 2 || call.args[0] != "install" {
+			t.Errorf("call %d: unexpected args %#v", i, call.args)
+		}
+	}
+	if !strings.HasSuffix(calls[0].args[1], "review-council") {
+		t.Errorf("first install should be review-council, got %q", calls[0].args[1])
+	}
+	if !strings.HasSuffix(calls[1].args[1], "workflows") {
+		t.Errorf("second install should be workflows, got %q", calls[1].args[1])
+	}
+	// Default platforms is "opencode" when OpenPackagePlatforms is empty.
+	for i, call := range calls {
+		var found bool
+		for j, a := range call.args {
+			if a == "--platforms" && j+1 < len(call.args) && call.args[j+1] == "opencode" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("call %d: expected --platforms opencode in args %#v", i, call.args)
+		}
+	}
+	// All embedded assets are always created — no delegation skipping.
+	if len(result.Created) != len(expectedAssetPaths) {
+		t.Errorf("created files: got %d want %d", len(result.Created), len(expectedAssetPaths))
+	}
+}
+
+func TestRun_OpenPackagePlatforms(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	opkgPath := "/fake/bin/opkg"
+	var capturedArgs [][]string
+	_, err := Run(Options{
+		TargetDir:             dir,
+		Version:               "1.0.0-test",
+		Stdout:                &buf,
+		OpenPackagePlatforms:  "opencode,cursor",
+		LookPath: func(name string) (string, error) {
+			if name == "opkg" {
+				return opkgPath, nil
+			}
+			return "", fmt.Errorf("not found")
+		},
+		ExecCmdInDir: func(workDir, bin string, args ...string) ([]byte, error) {
+			if bin == opkgPath {
+				capturedArgs = append(capturedArgs, args)
+			}
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(capturedArgs) != 2 {
+		t.Fatalf("expected 2 opkg calls, got %d", len(capturedArgs))
+	}
+	for i, args := range capturedArgs {
+		var platformsIdx int
+		found := false
+		for j, a := range args {
+			if a == "--platforms" {
+				platformsIdx = j
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("call %d: missing --platforms flag in args %#v", i, args)
+			continue
+		}
+		if platformsIdx+1 >= len(args) || args[platformsIdx+1] != "opencode,cursor" {
+			t.Errorf("call %d: expected --platforms opencode,cursor, got %#v", i, args)
+		}
+	}
+}
+
+func TestRun_OpenPackageFailureReportsPackageName(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	opkgPath := "/fake/bin/opkg"
+	callCount := 0
+	result, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+		LookPath: func(name string) (string, error) {
+			if name == "opkg" {
+				return opkgPath, nil
+			}
+			return "", fmt.Errorf("not found")
+		},
+		ExecCmdInDir: func(workDir, bin string, args ...string) ([]byte, error) {
+			if bin == opkgPath {
+				callCount++
+				// Fail on first install (review-council).
+				return []byte("registry error"), fmt.Errorf("exit status 1")
+			}
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// opkg failure is soft — Run still succeeds.
+	if len(result.Created) != len(expectedAssetPaths) {
+		t.Errorf("created files: got %d want %d", len(result.Created), len(expectedAssetPaths))
+	}
+	// Only one call — loop should stop after first failure.
+	if callCount != 1 {
+		t.Errorf("expected 1 opkg call on failure, got %d", callCount)
+	}
+	output := buf.String()
+	if !strings.Contains(output, "review-council") {
+		t.Errorf("failure output should name the failing package; got:\n%s", output)
+	}
+	if !strings.Contains(output, "re-run uf init") {
+		t.Errorf("failure output should suggest re-running uf init; got:\n%s", output)
+	}
+}
+
+func TestRun_OpenPackageDivisorOnly(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	opkgPath := "/fake/bin/opkg"
+	var installedPkgs []string
+	_, err := Run(Options{
+		TargetDir:   dir,
+		Version:     "1.0.0-test",
+		Stdout:      &buf,
+		DivisorOnly: true,
+		LookPath: func(name string) (string, error) {
+			if name == "opkg" {
+				return opkgPath, nil
+			}
+			return "", fmt.Errorf("not found")
+		},
+		ExecCmdInDir: func(workDir, bin string, args ...string) ([]byte, error) {
+			if bin == opkgPath && len(args) >= 2 && args[0] == "install" {
+				installedPkgs = append(installedPkgs, filepath.Base(args[1]))
+			}
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(installedPkgs) != 1 {
+		t.Fatalf("DivisorOnly should install 1 package, got %d: %v", len(installedPkgs), installedPkgs)
+	}
+	if installedPkgs[0] != "review-council" {
+		t.Errorf("DivisorOnly should install review-council, got %q", installedPkgs[0])
+	}
+}
+
+func TestRun_OpenPackageFallbackNoBinary(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	result, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+		LookPath: func(name string) (string, error) {
+			return "", fmt.Errorf("not found")
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(result.Created) != len(expectedAssetPaths) {
+		t.Errorf("created: got %d want %d (full fallback)", len(result.Created), len(expectedAssetPaths))
+	}
+}
+
 func TestRun_CreatesFiles(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
 	result, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -249,9 +503,10 @@ func TestRun_SkipsExisting(t *testing.T) {
 
 	// First run creates everything
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
@@ -260,9 +515,10 @@ func TestRun_SkipsExisting(t *testing.T) {
 	// Second run should skip user-owned, skip identical tool-owned
 	buf.Reset()
 	result, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("second Run() error: %v", err)
@@ -313,9 +569,10 @@ func TestRun_ForceOverwrites(t *testing.T) {
 
 	// First run
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
@@ -324,10 +581,11 @@ func TestRun_ForceOverwrites(t *testing.T) {
 	// Second run with --force
 	buf.Reset()
 	result, err := Run(Options{
-		TargetDir: dir,
-		Force:     true,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Force:           true,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("force Run() error: %v", err)
@@ -347,9 +605,10 @@ func TestRun_VersionMarker(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.2.3",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.2.3",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -383,8 +642,9 @@ func TestRun_VersionMarkerDev(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -420,9 +680,10 @@ func TestRun_OverwriteOnDiff_ToolOwned(t *testing.T) {
 
 	// First run
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
@@ -443,9 +704,10 @@ func TestRun_OverwriteOnDiff_ToolOwned(t *testing.T) {
 	// Re-run
 	buf.Reset()
 	result, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("second Run() error: %v", err)
@@ -504,9 +766,10 @@ func TestRun_OverwriteOnDiff_SkipsIdentical(t *testing.T) {
 
 	// First run
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
@@ -515,9 +778,10 @@ func TestRun_OverwriteOnDiff_SkipsIdentical(t *testing.T) {
 	// Re-run without any modifications
 	buf.Reset()
 	result, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("second Run() error: %v", err)
@@ -581,9 +845,10 @@ func TestRun_SchemaDistribution(t *testing.T) {
 
 	// First run creates everything
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
@@ -604,9 +869,10 @@ func TestRun_SchemaDistribution(t *testing.T) {
 	// Re-run without --force
 	buf.Reset()
 	result, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("second Run() error: %v", err)
@@ -926,9 +1192,10 @@ func TestRun_PrintSummaryIntegration(t *testing.T) {
 	var buf bytes.Buffer
 
 	result, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1227,10 +1494,11 @@ func TestRun_DivisorSubset(t *testing.T) {
 
 	var buf bytes.Buffer
 	result, err := Run(Options{
-		TargetDir:   dir,
-		DivisorOnly: true,
-		Version:     "1.0.0",
-		Stdout:      &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		DivisorOnly:     true,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1304,11 +1572,12 @@ func TestRun_DivisorSubset_WithLangFlag(t *testing.T) {
 	var buf bytes.Buffer
 
 	result, err := Run(Options{
-		TargetDir:   dir,
-		DivisorOnly: true,
-		Lang:        "typescript",
-		Version:     "1.0.0",
-		Stdout:      &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		DivisorOnly:     true,
+		Lang:            "typescript",
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1349,10 +1618,11 @@ func TestRun_DivisorSubset_DefaultFallback(t *testing.T) {
 	var buf bytes.Buffer
 
 	result, err := Run(Options{
-		TargetDir:   dir,
-		DivisorOnly: true,
-		Version:     "1.0.0",
-		Stdout:      &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		DivisorOnly:     true,
+		Version:         "1.0.0",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1427,9 +1697,10 @@ func TestScaffoldOutput_NoGraphthulhuReferences(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1475,9 +1746,10 @@ func TestScaffoldOutput_NoSwarmPluginReferences(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1525,9 +1797,10 @@ func TestScaffoldOutput_NoHivemindReferences(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1576,9 +1849,10 @@ func TestScaffoldOutput_NoBareUnboundReferences(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1627,9 +1901,10 @@ func TestScaffoldOutput_NoOldPathReferences(t *testing.T) {
 	var buf bytes.Buffer
 
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -1751,9 +2026,10 @@ func TestRun_LegacyFileWarning(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, err := Run(Options{
-		TargetDir: dir,
-		Version:   "1.0.0-test",
-		Stdout:    &buf,
+		SkipOpenPackage: true,
+		TargetDir:       dir,
+		Version:         "1.0.0-test",
+		Stdout:          &buf,
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
