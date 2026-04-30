@@ -278,6 +278,19 @@ func TestRun_OpenPackageRunsAfterScaffold(t *testing.T) {
 	if !strings.HasSuffix(calls[1].args[1], "workflows") {
 		t.Errorf("second install should be workflows, got %q", calls[1].args[1])
 	}
+	// Default platforms is "opencode" when OpenPackagePlatforms is empty.
+	for i, call := range calls {
+		var found bool
+		for j, a := range call.args {
+			if a == "--platforms" && j+1 < len(call.args) && call.args[j+1] == "opencode" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("call %d: expected --platforms opencode in args %#v", i, call.args)
+		}
+	}
 	// All embedded assets are always created — no delegation skipping.
 	if len(result.Created) != len(expectedAssetPaths) {
 		t.Errorf("created files: got %d want %d", len(result.Created), len(expectedAssetPaths))

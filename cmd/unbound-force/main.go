@@ -109,9 +109,8 @@ Use --force to overwrite all files regardless of ownership.
 Use --platforms to specify comma-separated AI harnesses for
 opkg installation (e.g. opencode,cursor,claude-code). When
 opkg is on PATH, uf init delegates agent and command installation
-to opkg, which routes files to each harness directory. Without
---platforms, opkg auto-detects installed harnesses from existing
-directories. Without opkg, embedded assets are used as fallback.`,
+to opkg, which routes files to each harness directory. Defaults
+to opencode when --platforms is not set.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			force, _ := cmd.Flags().GetBool("force")
 			divisorOnly, _ := cmd.Flags().GetBool("divisor")
@@ -135,7 +134,7 @@ directories. Without opkg, embedded assets are used as fallback.`,
 	cmd.Flags().Bool("force", false, "Overwrite all existing files")
 	cmd.Flags().Bool("divisor", false, "Deploy only Divisor review agents and convention packs")
 	cmd.Flags().String("lang", "", "Project language for convention pack (auto-detected if omitted)")
-	cmd.Flags().String("platforms", "", "Comma-separated AI harnesses to target (e.g. opencode,cursor,claude-code); defaults to auto-detect")
+	cmd.Flags().String("platforms", "", "Comma-separated AI harnesses to target (e.g. opencode,cursor,claude-code); defaults to opencode")
 	return cmd
 }
 

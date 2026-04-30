@@ -41,6 +41,7 @@ type Options struct {
 	ReadFile     func(string) ([]byte, error)                    // Reads a file (default: os.ReadFile)
 	WriteFile    func(string, []byte, os.FileMode) error         // Writes a file (default: os.WriteFile)
 	// OpenPackagePlatforms is passed to opkg install --platforms (e.g. "opencode,cursor,claude-code").
+	// Defaults to "opencode" when empty.
 	// Empty means opkg auto-detects from existing platform directories.
 	OpenPackagePlatforms string
 	// SkipOpenPackage disables opkg delegation (tests — keep embedded writes deterministic).
@@ -1062,11 +1063,12 @@ func openPackageInstall(opts *Options) []subToolResult {
 	}
 
 	var installedPkgs []string
+	platforms := opts.OpenPackagePlatforms
+	if platforms == "" {
+		platforms = "opencode"
+	}
 	for _, pkg := range pkgs {
-		args := []string{"install", pkg}
-		if opts.OpenPackagePlatforms != "" {
-			args = append(args, "--platforms", opts.OpenPackagePlatforms)
-		}
+		args := []string{"install", pkg, "--platforms", platforms}
 		out, execErr := opts.ExecCmdInDir(opts.TargetDir, opkgBin, args...)
 		if execErr != nil {
 			detail := strings.TrimSpace(string(out))

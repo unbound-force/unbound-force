@@ -136,11 +136,19 @@ not published, Homebrew absent), the step MUST return
 
 ### Requirement: OpenPackagePlatforms passthrough
 
-FR-008 [MUST]: When `Options.OpenPackagePlatforms` is
-non-empty, `openPackageInstall()` MUST append
-`--platforms <value>` to each `opkg install` invocation.
+FR-008 [MUST]: `openPackageInstall()` MUST always pass
+`--platforms` to each `opkg install` invocation. When
+`Options.OpenPackagePlatforms` is empty, the default
+value `"opencode"` MUST be used. When non-empty, the
+provided value is used as-is.
 
-#### Scenario: platforms flag passed to opkg
+#### Scenario: default platforms when flag not set
+- **GIVEN** `OpenPackagePlatforms` is empty
+- **WHEN** `openPackageInstall()` runs
+- **THEN** each `opkg install` call includes
+  `--platforms opencode`
+
+#### Scenario: custom platforms flag passed to opkg
 - **GIVEN** `OpenPackagePlatforms` is set to
   `"opencode,cursor"`
 - **WHEN** `openPackageInstall()` runs
