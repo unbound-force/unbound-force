@@ -380,8 +380,10 @@ func Run(opts Options) error {
 	fmt.Fprintf(opts.Stdout, "  [15/15] OpenPackage (opkg)...\n")
 	if opts.shouldSkipTool("opkg") {
 		results = append(results, stepResult{name: "OpenPackage (opkg)", action: "skipped", detail: "excluded by config"})
+	} else if nodeAvailable {
+		results = append(results, installOpkg(&opts))
 	} else {
-		results = append(results, installOpkg(&opts, env))
+		results = append(results, stepResult{name: "OpenPackage (opkg)", action: "skipped", detail: "no Node.js"})
 	}
 
 	// Print results.
@@ -975,42 +977,26 @@ func installDewey(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	return stepResult{name: "Dewey", action: "installed", detail: "via Homebrew"}
 }
 
-// installOpkg attempts to install the OpenPackage CLI (`opkg`) via
-// Homebrew so `uf init` can delegate to `opkg install`. When the formula
-// is unavailable or brew fails, returns skipped with a manual-install hint.
-func installOpkg(opts *Options, env doctor.DetectedEnvironment) stepResult {
+// installOpkg installs the OpenPackage CLI (`opkg`) via npm.
+// Follows the installOpenSpec() pattern: npm is the sole method.
+func installOpkg(opts *Options) stepResult {
 	if _, err := opts.LookPath("opkg"); err == nil {
 		return stepResult{name: "OpenPackage (opkg)", action: "already installed"}
 	}
 
 	if opts.DryRun {
-		if doctor.HasManager(env, doctor.ManagerHomebrew) {
-			return stepResult{name: "OpenPackage (opkg)", action: "dry-run", detail: "Would install: brew install openpackage"}
-		}
-		return stepResult{
-			name:   "OpenPackage (opkg)",
-			action: "dry-run",
-			detail: "Would skip: Homebrew unavailable — install opkg manually",
-		}
+		return stepResult{name: "OpenPackage (opkg)", action: "dry-run", detail: "Would install: npm install -g opkg"}
 	}
 
-	if !doctor.HasManager(env, doctor.ManagerHomebrew) {
+	if _, err := opts.ExecCmd("npm", "install", "-g", "opkg"); err != nil {
 		return stepResult{
 			name:   "OpenPackage (opkg)",
-			action: "skipped",
-			detail: "Homebrew not available — install opkg manually: https://openpackage.dev/docs/install",
-		}
-	}
-
-	if _, err := opts.ExecCmd("brew", "install", "openpackage"); err != nil {
-		return stepResult{
-			name:   "OpenPackage (opkg)",
-			action: "skipped",
-			detail: "brew install openpackage failed — install opkg manually for OpenPackage distribution",
+			action: "failed",
+			detail: "npm install failed — see https://openpackage.dev/docs/install",
 			err:    err,
 		}
 	}
-	return stepResult{name: "OpenPackage (opkg)", action: "installed", detail: "via Homebrew"}
+	return stepResult{name: "OpenPackage (opkg)", action: "installed", detail: "via npm"}
 }
 
 // pullEmbeddingModel pulls the enterprise-grade embedding model
