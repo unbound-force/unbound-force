@@ -198,6 +198,7 @@ func TestSetupRun_AllPresent(t *testing.T) {
 			"ollama":        "/usr/local/bin/ollama",
 			"golangci-lint": "/usr/local/bin/golangci-lint",
 			"govulncheck":   "/usr/local/bin/govulncheck",
+			"opkg":          "/usr/local/bin/opkg",
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -2717,5 +2718,149 @@ func TestSetupRun_SkipViaConfig(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+func TestInstallOpkg_AlreadyInstalled(t *testing.T) {
+	rec := &cmdRecorder{}
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"opkg": "/usr/local/bin/opkg",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+	result := installOpkg(&opts, env)
+	if result.action != "already installed" {
+		t.Errorf("expected 'already installed', got %q", result.action)
+	}
+}
+
+func TestInstallOpkg_DryRun_WithHomebrew(t *testing.T) {
+	rec := &cmdRecorder{}
+	var buf bytes.Buffer
+	opts := Options{
+		DryRun: true,
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+	result := installOpkg(&opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("expected 'dry-run', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "brew install openpackage") {
+		t.Errorf("expected brew install hint, got %q", result.detail)
+	}
+}
+
+func TestInstallOpkg_NoHomebrew(t *testing.T) {
+	rec := &cmdRecorder{}
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout:       &buf,
+		Stderr:       &buf,
+		LookPath:     stubLookPath(map[string]string{}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+	result := installOpkg(&opts, env)
+	if result.action != "skipped" {
+		t.Errorf("expected 'skipped', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "openpackage.dev") {
+		t.Errorf("expected manual install URL in detail, got %q", result.detail)
+	}
+}
+
+func TestInstallOpkg_BrewFailure(t *testing.T) {
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd: func(cmd string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("exit status 1")
+		},
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+	result := installOpkg(&opts, env)
+	if result.action != "skipped" {
+		t.Errorf("expected 'skipped' on brew failure, got %q", result.action)
+	}
+	if result.err == nil {
+		t.Error("expected non-nil err on brew failure")
+	}
+}
+
+func TestInstallOpkg_Success(t *testing.T) {
+	rec := &cmdRecorder{}
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+	result := installOpkg(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+	found := false
+	for _, call := range rec.calls {
+		if call == "brew install openpackage" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'brew install openpackage' call, got %v", rec.calls)
 	}
 }

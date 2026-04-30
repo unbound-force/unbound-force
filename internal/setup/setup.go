@@ -998,7 +998,7 @@ func installOpkg(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		return stepResult{
 			name:   "OpenPackage (opkg)",
 			action: "skipped",
-			detail: "Homebrew not available — install opkg manually (see plan-openpackage-migration.md)",
+			detail: "Homebrew not available — install opkg manually: https://openpackage.dev/docs/install",
 		}
 	}
 

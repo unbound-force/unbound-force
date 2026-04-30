@@ -45,6 +45,7 @@ type initParams struct {
 	divisorOnly bool
 	lang        string
 	version     string
+	platforms   string
 	stdout      io.Writer
 }
 
@@ -58,12 +59,13 @@ func runInit(p initParams) error {
 		}
 	}
 	_, err := scaffold.Run(scaffold.Options{
-		TargetDir:   p.targetDir,
-		Force:       p.force,
-		DivisorOnly: p.divisorOnly,
-		Lang:        lang,
-		Version:     p.version,
-		Stdout:      p.stdout,
+		TargetDir:        p.targetDir,
+		Force:            p.force,
+		DivisorOnly:      p.divisorOnly,
+		Lang:             lang,
+		Version:          p.version,
+		OpenPackagePlatforms: p.platforms,
+		Stdout:           p.stdout,
 	})
 	return err
 }
@@ -102,11 +104,19 @@ Use --lang to specify the project language for convention
 pack selection (auto-detected from go.mod, package.json,
 etc. if not provided).
 
-Use --force to overwrite all files regardless of ownership.`,
+Use --force to overwrite all files regardless of ownership.
+
+Use --platforms to specify comma-separated AI harnesses for
+opkg installation (e.g. opencode,cursor,claude-code). When
+opkg is on PATH, uf init delegates agent and command installation
+to opkg, which routes files to each harness directory. Without
+--platforms, opkg auto-detects installed harnesses from existing
+directories. Without opkg, embedded assets are used as fallback.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			force, _ := cmd.Flags().GetBool("force")
 			divisorOnly, _ := cmd.Flags().GetBool("divisor")
 			lang, _ := cmd.Flags().GetString("lang")
+			platforms, _ := cmd.Flags().GetString("platforms")
 			cwd, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("get working directory: %w", err)
@@ -116,6 +126,7 @@ Use --force to overwrite all files regardless of ownership.`,
 				force:       force,
 				divisorOnly: divisorOnly,
 				lang:        lang,
+				platforms:   platforms,
 				version:     version,
 				stdout:      cmd.OutOrStdout(),
 			})
@@ -124,6 +135,7 @@ Use --force to overwrite all files regardless of ownership.`,
 	cmd.Flags().Bool("force", false, "Overwrite all existing files")
 	cmd.Flags().Bool("divisor", false, "Deploy only Divisor review agents and convention packs")
 	cmd.Flags().String("lang", "", "Project language for convention pack (auto-detected if omitted)")
+	cmd.Flags().String("platforms", "", "Comma-separated AI harnesses to target (e.g. opencode,cursor,claude-code); defaults to auto-detect")
 	return cmd
 }
 

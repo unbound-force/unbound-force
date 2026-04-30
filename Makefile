@@ -1,4 +1,4 @@
-.PHONY: check build test lint install
+.PHONY: check build test lint install packages
 .PHONY: coverage ensure-gaze crapload crapload-baseline crapload-check
 
 check: lint test build
@@ -16,6 +16,11 @@ lint:
 install:
 	go build -o $(shell go env GOPATH)/bin/unbound-force ./cmd/unbound-force/
 	ln -sf $(shell go env GOPATH)/bin/unbound-force $(shell go env GOPATH)/bin/uf
+
+##@ OpenPackage Generation
+
+packages: ## generate packages/ from .opencode/ sources
+	./scripts/generate-packages.sh
 
 ##@ CRAP Load Monitoring
 

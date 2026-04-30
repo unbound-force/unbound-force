@@ -5,9 +5,9 @@ openpackage:
     mode: subagent
     temperature: 0.1
     tools:
-      write: false
-      edit: false
-      bash: false
+        write: false
+        edit: false
+        bash: false
   claude:
     name: testing
     tools: Read, Grep, Glob

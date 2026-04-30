@@ -5,11 +5,11 @@ openpackage:
     mode: subagent
     temperature: 0.1
     tools:
-      read: true
-      write: false
-      edit: false
-      bash: false
-      webfetch: false
+        read: true
+        write: false
+        edit: false
+        bash: false
+        webfetch: false
   claude:
     name: constitution-check
     tools: Read, Grep, Glob

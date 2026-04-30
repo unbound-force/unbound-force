@@ -163,6 +163,43 @@ var expectedAssetPaths = []string{
 	"openspec/schemas/unbound-force/templates/tasks.md",
 	// Swarm skills (1)
 	"opencode/skill/speckit-workflow/SKILL.md",
+	// OpenPackage: review-council (17)
+	"openpackage/packages/review-council/openpackage.yml",
+	"openpackage/packages/review-council/README.md",
+	"openpackage/packages/review-council/mcp.jsonc",
+	"openpackage/packages/review-council/agents/review-council/divisor-adversary.md",
+	"openpackage/packages/review-council/agents/review-council/divisor-architect.md",
+	"openpackage/packages/review-council/agents/review-council/divisor-curator.md",
+	"openpackage/packages/review-council/agents/review-council/divisor-envoy.md",
+	"openpackage/packages/review-council/agents/review-council/divisor-guard.md",
+	"openpackage/packages/review-council/agents/review-council/divisor-herald.md",
+	"openpackage/packages/review-council/agents/review-council/divisor-scribe.md",
+	"openpackage/packages/review-council/agents/review-council/divisor-sre.md",
+	"openpackage/packages/review-council/agents/review-council/divisor-testing.md",
+	"openpackage/packages/review-council/commands/review-council/review-council.md",
+	"openpackage/packages/review-council/commands/review-council/review-pr.md",
+	"openpackage/packages/review-council/rules/review-council/default-custom.md",
+	"openpackage/packages/review-council/rules/review-council/default.md",
+	"openpackage/packages/review-council/rules/review-council/severity.md",
+	// OpenPackage: workflows (16)
+	"openpackage/packages/workflows/openpackage.yml",
+	"openpackage/packages/workflows/README.md",
+	"openpackage/packages/workflows/agents/workflows/constitution-check.md",
+	"openpackage/packages/workflows/commands/workflows/constitution-check.md",
+	"openpackage/packages/workflows/commands/workflows/opsx-apply.md",
+	"openpackage/packages/workflows/commands/workflows/opsx-archive.md",
+	"openpackage/packages/workflows/commands/workflows/opsx-explore.md",
+	"openpackage/packages/workflows/commands/workflows/opsx-propose.md",
+	"openpackage/packages/workflows/commands/workflows/speckit.analyze.md",
+	"openpackage/packages/workflows/commands/workflows/speckit.checklist.md",
+	"openpackage/packages/workflows/commands/workflows/speckit.clarify.md",
+	"openpackage/packages/workflows/commands/workflows/speckit.constitution.md",
+	"openpackage/packages/workflows/commands/workflows/speckit.implement.md",
+	"openpackage/packages/workflows/commands/workflows/speckit.plan.md",
+	"openpackage/packages/workflows/commands/workflows/speckit.specify.md",
+	"openpackage/packages/workflows/commands/workflows/speckit.tasks.md",
+	"openpackage/packages/workflows/commands/workflows/speckit.taskstoissues.md",
+	"openpackage/packages/workflows/commands/workflows/speckit.testreview.md",
 }
 
 func TestAssetPaths_MatchExpected(t *testing.T) {
@@ -190,15 +227,14 @@ func TestAssetPaths_MatchExpected(t *testing.T) {
 	}
 }
 
-// openPackageDelegatedEmbeddedCount is the number of embedded assets skipped
-// when opkg install succeeds (must match assetDelegatedToOpenPackage).
-const openPackageDelegatedEmbeddedCount = 16
-
-func TestRun_OpenPackageDelegatesSkipsEmbeddedFiles(t *testing.T) {
+func TestRun_OpenPackageRunsAfterScaffold(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 	opkgPath := "/fake/bin/opkg"
-	opkgInstallCalled := false
+	type callRecord struct {
+		args []string
+	}
+	var calls []callRecord
 	result, err := Run(Options{
 		TargetDir: dir,
 		Version:   "1.0.0-test",
@@ -210,15 +246,16 @@ func TestRun_OpenPackageDelegatesSkipsEmbeddedFiles(t *testing.T) {
 			return "", fmt.Errorf("not found")
 		},
 		ExecCmdInDir: func(workDir, bin string, args ...string) ([]byte, error) {
-			opkgInstallCalled = true
-			if workDir != dir {
-				t.Errorf("ExecCmdInDir workdir: got %q want %q", workDir, dir)
-			}
-			if bin != opkgPath {
-				t.Errorf("ExecCmdInDir binary: got %q want %q", bin, opkgPath)
-			}
-			if len(args) < 2 || args[0] != "install" {
-				t.Errorf("ExecCmdInDir args: %#v", args)
+			if bin == opkgPath {
+				if workDir != dir {
+					t.Errorf("ExecCmdInDir workdir: got %q want %q", workDir, dir)
+				}
+				// Verify packages are deployed before opkg runs.
+				pkgPath := filepath.Join(dir, ".openpackage/packages/review-council/openpackage.yml")
+				if _, statErr := os.Stat(pkgPath); statErr != nil {
+					t.Errorf("packages not deployed before opkg install: %v", statErr)
+				}
+				calls = append(calls, callRecord{args: args})
 			}
 			return nil, nil
 		},
@@ -226,18 +263,151 @@ func TestRun_OpenPackageDelegatesSkipsEmbeddedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !opkgInstallCalled {
-		t.Fatal("expected opkg install")
+	// Default mode installs review-council then workflows (2 calls).
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 opkg install calls, got %d", len(calls))
 	}
-	want := len(expectedAssetPaths) - openPackageDelegatedEmbeddedCount
-	if len(result.Created) != want {
-		t.Errorf("created files: got %d want %d", len(result.Created), want)
+	for i, call := range calls {
+		if len(call.args) < 2 || call.args[0] != "install" {
+			t.Errorf("call %d: unexpected args %#v", i, call.args)
+		}
 	}
-	if _, statErr := os.Stat(filepath.Join(dir, ".opencode/command/agent-brief.md")); statErr != nil {
-		t.Errorf("expected agent-brief.md from embed: %v", statErr)
+	if !strings.HasSuffix(calls[0].args[1], "review-council") {
+		t.Errorf("first install should be review-council, got %q", calls[0].args[1])
 	}
-	if _, statErr := os.Stat(filepath.Join(dir, ".opencode/agents/divisor-guard.md")); statErr == nil {
-		t.Error("did not expect divisor-guard.md when OpenPackage delegated")
+	if !strings.HasSuffix(calls[1].args[1], "workflows") {
+		t.Errorf("second install should be workflows, got %q", calls[1].args[1])
+	}
+	// All embedded assets are always created — no delegation skipping.
+	if len(result.Created) != len(expectedAssetPaths) {
+		t.Errorf("created files: got %d want %d", len(result.Created), len(expectedAssetPaths))
+	}
+}
+
+func TestRun_OpenPackagePlatforms(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	opkgPath := "/fake/bin/opkg"
+	var capturedArgs [][]string
+	_, err := Run(Options{
+		TargetDir:             dir,
+		Version:               "1.0.0-test",
+		Stdout:                &buf,
+		OpenPackagePlatforms:  "opencode,cursor",
+		LookPath: func(name string) (string, error) {
+			if name == "opkg" {
+				return opkgPath, nil
+			}
+			return "", fmt.Errorf("not found")
+		},
+		ExecCmdInDir: func(workDir, bin string, args ...string) ([]byte, error) {
+			if bin == opkgPath {
+				capturedArgs = append(capturedArgs, args)
+			}
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(capturedArgs) != 2 {
+		t.Fatalf("expected 2 opkg calls, got %d", len(capturedArgs))
+	}
+	for i, args := range capturedArgs {
+		var platformsIdx int
+		found := false
+		for j, a := range args {
+			if a == "--platforms" {
+				platformsIdx = j
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("call %d: missing --platforms flag in args %#v", i, args)
+			continue
+		}
+		if platformsIdx+1 >= len(args) || args[platformsIdx+1] != "opencode,cursor" {
+			t.Errorf("call %d: expected --platforms opencode,cursor, got %#v", i, args)
+		}
+	}
+}
+
+func TestRun_OpenPackageFailureReportsPackageName(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	opkgPath := "/fake/bin/opkg"
+	callCount := 0
+	result, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+		LookPath: func(name string) (string, error) {
+			if name == "opkg" {
+				return opkgPath, nil
+			}
+			return "", fmt.Errorf("not found")
+		},
+		ExecCmdInDir: func(workDir, bin string, args ...string) ([]byte, error) {
+			if bin == opkgPath {
+				callCount++
+				// Fail on first install (review-council).
+				return []byte("registry error"), fmt.Errorf("exit status 1")
+			}
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// opkg failure is soft — Run still succeeds.
+	if len(result.Created) != len(expectedAssetPaths) {
+		t.Errorf("created files: got %d want %d", len(result.Created), len(expectedAssetPaths))
+	}
+	// Only one call — loop should stop after first failure.
+	if callCount != 1 {
+		t.Errorf("expected 1 opkg call on failure, got %d", callCount)
+	}
+	output := buf.String()
+	if !strings.Contains(output, "review-council") {
+		t.Errorf("failure output should name the failing package; got:\n%s", output)
+	}
+	if !strings.Contains(output, "re-run uf init") {
+		t.Errorf("failure output should suggest re-running uf init; got:\n%s", output)
+	}
+}
+
+func TestRun_OpenPackageDivisorOnly(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	opkgPath := "/fake/bin/opkg"
+	var installedPkgs []string
+	_, err := Run(Options{
+		TargetDir:   dir,
+		Version:     "1.0.0-test",
+		Stdout:      &buf,
+		DivisorOnly: true,
+		LookPath: func(name string) (string, error) {
+			if name == "opkg" {
+				return opkgPath, nil
+			}
+			return "", fmt.Errorf("not found")
+		},
+		ExecCmdInDir: func(workDir, bin string, args ...string) ([]byte, error) {
+			if bin == opkgPath && len(args) >= 2 && args[0] == "install" {
+				installedPkgs = append(installedPkgs, filepath.Base(args[1]))
+			}
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(installedPkgs) != 1 {
+		t.Fatalf("DivisorOnly should install 1 package, got %d: %v", len(installedPkgs), installedPkgs)
+	}
+	if installedPkgs[0] != "review-council" {
+		t.Errorf("DivisorOnly should install review-council, got %q", installedPkgs[0])
 	}
 }
 
