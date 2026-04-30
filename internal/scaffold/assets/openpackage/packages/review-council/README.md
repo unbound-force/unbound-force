@@ -35,3 +35,4 @@ package automatically (see `openspec/changes/opkg-delegate/proposal.md`).
 - `commands/review-council/*.md` — slash commands
 - `rules/review-council/*.md` — convention packs
 - `mcp.jsonc` — Dewey MCP template (optional)
+<!-- scaffolded by uf vdev -->

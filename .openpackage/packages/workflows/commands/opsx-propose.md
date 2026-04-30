@@ -1,0 +1,154 @@
+---
+description: Propose a new change - create it and generate all artifacts in one step
+---
+<!-- scaffolded by uf vdev -->
+
+Propose a new change - create the change and generate all artifacts in one step.
+
+I'll create a change with artifacts:
+- proposal.md (what & why)
+- design.md (how)
+- tasks.md (implementation steps)
+
+When ready to implement, run /unleash (autonomous) or /opsx-apply (sequential)
+
+---
+
+**Input**: The argument after `/opsx-propose` is the change name (kebab-case), OR a description of what the user wants to build.
+
+**Steps**
+
+1. **If no input provided, ask what they want to build**
+
+   Use the **AskUserQuestion tool** (open-ended, no preset options) to ask:
+   > "What change do you want to work on? Describe what you want to build or fix."
+
+   From their description, derive a kebab-case name (e.g., "add user authentication" → `add-user-auth`).
+
+   **IMPORTANT**: Do NOT proceed without understanding what the user wants to build.
+
+2. **Create the change directory**
+   ```bash
+   openspec new change "<name>"
+   ```
+   This creates a scaffolded change at `openspec/changes/<name>/` with `.openspec.yaml`.
+
+3. **Create and checkout a branch**
+
+   ```bash
+   git checkout -b opsx/<name>
+   ```
+
+   **Guard**: Before creating the branch, check the current branch:
+   - If already on `opsx/<name>` (exact match): skip branch creation, proceed.
+   - If on a different `opsx/*` branch: **STOP** with error: "Already on branch `opsx/<other>` -- finish or archive that change first."
+   - If on `main` or any non-opsx branch: create and checkout `opsx/<name>`.
+
+### Retrieve Context from Dewey (optional)
+
+Before drafting the proposal, query Dewey for relevant context:
+
+- `dewey_semantic_search` with the change description to find
+  related specs, past proposals, and similar changes
+- `dewey_semantic_search_filtered` with `source_type: "github"`
+  to find related issues across the organization
+- `dewey_traverse` on any discovered related specs to understand
+  dependencies
+
+Use the retrieved context to inform the proposal's scope,
+identify potential conflicts with existing work, and reference
+relevant prior decisions.
+
+If Dewey is unavailable, proceed without cross-repo context —
+use direct file reads of local specs and backlog items instead.
+
+4. **Get the artifact build order**
+   ```bash
+   openspec status --change "<name>" --json
+   ```
+   Parse the JSON to get:
+   - `applyRequires`: array of artifact IDs needed before implementation (e.g., `["tasks"]`)
+   - `artifacts`: list of all artifacts with their status and dependencies
+
+5. **Create artifacts in sequence until apply-ready**
+
+   Use the **TodoWrite tool** to track progress through the artifacts.
+
+   Loop through artifacts in dependency order (artifacts with no pending dependencies first):
+
+   a. **For each artifact that is `ready` (dependencies satisfied)**:
+      - Get instructions:
+        ```bash
+        openspec instructions <artifact-id> --change "<name>" --json
+        ```
+      - The instructions JSON includes:
+        - `context`: Project background (constraints for you - do NOT include in output)
+        - `rules`: Artifact-specific rules (constraints for you - do NOT include in output)
+        - `template`: The structure to use for your output file
+        - `instruction`: Schema-specific guidance for this artifact type
+        - `outputPath`: Where to write the artifact
+        - `dependencies`: Completed artifacts to read for context
+      - Read any completed dependency files for context
+      - Create the artifact file using `template` as the structure
+      - Apply `context` and `rules` as constraints - but do NOT copy them into the file
+      - Show brief progress: "Created <artifact-id>"
+
+   b. **Continue until all `applyRequires` artifacts are complete**
+      - After creating each artifact, re-run `openspec status --change "<name>" --json`
+      - Check if every artifact ID in `applyRequires` has `status: "done"` in the artifacts array
+      - Stop when all `applyRequires` artifacts are done
+
+   c. **If an artifact requires user input** (unclear context):
+      - Use **AskUserQuestion tool** to clarify
+      - Then continue with creation
+
+6. **Show final status**
+   ```bash
+   openspec status --change "<name>"
+   ```
+
+**STOP HERE. Do NOT proceed to implementation.**
+
+Your job is done. Report the results and prompt the
+user. The user will invoke a separate command
+(/unleash, /cobalt-crush, or /opsx-apply) when they
+are ready to implement.
+
+**Output**
+
+After completing all artifacts, summarize:
+- Change name and location
+- List of artifacts created with brief descriptions
+- What's ready: "All artifacts created! Ready for implementation."
+- Prompt: "Run `/unleash` for autonomous pipeline execution, `/opsx-apply` for sequential implementation, or `/cobalt-crush` for direct coding. `/unleash` is recommended when the change has multiple independent task groups."
+
+**Artifact Creation Guidelines**
+
+- Follow the `instruction` field from `openspec instructions` for each artifact type
+- The schema defines what each artifact should contain - follow it
+- Read dependency artifacts for context before creating new ones
+- Use `template` as the structure for your output file - fill in its sections
+- **IMPORTANT**: `context` and `rules` are constraints for YOU, not content for the file
+  - Do NOT copy `<context>`, `<rules>`, `<project_context>` blocks into the artifact
+  - These guide what you write, but should never appear in the output
+
+**Guardrails**
+- Create ALL artifacts needed for implementation (as defined by schema's `apply.requires`)
+- Always read dependency artifacts before creating a new one
+- If context is critically unclear, ask the user - but prefer making reasonable decisions to keep momentum
+- If a change with that name already exists, ask if user wants to continue it or create a new one
+- Verify each artifact file exists after writing before proceeding to next
+
+## Guardrails
+
+- **NEVER implement code changes** — this command
+  creates artifacts ONLY (proposal, design, specs, tasks).
+  The user needs to review the plan before
+  implementation begins. Implementing without review
+  defeats the purpose of the spec-first workflow.
+- **NEVER commit, push, or create PRs** — those are
+  /finale's responsibility
+- **NEVER run /unleash, /opsx-apply, or /cobalt-crush**
+  — the user decides when to implement
+- After artifacts are complete, STOP and prompt the
+  user to run /unleash, /opsx-apply, or /cobalt-crush

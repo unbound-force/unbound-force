@@ -88,3 +88,9 @@ internal/**/openspec/
 *.log
 gateway.pid
 unbound-force
+
+# opkg-generated platform directories (deployed at runtime, not tracked)
+.cursor/
+.claude/
+.openpackage/openpackage.yml
+.openpackage/openpackage.index.yml

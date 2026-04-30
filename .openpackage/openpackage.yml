@@ -1,5 +1,0 @@
-name: unbound-force
-dependencies:
-- name: "@unbound-force/review-council"
-  path: ./.openpackage/packages/review-council
-dev-dependencies: []
