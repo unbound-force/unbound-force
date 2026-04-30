@@ -1,3 +1,14 @@
+---
+spec_id: "035"
+title: "Multi-Platform Scaffold Deployment"
+phase: 2
+status: draft
+depends_on:
+  - "[[specs/003-specification-framework/spec]]"
+  - "[[specs/005-the-divisor-architecture/spec]]"
+  - "[[specs/019-divisor-council-refinement/spec]]"
+---
+
 # Feature Specification: Multi-Platform Scaffold Deployment
 
 **Feature Branch**: `035-platform-scaffold`
@@ -92,7 +103,9 @@ platform-appropriate content.
    directory from a previous `uf init`, **When** a user
    runs `uf init --platform cursor`, **Then** a
    `.cursor/` directory is created alongside the existing
-   `.opencode/` directory without modifying it.
+   `.opencode/` directory, and no files within the
+   existing `.opencode/` directory are modified, created,
+   or deleted.
 
 3. **Given** a dual-platform project, **When** a user
    runs `uf init --platform opencode --platform cursor`
@@ -130,9 +143,10 @@ them for the expected file types.
    `alwaysApply: false`, so it auto-attaches.
 
 2. **Given** a project scaffolded with
-   `--platform cursor`, **Then** language-agnostic packs
-   (`default`, `severity`, `content`) are deployed as
-   `.mdc` rules with `alwaysApply: true` and no globs.
+   `--platform cursor`, **When** a user inspects the
+   `.cursor/rules/` directory, **Then** language-agnostic
+   packs (`default`, `severity`, `content`) are deployed
+   as `.mdc` rules with `alwaysApply: true` and no globs.
 
 3. **Given** a custom convention pack
    (`go-custom.md`) that a user has modified, **When**
@@ -210,8 +224,9 @@ Divisor-related files are deployed to `.cursor/`.
    contains only the applicable convention pack rules.
 
 2. **Given** DivisorOnly mode with `--platform cursor`,
-   **Then** no OpenSpec directories, skills, or non-
-   Divisor agents are created.
+   **When** a user runs `uf init --divisor --platform
+   cursor`, **Then** no OpenSpec directories, skills, or
+   non-Divisor agents are created.
 
 ---
 
@@ -238,6 +253,15 @@ Divisor-related files are deployed to `.cursor/`.
   and `--platform cursor` is specified? OpenSpec
   directories are not created for Cursor (OpenSpec is
   OpenCode-specific tooling).
+- What happens when `--platform opencode --platform
+  cursor --force` is specified? `--force` applies to
+  all selected platforms -- both OpenCode and Cursor
+  user-owned files are overwritten.
+- What happens when a `.cursorrules` file exists from
+  a previous `uf init` and `--platform cursor` is now
+  specified? The legacy bridge file is left in place
+  with a notice that native `.cursor/rules/` supersedes
+  it (FR-019a).
 
 ## Requirements *(mandatory)*
 
@@ -256,9 +280,9 @@ Divisor-related files are deployed to `.cursor/`.
 - **FR-005**: System MUST deduplicate repeated platform
   values silently.
 - **FR-006**: System MUST deploy embedded assets to
-  each selected platform's directory in a single
-  `Run()` invocation, iterating over platforms per
-  asset file.
+  all selected platforms in a single initialization
+  operation, processing each asset for every applicable
+  platform.
 - **FR-007**: System MUST transform OpenCode agent
   frontmatter to Cursor format by: adding `name` from
   filename stem, preserving `description`, adding
@@ -306,26 +330,44 @@ Divisor-related files are deployed to `.cursor/`.
   the review-council command, and language-appropriate
   convention pack rules.
 - **FR-019**: System MUST NOT create `.cursorrules`
-  bridge file when the Cursor platform is explicitly
-  selected (native `.cursor/rules/` replaces its
-  function).
+  bridge file when the Cursor platform is in the
+  selected platform list (native `.cursor/rules/`
+  replaces its function). When both `opencode` and
+  `cursor` are selected, `.cursorrules` is skipped
+  because native rules supersede it. `CLAUDE.md` is
+  created only when `opencode` is in the platform list.
 - **FR-020**: System MUST continue creating `CLAUDE.md`
   and `.cursorrules` bridge files when only the
   `opencode` platform is selected (preserving current
   behavior).
+- **FR-019a**: When `--platform cursor` is selected and
+  a `.cursorrules` file already exists from a previous
+  `uf init`, the system MUST leave it in place and
+  print a notice that native `.cursor/rules/` now
+  supersedes it. The system MUST NOT delete the legacy
+  bridge file automatically.
 - **FR-021**: System MUST create `AGENTS.md` Convention
   Packs section regardless of selected platforms, as
   it is the platform-neutral context hub.
-- **FR-022**: System MUST expose a `Platform` interface
-  (or equivalent abstraction) that encapsulates path
-  mapping, content transformation, asset filtering,
-  and MCP configuration per platform.
+- **FR-022**: System MUST be architecturally extensible
+  so that adding a new platform target requires no
+  modification to the scaffold engine's core asset-
+  walking logic. Each platform's path mapping, content
+  transformation, asset filtering, and MCP
+  configuration MUST be encapsulated independently.
 - **FR-023**: System MUST support the `--lang` flag for
   both platforms, controlling which language-specific
   convention packs (or `.mdc` rules) are deployed.
-- **FR-024**: System MUST include `.cursor/` patterns
-  in the `.gitignore` managed block when the Cursor
-  platform is selected.
+- **FR-024**: When the Cursor platform is selected, the
+  system MUST include `.cursor/` runtime artifact
+  patterns (e.g., cache, logs) in the `.gitignore`
+  managed block. The `.cursor/agents/`, `.cursor/
+  commands/`, `.cursor/rules/`, and `.cursor/skills/`
+  directories MUST NOT be gitignored -- they contain
+  configuration that should be version-controlled.
+- **FR-025**: System MUST display the selected
+  platform(s) in the scaffold summary output so
+  users can confirm which platforms were deployed to.
 
 ### Key Entities
 
@@ -344,6 +386,50 @@ Divisor-related files are deployed to `.cursor/`.
   (`opencode.json` for OpenCode, `.cursor/mcp.json`
   for Cursor).
 
+## Out of Scope
+
+- Claude Code native `.claude/` directory deployment
+  (covered by existing `CLAUDE.md` bridge; planned as
+  a future platform via the extensibility architecture)
+- Copilot, Windsurf, or other platform support (future
+  work via the Platform extensibility mechanism)
+- Migration tooling for converting existing platform
+  configurations between formats
+- Cursor-specific settings or workspace configuration
+  beyond agent/command/rule/skill/MCP files
+- Runtime platform auto-detection (detecting which AI
+  tool is currently running)
+- Bidirectional sync (Cursor -> OpenCode)
+
+## Future Platforms
+
+Claude Code is planned as a Phase 2 platform target.
+The existing `CLAUDE.md` bridge file serves as the
+interim solution. Copilot (`--platform copilot`) and
+other tools can be added by implementing the platform
+extensibility mechanism (FR-022) without modifying the
+scaffold engine core.
+
+## Documentation Impact
+
+The following files MUST be updated when this feature
+is implemented:
+
+- **AGENTS.md**: Add `--platform` flag to Build & Test
+  Commands or Project Structure sections. Update Active
+  Technologies to mention Cursor support.
+- **QUICKSTART.md**: Add Cursor-specific installation
+  instructions and `--platform cursor` usage.
+- **USAGE.md**: Add dual-platform workflow recipe and
+  update the command quick reference.
+- **README.md**: Mention multi-platform support in the
+  project overview.
+
+Website documentation issues have been filed:
+- [unbound-force/website#50](https://github.com/unbound-force/website/issues/50) -- docs update
+- [unbound-force/website#51](https://github.com/unbound-force/website/issues/51) -- blog post
+- [unbound-force/website#52](https://github.com/unbound-force/website/issues/52) -- tutorial
+
 ## Dependencies
 
 - **Spec 003** (Specification Framework): Defines the
@@ -354,10 +440,17 @@ Divisor-related files are deployed to `.cursor/`.
 - **Spec 019** (Divisor Council Refinement): Defines
   severity pack (always-deploy) and convention pack
   classification.
-- **Prior art**: OpenPackage `platforms.jsonc` (Cursor
-  path mapping, `.mdc` extension convention) and Lola
-  `CursorTarget` (agent frontmatter, MCP translation)
-  informed the design.
+- **Spec 026** (Documentation Curation): A website
+  documentation issue MUST be filed per the Website
+  Documentation Gate before the implementing PR is
+  merged (filed: #50, #51, #52).
+
+### Research References
+
+- OpenPackage `platforms.jsonc` (Cursor path mapping,
+  `.mdc` extension convention) and Lola `CursorTarget`
+  (agent frontmatter, MCP translation) informed the
+  design.
 
 ## Assumptions
 
