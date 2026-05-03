@@ -4272,8 +4272,3 @@ func TestRunSandboxInit_CustomDemoPorts(t *testing.T) {
 	}
 }
 
-// --- Helper ---
-
-func writeTestFile(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0o644)
-}
