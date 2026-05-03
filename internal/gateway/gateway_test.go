@@ -14,12 +14,74 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/unbound-force/unbound-force/internal/auth"
+	"github.com/unbound-force/unbound-force/internal/pidfile"
 )
+
+// testVertexProvider creates a VertexProvider with a
+// pre-loaded TokenManager for testing. The token is
+// immediately available without calling Start().
+func testVertexProvider(t *testing.T, projectID, region, token string, expiry time.Duration) *VertexProvider {
+	t.Helper()
+	execCmd := func(name string, args ...string) ([]byte, error) {
+		return []byte(token + "\n"), nil
+	}
+	tm := auth.NewTokenManager(auth.TokenManagerOpts{
+		RefreshFn:       func() (string, error) { return token, nil },
+		Lifetime:        55 * time.Minute,
+		ProactiveWindow: 5 * time.Minute,
+		Interval:        1 * time.Hour,
+	})
+	// Manually start the token manager to set the initial
+	// token without launching a background goroutine that
+	// would interfere with tests.
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := tm.Start(ctx); err != nil {
+		cancel()
+		t.Fatalf("testVertexProvider Start: %v", err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		tm.Stop()
+	})
+	return &VertexProvider{
+		projectID: projectID,
+		region:    region,
+		tokenMgr:  tm,
+		execCmd:   execCmd,
+	}
+}
+
+// testBedrockProvider creates a BedrockProvider with a
+// pre-loaded TokenManager for testing.
+func testBedrockProvider(t *testing.T, region, ak, sk, st string) *BedrockProvider {
+	t.Helper()
+	encoded := encodeBRCreds(ak, sk, st)
+	tm := auth.NewTokenManager(auth.TokenManagerOpts{
+		RefreshFn:       func() (string, error) { return encoded, nil },
+		Lifetime:        50 * time.Minute,
+		ProactiveWindow: 5 * time.Minute,
+		Interval:        1 * time.Hour,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := tm.Start(ctx); err != nil {
+		cancel()
+		t.Fatalf("testBedrockProvider Start: %v", err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		tm.Stop()
+	})
+	return &BedrockProvider{
+		region:   region,
+		tokenMgr: tm,
+	}
+}
 
 // --- Helper: mock Options builder ---
 
@@ -60,206 +122,6 @@ func testOpts(t *testing.T) Options {
 // stdoutStr returns the captured stdout content.
 func stdoutStr(opts Options) string {
 	return opts.Stdout.(*bytes.Buffer).String()
-}
-
-// ============================================================
-// PID File Tests (T041-T045)
-// ============================================================
-
-func TestWritePID_ReadPID_RoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".uf", "gateway.pid")
-
-	started := time.Date(2026, 4, 20, 14, 30, 0, 0, time.UTC)
-	info := PIDInfo{
-		PID:      42195,
-		Port:     53147,
-		Provider: "vertex",
-		Started:  started,
-	}
-
-	if err := WritePID(path, info); err != nil {
-		t.Fatalf("WritePID failed: %v", err)
-	}
-
-	got, err := ReadPID(path)
-	if err != nil {
-		t.Fatalf("ReadPID failed: %v", err)
-	}
-
-	if got.PID != info.PID {
-		t.Errorf("PID: got %d, want %d", got.PID, info.PID)
-	}
-	if got.Port != info.Port {
-		t.Errorf("Port: got %d, want %d", got.Port, info.Port)
-	}
-	if got.Provider != info.Provider {
-		t.Errorf("Provider: got %q, want %q", got.Provider, info.Provider)
-	}
-	if !got.Started.Equal(info.Started) {
-		t.Errorf("Started: got %v, want %v", got.Started, info.Started)
-	}
-}
-
-func TestReadPID_MalformedFile(t *testing.T) {
-	tests := []struct {
-		name    string
-		content string
-		wantErr bool
-	}{
-		{
-			name:    "non-numeric PID",
-			content: "not-a-number\nport=53147\n",
-			wantErr: true,
-		},
-		{
-			name:    "empty file",
-			content: "",
-			wantErr: true,
-		},
-		{
-			name:    "missing metadata",
-			content: "12345\n",
-			wantErr: false, // PID is valid, metadata is optional
-		},
-		{
-			name:    "valid with unknown keys",
-			content: "12345\nport=53147\nunknown=value\n",
-			wantErr: false, // Unknown keys are ignored
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			path := filepath.Join(dir, "gateway.pid")
-			if err := os.WriteFile(path, []byte(tt.content), 0o644); err != nil {
-				t.Fatal(err)
-			}
-
-			info, err := ReadPID(path)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if info.PID != 12345 {
-				t.Errorf("PID: got %d, want 12345", info.PID)
-			}
-		})
-	}
-}
-
-func TestReadPID_FileNotFound(t *testing.T) {
-	_, err := ReadPID("/nonexistent/path/gateway.pid")
-	if err == nil {
-		t.Error("expected error for missing file")
-	}
-}
-
-func TestIsAlive_ProcessFound(t *testing.T) {
-	findProcess := func(pid int) (*os.Process, error) {
-		// Return a mock process that accepts signal 0.
-		return os.FindProcess(os.Getpid())
-	}
-
-	// Use current process PID — it's definitely alive.
-	alive := IsAlive(os.Getpid(), findProcess)
-	if !alive {
-		t.Error("expected alive=true for current process")
-	}
-}
-
-func TestIsAlive_ProcessNotFound(t *testing.T) {
-	findProcess := func(pid int) (*os.Process, error) {
-		return nil, fmt.Errorf("no such process")
-	}
-
-	alive := IsAlive(99999, findProcess)
-	if alive {
-		t.Error("expected alive=false when process not found")
-	}
-}
-
-func TestRemovePID_ExistingFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "gateway.pid")
-	if err := os.WriteFile(path, []byte("12345\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := RemovePID(path); err != nil {
-		t.Fatalf("RemovePID failed: %v", err)
-	}
-
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Error("expected file to be removed")
-	}
-}
-
-func TestRemovePID_NonExistent(t *testing.T) {
-	// Removing a non-existent file should not error (idempotent).
-	err := RemovePID("/nonexistent/path/gateway.pid")
-	if err != nil {
-		t.Fatalf("expected nil error for non-existent file, got: %v", err)
-	}
-}
-
-func TestCleanupStale_DeadProcess(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "gateway.pid")
-	content := "99999\nport=53147\nprovider=anthropic\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Process is dead.
-	findProcess := func(pid int) (*os.Process, error) {
-		return nil, fmt.Errorf("no such process")
-	}
-
-	if err := CleanupStale(path, findProcess); err != nil {
-		t.Fatalf("CleanupStale failed: %v", err)
-	}
-
-	// PID file should be removed.
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Error("expected stale PID file to be removed")
-	}
-}
-
-func TestCleanupStale_AliveProcess(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "gateway.pid")
-	content := fmt.Sprintf("%d\nport=53147\nprovider=anthropic\n", os.Getpid())
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Process is alive (current process).
-	findProcess := func(pid int) (*os.Process, error) {
-		return os.FindProcess(pid)
-	}
-
-	if err := CleanupStale(path, findProcess); err != nil {
-		t.Fatalf("CleanupStale failed: %v", err)
-	}
-
-	// PID file should still exist.
-	if _, err := os.Stat(path); err != nil {
-		t.Error("expected PID file to be preserved for alive process")
-	}
-}
-
-func TestCleanupStale_NoPIDFile(t *testing.T) {
-	err := CleanupStale("/nonexistent/path/gateway.pid", os.FindProcess)
-	if err != nil {
-		t.Fatalf("expected nil error when no PID file, got: %v", err)
-	}
 }
 
 // ============================================================
@@ -498,12 +360,8 @@ func TestAnthropicProvider_Start_MissingKey(t *testing.T) {
 // ============================================================
 
 func TestVertexProvider_PrepareRequest(t *testing.T) {
-	prov := &VertexProvider{
-		projectID:   "my-project",
-		region:      "us-east5",
-		token:       "ya29.test-token",
-		tokenExpiry: time.Now().Add(30 * time.Minute),
-	}
+	prov := testVertexProvider(t, "my-project", "us-east5",
+		"ya29.test-token", 30*time.Minute)
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages",
@@ -563,12 +421,8 @@ func TestVertexProvider_PrepareRequest(t *testing.T) {
 }
 
 func TestVertexProvider_PrepareRequest_StreamingEndpoint(t *testing.T) {
-	prov := &VertexProvider{
-		projectID:   "my-project",
-		region:      "us-east5",
-		token:       "ya29.test-token",
-		tokenExpiry: time.Now().Add(30 * time.Minute),
-	}
+	prov := testVertexProvider(t, "my-project", "us-east5",
+		"ya29.test-token", 30*time.Minute)
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[],"stream":true}`
 	req := httptest.NewRequest("POST", "/v1/messages",
@@ -584,12 +438,8 @@ func TestVertexProvider_PrepareRequest_StreamingEndpoint(t *testing.T) {
 }
 
 func TestVertexProvider_PrepareRequest_NonStreamingEndpoint(t *testing.T) {
-	prov := &VertexProvider{
-		projectID:   "my-project",
-		region:      "us-east5",
-		token:       "ya29.test-token",
-		tokenExpiry: time.Now().Add(30 * time.Minute),
-	}
+	prov := testVertexProvider(t, "my-project", "us-east5",
+		"ya29.test-token", 30*time.Minute)
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[],"stream":false}`
 	req := httptest.NewRequest("POST", "/v1/messages",
@@ -605,12 +455,8 @@ func TestVertexProvider_PrepareRequest_NonStreamingEndpoint(t *testing.T) {
 }
 
 func TestVertexProvider_PrepareRequest_CountTokensAlwaysRawPredict(t *testing.T) {
-	prov := &VertexProvider{
-		projectID:   "my-project",
-		region:      "us-east5",
-		token:       "ya29.test-token",
-		tokenExpiry: time.Now().Add(30 * time.Minute),
-	}
+	prov := testVertexProvider(t, "my-project", "us-east5",
+		"ya29.test-token", 30*time.Minute)
 
 	// Even with stream=true, count_tokens should use rawPredict.
 	body := `{"model":"claude-sonnet-4-20250514","messages":[],"stream":true}`
@@ -627,12 +473,8 @@ func TestVertexProvider_PrepareRequest_CountTokensAlwaysRawPredict(t *testing.T)
 }
 
 func TestVertexProvider_PrepareRequest_HeaderStripping(t *testing.T) {
-	prov := &VertexProvider{
-		projectID:   "my-project",
-		region:      "us-east5",
-		token:       "ya29.test-token",
-		tokenExpiry: time.Now().Add(30 * time.Minute),
-	}
+	prov := testVertexProvider(t, "my-project", "us-east5",
+		"ya29.test-token", 30*time.Minute)
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[]}`
 	req := httptest.NewRequest("POST", "/v1/messages",
@@ -653,12 +495,8 @@ func TestVertexProvider_PrepareRequest_HeaderStripping(t *testing.T) {
 }
 
 func TestVertexProvider_PrepareRequest_PreservesOtherHeaders(t *testing.T) {
-	prov := &VertexProvider{
-		projectID:   "my-project",
-		region:      "us-east5",
-		token:       "ya29.test-token",
-		tokenExpiry: time.Now().Add(30 * time.Minute),
-	}
+	prov := testVertexProvider(t, "my-project", "us-east5",
+		"ya29.test-token", 30*time.Minute)
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[]}`
 	req := httptest.NewRequest("POST", "/v1/messages",
@@ -707,10 +545,11 @@ func TestVertexProvider_Start_Success(t *testing.T) {
 	}
 	defer prov.Stop()
 
-	prov.tokenMu.RLock()
-	token := prov.token
-	prov.tokenMu.RUnlock()
-
+	// Verify the token is available via the TokenManager.
+	token, tokenErr := prov.validToken()
+	if tokenErr != nil {
+		t.Fatalf("validToken failed: %v", tokenErr)
+	}
 	if token != "ya29.test-token" {
 		t.Errorf("token: got %q, want %q", token, "ya29.test-token")
 	}
@@ -742,30 +581,31 @@ func TestVertexProvider_Start_GcloudFails(t *testing.T) {
 }
 
 func TestVertexProvider_TokenRefresh(t *testing.T) {
-	// Use a very short refresh interval for testing.
-	oldMinute := refreshMinute
-	refreshMinute = time.Millisecond
-	defer func() { refreshMinute = oldMinute }()
-
+	// Test that the TokenManager-based refresh works
+	// by using a very short interval via the auth package.
 	var callCount atomic.Int32
-	getenv := func(key string) string {
-		if key == "ANTHROPIC_VERTEX_PROJECT_ID" {
-			return "my-project"
-		}
-		return ""
-	}
 	execCmd := func(name string, args ...string) ([]byte, error) {
 		n := callCount.Add(1)
 		return []byte(fmt.Sprintf("token-%d\n", n)), nil
 	}
 
-	prov, provErr := newVertexProvider(getenv, execCmd)
-	if provErr != nil {
-		t.Fatalf("newVertexProvider: %v", provErr)
+	// Create a provider with a very short refresh interval.
+	prov := &VertexProvider{
+		projectID: "my-project",
+		region:    "us-east5",
+		execCmd:   execCmd,
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	prov.tokenMgr = auth.NewTokenManager(auth.TokenManagerOpts{
+		RefreshFn: func() (string, error) {
+			return auth.RefreshVertexToken(execCmd)
+		},
+		Lifetime:        55 * time.Minute,
+		ProactiveWindow: 5 * time.Minute,
+		Interval:        1 * time.Millisecond,
+	})
 
-	if err := prov.Start(ctx); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := prov.tokenMgr.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
 
@@ -776,13 +616,14 @@ func TestVertexProvider_TokenRefresh(t *testing.T) {
 	cancel()
 	prov.Stop()
 
-	// Verify the token was refreshed at least once.
-	prov.tokenMu.RLock()
-	token := prov.token
-	prov.tokenMu.RUnlock()
-
 	if callCount.Load() < 2 {
 		t.Errorf("expected at least 2 calls (initial + refresh), got: %d", callCount.Load())
+	}
+
+	// Verify the token is still available.
+	token, err := prov.validToken()
+	if err != nil {
+		t.Fatalf("validToken failed: %v", err)
 	}
 	if token == "" {
 		t.Error("expected token to be set after refresh")
@@ -794,13 +635,10 @@ func TestVertexProvider_TokenRefresh(t *testing.T) {
 // ============================================================
 
 func TestBedrockProvider_PrepareRequest(t *testing.T) {
-	prov := &BedrockProvider{
-		region:       "us-east-1",
-		accessKey:    "AKIAIOSFODNN7EXAMPLE",
-		secretKey:    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-		sessionToken: "test-session-token",
-		credExpiry:   time.Now().Add(30 * time.Minute),
-	}
+	prov := testBedrockProvider(t, "us-east-1",
+		"AKIAIOSFODNN7EXAMPLE",
+		"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		"test-session-token")
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages",
@@ -864,12 +702,11 @@ func TestBedrockProvider_Start_Success(t *testing.T) {
 	}
 	defer prov.Stop()
 
-	prov.credMu.RLock()
-	ak := prov.accessKey
-	sk := prov.secretKey
-	st := prov.sessionToken
-	prov.credMu.RUnlock()
-
+	// Verify credentials are available via validCredentials.
+	ak, sk, st, err := prov.validCredentials()
+	if err != nil {
+		t.Fatalf("validCredentials failed: %v", err)
+	}
 	if ak != "AKIATEST" {
 		t.Errorf("accessKey: got %q, want AKIATEST", ak)
 	}
@@ -898,17 +735,7 @@ func TestBedrockProvider_Start_AWSFails(t *testing.T) {
 }
 
 func TestBedrockProvider_CredentialRefresh(t *testing.T) {
-	oldMinute := refreshMinute
-	refreshMinute = time.Millisecond
-	defer func() { refreshMinute = oldMinute }()
-
 	var callCount atomic.Int32
-	getenv := func(key string) string {
-		if key == "AWS_REGION" {
-			return "us-east-1"
-		}
-		return ""
-	}
 	execCmd := func(name string, args ...string) ([]byte, error) {
 		n := callCount.Add(1)
 		return []byte(fmt.Sprintf(
@@ -918,10 +745,26 @@ func TestBedrockProvider_CredentialRefresh(t *testing.T) {
 			n, n, n)), nil
 	}
 
-	prov := newBedrockProvider(getenv, execCmd)
-	ctx, cancel := context.WithCancel(context.Background())
+	// Create a provider with a very short refresh interval.
+	prov := &BedrockProvider{
+		region:  "us-east-1",
+		execCmd: execCmd,
+	}
+	prov.tokenMgr = auth.NewTokenManager(auth.TokenManagerOpts{
+		RefreshFn: func() (string, error) {
+			ak, sk, st, err := auth.RefreshBedrockCredentials(execCmd)
+			if err != nil {
+				return "", err
+			}
+			return encodeBRCreds(ak, sk, st), nil
+		},
+		Lifetime:        50 * time.Minute,
+		ProactiveWindow: 5 * time.Minute,
+		Interval:        1 * time.Millisecond,
+	})
 
-	if err := prov.Start(ctx); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := prov.tokenMgr.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
 
@@ -1203,17 +1046,17 @@ func TestStart_ProviderDetectionAndPIDFile(t *testing.T) {
 	// Test 2: PID file round-trip works.
 	dir := t.TempDir()
 	pp := pidPath(dir)
-	info := PIDInfo{
+	info := pidfile.PIDInfo{
 		PID:      os.Getpid(),
 		Port:     53147,
 		Provider: "anthropic",
 		Started:  time.Now(),
 	}
-	if err := WritePID(pp, info); err != nil {
+	if err := pidfile.WritePID(pp, info); err != nil {
 		t.Fatalf("WritePID failed: %v", err)
 	}
 
-	got, err := ReadPID(pp)
+	got, err := pidfile.ReadPID(pp)
 	if err != nil {
 		t.Fatalf("ReadPID failed: %v", err)
 	}
@@ -1242,13 +1085,13 @@ func TestStop_PIDFileAndProcessAlive(t *testing.T) {
 
 	// Write a PID file with the current process PID.
 	pp := pidPath(opts.ProjectDir)
-	info := PIDInfo{
+	info := pidfile.PIDInfo{
 		PID:      os.Getpid(),
 		Port:     53147,
 		Provider: "anthropic",
 		Started:  time.Now(),
 	}
-	if err := WritePID(pp, info); err != nil {
+	if err := pidfile.WritePID(pp, info); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1293,13 +1136,13 @@ func TestStop_StalePIDFile(t *testing.T) {
 
 	// Write a PID file with a dead process.
 	pp := pidPath(opts.ProjectDir)
-	info := PIDInfo{
+	info := pidfile.PIDInfo{
 		PID:      99999,
 		Port:     53147,
 		Provider: "anthropic",
 		Started:  time.Now(),
 	}
-	if err := WritePID(pp, info); err != nil {
+	if err := pidfile.WritePID(pp, info); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1328,13 +1171,13 @@ func TestStatus_GatewayRunning(t *testing.T) {
 
 	// Write a PID file with current process PID.
 	pp := pidPath(opts.ProjectDir)
-	info := PIDInfo{
+	info := pidfile.PIDInfo{
 		PID:      os.Getpid(),
 		Port:     53147,
 		Provider: "vertex",
 		Started:  time.Now().Add(-1 * time.Hour),
 	}
-	if err := WritePID(pp, info); err != nil {
+	if err := pidfile.WritePID(pp, info); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1445,17 +1288,17 @@ func TestStart_CustomPort(t *testing.T) {
 	dir := t.TempDir()
 	pp := pidPath(dir)
 
-	info := PIDInfo{
+	info := pidfile.PIDInfo{
 		PID:      os.Getpid(),
 		Port:     9000,
 		Provider: "anthropic",
 		Started:  time.Now(),
 	}
-	if err := WritePID(pp, info); err != nil {
+	if err := pidfile.WritePID(pp, info); err != nil {
 		t.Fatalf("WritePID failed: %v", err)
 	}
 
-	got, err := ReadPID(pp)
+	got, err := pidfile.ReadPID(pp)
 	if err != nil {
 		t.Fatalf("ReadPID failed: %v", err)
 	}
@@ -1500,132 +1343,10 @@ func TestFormatUptime(t *testing.T) {
 	}
 }
 
-// ============================================================
-// Refresh Tests
-// ============================================================
-
-func TestRefreshVertexToken_Success(t *testing.T) {
-	execCmd := func(name string, args ...string) ([]byte, error) {
-		return []byte("ya29.fresh-token\n"), nil
-	}
-
-	token, err := refreshVertexToken(execCmd)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if token != "ya29.fresh-token" {
-		t.Errorf("token: got %q, want ya29.fresh-token", token)
-	}
-}
-
-func TestRefreshVertexToken_Failure(t *testing.T) {
-	execCmd := func(name string, args ...string) ([]byte, error) {
-		return []byte("ERROR: not authenticated"), fmt.Errorf("exit 1")
-	}
-
-	_, err := refreshVertexToken(execCmd)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "Re-authenticate") {
-		t.Errorf("expected re-auth suggestion, got: %s", err.Error())
-	}
-}
-
-func TestRefreshBedrockCredentials_EnvFormat(t *testing.T) {
-	execCmd := func(name string, args ...string) ([]byte, error) {
-		return []byte(
-			"export AWS_ACCESS_KEY_ID=AKIATEST\n" +
-				"export AWS_SECRET_ACCESS_KEY=secrettest\n" +
-				"export AWS_SESSION_TOKEN=sessiontest\n"), nil
-	}
-
-	ak, sk, st, err := refreshBedrockCredentials(execCmd)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if ak != "AKIATEST" {
-		t.Errorf("accessKey: got %q, want AKIATEST", ak)
-	}
-	if sk != "secrettest" {
-		t.Errorf("secretKey: got %q, want secrettest", sk)
-	}
-	if st != "sessiontest" {
-		t.Errorf("sessionToken: got %q, want sessiontest", st)
-	}
-}
-
-func TestRefreshBedrockCredentials_JSONFormat(t *testing.T) {
-	execCmd := func(name string, args ...string) ([]byte, error) {
-		return []byte(`{
-			"AccessKeyId": "AKIAJSON",
-			"SecretAccessKey": "secretjson",
-			"SessionToken": "sessionjson"
-		}`), nil
-	}
-
-	ak, sk, st, err := refreshBedrockCredentials(execCmd)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if ak != "AKIAJSON" {
-		t.Errorf("accessKey: got %q, want AKIAJSON", ak)
-	}
-	if sk != "secretjson" {
-		t.Errorf("secretKey: got %q, want secretjson", sk)
-	}
-	if st != "sessionjson" {
-		t.Errorf("sessionToken: got %q, want sessionjson", st)
-	}
-}
-
-func TestRefreshBedrockCredentials_Failure(t *testing.T) {
-	execCmd := func(name string, args ...string) ([]byte, error) {
-		return []byte("Unable to locate credentials"), fmt.Errorf("exit 1")
-	}
-
-	_, _, _, err := refreshBedrockCredentials(execCmd)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "Re-authenticate") {
-		t.Errorf("expected re-auth suggestion, got: %s", err.Error())
-	}
-}
-
-func TestRefreshLoop_ContextCancellation(t *testing.T) {
-	oldMinute := refreshMinute
-	refreshMinute = time.Millisecond
-	defer func() { refreshMinute = oldMinute }()
-
-	var callCount atomic.Int32
-	ctx, cancel := context.WithCancel(context.Background())
-
-	done := make(chan struct{})
-	go func() {
-		refreshLoop(ctx, 1*refreshMinute, func() error {
-			callCount.Add(1)
-			return nil
-		})
-		close(done)
-	}()
-
-	// Let it run a few cycles.
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-
-	// Wait for the goroutine to exit.
-	select {
-	case <-done:
-		// Good — goroutine exited.
-	case <-time.After(1 * time.Second):
-		t.Fatal("refreshLoop did not exit after context cancellation")
-	}
-
-	if callCount.Load() == 0 {
-		t.Error("expected at least one refresh call")
-	}
-}
+// Refresh function tests (RefreshVertexToken,
+// RefreshBedrockCredentials, ParseEnvExport,
+// ParseAWSCredentialsJSON) have moved to
+// internal/auth/*_test.go per design.md D2.
 
 // ============================================================
 // Extract Model Tests
@@ -1781,13 +1502,13 @@ func TestStart_ProviderNameOverride(t *testing.T) {
 	// Simpler approach: verify the "already running" path
 	// by writing a PID file with a live process first.
 	pp := pidPath(opts.ProjectDir)
-	info := PIDInfo{
+	info := pidfile.PIDInfo{
 		PID:      os.Getpid(),
 		Port:     opts.Port,
 		Provider: "anthropic",
 		Started:  time.Now(),
 	}
-	if err := WritePID(pp, info); err != nil {
+	if err := pidfile.WritePID(pp, info); err != nil {
 		t.Fatal(err)
 	}
 	opts.FindProcess = func(pid int) (*os.Process, error) {
@@ -1815,13 +1536,13 @@ func TestStart_AlreadyRunning(t *testing.T) {
 	// Write a PID file with the current process PID
 	// (which is alive).
 	pp := pidPath(opts.ProjectDir)
-	info := PIDInfo{
+	info := pidfile.PIDInfo{
 		PID:      os.Getpid(),
 		Port:     53147,
 		Provider: "anthropic",
 		Started:  time.Now(),
 	}
-	if err := WritePID(pp, info); err != nil {
+	if err := pidfile.WritePID(pp, info); err != nil {
 		t.Fatal(err)
 	}
 	opts.FindProcess = func(pid int) (*os.Process, error) {
@@ -2116,13 +1837,13 @@ func TestStop_ProcessAliveSignalSucceeds(t *testing.T) {
 
 	// Write a PID file.
 	pp := pidPath(opts.ProjectDir)
-	info := PIDInfo{
+	info := pidfile.PIDInfo{
 		PID:      os.Getpid(),
 		Port:     53147,
 		Provider: "anthropic",
 		Started:  time.Now(),
 	}
-	if err := WritePID(pp, info); err != nil {
+	if err := pidfile.WritePID(pp, info); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2161,13 +1882,13 @@ func TestStop_ProcessAliveButFindProcessFailsOnSecondCall(t *testing.T) {
 
 	// Write a PID file.
 	pp := pidPath(opts.ProjectDir)
-	info := PIDInfo{
+	info := pidfile.PIDInfo{
 		PID:      os.Getpid(),
 		Port:     53147,
 		Provider: "anthropic",
 		Started:  time.Now(),
 	}
-	if err := WritePID(pp, info); err != nil {
+	if err := pidfile.WritePID(pp, info); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2204,13 +1925,13 @@ func TestStatus_HealthEndpointFails(t *testing.T) {
 
 	// Write a PID file.
 	pp := pidPath(opts.ProjectDir)
-	info := PIDInfo{
+	info := pidfile.PIDInfo{
 		PID:      os.Getpid(),
 		Port:     53147,
 		Provider: "bedrock",
 		Started:  time.Now().Add(-30 * time.Minute),
 	}
-	if err := WritePID(pp, info); err != nil {
+	if err := pidfile.WritePID(pp, info); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2245,13 +1966,13 @@ func TestStatus_HealthEndpointNon200(t *testing.T) {
 	opts := testOpts(t)
 
 	pp := pidPath(opts.ProjectDir)
-	info := PIDInfo{
+	info := pidfile.PIDInfo{
 		PID:      os.Getpid(),
 		Port:     53147,
 		Provider: "vertex",
 		Started:  time.Now().Add(-2 * time.Hour),
 	}
-	if err := WritePID(pp, info); err != nil {
+	if err := pidfile.WritePID(pp, info); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2282,13 +2003,13 @@ func TestStatus_StalePIDFile(t *testing.T) {
 	opts := testOpts(t)
 
 	pp := pidPath(opts.ProjectDir)
-	info := PIDInfo{
+	info := pidfile.PIDInfo{
 		PID:      99999,
 		Port:     53147,
 		Provider: "anthropic",
 		Started:  time.Now(),
 	}
-	if err := WritePID(pp, info); err != nil {
+	if err := pidfile.WritePID(pp, info); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2309,49 +2030,6 @@ func TestStatus_StalePIDFile(t *testing.T) {
 	// PID file should be cleaned up.
 	if _, err := os.Stat(pp); !os.IsNotExist(err) {
 		t.Error("expected stale PID file to be removed")
-	}
-}
-
-// ============================================================
-// WritePID() Additional Tests
-// ============================================================
-
-func TestWritePID_NonExistentDirectory(t *testing.T) {
-	// WritePID should create the directory if it doesn't
-	// exist (via MkdirAll).
-	dir := t.TempDir()
-	path := filepath.Join(dir, "deep", "nested", "dir", "gateway.pid")
-
-	info := PIDInfo{
-		PID:      12345,
-		Port:     53147,
-		Provider: "anthropic",
-		Started:  time.Now(),
-	}
-
-	if err := WritePID(path, info); err != nil {
-		t.Fatalf("WritePID failed: %v", err)
-	}
-
-	// Verify the file was created.
-	got, err := ReadPID(path)
-	if err != nil {
-		t.Fatalf("ReadPID failed: %v", err)
-	}
-	if got.PID != 12345 {
-		t.Errorf("PID: got %d, want 12345", got.PID)
-	}
-}
-
-func TestWritePID_ReadOnlyDirectory(t *testing.T) {
-	// Test that WritePID returns an error when the
-	// directory cannot be created.
-	path := "/proc/nonexistent/gateway.pid"
-	info := PIDInfo{PID: 1, Port: 1, Provider: "test"}
-
-	err := WritePID(path, info)
-	if err == nil {
-		t.Fatal("expected error writing to read-only path")
 	}
 }
 
@@ -2467,10 +2145,11 @@ func TestIsAddrInUse_OpError(t *testing.T) {
 // ============================================================
 
 func TestVertexProvider_PrepareRequest_EmptyToken(t *testing.T) {
+	// Provider without a TokenManager — simulates
+	// uninitialized state.
 	prov := &VertexProvider{
 		projectID: "my-project",
 		region:    "us-east5",
-		token:     "", // Empty token.
 	}
 
 	req := httptest.NewRequest("POST", "/v1/messages",
@@ -2486,10 +2165,10 @@ func TestVertexProvider_PrepareRequest_EmptyToken(t *testing.T) {
 }
 
 func TestBedrockProvider_PrepareRequest_EmptyCredentials(t *testing.T) {
+	// Provider without a TokenManager — simulates
+	// uninitialized state.
 	prov := &BedrockProvider{
-		region:    "us-east-1",
-		accessKey: "",
-		secretKey: "",
+		region: "us-east-1",
 	}
 
 	req := httptest.NewRequest("POST", "/v1/messages",
@@ -2576,43 +2255,9 @@ func TestHashPayload_NilBody(t *testing.T) {
 	}
 }
 
-// ============================================================
-// parseAWSCredentialsJSON edge case
-// ============================================================
-
-func TestParseAWSCredentialsJSON_MissingFields(t *testing.T) {
-	data := []byte(`{"AccessKeyId":"AKIA","SecretAccessKey":""}`)
-	_, _, _, err := parseAWSCredentialsJSON(data)
-	if err == nil {
-		t.Fatal("expected error for missing SecretAccessKey")
-	}
-}
-
-func TestParseAWSCredentialsJSON_InvalidJSON(t *testing.T) {
-	data := []byte(`not json`)
-	_, _, _, err := parseAWSCredentialsJSON(data)
-	if err == nil {
-		t.Fatal("expected error for invalid JSON")
-	}
-}
-
-// ============================================================
-// refreshVertexToken edge case
-// ============================================================
-
-func TestRefreshVertexToken_EmptyOutput(t *testing.T) {
-	execCmd := func(name string, args ...string) ([]byte, error) {
-		return []byte("   \n"), nil
-	}
-
-	_, err := refreshVertexToken(execCmd)
-	if err == nil {
-		t.Fatal("expected error for empty token output")
-	}
-	if !strings.Contains(err.Error(), "empty token") {
-		t.Errorf("expected empty token error, got: %s", err.Error())
-	}
-}
+// parseAWSCredentialsJSON and refreshVertexToken edge case
+// tests have moved to internal/auth/*_test.go per
+// design.md D2.
 
 // ============================================================
 // Mock Provider for proxy tests
@@ -2859,13 +2504,10 @@ func TestAnthropicProvider_NoBodyTransformation(t *testing.T) {
 }
 
 func TestBedrockProvider_NoBodyTransformation(t *testing.T) {
-	prov := &BedrockProvider{
-		region:       "us-east-1",
-		accessKey:    "AKIAIOSFODNN7EXAMPLE",
-		secretKey:    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-		sessionToken: "test-session-token",
-		credExpiry:   time.Now().Add(30 * time.Minute),
-	}
+	prov := testBedrockProvider(t, "us-east-1",
+		"AKIAIOSFODNN7EXAMPLE",
+		"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		"test-session-token")
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages",
@@ -3872,39 +3514,41 @@ func TestNewProviderByName_VertexGlobalRegionError(t *testing.T) {
 // ============================================================
 
 func TestVertexPrepareRequest_StaleTokenRegression(t *testing.T) {
-	// TC-006 regression: before the fix, a stale token
-	// would be forwarded without error. Now PrepareRequest
-	// must reject requests when the token has expired.
+	// TC-006 regression: PrepareRequest must reject
+	// requests when the token has expired. The
+	// TokenManager handles this via Token() returning
+	// an error for expired tokens.
 	prov := &VertexProvider{
-		projectID:   "my-project",
-		region:      "us-east5",
-		token:       "stale-token",
-		tokenExpiry: time.Now().Add(-10 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("gcloud not authenticated")
-		},
-		getenv: func(key string) string { return "" },
+		projectID: "my-project",
+		region:    "us-east5",
 	}
+	// Create a TokenManager that returns an expired token.
+	prov.tokenMgr = auth.NewTokenManager(auth.TokenManagerOpts{
+		RefreshFn: func() (string, error) {
+			return "", fmt.Errorf("gcloud not authenticated")
+		},
+		Lifetime:        55 * time.Minute,
+		ProactiveWindow: 5 * time.Minute,
+		Interval:        1 * time.Hour,
+	})
+	// TokenManager won't start (refresh fails), so
+	// validToken returns unavailable.
 
 	req := httptest.NewRequest("POST", "/v1/messages",
 		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
 
 	err := prov.PrepareRequest(req)
 	if err == nil {
-		t.Fatal("expected error for expired token")
+		t.Fatal("expected error for unavailable token")
 	}
-	if !strings.Contains(err.Error(), "token expired") {
-		t.Errorf("expected 'token expired' error, got: %s", err.Error())
+	if !strings.Contains(err.Error(), "token") {
+		t.Errorf("expected token error, got: %s", err.Error())
 	}
 }
 
 func TestVertexPrepareRequest_ValidToken(t *testing.T) {
-	prov := &VertexProvider{
-		projectID:   "my-project",
-		region:      "us-east5",
-		token:       "ya29.valid-token",
-		tokenExpiry: time.Now().Add(30 * time.Minute),
-	}
+	prov := testVertexProvider(t, "my-project", "us-east5",
+		"ya29.valid-token", 30*time.Minute)
 
 	req := httptest.NewRequest("POST", "/v1/messages",
 		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
@@ -3913,208 +3557,23 @@ func TestVertexPrepareRequest_ValidToken(t *testing.T) {
 		t.Fatalf("PrepareRequest should succeed with valid token: %v", err)
 	}
 
-	auth := req.Header.Get("Authorization")
-	if auth != "Bearer ya29.valid-token" {
-		t.Errorf("Authorization: got %q, want %q", auth, "Bearer ya29.valid-token")
+	authHdr := req.Header.Get("Authorization")
+	if authHdr != "Bearer ya29.valid-token" {
+		t.Errorf("Authorization: got %q, want %q", authHdr, "Bearer ya29.valid-token")
 	}
 }
 
-func TestVertexPrepareRequest_ProactiveRefresh(t *testing.T) {
-	// Token expires in 3 minutes — within the proactive
-	// refresh window (5 minutes). PrepareRequest should
-	// trigger a proactive refresh.
-	prov := &VertexProvider{
-		projectID:   "my-project",
-		region:      "us-east5",
-		token:       "old-token",
-		tokenExpiry: time.Now().Add(3 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return []byte("new-token\n"), nil
-		},
-		getenv: func(key string) string {
-			switch key {
-			case "ANTHROPIC_VERTEX_PROJECT_ID":
-				return "my-project"
-			case "ANTHROPIC_VERTEX_REGION":
-				return "us-east5"
-			}
-			return ""
-		},
-	}
-
-	req := httptest.NewRequest("POST", "/v1/messages",
-		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
-
-	if err := prov.PrepareRequest(req); err != nil {
-		t.Fatalf("PrepareRequest should succeed: %v", err)
-	}
-
-	// Verify the token was updated.
-	prov.tokenMu.RLock()
-	token := prov.token
-	expiry := prov.tokenExpiry
-	prov.tokenMu.RUnlock()
-
-	if token != "new-token" {
-		t.Errorf("token: got %q, want %q", token, "new-token")
-	}
-	if time.Until(expiry) < 50*time.Minute {
-		t.Errorf("tokenExpiry should be reset to ~55 minutes from now, got %v until expiry",
-			time.Until(expiry))
-	}
-
-	auth := req.Header.Get("Authorization")
-	if auth != "Bearer new-token" {
-		t.Errorf("Authorization: got %q, want %q", auth, "Bearer new-token")
-	}
-}
-
-func TestVertexPrepareRequest_ProactiveRefreshFails(t *testing.T) {
-	// Token expires in 3 minutes — within the proactive
-	// refresh window. The refresh fails, but the request
-	// should proceed with the current (still valid) token.
-	prov := &VertexProvider{
-		projectID:   "my-project",
-		region:      "us-east5",
-		token:       "current-token",
-		tokenExpiry: time.Now().Add(3 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("gcloud not found")
-		},
-		getenv: func(key string) string { return "" },
-	}
-
-	req := httptest.NewRequest("POST", "/v1/messages",
-		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
-
-	if err := prov.PrepareRequest(req); err != nil {
-		t.Fatalf("PrepareRequest should succeed with still-valid token: %v", err)
-	}
-
-	// Verify the original token is preserved (not cleared).
-	prov.tokenMu.RLock()
-	token := prov.token
-	prov.tokenMu.RUnlock()
-
-	if token != "current-token" {
-		t.Errorf("token should be preserved on proactive refresh failure, got: %q", token)
-	}
-
-	auth := req.Header.Get("Authorization")
-	if auth != "Bearer current-token" {
-		t.Errorf("Authorization: got %q, want %q", auth, "Bearer current-token")
-	}
-}
-
-func TestVertexPrepareRequest_ProactiveRefreshTimeout(t *testing.T) {
-	// When execCmd returns an error (simulating any failure
-	// including timeout), the request should proceed with
-	// the current token.
-	prov := &VertexProvider{
-		projectID:   "my-project",
-		region:      "us-east5",
-		token:       "valid-token",
-		tokenExpiry: time.Now().Add(3 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("command timed out")
-		},
-		getenv: func(key string) string { return "" },
-	}
-
-	req := httptest.NewRequest("POST", "/v1/messages",
-		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
-
-	if err := prov.PrepareRequest(req); err != nil {
-		t.Fatalf("PrepareRequest should succeed despite refresh timeout: %v", err)
-	}
-
-	auth := req.Header.Get("Authorization")
-	if auth != "Bearer valid-token" {
-		t.Errorf("Authorization: got %q, want %q", auth, "Bearer valid-token")
-	}
-}
-
-func TestVertexRefreshFailure_ClearsToken(t *testing.T) {
-	// Simulate the refresh closure's failure path:
-	// token and tokenExpiry are cleared atomically.
-	prov := &VertexProvider{
-		projectID:   "my-project",
-		region:      "us-east5",
-		token:       "valid-token",
-		tokenExpiry: time.Now().Add(30 * time.Minute),
-	}
-
-	// Simulate what the refresh closure does on failure.
-	prov.tokenMu.Lock()
-	prov.token = ""
-	prov.tokenExpiry = time.Time{}
-	prov.tokenMu.Unlock()
-
-	if prov.token != "" {
-		t.Errorf("token should be empty after refresh failure, got: %q", prov.token)
-	}
-	if !prov.tokenExpiry.IsZero() {
-		t.Errorf("tokenExpiry should be zero after refresh failure, got: %v", prov.tokenExpiry)
-	}
-}
-
-func TestVertexPrepareRequest_ConcurrentProactiveRefresh(t *testing.T) {
-	// Verify that concurrent PrepareRequest calls with
-	// near-expiry tokens result in exactly 1 refresh
-	// invocation (TryLock deduplication).
-	var refreshCount atomic.Int32
-	prov := &VertexProvider{
-		projectID:   "my-project",
-		region:      "us-east5",
-		token:       "near-expiry-token",
-		tokenExpiry: time.Now().Add(3 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			refreshCount.Add(1)
-			// Brief sleep to simulate real gcloud latency.
-			time.Sleep(10 * time.Millisecond)
-			return []byte("refreshed-token\n"), nil
-		},
-		getenv: func(key string) string { return "" },
-	}
-
-	const goroutines = 5
-	var wg sync.WaitGroup
-	wg.Add(goroutines)
-
-	// Use a barrier to synchronize all goroutines.
-	barrier := make(chan struct{})
-
-	for i := 0; i < goroutines; i++ {
-		go func() {
-			defer wg.Done()
-			<-barrier // Wait for barrier release.
-			req := httptest.NewRequest("POST", "/v1/messages",
-				strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
-			_ = prov.PrepareRequest(req)
-		}()
-	}
-
-	// Release all goroutines simultaneously.
-	close(barrier)
-	wg.Wait()
-
-	count := refreshCount.Load()
-	if count != 1 {
-		t.Errorf("expected exactly 1 refresh invocation (TryLock deduplication), got: %d", count)
-	}
-}
+// Proactive refresh, concurrent dedup, and background
+// failure tests are now covered by the TokenManager
+// tests in internal/auth/token_test.go. The gateway
+// tests verify the integration via validToken() and
+// validCredentials().
 
 func TestBedrockPrepareRequest_ExpiredCredentials(t *testing.T) {
+	// Provider without a TokenManager — simulates
+	// uninitialized state.
 	prov := &BedrockProvider{
-		region:       "us-east-1",
-		accessKey:    "AKIATEST",
-		secretKey:    "secrettest",
-		sessionToken: "sessiontest",
-		credExpiry:   time.Now().Add(-10 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("aws CLI not authenticated")
-		},
-		getenv: func(key string) string { return "" },
+		region: "us-east-1",
 	}
 
 	req := httptest.NewRequest("POST", "/v1/messages",
@@ -4122,125 +3581,10 @@ func TestBedrockPrepareRequest_ExpiredCredentials(t *testing.T) {
 
 	err := prov.PrepareRequest(req)
 	if err == nil {
-		t.Fatal("expected error for expired credentials")
+		t.Fatal("expected error for unavailable credentials")
 	}
-	if !strings.Contains(err.Error(), "credentials expired") {
-		t.Errorf("expected 'credentials expired' error, got: %s", err.Error())
-	}
-}
-
-func TestBedrockRefreshFailure_ClearsCredentials(t *testing.T) {
-	// Simulate the refresh closure's failure path:
-	// all credentials and credExpiry are cleared atomically.
-	prov := &BedrockProvider{
-		region:       "us-east-1",
-		accessKey:    "AKIATEST",
-		secretKey:    "secrettest",
-		sessionToken: "sessiontest",
-		credExpiry:   time.Now().Add(30 * time.Minute),
-	}
-
-	// Simulate what the refresh closure does on failure.
-	prov.credMu.Lock()
-	prov.accessKey = ""
-	prov.secretKey = ""
-	prov.sessionToken = ""
-	prov.credExpiry = time.Time{}
-	prov.credMu.Unlock()
-
-	if prov.accessKey != "" {
-		t.Errorf("accessKey should be empty, got: %q", prov.accessKey)
-	}
-	if prov.secretKey != "" {
-		t.Errorf("secretKey should be empty, got: %q", prov.secretKey)
-	}
-	if prov.sessionToken != "" {
-		t.Errorf("sessionToken should be empty, got: %q", prov.sessionToken)
-	}
-	if !prov.credExpiry.IsZero() {
-		t.Errorf("credExpiry should be zero, got: %v", prov.credExpiry)
-	}
-}
-
-func TestBedrockPrepareRequest_ProactiveRefresh(t *testing.T) {
-	// Credentials expire in 3 minutes — within the
-	// proactive refresh window. PrepareRequest should
-	// trigger a proactive refresh.
-	prov := &BedrockProvider{
-		region:       "us-east-1",
-		accessKey:    "AKIAOLD",
-		secretKey:    "secretold",
-		sessionToken: "sessionold",
-		credExpiry:   time.Now().Add(3 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return []byte(
-				"export AWS_ACCESS_KEY_ID=AKIANEW\n" +
-					"export AWS_SECRET_ACCESS_KEY=secretnew\n" +
-					"export AWS_SESSION_TOKEN=sessionnew\n"), nil
-		},
-		getenv: func(key string) string { return "" },
-	}
-
-	req := httptest.NewRequest("POST", "/v1/messages",
-		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
-
-	if err := prov.PrepareRequest(req); err != nil {
-		t.Fatalf("PrepareRequest should succeed: %v", err)
-	}
-
-	// Verify credentials were refreshed.
-	prov.credMu.RLock()
-	ak := prov.accessKey
-	sk := prov.secretKey
-	st := prov.sessionToken
-	expiry := prov.credExpiry
-	prov.credMu.RUnlock()
-
-	if ak != "AKIANEW" {
-		t.Errorf("accessKey: got %q, want AKIANEW", ak)
-	}
-	if sk != "secretnew" {
-		t.Errorf("secretKey: got %q, want secretnew", sk)
-	}
-	if st != "sessionnew" {
-		t.Errorf("sessionToken: got %q, want sessionnew", st)
-	}
-	if time.Until(expiry) < 45*time.Minute {
-		t.Errorf("credExpiry should be reset to ~50 minutes from now, got %v until expiry",
-			time.Until(expiry))
-	}
-}
-
-func TestBedrockPrepareRequest_ProactiveRefreshFails(t *testing.T) {
-	// Credentials expire in 3 minutes — within the
-	// proactive refresh window. The refresh fails, but
-	// the request should proceed with current credentials.
-	prov := &BedrockProvider{
-		region:       "us-east-1",
-		accessKey:    "AKIACURRENT",
-		secretKey:    "secretcurrent",
-		sessionToken: "sessioncurrent",
-		credExpiry:   time.Now().Add(3 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("aws CLI not found")
-		},
-		getenv: func(key string) string { return "" },
-	}
-
-	req := httptest.NewRequest("POST", "/v1/messages",
-		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
-
-	if err := prov.PrepareRequest(req); err != nil {
-		t.Fatalf("PrepareRequest should succeed with still-valid credentials: %v", err)
-	}
-
-	// Verify original credentials are preserved.
-	prov.credMu.RLock()
-	ak := prov.accessKey
-	prov.credMu.RUnlock()
-
-	if ak != "AKIACURRENT" {
-		t.Errorf("accessKey should be preserved on proactive refresh failure, got: %q", ak)
+	if !strings.Contains(err.Error(), "credentials unavailable") {
+		t.Errorf("expected 'credentials unavailable' error, got: %s", err.Error())
 	}
 }
 
@@ -4307,13 +3651,13 @@ func TestStatus_ShowsLogPath(t *testing.T) {
 
 	// Write a PID file with current process PID.
 	pp := pidPath(opts.ProjectDir)
-	info := PIDInfo{
+	info := pidfile.PIDInfo{
 		PID:      os.Getpid(),
 		Port:     53147,
 		Provider: "vertex",
 		Started:  time.Now().Add(-1 * time.Hour),
 	}
-	if err := WritePID(pp, info); err != nil {
+	if err := pidfile.WritePID(pp, info); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4395,11 +3739,10 @@ func TestStart_ForegroundNoLogFile(t *testing.T) {
 }
 
 func TestValidToken_Empty(t *testing.T) {
+	// Provider without a TokenManager.
 	prov := &VertexProvider{
-		projectID:   "proj",
-		region:      "us-east5",
-		token:       "",
-		tokenExpiry: time.Now().Add(30 * time.Minute),
+		projectID: "proj",
+		region:    "us-east5",
 	}
 	_, err := prov.validToken()
 	if err == nil {
@@ -4410,32 +3753,9 @@ func TestValidToken_Empty(t *testing.T) {
 	}
 }
 
-func TestValidToken_Expired(t *testing.T) {
-	prov := &VertexProvider{
-		projectID:   "proj",
-		region:      "us-east5",
-		token:       "expired-token",
-		tokenExpiry: time.Now().Add(-10 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("refresh failed")
-		},
-	}
-	_, err := prov.validToken()
-	if err == nil {
-		t.Fatal("expected error for expired token")
-	}
-	if !strings.Contains(err.Error(), "expired") {
-		t.Errorf("error = %q, want 'expired'", err)
-	}
-}
-
 func TestValidToken_Valid(t *testing.T) {
-	prov := &VertexProvider{
-		projectID:   "proj",
-		region:      "us-east5",
-		token:       "good-token",
-		tokenExpiry: time.Now().Add(30 * time.Minute),
-	}
+	prov := testVertexProvider(t, "proj", "us-east5",
+		"good-token", 30*time.Minute)
 	tok, err := prov.validToken()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -4445,40 +3765,10 @@ func TestValidToken_Valid(t *testing.T) {
 	}
 }
 
-func TestValidToken_ProactiveRefreshTriggered(t *testing.T) {
-	prov := &VertexProvider{
-		projectID:   "proj",
-		region:      "us-east5",
-		token:       "old-token",
-		tokenExpiry: time.Now().Add(3 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return []byte("refreshed-token\n"), nil
-		},
-		getenv: func(key string) string {
-			switch key {
-			case "ANTHROPIC_VERTEX_PROJECT_ID", "GOOGLE_CLOUD_PROJECT":
-				return "proj"
-			case "ANTHROPIC_VERTEX_REGION", "VERTEX_LOCATION", "CLOUD_ML_REGION":
-				return "us-east5"
-			}
-			return ""
-		},
-	}
-	tok, err := prov.validToken()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if tok != "refreshed-token" {
-		t.Errorf("token = %q, want 'refreshed-token'", tok)
-	}
-}
-
 func TestValidCredentials_Empty(t *testing.T) {
+	// Provider without a TokenManager.
 	prov := &BedrockProvider{
-		region:     "us-east-1",
-		accessKey:  "",
-		secretKey:  "",
-		credExpiry: time.Now().Add(30 * time.Minute),
+		region: "us-east-1",
 	}
 	_, _, _, err := prov.validCredentials()
 	if err == nil {
@@ -4489,34 +3779,9 @@ func TestValidCredentials_Empty(t *testing.T) {
 	}
 }
 
-func TestValidCredentials_Expired(t *testing.T) {
-	prov := &BedrockProvider{
-		region:       "us-east-1",
-		accessKey:    "AKID",
-		secretKey:    "SECRET",
-		sessionToken: "TOKEN",
-		credExpiry:   time.Now().Add(-10 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("refresh failed")
-		},
-	}
-	_, _, _, err := prov.validCredentials()
-	if err == nil {
-		t.Fatal("expected error for expired credentials")
-	}
-	if !strings.Contains(err.Error(), "expired") {
-		t.Errorf("error = %q, want 'expired'", err)
-	}
-}
-
 func TestValidCredentials_Valid(t *testing.T) {
-	prov := &BedrockProvider{
-		region:       "us-east-1",
-		accessKey:    "AKID",
-		secretKey:    "SECRET",
-		sessionToken: "TOKEN",
-		credExpiry:   time.Now().Add(30 * time.Minute),
-	}
+	prov := testBedrockProvider(t, "us-east-1",
+		"AKID", "SECRET", "TOKEN")
 	ak, sk, st, err := prov.validCredentials()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -4528,7 +3793,7 @@ func TestValidCredentials_Valid(t *testing.T) {
 
 func TestPrintGatewayStatus_Basic(t *testing.T) {
 	var buf bytes.Buffer
-	info := &PIDInfo{
+	info := &pidfile.PIDInfo{
 		PID:      12345,
 		Port:     53147,
 		Provider: "vertex",
@@ -4562,7 +3827,7 @@ func TestPrintGatewayStatus_WithLogFile(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	info := &PIDInfo{
+	info := &pidfile.PIDInfo{
 		PID:      1,
 		Port:     8080,
 		Provider: "anthropic",
@@ -4576,7 +3841,7 @@ func TestPrintGatewayStatus_WithLogFile(t *testing.T) {
 
 func TestPrintGatewayStatus_NoLogFile(t *testing.T) {
 	var buf bytes.Buffer
-	info := &PIDInfo{
+	info := &pidfile.PIDInfo{
 		PID:      1,
 		Port:     8080,
 		Provider: "anthropic",
@@ -4588,100 +3853,32 @@ func TestPrintGatewayStatus_NoLogFile(t *testing.T) {
 	}
 }
 
-func TestTryProactiveRefresh_Success(t *testing.T) {
-	prov := &VertexProvider{
-		projectID:   "proj",
-		region:      "us-east5",
-		token:       "old",
-		tokenExpiry: time.Now().Add(3 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return []byte("new-token\n"), nil
-		},
-	}
-	prov.tryProactiveRefresh()
+// tryProactiveRefresh and tryProactiveRefreshBedrock tests
+// have moved to internal/auth/token_test.go as part of
+// the TokenManager extraction (design.md D2). The
+// TokenManager tests cover proactive refresh success,
+// failure (preserves token), and concurrent dedup.
 
-	prov.tokenMu.RLock()
-	tok := prov.token
-	exp := prov.tokenExpiry
-	prov.tokenMu.RUnlock()
-
-	if tok != "new-token" {
-		t.Errorf("token = %q, want 'new-token'", tok)
-	}
-	if time.Until(exp) < 50*time.Minute {
-		t.Errorf("expiry too soon: %v", exp)
+func TestEncodeBRCreds_RoundTrip(t *testing.T) {
+	encoded := encodeBRCreds("AKIA", "secret", "session")
+	ak, sk, st := decodeBRCreds(encoded)
+	if ak != "AKIA" || sk != "secret" || st != "session" {
+		t.Errorf("round-trip failed: got (%q, %q, %q)", ak, sk, st)
 	}
 }
 
-func TestTryProactiveRefresh_Failure_PreservesToken(t *testing.T) {
-	origExpiry := time.Now().Add(3 * time.Minute)
-	prov := &VertexProvider{
-		projectID:   "proj",
-		region:      "us-east5",
-		token:       "keep-me",
-		tokenExpiry: origExpiry,
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("gcloud not found")
-		},
-	}
-	prov.tryProactiveRefresh()
-
-	prov.tokenMu.RLock()
-	tok := prov.token
-	prov.tokenMu.RUnlock()
-
-	if tok != "keep-me" {
-		t.Errorf("token = %q, want 'keep-me' (preserved on failure)", tok)
+func TestDecodeBRCreds_NoSessionToken(t *testing.T) {
+	encoded := encodeBRCreds("AKIA", "secret", "")
+	ak, sk, st := decodeBRCreds(encoded)
+	if ak != "AKIA" || sk != "secret" || st != "" {
+		t.Errorf("got (%q, %q, %q), want (AKIA, secret, \"\")", ak, sk, st)
 	}
 }
 
-func TestTryProactiveRefreshBedrock_Success(t *testing.T) {
-	prov := &BedrockProvider{
-		region:       "us-east-1",
-		accessKey:    "old-ak",
-		secretKey:    "old-sk",
-		sessionToken: "old-st",
-		credExpiry:   time.Now().Add(3 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return []byte(`{"AccessKeyId":"new-ak","SecretAccessKey":"new-sk","SessionToken":"new-st"}`), nil
-		},
-	}
-	prov.tryProactiveRefreshBedrock()
-
-	prov.credMu.RLock()
-	ak := prov.accessKey
-	sk := prov.secretKey
-	st := prov.sessionToken
-	exp := prov.credExpiry
-	prov.credMu.RUnlock()
-
-	if ak != "new-ak" || sk != "new-sk" || st != "new-st" {
-		t.Errorf("credentials = (%q, %q, %q), want (new-ak, new-sk, new-st)", ak, sk, st)
-	}
-	if time.Until(exp) < 45*time.Minute {
-		t.Errorf("expiry too soon: %v", exp)
-	}
-}
-
-func TestTryProactiveRefreshBedrock_Failure_PreservesCredentials(t *testing.T) {
-	prov := &BedrockProvider{
-		region:       "us-east-1",
-		accessKey:    "keep-ak",
-		secretKey:    "keep-sk",
-		sessionToken: "keep-st",
-		credExpiry:   time.Now().Add(3 * time.Minute),
-		execCmd: func(name string, args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("aws not found")
-		},
-	}
-	prov.tryProactiveRefreshBedrock()
-
-	prov.credMu.RLock()
-	ak := prov.accessKey
-	prov.credMu.RUnlock()
-
-	if ak != "keep-ak" {
-		t.Errorf("accessKey = %q, want 'keep-ak' (preserved on failure)", ak)
+func TestDecodeBRCreds_Invalid(t *testing.T) {
+	ak, sk, st := decodeBRCreds("invalid")
+	if ak != "" || sk != "" || st != "" {
+		t.Errorf("expected empty for invalid input, got (%q, %q, %q)", ak, sk, st)
 	}
 }
 

@@ -176,6 +176,37 @@ func TestVersionCmd_Output(t *testing.T) {
 	}
 }
 
+// TestOllamaProxyCmd_Registered verifies that the
+// ollama-proxy command is registered with the expected
+// subcommands and flags.
+func TestOllamaProxyCmd_Registered(t *testing.T) {
+	cmd := newOllamaProxyCmd()
+
+	if cmd.Use != "ollama-proxy" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "ollama-proxy")
+	}
+
+	// Verify subcommands.
+	subcommands := cmd.Commands()
+	names := make(map[string]bool)
+	for _, sub := range subcommands {
+		names[sub.Use] = true
+	}
+	for _, want := range []string{"stop", "status"} {
+		if !names[want] {
+			t.Errorf("missing subcommand %q", want)
+		}
+	}
+
+	// Verify flags.
+	flags := []string{"port", "embed-model", "gateway-url", "detach"}
+	for _, name := range flags {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("missing flag --%s", name)
+		}
+	}
+}
+
 // TestRootCmd_HelpOutput is a regression guard for FR-004: the help
 // output must show the alias relationship and correct usage line.
 func TestRootCmd_HelpOutput(t *testing.T) {

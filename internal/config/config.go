@@ -27,9 +27,10 @@ type Config struct {
 	Scaffold  ScaffoldConfig  `yaml:"scaffold"  json:"scaffold"`
 	Embedding EmbeddingConfig `yaml:"embedding" json:"embedding"`
 	Sandbox   SandboxConfig   `yaml:"sandbox"   json:"sandbox"`
-	Gateway   GatewayConfig   `yaml:"gateway"   json:"gateway"`
-	Doctor    DoctorConfig    `yaml:"doctor"    json:"doctor"`
-	Workflow  WorkflowConfig  `yaml:"workflow"  json:"workflow"`
+	Gateway    GatewayConfig    `yaml:"gateway"       json:"gateway"`
+	OllamaProxy OllamaProxyConfig `yaml:"ollama_proxy" json:"ollama_proxy"`
+	Doctor     DoctorConfig     `yaml:"doctor"        json:"doctor"`
+	Workflow   WorkflowConfig   `yaml:"workflow"      json:"workflow"`
 }
 
 // SetupConfig controls how `uf setup` installs tools.
@@ -87,6 +88,13 @@ type CheConfig struct {
 type GatewayConfig struct {
 	Port     int    `yaml:"port"     json:"port"`
 	Provider string `yaml:"provider" json:"provider"`
+}
+
+// OllamaProxyConfig controls `uf ollama-proxy` behavior.
+type OllamaProxyConfig struct {
+	Port       int    `yaml:"port"        json:"port"`
+	EmbedModel string `yaml:"embed_model" json:"embed_model"`
+	GatewayURL string `yaml:"gateway_url" json:"gateway_url"`
 }
 
 // DoctorConfig controls `uf doctor` check behavior.
@@ -260,6 +268,17 @@ func merge(base, overlay Config) Config {
 		result.Gateway.Provider = overlay.Gateway.Provider
 	}
 
+	// OllamaProxy
+	if overlay.OllamaProxy.Port != 0 {
+		result.OllamaProxy.Port = overlay.OllamaProxy.Port
+	}
+	if overlay.OllamaProxy.EmbedModel != "" {
+		result.OllamaProxy.EmbedModel = overlay.OllamaProxy.EmbedModel
+	}
+	if overlay.OllamaProxy.GatewayURL != "" {
+		result.OllamaProxy.GatewayURL = overlay.OllamaProxy.GatewayURL
+	}
+
 	// Doctor
 	if overlay.Doctor.Skip != nil {
 		result.Doctor.Skip = overlay.Doctor.Skip
@@ -332,6 +351,17 @@ func applyEnvOverrides(cfg Config, getenv func(string) string) Config {
 	}
 	if v := getenv("UF_GATEWAY_PROVIDER"); v != "" {
 		cfg.Gateway.Provider = v
+	}
+	if v := getenv("UF_OLLAMA_PROXY_PORT"); v != "" {
+		if port, err := strconv.Atoi(v); err == nil {
+			cfg.OllamaProxy.Port = port
+		}
+	}
+	if v := getenv("UF_OLLAMA_PROXY_EMBED_MODEL"); v != "" {
+		cfg.OllamaProxy.EmbedModel = v
+	}
+	if v := getenv("UF_OLLAMA_PROXY_GATEWAY_URL"); v != "" {
+		cfg.OllamaProxy.GatewayURL = v
 	}
 	return cfg
 }

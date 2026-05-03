@@ -32,6 +32,7 @@ func main() {
 	root.AddCommand(newSetupCmd())
 	root.AddCommand(newSandboxCmd())
 	root.AddCommand(newGatewayCmd())
+	root.AddCommand(newOllamaProxyCmd())
 	root.AddCommand(newConfigCmd())
 
 	if err := root.Execute(); err != nil {

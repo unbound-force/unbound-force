@@ -3,7 +3,7 @@
 package config
 
 // Template returns the full commented-out YAML template for the
-// current config version. All 7 sections are present with inline
+// current config version. All 8 sections are present with inline
 // comments documenting valid values and defaults.
 func Template() string {
 	return `# .uf/config.yaml
@@ -12,7 +12,8 @@ func Template() string {
 # CLI flags and environment variables override these settings.
 # Env var overrides: UF_PACKAGE_MANAGER, OLLAMA_MODEL, OLLAMA_HOST,
 #   UF_SANDBOX_IMAGE, UF_SANDBOX_BACKEND, UF_SANDBOX_RUNTIME,
-#   UF_CHE_URL, UF_CHE_TOKEN, UF_GATEWAY_PORT, UF_GATEWAY_PROVIDER
+#   UF_CHE_URL, UF_CHE_TOKEN, UF_GATEWAY_PORT, UF_GATEWAY_PROVIDER,
+#   UF_OLLAMA_PROXY_PORT, UF_OLLAMA_PROXY_EMBED_MODEL, UF_OLLAMA_PROXY_GATEWAY_URL
 
 # ─── Setup Preferences ───────────────────────────────────────
 # Controls how ` + "`uf setup`" + ` installs tools.
@@ -70,6 +71,13 @@ func Template() string {
 #   port: 53147
 #   provider: auto               # auto | anthropic | vertex | bedrock
 
+# ─── Ollama Proxy ─────────────────────────────────────────────
+# Controls ` + "`uf ollama-proxy`" + ` behavior.
+# ollama_proxy:
+#   port: 11434                  # local port (matches Ollama default)
+#   embed_model: text-embedding-005  # Vertex AI embedding model
+#   gateway_url: http://localhost:53147  # uf gateway URL for generation
+
 # ─── Doctor ───────────────────────────────────────────────────
 # Controls ` + "`uf doctor`" + ` check behavior.
 # doctor:
@@ -100,6 +108,7 @@ var knownSections = []string{
 	"embedding",
 	"sandbox",
 	"gateway",
+	"ollama_proxy",
 	"doctor",
 	"workflow",
 }
