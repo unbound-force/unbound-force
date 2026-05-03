@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -81,8 +82,8 @@ type Options struct {
 
 	// --- New fields for Spec 029 ---
 
-	// BackendName selects the backend: "auto", "podman",
-	// or "che". Default: "auto" (auto-detect).
+	// BackendName selects the backend: "auto" or "podman".
+	// Default: "auto" (auto-detect).
 	BackendName string
 
 	// WorkspaceName overrides the auto-generated workspace
@@ -97,14 +98,19 @@ type Options struct {
 	// Default: "<ProjectDir>/.uf/sandbox.yaml".
 	ConfigPath string
 
-	// CheURL is the Eclipse Che server URL. Overrides
-	// config file. Can also be set via UF_CHE_URL env var.
-	CheURL string
-
 	// HTTPDo performs an HTTP request and returns the
-	// response. Used for CDE REST API calls. Defaults to
-	// http.DefaultClient.Do.
+	// response. Defaults to http.DefaultClient.Do.
 	HTTPDo func(req *http.Request) (*http.Response, error)
+
+	// GatewayPort is the port the LLM gateway is listening
+	// on. Set by dispatch functions (Create, Start) after
+	// autoStartGateway() returns. Zero when no gateway.
+	GatewayPort int
+
+	// GatewayActive is true when the LLM gateway proxy is
+	// running and should be used for credential isolation.
+	// Set by dispatch functions after autoStartGateway().
+	GatewayActive bool
 
 	// UIDMap enables explicit UID/GID mapping via
 	// --uidmap/--gidmap flags instead of --userns=keep-id.
@@ -372,6 +378,22 @@ func Create(opts Options) error {
 	opts.defaults()
 	opts = DefaultConfig(opts)
 
+	// Auto-start gateway for cloud provider credential
+	// isolation (D3: gateway wiring in dispatch functions).
+	// Called before ResolveBackend so all backends inherit
+	// gateway integration automatically.
+	gwPort, gwActive, gwErr := autoStartGateway(opts)
+	if gwErr != nil {
+		fmt.Fprintf(opts.Stderr,
+			"Gateway start failed (%v) — cloud provider LLM access unavailable\n", gwErr)
+	}
+	if gwActive {
+		fmt.Fprintf(opts.Stderr,
+			"Gateway active on port %d — credentials proxied\n", gwPort)
+	}
+	opts.GatewayPort = gwPort
+	opts.GatewayActive = gwActive
+
 	backend, err := ResolveBackend(opts)
 	if err != nil {
 		return err
@@ -418,12 +440,17 @@ func Destroy(opts Options) error {
 }
 
 // isPersistentWorkspace checks if a persistent workspace
-// exists for the current project by looking for a named
-// volume.
+// exists for the current project by looking for a Podman
+// named volume or a DevPod workspace (D5a).
 func isPersistentWorkspace(opts Options) bool {
+	// Check Podman named volume first.
 	volName := volumeNameForProject(opts.ProjectDir)
-	_, err := opts.ExecCmd("podman", "volume", "inspect", volName)
-	return err == nil
+	if _, err := opts.ExecCmd("podman", "volume", "inspect", volName); err == nil {
+		return true
+	}
+
+	// Check for DevPod workspace (guarded by LookPath).
+	return isDevPodWorkspace(opts)
 }
 
 // Start launches a sandbox container with the project directory
@@ -440,9 +467,24 @@ func Start(opts Options) error {
 	opts = DefaultConfig(opts)
 
 	// Persistent workspace detection: if a named volume
-	// exists for this project, delegate to the backend's
-	// Start method to resume the persistent workspace.
+	// or DevPod workspace exists for this project,
+	// delegate to the backend's Start method to resume
+	// the persistent workspace.
 	if isPersistentWorkspace(opts) {
+		// Auto-start gateway for persistent workspaces
+		// (D3: gateway wiring in dispatch functions).
+		gwPort, gwActive, gwErr := autoStartGateway(opts)
+		if gwErr != nil {
+			fmt.Fprintf(opts.Stderr,
+				"Gateway start failed (%v) — cloud provider LLM access unavailable\n", gwErr)
+		}
+		if gwActive {
+			fmt.Fprintf(opts.Stderr,
+				"Gateway active on port %d — credentials proxied\n", gwPort)
+		}
+		opts.GatewayPort = gwPort
+		opts.GatewayActive = gwActive
+
 		backend, err := ResolveBackend(opts)
 		if err != nil {
 			return err
@@ -670,15 +712,12 @@ func Extract(opts Options) error {
 		return nil
 	}
 
-	// For persistent CDE workspaces, suggest git pull.
+	// For persistent workspaces (Podman or DevPod), changes
+	// are on the host filesystem or accessible via git push.
 	if isPersistentWorkspace(opts) {
-		// Check if this is a CDE workspace (has Che URL configured).
-		cheURL := resolveCheURL(opts)
-		if cheURL != "" {
-			fmt.Fprintf(opts.Stdout,
-				"This workspace has git push access. Use `git pull` on the host instead of extract.\n")
-			return nil
-		}
+		fmt.Fprintf(opts.Stdout,
+			"This is a persistent workspace — changes are on the host filesystem or use git push.\n")
+		return nil
 	}
 
 	// Verify container is running.
@@ -843,6 +882,106 @@ func FormatStatus(w io.Writer, s ContainerStatus) {
 	if s.StartedAt != "" {
 		fmt.Fprintf(w, "  Started:    %s\n", s.StartedAt)
 	}
+}
+
+// InitDevcontainerOptions configures a devcontainer scaffolding
+// operation. Separated from Options to keep the init concern
+// distinct from runtime sandbox operations.
+type InitDevcontainerOptions struct {
+	// ProjectDir is the project root where .devcontainer/
+	// will be created.
+	ProjectDir string
+
+	// Image overrides the default container image in the
+	// template. Empty uses the template default.
+	Image string
+
+	// DemoPorts are additional ports to include in the
+	// forwardPorts array (merged with the default 4096).
+	DemoPorts []int
+
+	// Force overwrites an existing devcontainer.json.
+	Force bool
+
+	// Stdout is the writer for user-facing output.
+	Stdout io.Writer
+
+	// TemplateContent provides the raw devcontainer.json
+	// template bytes. Injected for testability — production
+	// callers pass scaffold.DevcontainerContent().
+	TemplateContent []byte
+}
+
+// InitDevcontainer creates .devcontainer/devcontainer.json from
+// the embedded template. Substitutes image and demo ports when
+// overrides are provided. Idempotent: skips if the file exists
+// unless Force is set.
+func InitDevcontainer(opts InitDevcontainerOptions) error {
+	if opts.ProjectDir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("get working directory: %w", err)
+		}
+		opts.ProjectDir = cwd
+	}
+	if opts.Stdout == nil {
+		opts.Stdout = os.Stdout
+	}
+
+	outPath := filepath.Join(opts.ProjectDir,
+		".devcontainer", "devcontainer.json")
+
+	// Idempotency: skip if file exists unless --force.
+	if _, err := os.Stat(outPath); err == nil && !opts.Force {
+		fmt.Fprintf(opts.Stdout,
+			".devcontainer/devcontainer.json already exists (use --force to overwrite)\n")
+		return nil
+	}
+
+	// Parse the template JSON.
+	var tmpl map[string]interface{}
+	if err := json.Unmarshal(opts.TemplateContent, &tmpl); err != nil {
+		return fmt.Errorf("parse devcontainer template: %w", err)
+	}
+
+	// Substitute image if provided.
+	if opts.Image != "" {
+		tmpl["image"] = opts.Image
+	}
+
+	// Merge demo ports into forwardPorts.
+	if len(opts.DemoPorts) > 0 {
+		existing, _ := tmpl["forwardPorts"].([]interface{})
+		for _, p := range opts.DemoPorts {
+			existing = append(existing, p)
+		}
+		tmpl["forwardPorts"] = existing
+	}
+
+	// Marshal with 2-space indent for readability.
+	output, err := json.MarshalIndent(tmpl, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal devcontainer.json: %w", err)
+	}
+	output = append(output, '\n')
+
+	// Create .devcontainer/ directory.
+	dir := filepath.Dir(outPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create .devcontainer/: %w", err)
+	}
+
+	// Write the file.
+	if err := os.WriteFile(outPath, output, 0o644); err != nil {
+		return fmt.Errorf("write devcontainer.json: %w", err)
+	}
+
+	action := "Created"
+	if opts.Force {
+		action = "Overwritten"
+	}
+	fmt.Fprintf(opts.Stdout, "%s .devcontainer/devcontainer.json\n", action)
+	return nil
 }
 
 // isYes returns true if the response is a yes confirmation.

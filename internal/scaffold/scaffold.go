@@ -110,6 +110,13 @@ func Run(opts Options) (*Result, error) {
 		// Strip "assets/" prefix to get the relative path
 		relPath := strings.TrimPrefix(path, "assets/")
 
+		// Devcontainer assets are NOT deployed by uf init.
+		// They are only used by uf sandbox init via
+		// DevcontainerContent(). Per design D7.
+		if strings.HasPrefix(relPath, "devcontainer/") {
+			return nil
+		}
+
 		// DivisorOnly mode: skip non-Divisor assets
 		if opts.DivisorOnly && !isDivisorAsset(relPath) {
 			return nil
@@ -253,7 +260,7 @@ func warnLegacyReviewerFiles(w io.Writer, targetDir string) {
 // knownAssetPrefixes enumerates the valid top-level prefixes
 // in the embedded assets directory. Used by mapAssetPath to
 // detect assets added under unexpected directories.
-var knownAssetPrefixes = []string{"opencode/", "openspec/"}
+var knownAssetPrefixes = []string{"opencode/", "openspec/", "devcontainer/"}
 
 // mapAssetPath converts an embedded asset relative path to the
 // output path in the target directory. The assets/ directory
@@ -268,6 +275,11 @@ func mapAssetPath(relPath string) string {
 	case strings.HasPrefix(relPath, "openspec/"):
 		// openspec/ paths pass through without dot prefix
 		return relPath
+	case strings.HasPrefix(relPath, "devcontainer/"):
+		// devcontainer/ assets map to .devcontainer/ in the
+		// target directory. NOT deployed by uf init — only
+		// used by uf sandbox init via DevcontainerContent().
+		return "." + relPath
 	default:
 		// Unknown prefix — pass through unchanged but this
 		// indicates a new asset directory was added without
@@ -1439,6 +1451,14 @@ func extractGitHubOrg(opts *Options) string {
 
 	// Not a GitHub remote — omit GitHub source.
 	return ""
+}
+
+// DevcontainerContent returns the raw content of the embedded
+// devcontainer.json template. Used by uf sandbox init to write
+// the template to .devcontainer/devcontainer.json. The template
+// is embedded but NOT deployed by uf init (per design D7).
+func DevcontainerContent() ([]byte, error) {
+	return assets.ReadFile("assets/devcontainer/devcontainer.json")
 }
 
 // writeSourcesConfig generates a multi-repo Dewey sources.yaml

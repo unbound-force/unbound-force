@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -20,8 +19,8 @@ import (
 // fields to exercise error paths.
 //
 // Key defaults for backward compatibility:
-//   - LookPath finds podman and opencode but NOT chectl
-//     (prevents auto-detection of CDE backend)
+//   - LookPath finds podman and opencode but NOT devpod
+//     (prevents auto-detection of DevPod backend)
 //   - ExecCmd returns error for "podman volume inspect"
 //     (prevents persistent workspace detection)
 func testOpts() Options {
@@ -32,8 +31,8 @@ func testOpts() Options {
 		Stderr:     &bytes.Buffer{},
 		Stdin:      strings.NewReader(""),
 		LookPath: func(name string) (string, error) {
-			// Don't find chectl by default — prevents CDE auto-detect.
-			if name == "chectl" {
+			// Don't find devpod by default — prevents auto-detect.
+			if name == "devpod" {
 				return "", fmt.Errorf("not found")
 			}
 			return "/usr/bin/" + name, nil
@@ -459,7 +458,7 @@ func TestForwardedEnvVars(t *testing.T) {
 func TestStart_PodmanMissing(t *testing.T) {
 	opts := testOpts()
 	opts.LookPath = func(name string) (string, error) {
-		if name == "podman" {
+		if name == "podman" || name == "devpod" {
 			return "", fmt.Errorf("not found")
 		}
 		return "/usr/bin/" + name, nil
@@ -1308,10 +1307,7 @@ func TestProjectName_Empty(t *testing.T) {
 
 func TestLoadConfig_HappyPath(t *testing.T) {
 	yamlContent := `
-backend: che
-che:
-  url: https://che.example.com
-  token: test-token
+backend: podman
 ollama:
   host: http://ollama.internal:11434
 demo_ports:
@@ -1327,14 +1323,8 @@ demo_ports:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Backend != "che" {
-		t.Errorf("expected backend che, got: %s", cfg.Backend)
-	}
-	if cfg.Che.URL != "https://che.example.com" {
-		t.Errorf("expected che URL, got: %s", cfg.Che.URL)
-	}
-	if cfg.Che.Token != "test-token" {
-		t.Errorf("expected che token, got: %s", cfg.Che.Token)
+	if cfg.Backend != "podman" {
+		t.Errorf("expected backend podman, got: %s", cfg.Backend)
 	}
 	if cfg.Ollama.Host != "http://ollama.internal:11434" {
 		t.Errorf("expected ollama host, got: %s", cfg.Ollama.Host)
@@ -1356,16 +1346,11 @@ func TestLoadConfig_Missing(t *testing.T) {
 	if cfg.Backend != "" {
 		t.Errorf("expected empty backend, got: %s", cfg.Backend)
 	}
-	if cfg.Che.URL != "" {
-		t.Errorf("expected empty che URL, got: %s", cfg.Che.URL)
-	}
 }
 
 func TestLoadConfig_EnvOverride(t *testing.T) {
 	yamlContent := `
 backend: podman
-che:
-  url: https://config-url.example.com
 `
 	opts := testOpts()
 	opts.ReadFile = func(path string) ([]byte, error) {
@@ -1373,10 +1358,10 @@ che:
 	}
 	opts.Getenv = func(key string) string {
 		switch key {
-		case "UF_CHE_URL":
-			return "https://env-url.example.com"
 		case "UF_SANDBOX_BACKEND":
-			return "che"
+			return "podman"
+		case "UF_OLLAMA_HOST":
+			return "http://custom-ollama:11434"
 		}
 		return ""
 	}
@@ -1386,11 +1371,11 @@ che:
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Env var should override config file.
-	if cfg.Che.URL != "https://env-url.example.com" {
-		t.Errorf("expected env URL override, got: %s", cfg.Che.URL)
-	}
-	if cfg.Backend != "che" {
+	if cfg.Backend != "podman" {
 		t.Errorf("expected env backend override, got: %s", cfg.Backend)
+	}
+	if cfg.Ollama.Host != "http://custom-ollama:11434" {
+		t.Errorf("expected env ollama host override, got: %s", cfg.Ollama.Host)
 	}
 }
 
@@ -1398,8 +1383,7 @@ che:
 
 func TestResolveBackend_AutoPodman(t *testing.T) {
 	opts := testOpts()
-	// LookPath doesn't find chectl (default in testOpts).
-	// No UF_CHE_URL set.
+	// Default testOpts: auto-detect returns Podman.
 
 	backend, err := ResolveBackend(opts)
 	if err != nil {
@@ -1407,24 +1391,6 @@ func TestResolveBackend_AutoPodman(t *testing.T) {
 	}
 	if backend.Name() != BackendPodman {
 		t.Errorf("expected podman backend, got: %s", backend.Name())
-	}
-}
-
-func TestResolveBackend_AutoChe(t *testing.T) {
-	opts := testOpts()
-	opts.Getenv = func(key string) string {
-		if key == "UF_CHE_URL" {
-			return "https://che.example.com"
-		}
-		return ""
-	}
-
-	backend, err := ResolveBackend(opts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if backend.Name() != BackendChe {
-		t.Errorf("expected che backend, got: %s", backend.Name())
 	}
 }
 
@@ -1441,31 +1407,19 @@ func TestResolveBackend_ExplicitPodman(t *testing.T) {
 	}
 }
 
-func TestResolveBackend_ExplicitChe(t *testing.T) {
+func TestResolveBackend_CheMigrationError(t *testing.T) {
 	opts := testOpts()
-	opts.BackendName = BackendChe
-	opts.CheURL = "https://che.example.com"
-
-	backend, err := ResolveBackend(opts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if backend.Name() != BackendChe {
-		t.Errorf("expected che backend, got: %s", backend.Name())
-	}
-}
-
-func TestResolveBackend_CheNotConfigured(t *testing.T) {
-	opts := testOpts()
-	opts.BackendName = BackendChe
-	// No CheURL, no chectl.
+	opts.BackendName = "che"
 
 	_, err := ResolveBackend(opts)
 	if err == nil {
-		t.Fatal("expected error when CDE not configured")
+		t.Fatal("expected error for che backend")
 	}
-	if !strings.Contains(err.Error(), "not configured") {
-		t.Errorf("expected not configured message, got: %s", err.Error())
+	if !strings.Contains(err.Error(), "che backend removed") {
+		t.Errorf("expected migration error, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "devpod") {
+		t.Errorf("expected devpod suggestion, got: %s", err.Error())
 	}
 }
 
@@ -1936,317 +1890,6 @@ func TestPodmanStatus_PersistentStopped(t *testing.T) {
 	}
 }
 
-// --- CheBackend tests ---
-
-func TestCheCreate_WithChectl(t *testing.T) {
-	var commands []string
-	opts := testOpts()
-	opts.LookPath = func(name string) (string, error) {
-		return "/usr/bin/" + name, nil
-	}
-
-	// Create a temp devfile.
-	tmpDir := t.TempDir()
-	opts.ProjectDir = tmpDir
-	if err := writeTestFile(tmpDir+"/devfile.yaml", "schemaVersion: 2.0.0"); err != nil {
-		t.Fatal(err)
-	}
-
-	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
-		cmd := name + " " + strings.Join(args, " ")
-		commands = append(commands, cmd)
-		return []byte(""), nil
-	}
-
-	b := &CheBackend{cheURL: "https://che.example.com", useChectl: true}
-	err := b.Create(opts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	hasCreate := false
-	hasStart := false
-	for _, cmd := range commands {
-		if strings.Contains(cmd, "workspace:create") {
-			hasCreate = true
-		}
-		if strings.Contains(cmd, "workspace:start") {
-			hasStart = true
-		}
-	}
-	if !hasCreate {
-		t.Error("expected chectl workspace:create")
-	}
-	if !hasStart {
-		t.Error("expected chectl workspace:start")
-	}
-}
-
-func TestCheCreate_WithRestAPI(t *testing.T) {
-	opts := testOpts()
-	opts.LookPath = func(name string) (string, error) {
-		if name == "chectl" {
-			return "", fmt.Errorf("not found")
-		}
-		return "/usr/bin/" + name, nil
-	}
-
-	tmpDir := t.TempDir()
-	opts.ProjectDir = tmpDir
-	opts.ReadFile = func(path string) ([]byte, error) {
-		if strings.HasSuffix(path, "devfile.yaml") {
-			return []byte("schemaVersion: 2.0.0"), nil
-		}
-		return nil, fmt.Errorf("not found")
-	}
-
-	// Create devfile on disk for os.Stat check.
-	if err := writeTestFile(tmpDir+"/devfile.yaml", "schemaVersion: 2.0.0"); err != nil {
-		t.Fatal(err)
-	}
-
-	var requestURL string
-	opts.HTTPDo = func(req *http.Request) (*http.Response, error) {
-		requestURL = req.URL.String()
-		return &http.Response{
-			StatusCode: 201,
-			Body:       io.NopCloser(strings.NewReader(`{"id":"ws-123"}`)),
-		}, nil
-	}
-
-	b := &CheBackend{cheURL: "https://che.example.com", useChectl: false}
-	err := b.Create(opts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(requestURL, "/api/workspace/devfile") {
-		t.Errorf("expected REST API URL, got: %s", requestURL)
-	}
-}
-
-func TestCheCreate_NoDevfile(t *testing.T) {
-	opts := testOpts()
-	opts.ProjectDir = t.TempDir() // Empty dir, no devfile.
-
-	b := &CheBackend{cheURL: "https://che.example.com", useChectl: true}
-	err := b.Create(opts)
-	if err == nil {
-		t.Fatal("expected error when devfile missing")
-	}
-	if !strings.Contains(err.Error(), "devfile.yaml not found") {
-		t.Errorf("expected devfile not found message, got: %s", err.Error())
-	}
-}
-
-func TestCheCreate_Unreachable(t *testing.T) {
-	opts := testOpts()
-	opts.LookPath = func(name string) (string, error) {
-		if name == "chectl" {
-			return "", fmt.Errorf("not found")
-		}
-		return "/usr/bin/" + name, nil
-	}
-
-	tmpDir := t.TempDir()
-	opts.ProjectDir = tmpDir
-	opts.ReadFile = func(path string) ([]byte, error) {
-		if strings.HasSuffix(path, "devfile.yaml") {
-			return []byte("schemaVersion: 2.0.0"), nil
-		}
-		return nil, fmt.Errorf("not found")
-	}
-	if err := writeTestFile(tmpDir+"/devfile.yaml", "schemaVersion: 2.0.0"); err != nil {
-		t.Fatal(err)
-	}
-
-	opts.HTTPDo = func(req *http.Request) (*http.Response, error) {
-		return nil, fmt.Errorf("connection refused")
-	}
-
-	b := &CheBackend{cheURL: "https://che.example.com", useChectl: false}
-	err := b.Create(opts)
-	if err == nil {
-		t.Fatal("expected error when Che unreachable")
-	}
-	if !strings.Contains(err.Error(), "cannot reach Che") {
-		t.Errorf("expected unreachable message, got: %s", err.Error())
-	}
-}
-
-func TestCheStart_WithChectl(t *testing.T) {
-	var commands []string
-	opts := testOpts()
-	opts.Detach = true
-	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
-		cmd := name + " " + strings.Join(args, " ")
-		commands = append(commands, cmd)
-		return []byte(""), nil
-	}
-
-	b := &CheBackend{cheURL: "https://che.example.com", useChectl: true}
-	err := b.Start(opts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	hasStart := false
-	for _, cmd := range commands {
-		if strings.Contains(cmd, "workspace:start") {
-			hasStart = true
-		}
-	}
-	if !hasStart {
-		t.Error("expected chectl workspace:start")
-	}
-}
-
-func TestCheStop_WithChectl(t *testing.T) {
-	var commands []string
-	opts := testOpts()
-	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
-		cmd := name + " " + strings.Join(args, " ")
-		commands = append(commands, cmd)
-		return []byte(""), nil
-	}
-
-	b := &CheBackend{cheURL: "https://che.example.com", useChectl: true}
-	err := b.Stop(opts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	hasStop := false
-	for _, cmd := range commands {
-		if strings.Contains(cmd, "workspace:stop") {
-			hasStop = true
-		}
-	}
-	if !hasStop {
-		t.Error("expected chectl workspace:stop")
-	}
-}
-
-func TestCheDestroy_WithChectl(t *testing.T) {
-	var commands []string
-	opts := testOpts()
-	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
-		cmd := name + " " + strings.Join(args, " ")
-		commands = append(commands, cmd)
-		return []byte(""), nil
-	}
-
-	b := &CheBackend{cheURL: "https://che.example.com", useChectl: true}
-	err := b.Destroy(opts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	hasDelete := false
-	hasYes := false
-	for _, cmd := range commands {
-		if strings.Contains(cmd, "workspace:delete") {
-			hasDelete = true
-		}
-		if strings.Contains(cmd, "--yes") {
-			hasYes = true
-		}
-	}
-	if !hasDelete {
-		t.Error("expected chectl workspace:delete")
-	}
-	if !hasYes {
-		t.Error("expected --yes flag on delete")
-	}
-}
-
-func TestCheStatus_Running(t *testing.T) {
-	cheJSON := `[{
-		"id": "ws-123",
-		"status": "RUNNING",
-		"config": {"name": "uf-test-project"},
-		"runtime": {
-			"machines": {
-				"dev": {
-					"servers": {
-						"opencode-4096": {"url": "https://uf-test-opencode.apps.che.example.com"},
-						"demo-web": {"url": "https://uf-test-demo.apps.che.example.com"}
-					}
-				}
-			}
-		}
-	}]`
-
-	opts := testOpts()
-	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
-		if name == "chectl" && len(args) > 0 && args[0] == "workspace:list" {
-			return []byte(cheJSON), nil
-		}
-		return []byte(""), nil
-	}
-
-	b := &CheBackend{cheURL: "https://che.example.com", useChectl: true}
-	ws, err := b.Status(opts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !ws.Exists {
-		t.Error("expected Exists=true")
-	}
-	if !ws.Running {
-		t.Error("expected Running=true")
-	}
-	if ws.ID != "ws-123" {
-		t.Errorf("expected workspace ID ws-123, got: %s", ws.ID)
-	}
-	if ws.ServerURL == "" {
-		t.Error("expected server URL to be set")
-	}
-	if len(ws.DemoEndpoints) == 0 {
-		t.Error("expected at least one demo endpoint")
-	}
-}
-
-func TestCheAttach_EndpointURL(t *testing.T) {
-	cheJSON := `[{
-		"id": "ws-123",
-		"status": "RUNNING",
-		"config": {"name": "uf-test-project"},
-		"runtime": {
-			"machines": {
-				"dev": {
-					"servers": {
-						"opencode-4096": {"url": "https://uf-test-opencode.apps.che.example.com"}
-					}
-				}
-			}
-		}
-	}]`
-
-	var attachURL string
-	opts := testOpts()
-	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
-		if name == "chectl" && len(args) > 0 && args[0] == "workspace:list" {
-			return []byte(cheJSON), nil
-		}
-		return []byte(""), nil
-	}
-	opts.ExecInteractive = func(name string, args ...string) error {
-		if name == "opencode" && len(args) > 1 {
-			attachURL = args[1]
-		}
-		return nil
-	}
-
-	b := &CheBackend{cheURL: "https://che.example.com", useChectl: true}
-	err := b.Attach(opts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(attachURL, "https://uf-test-opencode.apps.che.example.com") {
-		t.Errorf("expected Che endpoint URL, got: %s", attachURL)
-	}
-}
-
 // --- FormatWorkspaceStatus tests ---
 
 func TestFormatWorkspaceStatus_Podman(t *testing.T) {
@@ -2276,31 +1919,6 @@ func TestFormatWorkspaceStatus_Podman(t *testing.T) {
 	}
 	if !strings.Contains(out, "running") {
 		t.Errorf("expected running state, got: %s", out)
-	}
-}
-
-func TestFormatWorkspaceStatus_Che(t *testing.T) {
-	var buf bytes.Buffer
-	FormatWorkspaceStatus(&buf, WorkspaceStatus{
-		Exists:     true,
-		Running:    true,
-		Backend:    BackendChe,
-		Name:       "uf-myproject",
-		Mode:       ModePersistent,
-		ServerURL:  "https://uf-myproject-opencode.apps.che.example.com",
-		StartedAt:  "2026-04-13T10:00:00Z",
-		Persistent: true,
-	})
-
-	out := buf.String()
-	if !strings.Contains(out, "Sandbox Status") {
-		t.Errorf("expected status header, got: %s", out)
-	}
-	if !strings.Contains(out, "uf-myproject") {
-		t.Errorf("expected workspace name, got: %s", out)
-	}
-	if !strings.Contains(out, "persistent") {
-		t.Errorf("expected persistent label, got: %s", out)
 	}
 }
 
@@ -2566,9 +2184,8 @@ func TestCheckGitSync_Diverged(t *testing.T) {
 	}
 }
 
-func TestExtract_PersistentSuggestsGitPull(t *testing.T) {
+func TestExtract_PersistentWorkspaceEarlyReturn(t *testing.T) {
 	opts := testOpts()
-	opts.CheURL = "https://che.example.com"
 	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
 		if name == "podman" && len(args) > 0 && args[0] == "volume" {
 			return []byte("{}"), nil // volume exists → persistent
@@ -2580,8 +2197,12 @@ func TestExtract_PersistentSuggestsGitPull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(stdout(opts), "git pull") {
-		t.Errorf("expected git pull suggestion, got: %s", stdout(opts))
+	out := stdout(opts)
+	if !strings.Contains(out, "persistent workspace") {
+		t.Errorf("expected persistent workspace message, got: %s", out)
+	}
+	if !strings.Contains(out, "git push") {
+		t.Errorf("expected git push suggestion, got: %s", out)
 	}
 }
 
@@ -3337,6 +2958,82 @@ func TestBuildPersistentRunArgs_IncludesUserNS(t *testing.T) {
 	}
 }
 
+// --- buildPersistentRunArgs gateway tests (Task Group 3) ---
+
+func TestBuildPersistentRunArgs_GatewayActive(t *testing.T) {
+	opts := testOpts()
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.GatewayActive = true
+	opts.GatewayPort = GatewayDefaultPort
+	opts.Getenv = func(key string) string {
+		switch key {
+		case "ANTHROPIC_API_KEY":
+			return "sk-ant-xxx"
+		case "OPENAI_API_KEY":
+			return "sk-xxx"
+		}
+		return ""
+	}
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64"}
+	args := buildPersistentRunArgs(opts, platform, "uf-sandbox-test", "uf-vol-test")
+	joined := strings.Join(args, " ")
+
+	// Verify gateway env vars present.
+	if !strings.Contains(joined, "ANTHROPIC_BASE_URL=http://host.containers.internal:53147") {
+		t.Errorf("expected ANTHROPIC_BASE_URL, got: %s", joined)
+	}
+	if !strings.Contains(joined, "ANTHROPIC_API_KEY=gateway") {
+		t.Errorf("expected ANTHROPIC_API_KEY=gateway, got: %s", joined)
+	}
+
+	// Verify host's real ANTHROPIC_API_KEY is NOT forwarded
+	// (skipped by gatewaySkippedKeys).
+	count := strings.Count(joined, "ANTHROPIC_API_KEY")
+	if count != 1 {
+		t.Errorf("expected exactly 1 ANTHROPIC_API_KEY (gateway), got %d in: %s", count, joined)
+	}
+
+	// Verify non-proxied keys are still forwarded.
+	if !strings.Contains(joined, "-e OPENAI_API_KEY") {
+		t.Errorf("OPENAI_API_KEY should be forwarded, got: %s", joined)
+	}
+}
+
+func TestBuildPersistentRunArgs_GatewayInactive(t *testing.T) {
+	opts := testOpts()
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.GatewayActive = false
+	opts.GatewayPort = 0
+	opts.Getenv = func(key string) string {
+		if key == "ANTHROPIC_API_KEY" {
+			return "sk-ant-xxx"
+		}
+		return ""
+	}
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64"}
+	args := buildPersistentRunArgs(opts, platform, "uf-sandbox-test", "uf-vol-test")
+	joined := strings.Join(args, " ")
+
+	// Verify no gateway env vars.
+	if strings.Contains(joined, "ANTHROPIC_BASE_URL") {
+		t.Errorf("expected no ANTHROPIC_BASE_URL without gateway, got: %s", joined)
+	}
+	if strings.Contains(joined, "ANTHROPIC_API_KEY=gateway") {
+		t.Errorf("expected no ANTHROPIC_API_KEY=gateway without gateway, got: %s", joined)
+	}
+
+	// Verify ANTHROPIC_API_KEY IS forwarded from host.
+	if !strings.Contains(joined, "-e ANTHROPIC_API_KEY") {
+		t.Errorf("ANTHROPIC_API_KEY should be forwarded without gateway, got: %s", joined)
+	}
+}
+
 func TestBuildPersistentRunArgs_UIDMapOverride(t *testing.T) {
 	opts := testOpts()
 	opts.UIDMap = true
@@ -3718,6 +3415,860 @@ func TestPodmanCreate_ChownFailure(t *testing.T) {
 	}
 	if !volumeRmCalled {
 		t.Error("expected podman volume rm for partial cleanup")
+	}
+}
+
+// ============================================================
+// Gateway Wiring in Dispatch Functions (Task Group 2)
+// ============================================================
+
+func TestCreate_AutoStartsGateway(t *testing.T) {
+	gatewayStarted := false
+	opts := testOpts()
+	opts.Detach = true
+	opts.BackendName = BackendPodman
+	opts.Getenv = func(key string) string {
+		if key == "ANTHROPIC_API_KEY" {
+			return "sk-ant-test"
+		}
+		return ""
+	}
+
+	healthCallCount := 0
+	opts.HTTPGet = func(url string) (int, error) {
+		healthCallCount++
+		// Gateway health: first call fails, then succeeds.
+		if strings.Contains(url, "53147") {
+			if healthCallCount == 1 {
+				return 0, fmt.Errorf("connection refused")
+			}
+			return 200, nil
+		}
+		// OpenCode server health: always succeeds.
+		return 200, nil
+	}
+
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "uf" && len(args) > 0 && args[0] == "gateway" {
+			gatewayStarted = true
+			return []byte(""), nil
+		}
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				if len(args) > 1 && args[1] == "inspect" {
+					return nil, fmt.Errorf("no such volume")
+				}
+				return []byte(""), nil
+			case "run":
+				return []byte("container-id"), nil
+			case "cp":
+				return []byte(""), nil
+			case "inspect":
+				return nil, fmt.Errorf("no such container")
+			}
+		}
+		return []byte(""), nil
+	}
+
+	err := Create(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !gatewayStarted {
+		t.Error("expected gateway to be auto-started in Create()")
+	}
+
+	stderrOut := opts.Stderr.(*bytes.Buffer).String()
+	if !strings.Contains(stderrOut, "Gateway active") {
+		t.Errorf("expected 'Gateway active' in stderr, got: %s", stderrOut)
+	}
+}
+
+func TestStart_PersistentAutoStartsGateway(t *testing.T) {
+	gatewayStarted := false
+	opts := testOpts()
+	opts.Detach = true
+	opts.Getenv = func(key string) string {
+		if key == "ANTHROPIC_API_KEY" {
+			return "sk-ant-test"
+		}
+		return ""
+	}
+
+	healthCallCount := 0
+	opts.HTTPGet = func(url string) (int, error) {
+		healthCallCount++
+		if strings.Contains(url, "53147") {
+			if healthCallCount == 1 {
+				return 0, fmt.Errorf("connection refused")
+			}
+			return 200, nil
+		}
+		return 200, nil
+	}
+
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "uf" && len(args) > 0 && args[0] == "gateway" {
+			gatewayStarted = true
+			return []byte(""), nil
+		}
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				if len(args) > 1 && args[1] == "inspect" {
+					// Volume exists → persistent workspace.
+					return []byte("{}"), nil
+				}
+				return []byte(""), nil
+			case "inspect":
+				return []byte("{}"), nil // container exists
+			case "start":
+				return []byte(""), nil
+			}
+		}
+		return []byte(""), nil
+	}
+
+	err := Start(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !gatewayStarted {
+		t.Error("expected gateway to be auto-started for persistent Start()")
+	}
+
+	stderrOut := opts.Stderr.(*bytes.Buffer).String()
+	if !strings.Contains(stderrOut, "Gateway active") {
+		t.Errorf("expected 'Gateway active' in stderr, got: %s", stderrOut)
+	}
+}
+
+// ============================================================
+// DevPod Backend Tests (Task Group 4)
+// ============================================================
+
+func TestDevPodCreate_Success(t *testing.T) {
+	var capturedArgs []string
+	opts := testOpts()
+	opts.Detach = true
+	opts.LookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" {
+			if len(args) > 0 && args[0] == "version" {
+				return []byte("v0.5.18\n"), nil
+			}
+			if len(args) > 0 && args[0] == "up" {
+				capturedArgs = args
+				return []byte("workspace created"), nil
+			}
+		}
+		return []byte(""), nil
+	}
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{"image":"test"}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	b := &DevPodBackend{}
+	err := b.Create(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	joined := strings.Join(capturedArgs, " ")
+	if !strings.Contains(joined, "--provider podman") {
+		t.Errorf("expected --provider podman, got: %s", joined)
+	}
+	if !strings.Contains(joined, "--id uf-sandbox-test-project") {
+		t.Errorf("expected --id uf-sandbox-test-project, got: %s", joined)
+	}
+	if !strings.Contains(joined, "--ide none") {
+		t.Errorf("expected --ide none, got: %s", joined)
+	}
+}
+
+func TestDevPodCreate_NotInstalled(t *testing.T) {
+	opts := testOpts()
+	opts.LookPath = func(name string) (string, error) {
+		if name == "podman" {
+			return "", fmt.Errorf("not found")
+		}
+		return "/usr/bin/" + name, nil
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" && len(args) > 0 && args[0] == "version" {
+			return []byte("v0.5.18\n"), nil
+		}
+		return []byte(""), nil
+	}
+
+	b := &DevPodBackend{}
+	err := b.Create(opts)
+	if err == nil {
+		t.Fatal("expected error when podman not installed")
+	}
+	if !strings.Contains(err.Error(), "podman not found") {
+		t.Errorf("expected podman install hint, got: %s", err.Error())
+	}
+}
+
+func TestDevPodStop_Success(t *testing.T) {
+	stopCalled := false
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" && len(args) > 0 && args[0] == "stop" {
+			stopCalled = true
+			if args[1] != "uf-sandbox-test-project" {
+				t.Errorf("expected workspace name uf-sandbox-test-project, got: %s", args[1])
+			}
+			return []byte(""), nil
+		}
+		return []byte(""), nil
+	}
+
+	b := &DevPodBackend{}
+	err := b.Stop(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !stopCalled {
+		t.Error("expected devpod stop to be called")
+	}
+	if !strings.Contains(stdout(opts), "state preserved") {
+		t.Errorf("expected state preserved message, got: %s", stdout(opts))
+	}
+}
+
+func TestDevPodDestroy_Success(t *testing.T) {
+	var capturedArgs []string
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" && len(args) > 0 && args[0] == "delete" {
+			capturedArgs = args
+			return []byte(""), nil
+		}
+		return []byte(""), nil
+	}
+
+	b := &DevPodBackend{}
+	err := b.Destroy(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout(opts), "Sandbox destroyed") {
+		t.Errorf("expected destroyed message, got: %s", stdout(opts))
+	}
+
+	joined := strings.Join(capturedArgs, " ")
+	if !strings.Contains(joined, "uf-sandbox-test-project") {
+		t.Errorf("expected workspace name, got: %s", joined)
+	}
+	if !strings.Contains(joined, "--force") {
+		t.Errorf("expected --force flag, got: %s", joined)
+	}
+}
+
+func TestDevPodStatus_Running(t *testing.T) {
+	statusJSON := `{"id":"abc123","state":"Running","provider":"podman","ide":"none"}`
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" && len(args) > 0 && args[0] == "status" {
+			return []byte(statusJSON), nil
+		}
+		return []byte(""), nil
+	}
+
+	b := &DevPodBackend{}
+	ws, err := b.Status(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ws.Exists {
+		t.Error("expected Exists=true")
+	}
+	if !ws.Running {
+		t.Error("expected Running=true")
+	}
+	if ws.Backend != BackendDevPod {
+		t.Errorf("expected devpod backend, got: %s", ws.Backend)
+	}
+	if ws.Name != "uf-sandbox-test-project" {
+		t.Errorf("expected uf-sandbox-test-project, got: %s", ws.Name)
+	}
+	if ws.ID != "abc123" {
+		t.Errorf("expected abc123, got: %s", ws.ID)
+	}
+	if !ws.Persistent {
+		t.Error("expected Persistent=true")
+	}
+}
+
+func TestDevPodStatus_Stopped(t *testing.T) {
+	statusJSON := `{"id":"abc123","state":"Stopped","provider":"podman","ide":"none"}`
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" && len(args) > 0 && args[0] == "status" {
+			return []byte(statusJSON), nil
+		}
+		return []byte(""), nil
+	}
+
+	b := &DevPodBackend{}
+	ws, err := b.Status(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ws.Exists {
+		t.Error("expected Exists=true")
+	}
+	if ws.Running {
+		t.Error("expected Running=false for stopped workspace")
+	}
+}
+
+func TestDevPodCreate_GatewayEnvInjection(t *testing.T) {
+	var capturedArgs []string
+	opts := testOpts()
+	opts.Detach = true
+	opts.GatewayActive = true
+	opts.GatewayPort = GatewayDefaultPort
+	opts.LookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" {
+			if len(args) > 0 && args[0] == "version" {
+				return []byte("v0.5.18\n"), nil
+			}
+			if len(args) > 0 && args[0] == "up" {
+				capturedArgs = args
+				return []byte("workspace created"), nil
+			}
+		}
+		return []byte(""), nil
+	}
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{"image":"test"}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	b := &DevPodBackend{}
+	err := b.Create(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	joined := strings.Join(capturedArgs, " ")
+	if !strings.Contains(joined, "--workspace-env ANTHROPIC_BASE_URL=http://host.containers.internal:53147") {
+		t.Errorf("expected ANTHROPIC_BASE_URL via --workspace-env, got: %s", joined)
+	}
+	if !strings.Contains(joined, "--workspace-env ANTHROPIC_API_KEY=gateway") {
+		t.Errorf("expected ANTHROPIC_API_KEY=gateway via --workspace-env, got: %s", joined)
+	}
+}
+
+func TestResolveBackend_DevPod(t *testing.T) {
+	opts := testOpts()
+	opts.BackendName = BackendDevPod
+	opts.LookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+
+	backend, err := ResolveBackend(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if backend.Name() != BackendDevPod {
+		t.Errorf("expected devpod backend, got: %s", backend.Name())
+	}
+}
+
+func TestAutoDetect_PrefersDevPod(t *testing.T) {
+	opts := testOpts()
+	opts.LookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{"image":"test"}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	backend, err := autoDetectBackend(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if backend.Name() != BackendDevPod {
+		t.Errorf("expected devpod backend, got: %s", backend.Name())
+	}
+}
+
+func TestAutoDetect_FallsBackToPodman(t *testing.T) {
+	opts := testOpts()
+	opts.LookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+	// ReadFile returns error for devcontainer.json (not found).
+	opts.ReadFile = func(path string) ([]byte, error) {
+		return nil, fmt.Errorf("not found")
+	}
+
+	backend, err := autoDetectBackend(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if backend.Name() != BackendPodman {
+		t.Errorf("expected podman backend (fallback), got: %s", backend.Name())
+	}
+}
+
+func TestDevPodCreate_MissingDevcontainer(t *testing.T) {
+	opts := testOpts()
+	opts.LookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" && len(args) > 0 && args[0] == "version" {
+			return []byte("v0.5.18\n"), nil
+		}
+		return []byte(""), nil
+	}
+	// ReadFile returns error (no devcontainer.json).
+	opts.ReadFile = func(path string) ([]byte, error) {
+		return nil, fmt.Errorf("not found")
+	}
+
+	b := &DevPodBackend{}
+	err := b.Create(opts)
+	if err == nil {
+		t.Fatal("expected error when devcontainer.json missing")
+	}
+	if !strings.Contains(err.Error(), "devcontainer.json not found") {
+		t.Errorf("expected devcontainer.json error, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "uf sandbox init") {
+		t.Errorf("expected uf sandbox init hint, got: %s", err.Error())
+	}
+}
+
+func TestDevPodCreate_DevPodUpFails(t *testing.T) {
+	opts := testOpts()
+	opts.LookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" {
+			if len(args) > 0 && args[0] == "version" {
+				return []byte("v0.5.18\n"), nil
+			}
+			if len(args) > 0 && args[0] == "up" {
+				return []byte("provider error: podman crashed"), fmt.Errorf("exit 1")
+			}
+		}
+		return []byte(""), nil
+	}
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{"image":"test"}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	b := &DevPodBackend{}
+	err := b.Create(opts)
+	if err == nil {
+		t.Fatal("expected error when devpod up fails")
+	}
+	if !strings.Contains(err.Error(), "devpod up failed") {
+		t.Errorf("expected devpod up failed error, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "provider error") {
+		t.Errorf("expected devpod output in error, got: %s", err.Error())
+	}
+}
+
+func TestDevPodCreate_PodmanNotInstalled(t *testing.T) {
+	opts := testOpts()
+	opts.LookPath = func(name string) (string, error) {
+		if name == "podman" {
+			return "", fmt.Errorf("not found")
+		}
+		return "/usr/bin/" + name, nil
+	}
+
+	b := &DevPodBackend{}
+	err := b.Create(opts)
+	if err == nil {
+		t.Fatal("expected error when podman not installed")
+	}
+	if !strings.Contains(err.Error(), "podman not found") {
+		t.Errorf("expected podman not found error, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "DevPod requires Podman") {
+		t.Errorf("expected DevPod-specific hint, got: %s", err.Error())
+	}
+}
+
+func TestDevPodCreate_VersionTooOld(t *testing.T) {
+	opts := testOpts()
+	opts.LookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" && len(args) > 0 && args[0] == "version" {
+			return []byte("v0.4.9\n"), nil
+		}
+		return []byte(""), nil
+	}
+
+	b := &DevPodBackend{}
+	err := b.Create(opts)
+	if err == nil {
+		t.Fatal("expected error when DevPod version too old")
+	}
+	if !strings.Contains(err.Error(), "devpod >= 0.5.0 required") {
+		t.Errorf("expected version requirement error, got: %s", err.Error())
+	}
+}
+
+func TestDevPodAttach_Success(t *testing.T) {
+	var attachArgs []string
+	opts := testOpts()
+	opts.ExecInteractive = func(name string, args ...string) error {
+		attachArgs = append([]string{name}, args...)
+		return nil
+	}
+
+	b := &DevPodBackend{}
+	err := b.Attach(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(attachArgs) < 3 {
+		t.Fatalf("expected at least 3 args, got: %v", attachArgs)
+	}
+	if attachArgs[0] != "opencode" {
+		t.Errorf("expected opencode, got: %s", attachArgs[0])
+	}
+	if attachArgs[1] != "attach" {
+		t.Errorf("expected attach, got: %s", attachArgs[1])
+	}
+	if attachArgs[2] != "http://localhost:4096" {
+		t.Errorf("expected http://localhost:4096, got: %s", attachArgs[2])
+	}
+}
+
+func TestIsPersistentWorkspace_DevPod(t *testing.T) {
+	opts := testOpts()
+	opts.LookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		// Podman volume inspect fails (no Podman workspace).
+		if name == "podman" && len(args) > 0 && args[0] == "volume" {
+			return nil, fmt.Errorf("no such volume")
+		}
+		// DevPod status succeeds (workspace exists).
+		if name == "devpod" && len(args) > 0 && args[0] == "status" {
+			return []byte(`{"id":"abc","state":"Running"}`), nil
+		}
+		return []byte(""), nil
+	}
+
+	if !isPersistentWorkspace(opts) {
+		t.Error("expected isPersistentWorkspace=true for DevPod workspace")
+	}
+}
+
+func TestExtract_PersistentWorkspace(t *testing.T) {
+	// Test with Podman persistent workspace.
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 && args[0] == "volume" {
+			return []byte("{}"), nil // volume exists → persistent
+		}
+		return []byte(""), nil
+	}
+
+	err := Extract(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stdout(opts)
+	if !strings.Contains(out, "persistent workspace") {
+		t.Errorf("expected persistent workspace message, got: %s", out)
+	}
+
+	// Test with DevPod persistent workspace.
+	opts2 := testOpts()
+	opts2.LookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+	opts2.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 && args[0] == "volume" {
+			return nil, fmt.Errorf("no such volume")
+		}
+		if name == "devpod" && len(args) > 0 && args[0] == "status" {
+			return []byte(`{"id":"abc","state":"Running"}`), nil
+		}
+		return []byte(""), nil
+	}
+
+	err = Extract(opts2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out2 := stdout(opts2)
+	if !strings.Contains(out2, "persistent workspace") {
+		t.Errorf("expected persistent workspace message for DevPod, got: %s", out2)
+	}
+}
+
+func TestCreate_NoCloudProvider_SkipsGateway(t *testing.T) {
+	gatewayStarted := false
+	opts := testOpts()
+	opts.Detach = true
+	opts.BackendName = BackendPodman
+	// No provider env vars set (default testOpts).
+
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "uf" && len(args) > 0 && args[0] == "gateway" {
+			gatewayStarted = true
+			return []byte(""), nil
+		}
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				if len(args) > 1 && args[1] == "inspect" {
+					return nil, fmt.Errorf("no such volume")
+				}
+				return []byte(""), nil
+			case "run":
+				return []byte("container-id"), nil
+			case "cp":
+				return []byte(""), nil
+			case "inspect":
+				return nil, fmt.Errorf("no such container")
+			}
+		}
+		return []byte(""), nil
+	}
+
+	err := Create(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gatewayStarted {
+		t.Error("expected gateway NOT to be started when no cloud provider")
+	}
+
+	stderrOut := opts.Stderr.(*bytes.Buffer).String()
+	if strings.Contains(stderrOut, "Gateway active") {
+		t.Errorf("expected no 'Gateway active' in stderr, got: %s", stderrOut)
+	}
+}
+
+// --- InitDevcontainer tests ---
+
+// testDevcontainerTemplate returns a minimal devcontainer.json
+// template for testing. Mirrors the embedded asset structure.
+func testDevcontainerTemplate() []byte {
+	return []byte(`{
+  "_comment": "ANTHROPIC_API_KEY=gateway is a sentinel value.",
+  "image": "quay.io/unbound-force/opencode-dev:latest",
+  "forwardPorts": [4096],
+  "containerEnv": {
+    "ANTHROPIC_BASE_URL": "http://host.containers.internal:53147",
+    "ANTHROPIC_API_KEY": "gateway"
+  },
+  "remoteUser": "dev"
+}
+`)
+}
+
+func TestRunSandboxInit_Creates(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	err := InitDevcontainer(InitDevcontainerOptions{
+		ProjectDir:      dir,
+		Stdout:          &buf,
+		TemplateContent: testDevcontainerTemplate(),
+	})
+	if err != nil {
+		t.Fatalf("InitDevcontainer error: %v", err)
+	}
+
+	// Verify file was created.
+	outPath := filepath.Join(dir, ".devcontainer", "devcontainer.json")
+	data, readErr := os.ReadFile(outPath)
+	if readErr != nil {
+		t.Fatalf("read devcontainer.json: %v", readErr)
+	}
+
+	// Parse and verify fields.
+	var parsed map[string]interface{}
+	if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
+		t.Fatalf("parse devcontainer.json: %v", jsonErr)
+	}
+
+	if img, ok := parsed["image"].(string); !ok || img != "quay.io/unbound-force/opencode-dev:latest" {
+		t.Errorf("image = %v, want quay.io/unbound-force/opencode-dev:latest", parsed["image"])
+	}
+
+	ports, ok := parsed["forwardPorts"].([]interface{})
+	if !ok || len(ports) != 1 {
+		t.Errorf("forwardPorts = %v, want [4096]", parsed["forwardPorts"])
+	} else if ports[0].(float64) != 4096 {
+		t.Errorf("forwardPorts[0] = %v, want 4096", ports[0])
+	}
+
+	env, ok := parsed["containerEnv"].(map[string]interface{})
+	if !ok {
+		t.Fatal("containerEnv not a map")
+	}
+	if env["ANTHROPIC_API_KEY"] != "gateway" {
+		t.Errorf("ANTHROPIC_API_KEY = %v, want gateway", env["ANTHROPIC_API_KEY"])
+	}
+	if env["ANTHROPIC_BASE_URL"] != "http://host.containers.internal:53147" {
+		t.Errorf("ANTHROPIC_BASE_URL = %v, want gateway URL", env["ANTHROPIC_BASE_URL"])
+	}
+
+	if parsed["remoteUser"] != "dev" {
+		t.Errorf("remoteUser = %v, want dev", parsed["remoteUser"])
+	}
+
+	// Verify _comment key is present (sentinel explanation).
+	if _, hasComment := parsed["_comment"]; !hasComment {
+		t.Error("expected _comment key explaining sentinel value")
+	}
+
+	// Verify output message.
+	if !strings.Contains(buf.String(), "Created") {
+		t.Errorf("expected 'Created' in output, got: %s", buf.String())
+	}
+}
+
+func TestRunSandboxInit_ExistingSkips(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create existing devcontainer.json.
+	dcDir := filepath.Join(dir, ".devcontainer")
+	if err := os.MkdirAll(dcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := []byte(`{"image":"custom"}`)
+	if err := os.WriteFile(filepath.Join(dcDir, "devcontainer.json"), existing, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err := InitDevcontainer(InitDevcontainerOptions{
+		ProjectDir:      dir,
+		Stdout:          &buf,
+		TemplateContent: testDevcontainerTemplate(),
+	})
+	if err != nil {
+		t.Fatalf("InitDevcontainer error: %v", err)
+	}
+
+	// Verify file was NOT overwritten.
+	data, _ := os.ReadFile(filepath.Join(dcDir, "devcontainer.json"))
+	if string(data) != string(existing) {
+		t.Error("existing devcontainer.json should not be overwritten without --force")
+	}
+
+	// Verify skip message.
+	if !strings.Contains(buf.String(), "already exists") {
+		t.Errorf("expected 'already exists' in output, got: %s", buf.String())
+	}
+}
+
+func TestRunSandboxInit_ForceOverwrites(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create existing devcontainer.json.
+	dcDir := filepath.Join(dir, ".devcontainer")
+	if err := os.MkdirAll(dcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dcDir, "devcontainer.json"), []byte(`{"image":"old"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err := InitDevcontainer(InitDevcontainerOptions{
+		ProjectDir:      dir,
+		Force:           true,
+		Stdout:          &buf,
+		TemplateContent: testDevcontainerTemplate(),
+	})
+	if err != nil {
+		t.Fatalf("InitDevcontainer error: %v", err)
+	}
+
+	// Verify file was overwritten with template content.
+	data, _ := os.ReadFile(filepath.Join(dcDir, "devcontainer.json"))
+	var parsed map[string]interface{}
+	if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
+		t.Fatalf("parse overwritten devcontainer.json: %v", jsonErr)
+	}
+	if parsed["image"] != "quay.io/unbound-force/opencode-dev:latest" {
+		t.Errorf("image = %v, want template default", parsed["image"])
+	}
+
+	// Verify overwrite message.
+	if !strings.Contains(buf.String(), "Overwritten") {
+		t.Errorf("expected 'Overwritten' in output, got: %s", buf.String())
+	}
+}
+
+func TestRunSandboxInit_CustomDemoPorts(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	err := InitDevcontainer(InitDevcontainerOptions{
+		ProjectDir:      dir,
+		DemoPorts:       []int{3000, 8080},
+		Stdout:          &buf,
+		TemplateContent: testDevcontainerTemplate(),
+	})
+	if err != nil {
+		t.Fatalf("InitDevcontainer error: %v", err)
+	}
+
+	// Verify forwardPorts includes default 4096 + custom ports.
+	data, _ := os.ReadFile(filepath.Join(dir, ".devcontainer", "devcontainer.json"))
+	var parsed map[string]interface{}
+	if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
+		t.Fatalf("parse devcontainer.json: %v", jsonErr)
+	}
+
+	ports, ok := parsed["forwardPorts"].([]interface{})
+	if !ok {
+		t.Fatal("forwardPorts not an array")
+	}
+	if len(ports) != 3 {
+		t.Fatalf("expected 3 ports (4096 + 3000 + 8080), got %d: %v", len(ports), ports)
+	}
+
+	// Verify all ports are present.
+	portSet := make(map[float64]bool)
+	for _, p := range ports {
+		portSet[p.(float64)] = true
+	}
+	for _, expected := range []float64{4096, 3000, 8080} {
+		if !portSet[expected] {
+			t.Errorf("expected port %v in forwardPorts, got: %v", expected, ports)
+		}
 	}
 }
 

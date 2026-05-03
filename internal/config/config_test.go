@@ -138,7 +138,6 @@ func TestMerge_DeepFields(t *testing.T) {
 	overlay := Config{
 		Sandbox: SandboxConfig{
 			Resources: ResourcesConfig{Memory: "16g"},
-			Che:       CheConfig{URL: "https://che.example.com"},
 		},
 	}
 	result := merge(base, overlay)
@@ -147,9 +146,6 @@ func TestMerge_DeepFields(t *testing.T) {
 	}
 	if result.Sandbox.Resources.CPUs != "4" {
 		t.Errorf("Resources.CPUs = %q, want %q (preserved from base)", result.Sandbox.Resources.CPUs, "4")
-	}
-	if result.Sandbox.Che.URL != "https://che.example.com" {
-		t.Errorf("Che.URL = %q, want %q", result.Sandbox.Che.URL, "https://che.example.com")
 	}
 }
 
@@ -184,10 +180,8 @@ func TestApplyEnvOverrides_StringFields(t *testing.T) {
 		"OLLAMA_MODEL":        "mxbai-embed-large",
 		"OLLAMA_HOST":         "http://remote:11434",
 		"UF_SANDBOX_IMAGE":    "custom:v2",
-		"UF_SANDBOX_BACKEND":  "che",
+		"UF_SANDBOX_BACKEND":  "podman",
 		"UF_SANDBOX_RUNTIME":  "docker",
-		"UF_CHE_URL":          "https://che.example.com",
-		"UF_CHE_TOKEN":        "tok123",
 		"UF_GATEWAY_PROVIDER": "vertex",
 	}
 	result := applyEnvOverrides(cfg, func(k string) string { return env[k] })
@@ -199,10 +193,8 @@ func TestApplyEnvOverrides_StringFields(t *testing.T) {
 		{"Embedding.Model", result.Embedding.Model, "mxbai-embed-large"},
 		{"Embedding.Host", result.Embedding.Host, "http://remote:11434"},
 		{"Sandbox.Image", result.Sandbox.Image, "custom:v2"},
-		{"Sandbox.Backend", result.Sandbox.Backend, "che"},
+		{"Sandbox.Backend", result.Sandbox.Backend, "podman"},
 		{"Sandbox.Runtime", result.Sandbox.Runtime, "docker"},
-		{"Sandbox.Che.URL", result.Sandbox.Che.URL, "https://che.example.com"},
-		{"Sandbox.Che.Token", result.Sandbox.Che.Token, "tok123"},
 		{"Gateway.Provider", result.Gateway.Provider, "vertex"},
 	}
 	for _, c := range checks {
@@ -526,9 +518,9 @@ func TestSandboxConfig_IsEmpty(t *testing.T) {
 	}
 
 	custom := Defaults().Sandbox
-	custom.Che.URL = "https://che.example.com"
+	custom.DemoPorts = []int{3000}
 	if custom.IsEmpty() {
-		t.Error("sandbox config with Che URL should not be empty")
+		t.Error("sandbox config with DemoPorts should not be empty")
 	}
 }
 

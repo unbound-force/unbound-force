@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/unbound-force/unbound-force/internal/config"
 	"github.com/unbound-force/unbound-force/internal/sandbox"
+	"github.com/unbound-force/unbound-force/internal/scaffold"
 )
 
 // newSandboxCmd returns the `uf sandbox` parent command with
@@ -19,10 +20,11 @@ func newSandboxCmd() *cobra.Command {
 		Use:   "sandbox",
 		Short: "Manage containerized OpenCode sessions",
 		Long: `Launch, manage, and extract changes from containerized
-OpenCode development sessions. Supports Podman (local) and
-Eclipse Che / Dev Spaces (CDE) backends.
+OpenCode development sessions. Supports Podman (local)
+and DevPod backends.
 
 Subcommands:
+  init     Scaffold .devcontainer/devcontainer.json
   create   Provision a persistent sandbox workspace
   destroy  Permanently delete a sandbox workspace
   start    Launch or resume a sandbox
@@ -33,6 +35,7 @@ Subcommands:
 	}
 
 	cmd.AddCommand(
+		newSandboxInitCmd(),
 		newSandboxCreateCmd(),
 		newSandboxDestroyCmd(),
 		newSandboxStartCmd(),
@@ -84,6 +87,76 @@ func applySandboxConfig(opts *sandbox.Options, stderr io.Writer) {
 	}
 }
 
+// --- init ---
+
+type sandboxInitParams struct {
+	projectDir string
+	image      string
+	demoPorts  []int
+	force      bool
+	stdout     io.Writer
+}
+
+func runSandboxInit(p sandboxInitParams) error {
+	tmpl, err := scaffold.DevcontainerContent()
+	if err != nil {
+		return fmt.Errorf("read devcontainer template: %w", err)
+	}
+
+	return sandbox.InitDevcontainer(sandbox.InitDevcontainerOptions{
+		ProjectDir:      p.projectDir,
+		Image:           p.image,
+		DemoPorts:       p.demoPorts,
+		Force:           p.force,
+		Stdout:          p.stdout,
+		TemplateContent: tmpl,
+	})
+}
+
+func newSandboxInitCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "Scaffold .devcontainer/devcontainer.json",
+		Long: `Create a .devcontainer/devcontainer.json configuration
+for use with DevPod or other devcontainer-compatible tools.
+
+The template includes the OpenCode dev image, gateway proxy
+environment variables, and port forwarding for the OpenCode
+server.
+
+Use --image to override the default container image.
+Use --demo-ports to expose additional ports for demos.
+Use --force to overwrite an existing devcontainer.json.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			image, _ := cmd.Flags().GetString("image")
+			demoPorts, _ := cmd.Flags().GetIntSlice("demo-ports")
+			force, _ := cmd.Flags().GetBool("force")
+
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("get working directory: %w", err)
+			}
+
+			return runSandboxInit(sandboxInitParams{
+				projectDir: cwd,
+				image:      image,
+				demoPorts:  demoPorts,
+				force:      force,
+				stdout:     cmd.OutOrStdout(),
+			})
+		},
+	}
+
+	cmd.Flags().String("image", "",
+		"Container image (default \"quay.io/unbound-force/opencode-dev:latest\")")
+	cmd.Flags().IntSlice("demo-ports", nil,
+		"Additional ports to forward (comma-separated, e.g., 3000,8080)")
+	cmd.Flags().Bool("force", false,
+		"Overwrite existing .devcontainer/devcontainer.json")
+
+	return cmd
+}
+
 // --- create ---
 
 type sandboxCreateParams struct {
@@ -123,8 +196,7 @@ func newSandboxCreateCmd() *cobra.Command {
 		Use:   "create",
 		Short: "Provision a persistent sandbox workspace",
 		Long: `Provision a persistent sandbox workspace for the current
-project. Uses Eclipse Che/Dev Spaces when configured,
-Podman with named volumes otherwise.
+project using Podman (named volumes) or DevPod.
 
 The workspace persists across stop/start cycles. Use
 'uf sandbox destroy' to permanently remove it.`,
@@ -160,9 +232,9 @@ The workspace persists across stop/start cycles. Use
 	}
 
 	cmd.Flags().String("backend", "auto",
-		"Backend: auto, podman, or che")
+		"Backend: auto, podman, or devpod")
 	cmd.Flags().String("image", "",
-		"Container image (Podman only; default from UF_SANDBOX_IMAGE or quay.io/unbound-force/opencode-dev:latest)")
+		"Container image (default from UF_SANDBOX_IMAGE or quay.io/unbound-force/opencode-dev:latest)")
 	cmd.Flags().String("memory", "",
 		"Memory limit (default \"8g\")")
 	cmd.Flags().String("cpus", "",
@@ -221,7 +293,7 @@ func newSandboxDestroyCmd() *cobra.Command {
 		Use:   "destroy",
 		Short: "Permanently delete a sandbox workspace",
 		Long: `Permanently delete the sandbox workspace and all
-associated state (named volumes, CDE workspace).
+associated state (named volumes or DevPod workspace).
 
 Use --yes to skip the confirmation prompt.
 Use --force to destroy even if the workspace is running.`,
@@ -340,7 +412,7 @@ directly to the host filesystem).`,
 	cmd.Flags().String("cpus", "",
 		"Container CPU limit (default \"4\")")
 	cmd.Flags().String("backend", "auto",
-		"Backend: auto, podman, or che")
+		"Backend: auto, podman, or devpod")
 	cmd.Flags().Bool("no-parent", false,
 		"Mount only the project directory (disable parent directory mount)")
 	cmd.Flags().Bool("uidmap", false,

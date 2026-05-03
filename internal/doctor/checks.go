@@ -1132,6 +1132,78 @@ func checkDewey(opts *Options) CheckGroup {
 	return group
 }
 
+// isDevPodDetected returns true when DevPod is relevant to the
+// project: either `devpod` is in PATH or the sandbox backend is
+// configured as "devpod" in .uf/config.yaml. Used to gate the
+// DevPod doctor check group per design D8.
+func isDevPodDetected(opts *Options) bool {
+	if _, err := opts.LookPath("devpod"); err == nil {
+		return true
+	}
+	// Check config backend.
+	configPath := filepath.Join(opts.TargetDir, ".uf", "config.yaml")
+	data, err := opts.ReadFile(configPath)
+	if err != nil {
+		return false
+	}
+	// Simple string check — avoids YAML parsing dependency
+	// for a single field. Matches "backend: devpod" or
+	// "backend: \"devpod\"" in the sandbox section.
+	return strings.Contains(string(data), "backend: devpod") ||
+		strings.Contains(string(data), "backend: \"devpod\"")
+}
+
+// checkDevPod checks DevPod-related components: binary presence
+// and devcontainer configuration. The group is only included
+// when DevPod is detected (isDevPodDetected), keeping output
+// clean for Podman-only users per design D8.
+func checkDevPod(opts *Options) *CheckGroup {
+	if !isDevPodDetected(opts) {
+		return nil
+	}
+
+	group := &CheckGroup{
+		Name:    "DevPod",
+		Results: []CheckResult{},
+	}
+
+	// Check 1: devpod binary presence.
+	if _, err := opts.LookPath("devpod"); err != nil {
+		group.Results = append(group.Results, CheckResult{
+			Name:        "devpod",
+			Severity:    Warn,
+			Message:     "not found",
+			InstallHint: "Install DevPod: https://devpod.sh/docs/getting-started/install",
+		})
+	} else {
+		group.Results = append(group.Results, CheckResult{
+			Name:     "devpod",
+			Severity: Pass,
+			Message:  "installed",
+		})
+	}
+
+	// Check 2: .devcontainer/devcontainer.json existence.
+	dcPath := filepath.Join(opts.TargetDir,
+		".devcontainer", "devcontainer.json")
+	if _, err := os.Stat(dcPath); err == nil {
+		group.Results = append(group.Results, CheckResult{
+			Name:     "devcontainer config",
+			Severity: Pass,
+			Message:  ".devcontainer/devcontainer.json found",
+		})
+	} else {
+		group.Results = append(group.Results, CheckResult{
+			Name:        "devcontainer config",
+			Severity:    Warn,
+			Message:     ".devcontainer/devcontainer.json not found",
+			InstallHint: "Run: uf sandbox init",
+		})
+	}
+
+	return group
+}
+
 // parseFrontmatter extracts YAML frontmatter from a Markdown file.
 // Per research.md R6: split on --- delimiters, unmarshal with yaml.v3.
 func parseFrontmatter(data []byte) (map[string]interface{}, error) {
