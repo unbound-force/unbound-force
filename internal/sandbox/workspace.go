@@ -22,7 +22,7 @@ type WorkspaceStatus struct {
 	// Running is true when the workspace is active.
 	Running bool
 
-	// Backend is the backend type ("podman" or "che").
+	// Backend is the backend type (e.g., "podman").
 	Backend string
 
 	// Name is the workspace name
@@ -30,22 +30,22 @@ type WorkspaceStatus struct {
 	Name string
 
 	// ID is the workspace identifier (container ID for
-	// Podman, workspace ID for Che). Short form.
+	// Podman, workspace ID for DevPod). Short form.
 	ID string
 
-	// Image is the container image or devfile used.
+	// Image is the container image used.
 	Image string
 
-	// Mode is the workspace mode. For Podman: "isolated"
-	// or "direct". For CDE: always "persistent".
+	// Mode is the workspace mode: "isolated", "direct",
+	// or "persistent".
 	Mode string
 
 	// ProjectDir is the source project directory (host
-	// path for Podman, repo URL for CDE).
+	// path).
 	ProjectDir string
 
-	// ServerURL is the OpenCode server URL. For Podman:
-	// http://localhost:4096. For CDE: the Che endpoint URL.
+	// ServerURL is the OpenCode server URL (e.g.,
+	// http://localhost:4096).
 	ServerURL string
 
 	// DemoEndpoints lists exposed demo port URLs.
@@ -59,7 +59,7 @@ type WorkspaceStatus struct {
 	ExitCode int
 
 	// Persistent is true when the workspace uses named
-	// volumes or CDE storage (survives stop/start).
+	// volumes (survives stop/start).
 	Persistent bool
 }
 
@@ -73,8 +73,8 @@ type DemoEndpoint struct {
 	// Port is the container-internal port number.
 	Port int
 
-	// URL is the externally accessible URL. For Podman:
-	// http://localhost:<port>. For CDE: the Che route URL.
+	// URL is the externally accessible URL (e.g.,
+	// http://localhost:<port>).
 	URL string
 
 	// Protocol is "http" or "https".
@@ -83,40 +83,24 @@ type DemoEndpoint struct {
 
 // SandboxConfig is the persistent sandbox configuration
 // loaded from `.uf/sandbox.yaml`. Provides defaults for
-// CDE URL, Ollama endpoint, backend selection, and demo
-// port mappings.
+// Ollama endpoint, backend selection, and demo port
+// mappings.
 type SandboxConfig struct {
-	// Che contains CDE backend configuration.
-	Che CheConfig `yaml:"che"`
-
 	// Ollama contains Ollama endpoint configuration.
 	Ollama OllamaConfig `yaml:"ollama"`
 
-	// Backend is the default backend: "auto", "podman",
-	// or "che". Default: "auto".
+	// Backend is the default backend: "auto" or "podman".
+	// Default: "auto".
 	Backend string `yaml:"backend"`
 
-	// DemoPorts lists port numbers to expose for demos
-	// (Podman only; CDE uses devfile endpoints).
+	// DemoPorts lists port numbers to expose for demos.
 	DemoPorts []int `yaml:"demo_ports"`
-}
-
-// CheConfig contains Eclipse Che connection settings.
-type CheConfig struct {
-	// URL is the Che/Dev Spaces instance URL.
-	// Can also be set via UF_CHE_URL env var.
-	URL string `yaml:"url"`
-
-	// Token is the authentication token for REST API.
-	// Can also be set via UF_CHE_TOKEN env var.
-	// Only needed when chectl is not available.
-	Token string `yaml:"token"`
 }
 
 // OllamaConfig contains Ollama endpoint settings.
 type OllamaConfig struct {
 	// Host is the Ollama endpoint URL. Overrides the
-	// default host.containers.internal:11434 for CDE
+	// default host.containers.internal:11434 for
 	// deployments where that hostname doesn't resolve.
 	Host string `yaml:"host"`
 }
@@ -167,7 +151,6 @@ func volumeNameForProject(dir string) string {
 // Returns a zero-value SandboxConfig with defaults if the
 // file does not exist. Environment variables override
 // config file values.
-//
 func LoadConfig(opts Options) (SandboxConfig, error) {
 	configPath := opts.ConfigPath
 	if configPath == "" {
@@ -184,12 +167,6 @@ func LoadConfig(opts Options) (SandboxConfig, error) {
 	}
 
 	// Environment variable overrides.
-	if envURL := opts.Getenv("UF_CHE_URL"); envURL != "" {
-		cfg.Che.URL = envURL
-	}
-	if envToken := opts.Getenv("UF_CHE_TOKEN"); envToken != "" {
-		cfg.Che.Token = envToken
-	}
 	if envOllama := opts.Getenv("UF_OLLAMA_HOST"); envOllama != "" {
 		cfg.Ollama.Host = envOllama
 	}
@@ -244,9 +221,8 @@ func FormatWorkspaceStatus(w io.Writer, ws WorkspaceStatus) {
 }
 
 // setupGitSync configures the workspace's git remote
-// and branch for bidirectional sync. For Podman, this
-// runs git commands inside the container. For CDE, Che
-// handles git clone from the devfile projects section.
+// and branch for bidirectional sync. Runs git commands
+// inside the container.
 func setupGitSync(opts Options) error {
 	name := containerNameForProject(opts.ProjectDir)
 

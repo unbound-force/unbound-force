@@ -1,0 +1,10 @@
+{
+  "_comment": "ANTHROPIC_API_KEY=gateway is a sentinel value indicating the uf gateway proxy handles authentication. When the gateway is not running, OpenCode uses its own configured provider.",
+  "image": "quay.io/unbound-force/opencode-dev:latest",
+  "forwardPorts": [4096],
+  "containerEnv": {
+    "ANTHROPIC_BASE_URL": "http://host.containers.internal:53147",
+    "ANTHROPIC_API_KEY": "gateway"
+  },
+  "remoteUser": "dev"
+}

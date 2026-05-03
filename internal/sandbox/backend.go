@@ -1,6 +1,9 @@
 package sandbox
 
-import "fmt"
+import (
+	"fmt"
+	"path/filepath"
+)
 
 // Backend constants for workspace provisioning.
 const (
@@ -10,11 +13,11 @@ const (
 	// BackendPodman selects the Podman backend.
 	BackendPodman = "podman"
 
-	// BackendChe selects the Eclipse Che backend.
-	BackendChe = "che"
+	// BackendDevPod selects the DevPod backend.
+	BackendDevPod = "devpod"
 
 	// ModePersistent is the mode for persistent workspaces
-	// (named volumes or CDE storage).
+	// (named volumes or DevPod storage).
 	ModePersistent = "persistent"
 
 	// DefaultConfigPath is the default sandbox config file
@@ -61,8 +64,7 @@ type Backend interface {
 	// OpenCode server.
 	Attach(opts Options) error
 
-	// Name returns the backend identifier ("podman" or
-	// "che").
+	// Name returns the backend identifier (e.g., "podman").
 	Name() string
 }
 
@@ -74,8 +76,7 @@ type Backend interface {
 //  1. --backend flag (explicit selection)
 //  2. UF_SANDBOX_BACKEND env var
 //  3. .uf/sandbox.yaml backend field
-//  4. Auto-detect: CDE if chectl/UF_CHE_URL available,
-//     Podman otherwise
+//  4. Auto-detect: Podman (default)
 func ResolveBackend(opts Options) (Backend, error) {
 	opts.defaults()
 
@@ -101,54 +102,38 @@ func ResolveBackend(opts Options) (Backend, error) {
 		}
 		return &PodmanBackend{}, nil
 
-	case BackendChe:
-		cheURL := resolveCheURL(opts)
-		hasChectl := false
-		if _, err := opts.LookPath("chectl"); err == nil {
-			hasChectl = true
-		}
-		if cheURL == "" && !hasChectl {
+	case BackendDevPod:
+		if _, err := opts.LookPath("devpod"); err != nil {
 			return nil, fmt.Errorf(
-				"CDE backend requested but not configured, set UF_CHE_URL or install chectl")
+				"devpod not found, install: https://devpod.sh/docs/getting-started/install")
 		}
-		return &CheBackend{cheURL: cheURL, useChectl: hasChectl}, nil
+		return &DevPodBackend{}, nil
+
+	case "che":
+		// Migration error: Che backend was removed in favor of DevPod.
+		return nil, fmt.Errorf(
+			"che backend removed, use --backend devpod instead. Install DevPod: https://devpod.sh/docs/getting-started/install")
 
 	case BackendAuto:
 		return autoDetectBackend(opts)
 
 	default:
 		return nil, fmt.Errorf(
-			"unknown backend: %s, use 'auto', 'podman', or 'che'", backendName)
+			"unknown backend: %s, use 'auto', 'podman', or 'devpod'", backendName)
 	}
 }
 
 // autoDetectBackend selects the best available backend.
-// CDE is preferred when chectl or UF_CHE_URL is available;
-// otherwise Podman is selected.
+// Prefers DevPod when devpod is in PATH AND
+// .devcontainer/devcontainer.json exists in the project
+// directory. Falls back to Podman otherwise.
 func autoDetectBackend(opts Options) (Backend, error) {
-	cheURL := resolveCheURL(opts)
-	hasChectl := false
-	if _, err := opts.LookPath("chectl"); err == nil {
-		hasChectl = true
+	if _, err := opts.LookPath("devpod"); err == nil {
+		dcPath := filepath.Join(opts.ProjectDir,
+			".devcontainer", "devcontainer.json")
+		if _, readErr := opts.ReadFile(dcPath); readErr == nil {
+			return &DevPodBackend{}, nil
+		}
 	}
-
-	// Prefer CDE when available.
-	if cheURL != "" || hasChectl {
-		return &CheBackend{cheURL: cheURL, useChectl: hasChectl}, nil
-	}
-
-	// Fall back to Podman.
 	return &PodmanBackend{}, nil
-}
-
-// resolveCheURL returns the Che server URL from flag > env > config.
-func resolveCheURL(opts Options) string {
-	if opts.CheURL != "" {
-		return opts.CheURL
-	}
-	if envURL := opts.Getenv("UF_CHE_URL"); envURL != "" {
-		return envURL
-	}
-	cfg, _ := LoadConfig(opts)
-	return cfg.Che.URL
 }

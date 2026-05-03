@@ -66,7 +66,6 @@ type SandboxConfig struct {
 	Image     string          `yaml:"image"      json:"image"`
 	Resources ResourcesConfig `yaml:"resources"  json:"resources"`
 	Mode      string          `yaml:"mode"       json:"mode"`
-	Che       CheConfig       `yaml:"che"        json:"che"`
 	DemoPorts []int           `yaml:"demo_ports" json:"demo_ports"`
 	UIDMap    bool            `yaml:"uid_map"    json:"uid_map"`
 }
@@ -75,12 +74,6 @@ type SandboxConfig struct {
 type ResourcesConfig struct {
 	Memory string `yaml:"memory" json:"memory"`
 	CPUs   string `yaml:"cpus"   json:"cpus"`
-}
-
-// CheConfig defines Eclipse Che / Dev Spaces settings.
-type CheConfig struct {
-	URL   string `yaml:"url"   json:"url"`
-	Token string `yaml:"token" json:"token"`
 }
 
 // GatewayConfig controls `uf gateway` behavior.
@@ -239,12 +232,6 @@ func merge(base, overlay Config) Config {
 	if overlay.Sandbox.Mode != "" {
 		result.Sandbox.Mode = overlay.Sandbox.Mode
 	}
-	if overlay.Sandbox.Che.URL != "" {
-		result.Sandbox.Che.URL = overlay.Sandbox.Che.URL
-	}
-	if overlay.Sandbox.Che.Token != "" {
-		result.Sandbox.Che.Token = overlay.Sandbox.Che.Token
-	}
 	if overlay.Sandbox.DemoPorts != nil {
 		result.Sandbox.DemoPorts = overlay.Sandbox.DemoPorts
 	}
@@ -319,12 +306,6 @@ func applyEnvOverrides(cfg Config, getenv func(string) string) Config {
 	if v := getenv("UF_SANDBOX_UIDMAP"); v == "1" || v == "true" {
 		cfg.Sandbox.UIDMap = true
 	}
-	if v := getenv("UF_CHE_URL"); v != "" {
-		cfg.Sandbox.Che.URL = v
-	}
-	if v := getenv("UF_CHE_TOKEN"); v != "" {
-		cfg.Sandbox.Che.Token = v
-	}
 	if v := getenv("UF_GATEWAY_PORT"); v != "" {
 		if port, err := strconv.Atoi(v); err == nil {
 			cfg.Gateway.Port = port
@@ -392,8 +373,6 @@ func (s SandboxConfig) IsEmpty() bool {
 		s.Resources.Memory == d.Resources.Memory &&
 		s.Resources.CPUs == d.Resources.CPUs &&
 		s.Mode == d.Mode &&
-		s.Che.URL == "" &&
-		s.Che.Token == "" &&
 		s.DemoPorts == nil
 }
 

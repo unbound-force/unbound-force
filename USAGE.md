@@ -128,6 +128,24 @@ generate tests for the weakest spots:
 /gaze-fix
 ```
 
+### Persistent CDE with DevPod
+
+Set up a persistent development environment using
+DevPod and the devcontainer spec:
+
+```bash
+uf sandbox init                          # scaffold devcontainer.json
+uf sandbox create --backend devpod       # create workspace
+uf sandbox start                         # resume workspace
+uf sandbox stop                          # pause workspace
+uf sandbox destroy                       # remove workspace
+```
+
+DevPod workspaces persist across sessions and run
+directly in Podman -- no Kubernetes required. The
+gateway proxy auto-starts when a cloud LLM provider
+is detected, injecting credentials into the workspace.
+
 ## When to Use What
 
 | Situation | Workflow | Start with |

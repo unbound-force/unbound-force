@@ -12,7 +12,7 @@ func Template() string {
 # CLI flags and environment variables override these settings.
 # Env var overrides: UF_PACKAGE_MANAGER, OLLAMA_MODEL, OLLAMA_HOST,
 #   UF_SANDBOX_IMAGE, UF_SANDBOX_BACKEND, UF_SANDBOX_RUNTIME,
-#   UF_CHE_URL, UF_CHE_TOKEN, UF_GATEWAY_PORT, UF_GATEWAY_PROVIDER
+#   UF_GATEWAY_PORT, UF_GATEWAY_PROVIDER
 
 # ─── Setup Preferences ───────────────────────────────────────
 # Controls how ` + "`uf setup`" + ` installs tools.
@@ -53,15 +53,12 @@ func Template() string {
 # Controls ` + "`uf sandbox`" + ` behavior.
 # sandbox:
 #   runtime: auto                # auto | podman | docker
-#   backend: auto                # auto | podman | che
+#   backend: auto                # auto | podman
 #   image: quay.io/unbound-force/opencode-dev:latest
 #   resources:
 #     memory: 8g
 #     cpus: "4"
 #   mode: isolated               # isolated | direct
-#   che:
-#     url: ""
-#     token: ""
 #   demo_ports: []
 
 # ─── Gateway ──────────────────────────────────────────────────
