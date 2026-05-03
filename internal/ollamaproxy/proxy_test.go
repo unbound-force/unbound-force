@@ -94,18 +94,6 @@ func testTokenManager(t *testing.T, token string) *auth.TokenManager {
 	return tm
 }
 
-// testProxyServer creates a proxyServer with a mock token
-// manager for handler testing.
-func testProxyServer(t *testing.T, opts Options) *proxyServer {
-	t.Helper()
-	return &proxyServer{
-		tokenMgr:         testTokenManager(t, "mock-vertex-token"),
-		opts:             opts,
-		gatewayAvailable: true,
-		startTime:        time.Now(),
-	}
-}
-
 // ============================================================
 // Task 3.10: TestMapModelName_Known
 // ============================================================
@@ -1333,10 +1321,7 @@ func (rt *redirectTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// Redirect the request to the test server.
 	req.URL.Scheme = "http"
 	// Parse the target to get host.
-	targetURL := rt.target
-	if strings.HasPrefix(targetURL, "http://") {
-		targetURL = strings.TrimPrefix(targetURL, "http://")
-	}
+	targetURL := strings.TrimPrefix(rt.target, "http://")
 	req.URL.Host = targetURL
 	req.Host = targetURL
 	return rt.inner.RoundTrip(req)

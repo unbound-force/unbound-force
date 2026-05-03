@@ -433,18 +433,8 @@ func Start(opts Options) error {
 		}
 	}
 
-	// Resolve region and project from env vars (same
-	// chain as gateway provider, per design.md D9).
-	region := opts.Getenv("ANTHROPIC_VERTEX_REGION")
-	if region == "" {
-		region = opts.Getenv("VERTEX_LOCATION")
-	}
-	if region == "" {
-		region = opts.Getenv("CLOUD_ML_REGION")
-	}
-	if region == "" {
-		region = "us-east5"
-	}
+	// Region is resolved per-request in embed.go using
+	// the same env var chain (per design.md D9).
 
 	projectID := opts.Getenv("ANTHROPIC_VERTEX_PROJECT_ID")
 	if projectID == "" {
@@ -452,7 +442,7 @@ func Start(opts Options) error {
 	}
 	if projectID == "" {
 		return fmt.Errorf(
-			"Vertex AI project ID not set. Set one of: " +
+			"vertex AI project ID not set; set one of: " +
 				"ANTHROPIC_VERTEX_PROJECT_ID or GOOGLE_CLOUD_PROJECT")
 	}
 
