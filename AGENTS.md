@@ -530,6 +530,22 @@ Requires Node.js >= 20.19.0 and the OpenSpec CLI:
 
 When a task from `tasks.md` is completed during implementation, its checkbox **must** be updated from `- [ ]` to `- [x]` immediately. Do not defer this -- mark tasks complete as they are finished, not in a batch after all work is done.
 
+### Parallel Task Markers
+
+Both Speckit and OpenSpec task formats support `[P]`
+markers for parallel-eligible tasks. `/unleash` and
+Replicator detect `[P]` markers regardless of task ID
+format (Speckit `T001` or OpenSpec `1.1`).
+
+Format: `- [ ] N.M [P] Task description`
+
+A task is parallel-eligible when it: (a) touches
+different files from other `[P]` tasks in the same
+group, (b) has no dependency on prior tasks, (c) can
+execute without ordering constraints. Tasks without
+`[P]` run sequentially first, then `[P]` tasks run in
+parallel (up to 4 concurrent workers via git worktrees).
+
 ### Documentation Validation Gate
 
 Before marking any task complete, validate whether the change requires documentation updates:
@@ -888,6 +904,7 @@ without exception.
 
 ## Recent Changes
 
+- 035-openspec-parallel-markers: Added `[P]` parallel marker support to OpenSpec task template and schema instructions. Updated `openspec/schemas/unbound-force/templates/tasks.md` with `[P]` marker examples (sequential + parallel tasks in same group) and an HTML comment explaining the convention. Updated `openspec/schemas/unbound-force/schema.yaml` tasks instruction to guide the LLM on when to add `[P]` (different files, no dependencies) and when not to (same file). Added "Parallel Task Markers" subsection to AGENTS.md documenting the alignment between Speckit and OpenSpec task formats. No Go code changes. Closes #153.
 - opsx/sandbox-uid-mapping: Fixed rootless Podman UID mismatch that broke `uf sandbox` direct mode and git operations on both macOS and Linux. Added `--userns=keep-id:uid=1000,gid=1000` to all `podman run` invocations via shared `uidMappingArgs()` helper (both `buildRunArgs()` and `buildPersistentRunArgs()`). Added macOS Podman machine UID probe using `busybox:latest` with `--entrypoint stat` override — fails with actionable error when virtiofs doesn't map UIDs correctly. Added `--uidmap` CLI flag as escape hatch for macOS users whose Podman machine can't be reconfigured (explicit `--uidmap`/`--gidmap` mapping). Added `Platform *PlatformConfig` injection field for cross-platform testability. Added `parsePodmanVersion()` enforcing Podman >= 4.3 at runtime. Added `isRootlessPodman()` guard rejecting `--uidmap` under rootful Podman (privilege escalation prevention). Added post-copy `chown -R dev:dev /workspace` in `PodmanBackend.Create()`. New `UIDMap` field in `Options`, `SandboxConfig`, and CLI flags. Added 21 new test functions, fixed 8 existing tests. Modified files: `internal/sandbox/config.go`, `internal/sandbox/podman.go`, `internal/sandbox/detect.go`, `internal/sandbox/sandbox.go`, `internal/sandbox/sandbox_test.go`, `internal/config/config.go`, `internal/config/config_test.go`, `cmd/unbound-force/sandbox.go`, `cmd/unbound-force/sandbox_test.go`. No new dependencies. 9 task groups and 50 tasks completed.
 - opsx/gateway-token-refresh-fix: Fixed silent token expiry failures in the gateway's Vertex AI and Bedrock providers. Added token/credential expiry tracking (`tokenExpiry time.Time` on `VertexProvider`, `credExpiry time.Time` on `BedrockProvider`) with 55-minute/50-minute safety margins. When a background refresh fails, the stored token/credentials are now cleared atomically under the write lock, causing `PrepareRequest` to return a clear "Re-authenticate" error instead of silently forwarding stale credentials that Vertex rejects with `ACCESS_TOKEN_TYPE_UNSUPPORTED`. Added proactive refresh in `PrepareRequest` — when a token is within 5 minutes of expiry, a synchronous refresh is attempted with `sync.Mutex.TryLock()` deduplication to prevent thundering herd. Detached gateway child process now redirects stdout/stderr to `.uf/gateway.log` (0600 permissions) instead of discarding logs. `uf gateway status` displays the log file path. Named constants extracted (`vertexTokenLifetime`, `proactiveRefreshWindow`, `bedrockCredLifetime`). Added 14 new test functions including regression test (`TestVertexPrepareRequest_StaleTokenRegression` per TC-006), concurrent deduplication test with `sync.WaitGroup` barrier and `atomic.Int32` counter, and foreground negative case. Updated 8 existing test call sites. Synced 18 pre-existing scaffold asset drifts. Modified files: `internal/gateway/provider.go`, `internal/gateway/gateway.go`, `internal/gateway/gateway_test.go`. No new dependencies. 7 task groups and 42 tasks completed.
 - opsx/review-pr-reliability: Fixed 6 reliability issues in `/review-pr` command that caused 12 wasted tool calls and an incomplete review during PR #139. Added argument-first parsing gate (prevents auto-detection when PR number provided), execution mode check in Step 0 (stops early when local tools can't run in plan/read-only mode), mandatory CI coverage matrix in Step 4 (makes CI→local tool dedup decision visible and auditable), save-and-navigate diff handling in Step 5 (replaces nonexistent `gh pr diff -- <path>` file-filter syntax with concrete temp-file technique), GitHub API guidance for PR branch file access (replaces failing `git show`/`git fetch` with `gh api`), and PR-introduced spec detection in Step 6 (finds specs in the PR's changed file list when not on base branch). Fixed pre-existing step numbering issue in Step 10. Modified files: `.opencode/command/review-pr.md`, `internal/scaffold/assets/opencode/command/review-pr.md`, `AGENTS.md`. No Go code changes. 8 task groups and 28 tasks completed.
