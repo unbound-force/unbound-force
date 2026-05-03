@@ -1,6 +1,6 @@
 //go:build !windows
 
-package gateway
+package pidfile
 
 import "syscall"
 

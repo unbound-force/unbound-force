@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
+
+	"github.com/unbound-force/unbound-force/internal/pidfile"
 )
 
 // DefaultPort is the default local port for the gateway.
@@ -434,13 +436,13 @@ func Start(opts Options) error {
 
 	// Clean up stale PID file from a previous crash.
 	pp := pidPath(opts.ProjectDir)
-	if err := CleanupStale(pp, opts.FindProcess); err != nil {
+	if err := pidfile.CleanupStale(pp, opts.FindProcess); err != nil {
 		log.Warn("failed to clean stale PID file", "error", err)
 	}
 
 	// Check if a gateway is already running.
-	if info, readErr := ReadPID(pp); readErr == nil {
-		if IsAlive(info.PID, opts.FindProcess) {
+	if info, readErr := pidfile.ReadPID(pp); readErr == nil {
+		if pidfile.IsAlive(info.PID, opts.FindProcess) {
 			return fmt.Errorf(
 				"gateway already running (PID %d) on port %d. "+
 					"Use `uf gateway stop` first or `--port` to use a different port",
@@ -461,13 +463,13 @@ func Start(opts Options) error {
 	handler := newMux(prov, opts.Port, startTime)
 
 	// Write PID file.
-	pidInfo := PIDInfo{
+	pidInfo := pidfile.PIDInfo{
 		PID:      os.Getpid(),
 		Port:     opts.Port,
 		Provider: prov.Name(),
 		Started:  startTime,
 	}
-	if err := WritePID(pp, pidInfo); err != nil {
+	if err := pidfile.WritePID(pp, pidInfo); err != nil {
 		return fmt.Errorf("write PID file: %w", err)
 	}
 
@@ -504,12 +506,12 @@ func Start(opts Options) error {
 		if err != nil && err != http.ErrServerClosed {
 			// Check for port conflict.
 			if isAddrInUse(err) {
-				_ = RemovePID(pp)
+				_ = pidfile.RemovePID(pp)
 				return fmt.Errorf(
 					"port %d is already in use. Use `--port` to specify a different port",
 					opts.Port)
 			}
-			_ = RemovePID(pp)
+			_ = pidfile.RemovePID(pp)
 			return fmt.Errorf("server error: %w", err)
 		}
 	}
@@ -524,7 +526,7 @@ func Start(opts Options) error {
 	prov.Stop()
 
 	// Remove PID file.
-	_ = RemovePID(pp)
+	_ = pidfile.RemovePID(pp)
 
 	fmt.Fprintf(opts.Stderr, "Gateway stopped.\n")
 	return nil
@@ -621,15 +623,15 @@ func Stop(opts Options) error {
 	opts.defaults()
 
 	pp := pidPath(opts.ProjectDir)
-	info, err := ReadPID(pp)
+	info, err := pidfile.ReadPID(pp)
 	if err != nil {
 		fmt.Fprintf(opts.Stdout, "No gateway running.\n")
 		return nil
 	}
 
-	if !IsAlive(info.PID, opts.FindProcess) {
+	if !pidfile.IsAlive(info.PID, opts.FindProcess) {
 		// Stale PID file — clean up.
-		_ = RemovePID(pp)
+		_ = pidfile.RemovePID(pp)
 		fmt.Fprintf(opts.Stdout, "No gateway running.\n")
 		return nil
 	}
@@ -637,7 +639,7 @@ func Stop(opts Options) error {
 	// Send SIGTERM to the gateway process.
 	proc, err := opts.FindProcess(info.PID)
 	if err != nil {
-		_ = RemovePID(pp)
+		_ = pidfile.RemovePID(pp)
 		fmt.Fprintf(opts.Stdout, "No gateway running.\n")
 		return nil
 	}
@@ -650,7 +652,7 @@ func Stop(opts Options) error {
 	time.Sleep(500 * time.Millisecond)
 
 	// Remove PID file.
-	_ = RemovePID(pp)
+	_ = pidfile.RemovePID(pp)
 
 	fmt.Fprintf(opts.Stdout, "Gateway stopped.\n")
 	return nil
@@ -663,15 +665,15 @@ func Status(opts Options) error {
 	opts.defaults()
 
 	pp := pidPath(opts.ProjectDir)
-	info, err := ReadPID(pp)
+	info, err := pidfile.ReadPID(pp)
 	if err != nil {
 		fmt.Fprintf(opts.Stdout, "No gateway running.\n")
 		return nil
 	}
 
-	if !IsAlive(info.PID, opts.FindProcess) {
+	if !pidfile.IsAlive(info.PID, opts.FindProcess) {
 		// Stale PID file — clean up.
-		_ = RemovePID(pp)
+		_ = pidfile.RemovePID(pp)
 		fmt.Fprintf(opts.Stdout, "No gateway running.\n")
 		return nil
 	}
@@ -689,7 +691,7 @@ func Status(opts Options) error {
 // to w. Extracted from Status() to avoid duplicating the
 // display logic for the health-success and health-failure
 // paths.
-func printGatewayStatus(w io.Writer, info *PIDInfo, projectDir string) {
+func printGatewayStatus(w io.Writer, info *pidfile.PIDInfo, projectDir string) {
 	uptime := time.Since(info.Started)
 	fmt.Fprintf(w, "Gateway Status\n")
 	fmt.Fprintf(w, "  Provider:  %s\n", info.Provider)

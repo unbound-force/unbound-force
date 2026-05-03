@@ -564,6 +564,92 @@ func TestUserConfigPath_Error(t *testing.T) {
 	}
 }
 
+// --- OllamaProxy config tests ---
+
+func TestOllamaProxyConfig_Defaults(t *testing.T) {
+	cfg := Defaults()
+	// OllamaProxy defaults are zero values — the proxy
+	// package applies its own defaults when zero.
+	if cfg.OllamaProxy.Port != 0 {
+		t.Errorf("OllamaProxy.Port = %d, want 0 (zero = use proxy default)", cfg.OllamaProxy.Port)
+	}
+	if cfg.OllamaProxy.EmbedModel != "" {
+		t.Errorf("OllamaProxy.EmbedModel = %q, want empty (zero = use proxy default)", cfg.OllamaProxy.EmbedModel)
+	}
+	if cfg.OllamaProxy.GatewayURL != "" {
+		t.Errorf("OllamaProxy.GatewayURL = %q, want empty (zero = use proxy default)", cfg.OllamaProxy.GatewayURL)
+	}
+}
+
+func TestOllamaProxyConfig_EnvOverrides(t *testing.T) {
+	cfg := Defaults()
+	env := map[string]string{
+		"UF_OLLAMA_PROXY_PORT":        "9999",
+		"UF_OLLAMA_PROXY_EMBED_MODEL": "custom-model",
+		"UF_OLLAMA_PROXY_GATEWAY_URL": "http://localhost:8080",
+	}
+	result := applyEnvOverrides(cfg, func(k string) string { return env[k] })
+
+	if result.OllamaProxy.Port != 9999 {
+		t.Errorf("OllamaProxy.Port = %d, want 9999", result.OllamaProxy.Port)
+	}
+	if result.OllamaProxy.EmbedModel != "custom-model" {
+		t.Errorf("OllamaProxy.EmbedModel = %q, want %q", result.OllamaProxy.EmbedModel, "custom-model")
+	}
+	if result.OllamaProxy.GatewayURL != "http://localhost:8080" {
+		t.Errorf("OllamaProxy.GatewayURL = %q, want %q", result.OllamaProxy.GatewayURL, "http://localhost:8080")
+	}
+
+	// Invalid port is ignored.
+	cfg2 := Defaults()
+	result2 := applyEnvOverrides(cfg2, func(k string) string {
+		if k == "UF_OLLAMA_PROXY_PORT" {
+			return "notanumber"
+		}
+		return ""
+	})
+	if result2.OllamaProxy.Port != 0 {
+		t.Errorf("OllamaProxy.Port = %d, want 0 (invalid env ignored)", result2.OllamaProxy.Port)
+	}
+}
+
+func TestOllamaProxyConfig_Merge(t *testing.T) {
+	base := Defaults()
+	overlay := Config{
+		OllamaProxy: OllamaProxyConfig{
+			Port:       8888,
+			EmbedModel: "custom-embed",
+			GatewayURL: "http://localhost:9090",
+		},
+	}
+	result := merge(base, overlay)
+
+	if result.OllamaProxy.Port != 8888 {
+		t.Errorf("OllamaProxy.Port = %d, want 8888", result.OllamaProxy.Port)
+	}
+	if result.OllamaProxy.EmbedModel != "custom-embed" {
+		t.Errorf("OllamaProxy.EmbedModel = %q, want %q", result.OllamaProxy.EmbedModel, "custom-embed")
+	}
+	if result.OllamaProxy.GatewayURL != "http://localhost:9090" {
+		t.Errorf("OllamaProxy.GatewayURL = %q, want %q", result.OllamaProxy.GatewayURL, "http://localhost:9090")
+	}
+
+	// Zero overlay preserves base.
+	base2 := Config{
+		OllamaProxy: OllamaProxyConfig{
+			Port:       7777,
+			EmbedModel: "base-model",
+		},
+	}
+	result2 := merge(base2, Config{})
+	if result2.OllamaProxy.Port != 7777 {
+		t.Errorf("OllamaProxy.Port = %d, want 7777 (preserved from base)", result2.OllamaProxy.Port)
+	}
+	if result2.OllamaProxy.EmbedModel != "base-model" {
+		t.Errorf("OllamaProxy.EmbedModel = %q, want %q (preserved from base)", result2.OllamaProxy.EmbedModel, "base-model")
+	}
+}
+
 // --- JSON serialization test ---
 
 func TestConfig_JSONRoundTrip(t *testing.T) {

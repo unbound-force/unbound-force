@@ -2,143 +2,16 @@ package gateway
 
 import (
 	"bytes"
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/charmbracelet/log"
 )
-
-// refreshMinute is the duration of one minute, used as
-// the base unit for refresh intervals. Defined as a
-// variable (not const) so tests can override it.
-var refreshMinute = time.Minute
-
-// refreshLoop runs a generic refresh function on a ticker
-// interval. Cancels when the context is done. Logs errors
-// but does not stop on failure (the next tick will retry).
-//
-// Design decision: Generic refresh loop shared by Vertex
-// and Bedrock providers. The refreshFn closure captures
-// the provider-specific logic (per DRY principle).
-func refreshLoop(ctx context.Context, interval time.Duration, refreshFn func() error) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := refreshFn(); err != nil {
-				log.Error("credential refresh failed", "error", err)
-			}
-		}
-	}
-}
-
-// refreshVertexToken calls `gcloud auth application-default
-// print-access-token` to obtain a fresh OAuth token.
-// Returns the token string or an error with a clear
-// message suggesting re-authentication (US3 scenario 2).
-func refreshVertexToken(
-	execCmd func(string, ...string) ([]byte, error),
-) (string, error) {
-	out, err := execCmd("gcloud", "auth", "application-default",
-		"print-access-token")
-	if err != nil {
-		return "", fmt.Errorf(
-			"failed to get Vertex AI token from gcloud. "+
-				"Re-authenticate: gcloud auth application-default login\n"+
-				"Error: %s", strings.TrimSpace(string(out)))
-	}
-	token := strings.TrimSpace(string(out))
-	if token == "" {
-		return "", fmt.Errorf(
-			"gcloud returned empty token. "+
-				"Re-authenticate: gcloud auth application-default login")
-	}
-	return token, nil
-}
-
-// refreshBedrockCredentials calls `aws configure
-// export-credentials --format env` to obtain fresh AWS
-// credentials. Returns the access key, secret key,
-// session token, and any error.
-func refreshBedrockCredentials(
-	execCmd func(string, ...string) ([]byte, error),
-) (accessKey, secretKey, sessionToken string, err error) {
-	out, err := execCmd("aws", "configure", "export-credentials",
-		"--format", "env")
-	if err != nil {
-		return "", "", "", fmt.Errorf(
-			"failed to get AWS credentials from aws CLI. "+
-				"Re-authenticate: aws sso login\n"+
-				"Error: %s", strings.TrimSpace(string(out)))
-	}
-
-	// The output is in env format:
-	//   export AWS_ACCESS_KEY_ID=...
-	//   export AWS_SECRET_ACCESS_KEY=...
-	//   export AWS_SESSION_TOKEN=...
-	// Parse the key=value pairs.
-	envVars := parseEnvExport(string(out))
-	ak := envVars["AWS_ACCESS_KEY_ID"]
-	sk := envVars["AWS_SECRET_ACCESS_KEY"]
-	st := envVars["AWS_SESSION_TOKEN"]
-
-	if ak == "" || sk == "" {
-		// Try JSON format as fallback.
-		ak, sk, st, err = parseAWSCredentialsJSON(out)
-		if err != nil {
-			return "", "", "", fmt.Errorf(
-				"could not parse AWS credentials. "+
-					"Re-authenticate: aws sso login")
-		}
-	}
-
-	return ak, sk, st, nil
-}
-
-// parseEnvExport parses `export KEY=VALUE` lines into a map.
-func parseEnvExport(output string) map[string]string {
-	result := make(map[string]string)
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
-		line = strings.TrimPrefix(line, "export ")
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		// Remove surrounding quotes if present.
-		value = strings.Trim(value, "\"'")
-		result[key] = value
-	}
-	return result
-}
-
-// parseAWSCredentialsJSON parses JSON-format AWS credentials.
-func parseAWSCredentialsJSON(data []byte) (string, string, string, error) {
-	var creds struct {
-		AccessKeyID     string `json:"AccessKeyId"`
-		SecretAccessKey string `json:"SecretAccessKey"`
-		SessionToken    string `json:"SessionToken"`
-	}
-	if err := json.Unmarshal(data, &creds); err != nil {
-		return "", "", "", err
-	}
-	if creds.AccessKeyID == "" || creds.SecretAccessKey == "" {
-		return "", "", "", fmt.Errorf("missing required credential fields")
-	}
-	return creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, nil
-}
 
 // --- SigV4 Signing ---
 
