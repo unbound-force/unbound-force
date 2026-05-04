@@ -144,6 +144,12 @@ func Run(opts Options) (*Report, error) {
 		checkAgentSkillIntegrity(&opts),
 	}
 
+	// Context-sensitive groups: only included when relevant
+	// tools are detected (per design D8).
+	if devpodGroup := checkDevPod(&opts); devpodGroup != nil {
+		allGroups = append(allGroups, *devpodGroup)
+	}
+
 	// Apply SkipChecks filter: remove check groups or
 	// individual results whose name matches a skip entry.
 	groups := filterSkippedChecks(allGroups, opts.SkipChecks)

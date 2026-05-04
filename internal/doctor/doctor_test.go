@@ -3542,6 +3542,84 @@ func TestCheckAgentContext_FullPass(t *testing.T) {
 	}
 }
 
+// --- DevPod doctor check tests ---
+
+func TestDevPodChecks_AllPresent(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create .devcontainer/devcontainer.json.
+	createFile(t, dir, ".devcontainer/devcontainer.json", `{"image":"test"}`)
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPath(map[string]string{"devpod": "/usr/local/bin/devpod"}),
+		ReadFile:  os.ReadFile,
+	}
+
+	group := checkDevPod(opts)
+	if group == nil {
+		t.Fatal("expected non-nil DevPod group when devpod is in PATH")
+	}
+	if group.Name != "DevPod" {
+		t.Errorf("group name = %q, want DevPod", group.Name)
+	}
+	if len(group.Results) != 2 {
+		t.Fatalf("expected 2 checks, got %d", len(group.Results))
+	}
+
+	// Both checks should pass.
+	for _, r := range group.Results {
+		if r.Severity != Pass {
+			t.Errorf("check %q: severity = %v, want Pass", r.Name, r.Severity)
+		}
+	}
+}
+
+func TestDevPodChecks_HiddenWhenNotDetected(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPathSimple(map[string]bool{}), // No devpod
+		ReadFile:  os.ReadFile,
+	}
+
+	group := checkDevPod(opts)
+	if group != nil {
+		t.Error("expected nil DevPod group when devpod not detected")
+	}
+}
+
+func TestDevPodChecks_MissingDevcontainer(t *testing.T) {
+	dir := t.TempDir()
+	// No .devcontainer/devcontainer.json.
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubLookPath(map[string]string{"devpod": "/usr/local/bin/devpod"}),
+		ReadFile:  os.ReadFile,
+	}
+
+	group := checkDevPod(opts)
+	if group == nil {
+		t.Fatal("expected non-nil DevPod group")
+	}
+
+	// Find devcontainer config check.
+	for _, r := range group.Results {
+		if r.Name == "devcontainer config" {
+			if r.Severity != Warn {
+				t.Errorf("severity = %v, want Warn", r.Severity)
+			}
+			if !strings.Contains(r.InstallHint, "uf sandbox init") {
+				t.Errorf("install hint = %q, want 'uf sandbox init'", r.InstallHint)
+			}
+			return
+		}
+	}
+	t.Error("devcontainer config check not found")
+}
+
 func TestCheckAgentContext_BranchProtection(t *testing.T) {
 	t.Run("found when prohibition present", func(t *testing.T) {
 		dir := t.TempDir()

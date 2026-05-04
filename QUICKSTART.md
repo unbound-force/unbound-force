@@ -58,6 +58,19 @@ the `--uidmap` escape hatch:
 uf sandbox start --uidmap
 ```
 
+#### DevPod CDE (Optional)
+
+For persistent CDE workspaces with DevPod:
+
+1. Install DevPod: https://devpod.sh/docs/getting-started/install
+2. Run `uf sandbox init` to scaffold a devcontainer.json
+3. Run `uf sandbox create --backend devpod` to create a
+   persistent workspace
+
+DevPod uses the industry-standard devcontainer spec and
+runs workspaces directly in Podman -- no Kubernetes
+required.
+
 ### Fedora / RHEL (Homebrew -- recommended)
 
 Homebrew provides access to all companion tools via

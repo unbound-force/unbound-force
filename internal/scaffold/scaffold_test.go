@@ -51,6 +51,13 @@ func TestEmbeddedAssets_MatchSource(t *testing.T) {
 	}
 
 	for _, relPath := range paths {
+		// Skip non-deployed assets that have no canonical source
+		// at the repo root (e.g., devcontainer template is
+		// embedded-only, created by uf sandbox init).
+		if strings.HasPrefix(relPath, "devcontainer/") {
+			continue
+		}
+
 		// Map asset path to canonical source path
 		srcRel := mapAssetToSource(relPath)
 		srcPath := filepath.Join(root, srcRel)
@@ -165,6 +172,16 @@ var expectedAssetPaths = []string{
 	"opencode/skill/speckit-workflow/SKILL.md",
 }
 
+// nonDeployedAssetPaths lists embedded assets that are NOT
+// deployed by uf init. These are accessed via dedicated
+// functions (e.g., DevcontainerContent()) and are skipped
+// during the Run() walk. They must be listed here so
+// TestAssetPaths_MatchExpected accounts for them.
+var nonDeployedAssetPaths = []string{
+	// Devcontainer template — deployed by uf sandbox init, not uf init (D7)
+	"devcontainer/devcontainer.json",
+}
+
 func TestAssetPaths_MatchExpected(t *testing.T) {
 	paths, err := assetPaths()
 	if err != nil {
@@ -172,20 +189,23 @@ func TestAssetPaths_MatchExpected(t *testing.T) {
 	}
 
 	sort.Strings(paths)
-	expected := make([]string, len(expectedAssetPaths))
-	copy(expected, expectedAssetPaths)
-	sort.Strings(expected)
 
-	if len(paths) != len(expected) {
-		t.Errorf("expected %d assets, got %d", len(expected), len(paths))
-		t.Logf("expected: %v", expected)
+	// Combine deployed and non-deployed assets for the full manifest.
+	allExpected := make([]string, 0, len(expectedAssetPaths)+len(nonDeployedAssetPaths))
+	allExpected = append(allExpected, expectedAssetPaths...)
+	allExpected = append(allExpected, nonDeployedAssetPaths...)
+	sort.Strings(allExpected)
+
+	if len(paths) != len(allExpected) {
+		t.Errorf("expected %d assets, got %d", len(allExpected), len(paths))
+		t.Logf("expected: %v", allExpected)
 		t.Logf("got:      %v", paths)
 		return
 	}
 
 	for i := range paths {
-		if paths[i] != expected[i] {
-			t.Errorf("asset mismatch at index %d: expected %q, got %q", i, expected[i], paths[i])
+		if paths[i] != allExpected[i] {
+			t.Errorf("asset mismatch at index %d: expected %q, got %q", i, allExpected[i], paths[i])
 		}
 	}
 }
