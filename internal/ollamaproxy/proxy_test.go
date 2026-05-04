@@ -468,6 +468,129 @@ func TestHandleEmbed_BatchInput(t *testing.T) {
 }
 
 // ============================================================
+// TestStringOrSlice_Unmarshal — unit tests for the custom
+// JSON unmarshaler that accepts both string and []string.
+// ============================================================
+
+func TestStringOrSlice_Unmarshal(t *testing.T) {
+	tests := []struct {
+		name    string
+		json    string
+		want    []string
+		wantErr bool
+	}{
+		{"array single", `["hello"]`, []string{"hello"}, false},
+		{"array multi", `["a","b","c"]`, []string{"a", "b", "c"}, false},
+		{"bare string", `"hello"`, []string{"hello"}, false},
+		{"empty array", `[]`, []string{}, false},
+		{"empty string", `""`, []string{""}, false},
+		{"number", `42`, nil, true},
+		{"object", `{}`, nil, true},
+		{"null", `null`, nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var s stringOrSlice
+			err := s.UnmarshalJSON([]byte(tt.json))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("UnmarshalJSON(%s) err = %v, wantErr %v",
+					tt.json, err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if len(s) != len(tt.want) {
+				t.Fatalf("got len %d, want %d", len(s), len(tt.want))
+			}
+			for i := range s {
+				if s[i] != tt.want[i] {
+					t.Errorf("s[%d] = %q, want %q", i, s[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// ============================================================
+// TestHandleEmbed_StringInput — verify that a bare string
+// "input" field is accepted (Ollama API compat).
+// ============================================================
+
+func TestHandleEmbed_StringInput(t *testing.T) {
+	// Mock Vertex AI server that returns a single embedding.
+	var capturedBody []byte
+	vertexServer := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedBody, _ = io.ReadAll(r.Body)
+			resp := vertexEmbedResponse{
+				Predictions: []vertexEmbedPrediction{
+					{Embeddings: vertexEmbedValues{
+						Values: []float64{0.1, 0.2, 0.3},
+					}},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+	defer vertexServer.Close()
+
+	opts := testOpts(t)
+	opts.HTTPClient = &http.Client{
+		Transport: &redirectTransport{
+			target: vertexServer.URL,
+			inner:  http.DefaultTransport,
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	ps := &proxyServer{
+		tokenMgr:         testTokenManager(t, "mock-token"),
+		opts:             opts,
+		gatewayAvailable: true,
+		startTime:        time.Now(),
+	}
+
+	// Send request with bare string input (not array).
+	reqBody := `{"model": "granite-embedding:30m", "input": "hello world"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/embed",
+		strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	ps.handleEmbed(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s",
+			w.Code, http.StatusOK, w.Body.String())
+	}
+
+	// Verify Vertex received the input as an instance.
+	var vertexReq vertexEmbedRequest
+	if err := json.Unmarshal(capturedBody, &vertexReq); err != nil {
+		t.Fatalf("unmarshal captured body: %v", err)
+	}
+	if len(vertexReq.Instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(vertexReq.Instances))
+	}
+	if vertexReq.Instances[0].Content != "hello world" {
+		t.Errorf("instance content = %q, want %q",
+			vertexReq.Instances[0].Content, "hello world")
+	}
+
+	// Verify Ollama response.
+	var ollamaResp ollamaEmbedResponse
+	if err := json.NewDecoder(w.Body).Decode(&ollamaResp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(ollamaResp.Embeddings) != 1 {
+		t.Fatalf("expected 1 embedding, got %d", len(ollamaResp.Embeddings))
+	}
+	if ollamaResp.Model != "granite-embedding:30m" {
+		t.Errorf("model = %q, want %q", ollamaResp.Model, "granite-embedding:30m")
+	}
+}
+
+// ============================================================
 // Task 4.15: TestHandleEmbed_VertexError
 // ============================================================
 

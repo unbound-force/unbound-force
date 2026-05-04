@@ -10,11 +10,43 @@ import (
 	"github.com/charmbracelet/log"
 )
 
+// stringOrSlice accepts both a bare JSON string and an
+// array of strings. The Ollama /api/embed API accepts
+// either format for the "input" field, but some clients
+// (including Dewey) may send a bare string. This custom
+// unmarshaler normalizes both forms to []string.
+type stringOrSlice []string
+
+// UnmarshalJSON implements json.Unmarshaler. It accepts
+// both "text" (string) and ["text"] (array of strings).
+func (s *stringOrSlice) UnmarshalJSON(data []byte) error {
+	// Reject JSON null explicitly — input is required.
+	if string(data) == "null" {
+		return fmt.Errorf(
+			"input must be a string or array of strings")
+	}
+	// Try array first (most common case).
+	var arr []string
+	if err := json.Unmarshal(data, &arr); err == nil {
+		*s = arr
+		return nil
+	}
+	// Fall back to single string.
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return fmt.Errorf(
+			"input must be a string or array of strings")
+	}
+	*s = []string{str}
+	return nil
+}
+
 // ollamaEmbedRequest is the Ollama embed request format.
-// Dewey sends: {"model": "<name>", "input": ["text"]}.
+// Dewey sends: {"model": "<name>", "input": ["text"]}
+// or {"model": "<name>", "input": "text"} (both accepted).
 type ollamaEmbedRequest struct {
-	Model string   `json:"model"`
-	Input []string `json:"input"`
+	Model string        `json:"model"`
+	Input stringOrSlice `json:"input"`
 }
 
 // ollamaEmbedResponse is the Ollama embed response format.
