@@ -65,9 +65,11 @@ jobs:
           # If artifact or baseline is missing, pass
           # (nothing to compare)
           if [ ! -f "$CURRENT" ] || [ ! -f "$BASELINE" ]; then
-            echo "status=pass" >> "$GITHUB_OUTPUT"
-            echo "filtered=0" >> "$GITHUB_OUTPUT"
-            echo "remaining=0" >> "$GITHUB_OUTPUT"
+            {
+              echo "status=pass"
+              echo "filtered=0"
+              echo "remaining=0"
+            } >> "$GITHUB_OUTPUT"
             echo "No scores or baseline found — skipping epsilon check"
             exit 0
           fi
@@ -106,9 +108,11 @@ jobs:
             fi
           done
 
-          echo "status=$([ "$REMAINING" -gt 0 ] && echo fail || echo pass)" >> "$GITHUB_OUTPUT"
-          echo "filtered=$FILTERED" >> "$GITHUB_OUTPUT"
-          echo "remaining=$REMAINING" >> "$GITHUB_OUTPUT"
+          {
+            echo "status=$([ "$REMAINING" -gt 0 ] && echo fail || echo pass)"
+            echo "filtered=$FILTERED"
+            echo "remaining=$REMAINING"
+          } >> "$GITHUB_OUTPUT"
 
           echo "## Epsilon Evaluation (ε=$EPSILON)"
           echo "Regressions filtered (below epsilon): $FILTERED"
