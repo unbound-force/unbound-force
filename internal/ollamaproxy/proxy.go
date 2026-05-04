@@ -441,8 +441,10 @@ func Start(opts Options) error {
 	//   2. VERTEX_LOCATION (Google Cloud convention)
 	//   3. CLOUD_ML_REGION (legacy)
 	//   4. Default: us-east5
-	// "global" is rejected — Vertex AI predict requires a
-	// specific regional endpoint.
+	// "global" is treated as empty — Vertex AI predict
+	// requires a specific regional endpoint, but
+	// text-embedding-005 is available in all regions so
+	// defaulting to us-east5 is safe.
 	region := opts.Getenv("ANTHROPIC_VERTEX_REGION")
 	if region == "" {
 		region = opts.Getenv("VERTEX_LOCATION")
@@ -451,13 +453,10 @@ func Start(opts Options) error {
 		region = opts.Getenv("CLOUD_ML_REGION")
 	}
 	if region == "global" {
-		return fmt.Errorf(
-			"vertex region %q is not supported for "+
-				"embedding predict. This endpoint requires a "+
-				"specific region (e.g., us-east5, europe-west1). "+
-				"Set ANTHROPIC_VERTEX_REGION to override "+
-				"VERTEX_LOCATION and CLOUD_ML_REGION",
-			region)
+		log.Warn("region \"global\" not supported for "+
+			"embedding predict, using us-east5",
+			"source", "CLOUD_ML_REGION")
+		region = ""
 	}
 	if region == "" {
 		region = "us-east5"

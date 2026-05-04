@@ -1272,13 +1272,21 @@ func TestStart_NonLoopbackGatewayURL(t *testing.T) {
 }
 
 // ============================================================
-// TestStart_GlobalRegionError — verify startup fails when
-// region resolves to "global" (Vertex predict requires a
-// specific regional endpoint).
+// TestStart_GlobalRegionFallback — verify that "global"
+// region falls through to the default (us-east5) with a
+// warning, not an error. text-embedding-005 is available
+// in all regions so defaulting is safe.
 // ============================================================
 
-func TestStart_GlobalRegionError(t *testing.T) {
+func TestStart_GlobalRegionFallback(t *testing.T) {
+	// When CLOUD_ML_REGION=global, Start() should NOT
+	// fail. We make it fail later at gcloud LookPath to
+	// prove it passed region validation (global was
+	// treated as empty and defaulted to us-east5).
 	opts := testOpts(t)
+	opts.LookPath = func(name string) (string, error) {
+		return "", fmt.Errorf("not found")
+	}
 	opts.Getenv = func(key string) string {
 		switch key {
 		case "ANTHROPIC_VERTEX_PROJECT_ID":
@@ -1291,13 +1299,16 @@ func TestStart_GlobalRegionError(t *testing.T) {
 
 	err := Start(opts)
 	if err == nil {
-		t.Fatal("expected error for global region")
+		t.Fatal("expected error (gcloud missing), got nil")
 	}
-	if !strings.Contains(err.Error(), "global") {
-		t.Errorf("expected 'global' in error, got: %s", err.Error())
+	// The error should be about gcloud, NOT about global
+	// region — proving the fallback worked.
+	if strings.Contains(err.Error(), "global") {
+		t.Errorf("expected gcloud error, got global region "+
+			"error: %s", err.Error())
 	}
-	if !strings.Contains(err.Error(), "ANTHROPIC_VERTEX_REGION") {
-		t.Errorf("expected override hint, got: %s", err.Error())
+	if !strings.Contains(err.Error(), "gcloud") {
+		t.Errorf("expected gcloud error, got: %s", err.Error())
 	}
 }
 
