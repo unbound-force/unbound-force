@@ -251,7 +251,7 @@ func Run(opts Options) error {
 	fmt.Fprintln(opts.Stdout, "Installing...")
 
 	// Step 1: Install OpenCode (FR-022).
-	fmt.Fprintf(opts.Stdout, "  [1/14] OpenCode...\n")
+	fmt.Fprintf(opts.Stdout, "  [1/13] OpenCode...\n")
 	if opts.shouldSkipTool("opencode") {
 		results = append(results, stepResult{name: "OpenCode", action: "skipped", detail: "excluded by config"})
 	} else {
@@ -259,31 +259,23 @@ func Run(opts Options) error {
 	}
 
 	// Step 2: Install Gaze (FR-023).
-	fmt.Fprintf(opts.Stdout, "  [2/14] Gaze...\n")
+	fmt.Fprintf(opts.Stdout, "  [2/13] Gaze...\n")
 	if opts.shouldSkipTool("gaze") {
 		results = append(results, stepResult{name: "Gaze", action: "skipped", detail: "excluded by config"})
 	} else {
 		results = append(results, installGaze(&opts, env))
 	}
 
-	// Step 3: Install Mx F Manager hero.
-	fmt.Fprintf(opts.Stdout, "  [3/14] Mx F...\n")
-	if opts.shouldSkipTool("mxf") {
-		results = append(results, stepResult{name: "Mx F", action: "skipped", detail: "excluded by config"})
-	} else {
-		results = append(results, installMxF(&opts, env))
-	}
-
-	// Step 4: Install GitHub CLI.
-	fmt.Fprintf(opts.Stdout, "  [4/14] GitHub CLI...\n")
+	// Step 3: Install GitHub CLI.
+	fmt.Fprintf(opts.Stdout, "  [3/13] GitHub CLI...\n")
 	if opts.shouldSkipTool("gh") {
 		results = append(results, stepResult{name: "GitHub CLI", action: "skipped", detail: "excluded by config"})
 	} else {
 		results = append(results, installGH(&opts, env))
 	}
 
-	// Step 5: Ensure Node.js (FR-024).
-	fmt.Fprintf(opts.Stdout, "  [5/14] Node.js...\n")
+	// Step 4: Ensure Node.js (FR-024).
+	fmt.Fprintf(opts.Stdout, "  [4/13] Node.js...\n")
 	nodeAvailable := false
 	if opts.shouldSkipTool("node") {
 		results = append(results, stepResult{name: "Node.js", action: "skipped", detail: "excluded by config"})
@@ -293,18 +285,18 @@ func Run(opts Options) error {
 		nodeAvailable = nodeResult.err == nil && nodeResult.action != "failed"
 	}
 
-	// Step 6: Install OpenSpec CLI (Node.js-dependent).
+	// Step 5: Install OpenSpec CLI (Node.js-dependent).
 	if opts.shouldSkipTool("openspec") {
 		results = append(results, stepResult{name: "OpenSpec CLI", action: "skipped", detail: "excluded by config"})
 	} else if nodeAvailable {
-		fmt.Fprintf(opts.Stdout, "  [6/14] OpenSpec CLI...\n")
+		fmt.Fprintf(opts.Stdout, "  [5/13] OpenSpec CLI...\n")
 		results = append(results, installOpenSpec(&opts, env))
 	} else {
 		results = append(results, stepResult{name: "OpenSpec CLI", action: "skipped", detail: "no Node.js"})
 	}
 
-	// Step 7: Install uv (Python package manager for Specify CLI).
-	fmt.Fprintf(opts.Stdout, "  [7/14] uv...\n")
+	// Step 6: Install uv (Python package manager for Specify CLI).
+	fmt.Fprintf(opts.Stdout, "  [6/13] uv...\n")
 	uvAvailable := false
 	if opts.shouldSkipTool("uv") {
 		results = append(results, stepResult{name: "uv", action: "skipped", detail: "excluded by config"})
@@ -314,18 +306,18 @@ func Run(opts Options) error {
 		uvAvailable = uvResult.err == nil && uvResult.action != "failed"
 	}
 
-	// Step 8: Install Specify CLI (uv-dependent).
+	// Step 7: Install Specify CLI (uv-dependent).
 	if opts.shouldSkipTool("specify") {
 		results = append(results, stepResult{name: "Specify CLI", action: "skipped", detail: "excluded by config"})
 	} else if uvAvailable {
-		fmt.Fprintf(opts.Stdout, "  [8/14] Specify CLI...\n")
+		fmt.Fprintf(opts.Stdout, "  [7/13] Specify CLI...\n")
 		results = append(results, installSpecify(&opts, env))
 	} else {
 		results = append(results, stepResult{name: "Specify CLI", action: "skipped", detail: "no uv"})
 	}
 
-	// Step 9: Install Replicator (Homebrew, replaces Swarm plugin).
-	fmt.Fprintf(opts.Stdout, "  [9/14] Replicator...\n")
+	// Step 8: Install Replicator (Homebrew, replaces Swarm plugin).
+	fmt.Fprintf(opts.Stdout, "  [8/13] Replicator...\n")
 	replicatorSkipped := false
 	if opts.shouldSkipTool("replicator") {
 		results = append(results, stepResult{name: "Replicator", action: "skipped", detail: "excluded by config"})
@@ -336,40 +328,40 @@ func Run(opts Options) error {
 		replicatorSkipped = replicatorResult.err != nil || replicatorResult.action == "failed" || replicatorResult.action == "skipped"
 	}
 
-	// Step 10: Run replicator setup.
+	// Step 9: Run replicator setup.
 	if replicatorSkipped {
 		results = append(results, stepResult{name: "replicator setup", action: "skipped", detail: "no replicator"})
 	} else {
-		fmt.Fprintf(opts.Stdout, "  [10/14] Replicator setup...\n")
+		fmt.Fprintf(opts.Stdout, "  [9/13] Replicator setup...\n")
 		results = append(results, runReplicatorSetup(&opts))
 	}
 
-	// Step 11: Install Ollama (prerequisite for Dewey + Replicator embeddings).
-	fmt.Fprintf(opts.Stdout, "  [11/14] Ollama...\n")
+	// Step 10: Install Ollama (prerequisite for Dewey + Replicator embeddings).
+	fmt.Fprintf(opts.Stdout, "  [10/13] Ollama...\n")
 	if opts.shouldSkipTool("ollama") {
 		results = append(results, stepResult{name: "Ollama", action: "skipped", detail: "excluded by config"})
 	} else {
 		results = append(results, installOllama(&opts, env))
 	}
 
-	// Step 12: Install Dewey (after Ollama).
-	fmt.Fprintf(opts.Stdout, "  [12/14] Dewey...\n")
+	// Step 11: Install Dewey (after Ollama).
+	fmt.Fprintf(opts.Stdout, "  [11/13] Dewey...\n")
 	if opts.shouldSkipTool("dewey") {
 		results = append(results, stepResult{name: "Dewey", action: "skipped", detail: "excluded by config"})
 	} else {
 		results = append(results, installDewey(&opts, env))
 	}
 
-	// Step 13: Install golangci-lint (Spec 019 FR-012).
-	fmt.Fprintf(opts.Stdout, "  [13/14] golangci-lint...\n")
+	// Step 12: Install golangci-lint (Spec 019 FR-012).
+	fmt.Fprintf(opts.Stdout, "  [12/13] golangci-lint...\n")
 	if opts.shouldSkipTool("golangci-lint") {
 		results = append(results, stepResult{name: "golangci-lint", action: "skipped", detail: "excluded by config"})
 	} else {
 		results = append(results, installGolangciLint(&opts, env))
 	}
 
-	// Step 14: Install govulncheck (Spec 019 FR-012).
-	fmt.Fprintf(opts.Stdout, "  [14/14] govulncheck...\n")
+	// Step 13: Install govulncheck (Spec 019 FR-012).
+	fmt.Fprintf(opts.Stdout, "  [13/13] govulncheck...\n")
 	if opts.shouldSkipTool("govulncheck") {
 		results = append(results, stepResult{name: "govulncheck", action: "skipped", detail: "excluded by config"})
 	} else {
@@ -448,21 +440,6 @@ func installOpenCode(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		return stepResult{name: "OpenCode", action: "failed", detail: "curl install failed", err: err}
 	}
 	return stepResult{name: "OpenCode", action: "installed", detail: "via curl"}
-}
-
-// installMxF verifies the Mx F Manager hero is in PATH.
-// The mxf binary is bundled with unbound-force (same archive,
-// RPM, and Formula), so no separate install is needed.
-func installMxF(opts *Options, _ doctor.DetectedEnvironment) stepResult {
-	if _, err := opts.LookPath("mxf"); err == nil {
-		return stepResult{name: "Mx F", action: "already installed"}
-	}
-
-	return stepResult{
-		name:   "Mx F",
-		action: "not found",
-		detail: "Bundled with unbound-force — reinstall unbound-force to get mxf",
-	}
 }
 
 // installGH installs the GitHub CLI if missing.

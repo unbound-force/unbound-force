@@ -116,7 +116,7 @@ func TestSetupRun_AllMissing(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Verify install order: opencode (brew), gaze (brew), mxf (brew),
+	// Verify install order: opencode (brew), gaze (brew),
 	// gh (brew), node version check, openspec (npm), uv (brew),
 	// replicator (brew), replicator setup, ollama (brew),
 	// dewey (brew).
@@ -130,7 +130,6 @@ func TestSetupRun_AllMissing(t *testing.T) {
 	expectedCmds := []string{
 		"brew install anomalyco/tap/opencode",
 		"brew install unbound-force/tap/gaze",
-		// mxf is bundled with unbound-force — no separate install
 		"brew install gh",
 		"node --version",
 		"npm install -g @fission-ai/openspec@latest",
@@ -186,7 +185,6 @@ func TestSetupRun_AllPresent(t *testing.T) {
 			"brew":          "/opt/homebrew/bin/brew",
 			"opencode":      "/usr/local/bin/opencode",
 			"gaze":          "/usr/local/bin/gaze",
-			"mxf":           "/usr/local/bin/mxf",
 			"gh":            "/usr/local/bin/gh",
 			"node":          "/usr/local/bin/node",
 			"npm":           "/usr/local/bin/npm",
@@ -1857,100 +1855,6 @@ func TestInstallViaRpm_DryRun(t *testing.T) {
 	}
 }
 
-// --- Mx F installation tests ---
-
-func TestSetupRun_MxFMissing_BundledHint(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	rec := &cmdRecorder{
-		outputs: map[string]string{
-			"node --version": "v22.15.0",
-		},
-	}
-
-	var buf bytes.Buffer
-	opts := Options{
-		TargetDir: dir,
-		YesFlag:   true,
-		Stdout:    &buf,
-		Stderr:    &buf,
-		LookPath: stubLookPath(map[string]string{
-			"brew":     "/opt/homebrew/bin/brew",
-			"opencode": "/usr/local/bin/opencode",
-			"gaze":     "/usr/local/bin/gaze",
-			"gh":       "/usr/local/bin/gh",
-			"node":     "/usr/local/bin/node",
-			"npm":      "/usr/local/bin/npm",
-			// mxf NOT in PATH
-		}),
-		ExecCmd:      rec.execCmd,
-		EvalSymlinks: stubEvalSymlinks(nil),
-		Getenv:       stubGetenv(map[string]string{}),
-		ReadFile:     os.ReadFile,
-		WriteFile:    os.WriteFile,
-	}
-
-	_ = Run(opts)
-
-	// Verify no brew install mxf was attempted -- mxf is bundled.
-	for _, call := range rec.calls {
-		if call == "brew install unbound-force/tap/mxf" {
-			t.Error("should NOT attempt brew install mxf -- it is bundled with unbound-force")
-		}
-	}
-
-	// Verify output contains bundled hint.
-	output := buf.String()
-	if !strings.Contains(output, "Bundled with unbound-force") {
-		t.Error("expected bundled hint in output when mxf is missing")
-	}
-}
-
-func TestSetupRun_MxFPresent(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	rec := &cmdRecorder{
-		outputs: map[string]string{
-			"node --version": "v22.15.0",
-		},
-	}
-
-	var buf bytes.Buffer
-	opts := Options{
-		TargetDir: dir,
-		YesFlag:   true,
-		Stdout:    &buf,
-		Stderr:    &buf,
-		LookPath: stubLookPath(map[string]string{
-			"brew":     "/opt/homebrew/bin/brew",
-			"opencode": "/usr/local/bin/opencode",
-			"gaze":     "/usr/local/bin/gaze",
-			"mxf":      "/usr/local/bin/mxf",
-			"gh":       "/usr/local/bin/gh",
-			"node":     "/usr/local/bin/node",
-			"npm":      "/usr/local/bin/npm",
-		}),
-		ExecCmd:      rec.execCmd,
-		EvalSymlinks: stubEvalSymlinks(nil),
-		Getenv:       stubGetenv(map[string]string{}),
-		ReadFile:     os.ReadFile,
-		WriteFile:    os.WriteFile,
-	}
-
-	_ = Run(opts)
-
-	output := buf.String()
-	if !strings.Contains(output, "already installed") {
-		t.Error("expected 'already installed' for mxf when present in PATH")
-	}
-}
-
 // --- GitHub CLI installation tests ---
 
 func TestSetupRun_GHMissing_BrewInstall(t *testing.T) {
@@ -1975,7 +1879,6 @@ func TestSetupRun_GHMissing_BrewInstall(t *testing.T) {
 			"brew":     "/opt/homebrew/bin/brew",
 			"opencode": "/usr/local/bin/opencode",
 			"gaze":     "/usr/local/bin/gaze",
-			"mxf":      "/usr/local/bin/mxf",
 			"node":     "/usr/local/bin/node",
 			"npm":      "/usr/local/bin/npm",
 			// gh NOT in PATH
@@ -2072,7 +1975,6 @@ func TestSetupRun_OpenSpecMissing_Install(t *testing.T) {
 			"brew":     "/opt/homebrew/bin/brew",
 			"opencode": "/usr/local/bin/opencode",
 			"gaze":     "/usr/local/bin/gaze",
-			"mxf":      "/usr/local/bin/mxf",
 			"gh":       "/usr/local/bin/gh",
 			"node":     "/usr/local/bin/node",
 			"npm":      "/usr/local/bin/npm",
@@ -2124,7 +2026,6 @@ func TestSetupRun_OpenSpecNpmFails(t *testing.T) {
 			"brew":     "/opt/homebrew/bin/brew",
 			"opencode": "/usr/local/bin/opencode",
 			"gaze":     "/usr/local/bin/gaze",
-			"mxf":      "/usr/local/bin/mxf",
 			"gh":       "/usr/local/bin/gh",
 			"node":     "/usr/local/bin/node",
 			"npm":      "/usr/local/bin/npm",

@@ -114,10 +114,6 @@ var coreToolSpecs = []toolSpec{
 		recommended: true,
 	},
 	{
-		name:        "mxf",
-		recommended: true,
-	},
-	{
 		name:         "node",
 		versionCmd:   []string{"node", "--version"},
 		versionParse: parseNodeVersion,

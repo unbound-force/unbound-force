@@ -467,15 +467,6 @@ func TestCheckCoreTools(t *testing.T) {
 		t.Error("gaze check not found")
 	}
 
-	// mxf: not found -> Warn (recommended)
-	if r, ok := results["mxf"]; ok {
-		if r.Severity != Warn {
-			t.Errorf("mxf severity = %v, want Warn", r.Severity)
-		}
-	} else {
-		t.Error("mxf check not found")
-	}
-
 	// dewey is checked in the dedicated "Dewey Knowledge Layer" group,
 	// not in Core Tools. See TestCheckDewey_* tests.
 
@@ -670,7 +661,7 @@ func TestCheckHeroAvailability(t *testing.T) {
 
 	opts := &Options{
 		TargetDir: dir,
-		LookPath:  stubLookPathSimple(map[string]bool{"gaze": true, "mxf": true}),
+		LookPath:  stubLookPathSimple(map[string]bool{"gaze": true}),
 	}
 
 	group := checkHeroAvailability(opts)
@@ -876,7 +867,7 @@ func TestDoctorRun(t *testing.T) {
 	if report == nil {
 		t.Fatal("Run returned nil report")
 	}
-	// Some required tools are missing (e.g., gaze, mxf), so expect
+	// Some required tools are missing (e.g., gaze), so expect
 	// failures (swarm not found causes Fail in Swarm Plugin group).
 	if err == nil {
 		t.Log("Run returned nil error (all checks passed or only warnings)")
@@ -946,7 +937,6 @@ func TestDoctorRun_AllPass(t *testing.T) {
 			"go":         "/usr/local/go/bin/go",
 			"opencode":   "/usr/local/bin/opencode",
 			"gaze":       "/usr/local/bin/gaze",
-			"mxf":        "/usr/local/bin/mxf",
 			"replicator": "/usr/local/bin/replicator",
 		}),
 		ExecCmd: stubExecCmd(
@@ -1695,7 +1685,6 @@ func TestHomebrewInstallCmd(t *testing.T) {
 		{"go", "brew install go"},
 		{"opencode", "brew install anomalyco/tap/opencode"},
 		{"gaze", "brew install unbound-force/tap/gaze"},
-		{"mxf", "brew install unbound-force/tap/unbound-force (mxf is bundled)"},
 		{"dewey", "brew install unbound-force/tap/dewey"},
 		{"node", "brew install node"},
 		{"gh", "brew install gh"},
@@ -2904,15 +2893,14 @@ func TestFilterSkippedChecks_SkipIndividualResult(t *testing.T) {
 		{Name: "Core Tools", Results: []CheckResult{
 			{Name: "go", Severity: Pass},
 			{Name: "gaze", Severity: Warn},
-			{Name: "mxf", Severity: Warn},
 		}},
 	}
 	filtered := filterSkippedChecks(groups, []string{"gaze"})
 	if len(filtered) != 1 {
 		t.Fatalf("expected 1 group, got %d", len(filtered))
 	}
-	if len(filtered[0].Results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(filtered[0].Results))
+	if len(filtered[0].Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(filtered[0].Results))
 	}
 	for _, r := range filtered[0].Results {
 		if r.Name == "gaze" {
