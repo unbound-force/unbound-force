@@ -4187,10 +4187,65 @@ func TestEnsureCLAUDEmd_ExistingWithoutMarker(t *testing.T) {
 	}
 }
 
+func TestReplaceManagedBlock_NoMarker(t *testing.T) {
+	content := "some content without marker\n"
+	result, changed := replaceManagedBlock(content, claudemdMarker, "new block")
+	if changed {
+		t.Error("expected no change when marker absent")
+	}
+	if result != content {
+		t.Error("expected original content returned")
+	}
+}
+
+func TestReplaceManagedBlock_Identical(t *testing.T) {
+	block := claudemdMarker + "\n\n@AGENTS.md\n"
+	result, changed := replaceManagedBlock(block, claudemdMarker, block)
+	if changed {
+		t.Error("expected no change when content identical")
+	}
+	if result != block {
+		t.Error("expected original content returned")
+	}
+}
+
+func TestReplaceManagedBlock_Updated(t *testing.T) {
+	prefix := "# My Project\n\n"
+	oldBlock := claudemdMarker + "\n\nold content\n"
+	newBlock := claudemdMarker + "\n\nnew content\n"
+	content := prefix + oldBlock
+
+	result, changed := replaceManagedBlock(content, claudemdMarker, newBlock)
+	if !changed {
+		t.Error("expected change when content differs")
+	}
+	if result != prefix+newBlock {
+		t.Errorf("unexpected result:\n%s", result)
+	}
+}
+
+func TestReplaceManagedBlock_PreservesPrefix(t *testing.T) {
+	prefix := "User content line 1\nUser content line 2\n\n"
+	oldBlock := claudemdMarker + "\n\nmanaged stuff\n"
+	newBlock := claudemdMarker + "\n\nupdated managed stuff\n"
+	content := prefix + oldBlock
+
+	result, changed := replaceManagedBlock(content, claudemdMarker, newBlock)
+	if !changed {
+		t.Error("expected change")
+	}
+	if !strings.HasPrefix(result, prefix) {
+		t.Error("prefix should be preserved")
+	}
+	if !strings.HasSuffix(result, "updated managed stuff\n") {
+		t.Error("new block should be at end")
+	}
+}
+
 func TestEnsureCLAUDEmd_AlreadyConfigured(t *testing.T) {
 	dir := t.TempDir()
 
-	existing := claudemdMarker + "\n\n@AGENTS.md\n"
+	existing := buildCLAUDEmdBlock("go")
 	claudePath := filepath.Join(dir, "CLAUDE.md")
 	if err := os.WriteFile(claudePath, []byte(existing), 0o644); err != nil {
 		t.Fatalf("write CLAUDE.md: %v", err)
@@ -4213,7 +4268,82 @@ func TestEnsureCLAUDEmd_AlreadyConfigured(t *testing.T) {
 		t.Fatalf("read CLAUDE.md: %v", err)
 	}
 	if string(after) != existing {
-		t.Error("CLAUDE.md should be unchanged when marker already present")
+		t.Error("CLAUDE.md should be unchanged when block already matches")
+	}
+}
+
+func TestEnsureCLAUDEmd_StaleContent(t *testing.T) {
+	dir := t.TempDir()
+
+	// Seed with an older managed block missing cobalt-crush and
+	// review agents sections.
+	stale := claudemdMarker + "\n\n@AGENTS.md\n\n## Convention Packs\n\n" +
+		"@.opencode/uf/packs/default.md\n@.opencode/uf/packs/go.md\n"
+	claudePath := filepath.Join(dir, "CLAUDE.md")
+	if err := os.WriteFile(claudePath, []byte(stale), 0o644); err != nil {
+		t.Fatalf("write CLAUDE.md: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+	}
+
+	result := ensureCLAUDEmd(opts, "go")
+
+	if result.action != "updated" {
+		t.Errorf("expected action 'updated', got %q", result.action)
+	}
+
+	after, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	text := string(after)
+
+	if !strings.Contains(text, "@.opencode/agents/cobalt-crush-dev.md") {
+		t.Error("expected cobalt-crush @import after update")
+	}
+	if !strings.Contains(text, "divisor-guard.md") {
+		t.Error("expected review agents section after update")
+	}
+}
+
+func TestEnsureCLAUDEmd_StaleContentPreservesPrefix(t *testing.T) {
+	dir := t.TempDir()
+
+	// Seed with user content above the managed block.
+	prefix := "# My Project\n\nCustom instructions.\n\n"
+	stale := prefix + claudemdMarker + "\n\n@AGENTS.md\n"
+	claudePath := filepath.Join(dir, "CLAUDE.md")
+	if err := os.WriteFile(claudePath, []byte(stale), 0o644); err != nil {
+		t.Fatalf("write CLAUDE.md: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+	}
+
+	result := ensureCLAUDEmd(opts, "go")
+
+	if result.action != "updated" {
+		t.Errorf("expected action 'updated', got %q", result.action)
+	}
+
+	after, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	text := string(after)
+
+	if !strings.HasPrefix(text, prefix) {
+		t.Error("user content above marker should be preserved")
+	}
+	if !strings.Contains(text, "divisor-guard.md") {
+		t.Error("expected review agents section after update")
 	}
 }
 
@@ -4320,7 +4450,7 @@ func TestEnsureCursorrules_ExistingWithoutMarker(t *testing.T) {
 func TestEnsureCursorrules_AlreadyConfigured(t *testing.T) {
 	dir := t.TempDir()
 
-	existing := cursorrulesMarker + "\n\nSome rules.\n"
+	existing := buildCursorrulesBlock("go")
 	rulesPath := filepath.Join(dir, ".cursorrules")
 	if err := os.WriteFile(rulesPath, []byte(existing), 0o644); err != nil {
 		t.Fatalf("write .cursorrules: %v", err)
@@ -4336,6 +4466,88 @@ func TestEnsureCursorrules_AlreadyConfigured(t *testing.T) {
 
 	if result.action != "already configured" {
 		t.Errorf("expected action 'already configured', got %q", result.action)
+	}
+
+	after, err := os.ReadFile(rulesPath)
+	if err != nil {
+		t.Fatalf("read .cursorrules: %v", err)
+	}
+	if string(after) != existing {
+		t.Error(".cursorrules should be unchanged when block already matches")
+	}
+}
+
+func TestEnsureCursorrules_StaleContent(t *testing.T) {
+	dir := t.TempDir()
+
+	// Seed with an older managed block missing cobalt-crush and
+	// review agents sections.
+	stale := cursorrulesMarker + "\n\nThis project follows coding conventions.\n\n" +
+		"Available packs:\n- .opencode/uf/packs/default.md\n"
+	rulesPath := filepath.Join(dir, ".cursorrules")
+	if err := os.WriteFile(rulesPath, []byte(stale), 0o644); err != nil {
+		t.Fatalf("write .cursorrules: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+	}
+
+	result := ensureCursorrules(opts, "go")
+
+	if result.action != "updated" {
+		t.Errorf("expected action 'updated', got %q", result.action)
+	}
+
+	after, err := os.ReadFile(rulesPath)
+	if err != nil {
+		t.Fatalf("read .cursorrules: %v", err)
+	}
+	text := string(after)
+
+	if !strings.Contains(text, "cobalt-crush-dev.md") {
+		t.Error("expected cobalt-crush reference after update")
+	}
+	if !strings.Contains(text, "divisor-guard.md") {
+		t.Error("expected review agents section after update")
+	}
+}
+
+func TestEnsureCursorrules_StaleContentPreservesPrefix(t *testing.T) {
+	dir := t.TempDir()
+
+	prefix := "Use TypeScript strict mode.\n\n"
+	stale := prefix + cursorrulesMarker + "\n\nSome old rules.\n"
+	rulesPath := filepath.Join(dir, ".cursorrules")
+	if err := os.WriteFile(rulesPath, []byte(stale), 0o644); err != nil {
+		t.Fatalf("write .cursorrules: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+	}
+
+	result := ensureCursorrules(opts, "go")
+
+	if result.action != "updated" {
+		t.Errorf("expected action 'updated', got %q", result.action)
+	}
+
+	after, err := os.ReadFile(rulesPath)
+	if err != nil {
+		t.Fatalf("read .cursorrules: %v", err)
+	}
+	text := string(after)
+
+	if !strings.HasPrefix(text, prefix) {
+		t.Error("user content above marker should be preserved")
+	}
+	if !strings.Contains(text, "divisor-guard.md") {
+		t.Error("expected review agents section after update")
 	}
 }
 

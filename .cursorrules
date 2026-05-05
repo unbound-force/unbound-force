@@ -14,3 +14,14 @@ Available packs:
 - .opencode/uf/packs/content-custom.md
 - .opencode/uf/packs/go.md
 - .opencode/uf/packs/go-custom.md
+
+For engineering philosophy and coding principles, read
+.opencode/agents/cobalt-crush-dev.md.
+
+When reviewing code, consult the applicable reviewer
+checklist from .opencode/agents/:
+- divisor-guard.md — intent drift, constitution
+- divisor-architect.md — structure, patterns, DRY
+- divisor-adversary.md — security, error handling
+- divisor-testing.md — test quality, assertions
+- divisor-sre.md — operations, performance

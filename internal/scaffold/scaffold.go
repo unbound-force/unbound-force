@@ -1000,33 +1000,28 @@ func ensureAGENTSmdPackSection(opts *Options, lang string) subToolResult {
 	}
 }
 
+// replaceManagedBlock replaces the managed block (from marker to EOF)
+// in content with newBlock. Returns the updated content and whether
+// a change was made. If the managed block is already identical to
+// newBlock, the original content is returned unchanged.
+func replaceManagedBlock(content, marker, newBlock string) (string, bool) {
+	idx := strings.Index(content, marker)
+	if idx < 0 {
+		return content, false
+	}
+	prefix := content[:idx]
+	if prefix+newBlock == content {
+		return content, false
+	}
+	return prefix + newBlock, true
+}
+
 // claudemdMarker is the sentinel string used to detect the managed
 // block in CLAUDE.md. Same marker pattern as gitignoreMarker.
 const claudemdMarker = "# Unbound Force — managed by uf init"
 
-// ensureCLAUDEmd creates or appends a managed block to CLAUDE.md with
-// @imports for AGENTS.md and deployed convention packs. Idempotent: if
-// the marker already exists, the file is not modified.
-// Uses opts.ReadFile/WriteFile for testability (dependency injection).
-func ensureCLAUDEmd(opts *Options, lang string) subToolResult {
-	claudePath := filepath.Join(opts.TargetDir, "CLAUDE.md")
-
-	existing, readErr := opts.ReadFile(claudePath)
-	if readErr != nil && !os.IsNotExist(readErr) {
-		return subToolResult{
-			name:   "CLAUDE.md",
-			action: "failed",
-			detail: fmt.Sprintf("read failed: %v", readErr),
-		}
-	}
-
-	if readErr == nil && strings.Contains(string(existing), claudemdMarker) {
-		return subToolResult{
-			name:   "CLAUDE.md",
-			action: "already configured",
-		}
-	}
-
+// buildCLAUDEmdBlock generates the managed block for CLAUDE.md.
+func buildCLAUDEmdBlock(lang string) string {
 	packs := collectDeployedPacks(lang)
 	var block strings.Builder
 	block.WriteString(claudemdMarker + "\n\n")
@@ -1044,7 +1039,53 @@ func ensureCLAUDEmd(opts *Options, lang string) subToolResult {
 	block.WriteString("- divisor-adversary.md — security, error handling\n")
 	block.WriteString("- divisor-testing.md — test quality, assertions\n")
 	block.WriteString("- divisor-sre.md — operations, performance\n")
+	return block.String()
+}
 
+// ensureCLAUDEmd creates or appends a managed block to CLAUDE.md with
+// @imports for AGENTS.md and deployed convention packs. Idempotent:
+// if the managed block already matches the expected content, the file
+// is not modified. Stale managed blocks are replaced in-place.
+// Uses opts.ReadFile/WriteFile for testability (dependency injection).
+func ensureCLAUDEmd(opts *Options, lang string) subToolResult {
+	claudePath := filepath.Join(opts.TargetDir, "CLAUDE.md")
+
+	existing, readErr := opts.ReadFile(claudePath)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return subToolResult{
+			name:   "CLAUDE.md",
+			action: "failed",
+			detail: fmt.Sprintf("read failed: %v", readErr),
+		}
+	}
+
+	newBlock := buildCLAUDEmdBlock(lang)
+
+	// Marker present -- check whether managed block needs updating.
+	if readErr == nil && strings.Contains(string(existing), claudemdMarker) {
+		updated, changed := replaceManagedBlock(
+			string(existing), claudemdMarker, newBlock,
+		)
+		if !changed {
+			return subToolResult{
+				name:   "CLAUDE.md",
+				action: "already configured",
+			}
+		}
+		if writeErr := opts.WriteFile(claudePath, []byte(updated), 0o644); writeErr != nil {
+			return subToolResult{
+				name:   "CLAUDE.md",
+				action: "failed",
+				detail: fmt.Sprintf("write failed: %v", writeErr),
+			}
+		}
+		return subToolResult{
+			name:   "CLAUDE.md",
+			action: "updated",
+		}
+	}
+
+	// No marker -- create or append.
 	var content string
 	if readErr == nil {
 		content = string(existing)
@@ -1055,7 +1096,7 @@ func ensureCLAUDEmd(opts *Options, lang string) subToolResult {
 			content += "\n"
 		}
 	}
-	content += block.String()
+	content += newBlock
 
 	if writeErr := opts.WriteFile(claudePath, []byte(content), 0o644); writeErr != nil {
 		return subToolResult{
@@ -1079,29 +1120,8 @@ func ensureCLAUDEmd(opts *Options, lang string) subToolResult {
 // block in .cursorrules. Same marker pattern as claudemdMarker.
 const cursorrulesMarker = claudemdMarker
 
-// ensureCursorrules creates or appends a managed block to .cursorrules
-// with instructions to read AGENTS.md and convention packs. Idempotent:
-// if the marker already exists, the file is not modified.
-// Uses opts.ReadFile/WriteFile for testability (dependency injection).
-func ensureCursorrules(opts *Options, lang string) subToolResult {
-	rulesPath := filepath.Join(opts.TargetDir, ".cursorrules")
-
-	existing, readErr := opts.ReadFile(rulesPath)
-	if readErr != nil && !os.IsNotExist(readErr) {
-		return subToolResult{
-			name:   ".cursorrules",
-			action: "failed",
-			detail: fmt.Sprintf("read failed: %v", readErr),
-		}
-	}
-
-	if readErr == nil && strings.Contains(string(existing), cursorrulesMarker) {
-		return subToolResult{
-			name:   ".cursorrules",
-			action: "already configured",
-		}
-	}
-
+// buildCursorrulesBlock generates the managed block for .cursorrules.
+func buildCursorrulesBlock(lang string) string {
 	packs := collectDeployedPacks(lang)
 	var block strings.Builder
 	block.WriteString(cursorrulesMarker + "\n\n")
@@ -1123,7 +1143,53 @@ func ensureCursorrules(opts *Options, lang string) subToolResult {
 	block.WriteString("- divisor-adversary.md — security, error handling\n")
 	block.WriteString("- divisor-testing.md — test quality, assertions\n")
 	block.WriteString("- divisor-sre.md — operations, performance\n")
+	return block.String()
+}
 
+// ensureCursorrules creates or appends a managed block to .cursorrules
+// with instructions to read AGENTS.md and convention packs. Idempotent:
+// if the managed block already matches the expected content, the file
+// is not modified. Stale managed blocks are replaced in-place.
+// Uses opts.ReadFile/WriteFile for testability (dependency injection).
+func ensureCursorrules(opts *Options, lang string) subToolResult {
+	rulesPath := filepath.Join(opts.TargetDir, ".cursorrules")
+
+	existing, readErr := opts.ReadFile(rulesPath)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return subToolResult{
+			name:   ".cursorrules",
+			action: "failed",
+			detail: fmt.Sprintf("read failed: %v", readErr),
+		}
+	}
+
+	newBlock := buildCursorrulesBlock(lang)
+
+	// Marker present -- check whether managed block needs updating.
+	if readErr == nil && strings.Contains(string(existing), cursorrulesMarker) {
+		updated, changed := replaceManagedBlock(
+			string(existing), cursorrulesMarker, newBlock,
+		)
+		if !changed {
+			return subToolResult{
+				name:   ".cursorrules",
+				action: "already configured",
+			}
+		}
+		if writeErr := opts.WriteFile(rulesPath, []byte(updated), 0o644); writeErr != nil {
+			return subToolResult{
+				name:   ".cursorrules",
+				action: "failed",
+				detail: fmt.Sprintf("write failed: %v", writeErr),
+			}
+		}
+		return subToolResult{
+			name:   ".cursorrules",
+			action: "updated",
+		}
+	}
+
+	// No marker -- create or append.
 	var content string
 	if readErr == nil {
 		content = string(existing)
@@ -1134,7 +1200,7 @@ func ensureCursorrules(opts *Options, lang string) subToolResult {
 			content += "\n"
 		}
 	}
-	content += block.String()
+	content += newBlock
 
 	if writeErr := opts.WriteFile(rulesPath, []byte(content), 0o644); writeErr != nil {
 		return subToolResult{
