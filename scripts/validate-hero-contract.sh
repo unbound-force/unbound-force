@@ -142,11 +142,14 @@ else
   check_required ".opencode/ exists" "fail"
 fi
 
-# 5. .opencode/command/ exists
-if [[ -d "$REPO_PATH/.opencode/command/" ]]; then
-  check_required ".opencode/command/ exists" "pass"
+# 5. .opencode/commands/ exists (with legacy .opencode/command/ fallback)
+if [[ -d "$REPO_PATH/.opencode/commands/" ]]; then
+  check_required ".opencode/commands/ exists" "pass"
+elif [[ -d "$REPO_PATH/.opencode/command/" ]]; then
+  check_required ".opencode/commands/ exists" "pass"
+  printf "  ${YELLOW}[WARN]${NC} %s\n" "Found legacy .opencode/command/ directory. Run 'uf init' to migrate to .opencode/commands/."
 else
-  check_required ".opencode/command/ exists" "fail"
+  check_required ".opencode/commands/ exists" "fail"
 fi
 
 # 6. specs/ exists

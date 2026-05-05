@@ -23,6 +23,47 @@ or after updating the OpenSpec CLI (`npm update`). Safe to re-run
 
 ## Instructions
 
+### Step 0: Command Directory Migration
+
+Check whether the legacy `.opencode/command/` directory needs
+to be migrated to `.opencode/commands/`:
+
+1. Check if `.opencode/command/` exists (old directory):
+   ```bash
+   ls -d .opencode/command/ 2>/dev/null
+   ```
+
+2. Check if `.opencode/commands/` exists (new directory):
+   ```bash
+   ls -d .opencode/commands/ 2>/dev/null
+   ```
+
+3. **If old exists and new does NOT exist**: rename the
+   directory:
+   ```bash
+   mv .opencode/command .opencode/commands
+   ```
+   Report: `✅ command/ → commands/: migrated`
+
+4. **If both exist**: move unique files from old to new,
+   remove duplicates from old, and clean up:
+   ```bash
+   # For each file in old dir, move if not in new, else remove
+   for f in .opencode/command/*; do
+     name="$(basename "$f")"
+     if [ -f ".opencode/commands/$name" ]; then
+       rm "$f"
+     else
+       mv "$f" .opencode/commands/
+     fi
+   done
+   rmdir .opencode/command 2>/dev/null
+   ```
+   Report: `✅ command/ → commands/: merged (old dir cleaned up)`
+
+5. **If old does NOT exist**: no migration needed.
+   Report: `⊘ command/ migration: not needed`
+
 ### Step 1: Check Prerequisites
 
 Verify the project has been initialized:
@@ -37,9 +78,9 @@ Verify the project has been initialized:
    - `.opencode/skills/openspec-explore/SKILL.md`
 
 3. Check that these 3 OpenSpec command files exist:
-   - `.opencode/command/opsx-propose.md`
-   - `.opencode/command/opsx-apply.md`
-   - `.opencode/command/opsx-archive.md`
+   - `.opencode/commands/opsx-propose.md`
+   - `.opencode/commands/opsx-apply.md`
+   - `.opencode/commands/opsx-archive.md`
 
 For each missing file, report an error:
 > `❌ <path>: file not found`
@@ -78,7 +119,7 @@ customization. For each file:
 
 **Target files**:
 - `.opencode/skills/openspec-propose/SKILL.md`
-- `.opencode/command/opsx-propose.md`
+- `.opencode/commands/opsx-propose.md`
 
 **What to insert**: After the step that creates the change
 directory (`openspec new change "<name>"`), insert a new step:
@@ -102,7 +143,7 @@ renumber existing steps (to avoid accidental content loss).
 
 **Target files**:
 - `.opencode/skills/openspec-apply-change/SKILL.md`
-- `.opencode/command/opsx-apply.md`
+- `.opencode/commands/opsx-apply.md`
 
 **What to insert**: Before the implementation begins, insert a
 branch validation step:
@@ -124,7 +165,7 @@ existing steps.
 
 **Target files**:
 - `.opencode/skills/openspec-archive-change/SKILL.md`
-- `.opencode/command/opsx-archive.md`
+- `.opencode/commands/opsx-archive.md`
 
 **What to insert**: After the archive move completes, insert a
 branch cleanup step:
@@ -169,7 +210,7 @@ instructions. For each file:
 
 **Target files**:
 - `.opencode/skills/openspec-propose/SKILL.md`
-- `.opencode/command/opsx-propose.md`
+- `.opencode/commands/opsx-propose.md`
 
 **What to insert**: Before drafting the proposal artifacts, add
 a context retrieval step:
@@ -200,7 +241,7 @@ of whether branch enforcement was applied.
 
 **Target files**:
 - `.opencode/skills/openspec-apply-change/SKILL.md`
-- `.opencode/command/opsx-apply.md`
+- `.opencode/commands/opsx-apply.md`
 
 **What to insert**: Before implementing tasks, add a context
 retrieval step:
@@ -314,14 +355,14 @@ skills only (commands delegate to skills for behavior).
 Create the 4 UF-custom speckit commands that upstream
 `specify init` does not provide. For each file below:
 
-1. **Check** if the file exists in `.opencode/command/`
+1. **Check** if the file exists in `.opencode/commands/`
 2. **If it exists**: Report `⊘ <filename>: already exists (skipped)`
 3. **If it does not exist**: Create it with the content
    described below. Report `✅ <filename>: created`
 
 #### speckit.analyze.md
 
-Create `.opencode/command/speckit.analyze.md` — a
+Create `.opencode/commands/speckit.analyze.md` — a
 read-only cross-artifact consistency and quality analysis
 command. The command:
 - Runs after `/speckit.tasks` produces `tasks.md`
@@ -342,7 +383,7 @@ description: Perform a non-destructive cross-artifact consistency and quality an
 
 #### speckit.checklist.md
 
-Create `.opencode/command/speckit.checklist.md` — a
+Create `.opencode/commands/speckit.checklist.md` — a
 requirements quality validation command ("unit tests
 for English"). The command:
 - Generates checklists that test REQUIREMENTS quality,
@@ -363,7 +404,7 @@ description: Generate a custom checklist for the current feature based on user r
 
 #### speckit.clarify.md
 
-Create `.opencode/command/speckit.clarify.md` — a spec
+Create `.opencode/commands/speckit.clarify.md` — a spec
 ambiguity detection and resolution command. The command:
 - Scans spec.md for ambiguities across 10 taxonomy
   categories (functional scope, data model, UX flow,
@@ -383,7 +424,7 @@ description: Identify underspecified areas in the current feature spec by asking
 
 #### speckit.taskstoissues.md
 
-Create `.opencode/command/speckit.taskstoissues.md` — a
+Create `.opencode/commands/speckit.taskstoissues.md` — a
 GitHub issue creation command. The command:
 - Reads tasks.md and creates GitHub issues for each task
 - Requires a GitHub remote URL (validates before creating)
@@ -406,7 +447,7 @@ step: run `.specify/scripts/bash/check-prerequisites.sh
 ### Step 6: Speckit Command Guardrails
 
 Inject a `## Guardrails` section into ALL 9
-`.opencode/command/speckit.*.md` files. For each file:
+`.opencode/commands/speckit.*.md` files. For each file:
 
 1. **Read** the file content
 2. **Check** if a `## Guardrails` section already exists
@@ -485,7 +526,7 @@ This step is read-only — it verifies but does not modify.
 
 ### Step 8: OpenSpec Command Guardrails
 
-For `.opencode/command/opsx-propose.md`:
+For `.opencode/commands/opsx-propose.md`:
 
 1. **Read** the file content
 2. **Check** if a `## Guardrails` section exists at the

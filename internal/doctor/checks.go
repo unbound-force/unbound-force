@@ -522,9 +522,20 @@ func checkScaffoldedFiles(opts *Options) CheckGroup {
 	agentsDir := filepath.Join(opts.TargetDir, ".opencode", "agents")
 	group.Results = append(group.Results, checkDirWithCount(agentsDir, ".opencode/agents/", "agent files", ".md"))
 
-	// Check .opencode/command/ with file count.
-	commandDir := filepath.Join(opts.TargetDir, ".opencode", "command")
-	group.Results = append(group.Results, checkDirWithCount(commandDir, ".opencode/command/", "command files", ".md"))
+	// Check .opencode/commands/ with file count.
+	commandDir := filepath.Join(opts.TargetDir, ".opencode", "commands")
+	group.Results = append(group.Results, checkDirWithCount(commandDir, ".opencode/commands/", "command files", ".md"))
+
+	// Warn if legacy .opencode/command/ (singular) still exists.
+	legacyCommandDir := filepath.Join(opts.TargetDir, ".opencode", "command")
+	if info, err := os.Stat(legacyCommandDir); err == nil && info.IsDir() {
+		group.Results = append(group.Results, CheckResult{
+			Name:        ".opencode/command/",
+			Severity:    Warn,
+			Message:     "legacy directory — run 'uf init' to migrate to .opencode/commands/",
+			InstallHint: "uf init",
+		})
+	}
 
 	// Check .opencode/uf/packs/ for convention packs.
 	packsDir := filepath.Join(opts.TargetDir, ".opencode", "uf", "packs")

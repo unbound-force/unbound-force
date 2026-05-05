@@ -51,7 +51,7 @@ examining the current branch and workspace:
      `data-model.md`, `research.md`
    - **Code files**: everything else (`.go`, `.ts`, `.js`,
      `.py`, `go.mod`, `go.sum`, `Makefile`, `internal/`,
-     `cmd/`, `.opencode/agents/`, `.opencode/command/`,
+     `cmd/`, `.opencode/agents/`, `.opencode/commands/`,
      `.opencode/skill/`, `.opencode/uf/packs/`,
      etc.)
 

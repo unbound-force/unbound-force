@@ -76,7 +76,7 @@ Classify files as user-facing or internal based on path patterns:
 **User-facing paths** (trigger documentation checks):
 - `cmd/` — CLI commands and flags
 - `.opencode/agents/` — agent capabilities
-- `.opencode/command/` — slash commands
+- `.opencode/commands/` — slash commands
 - `.opencode/skill/` — swarm skills
 - `internal/scaffold/` — scaffold output (affects what `uf init` deploys)
 - `AGENTS.md` — project documentation

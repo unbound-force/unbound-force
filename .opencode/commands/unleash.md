@@ -237,7 +237,7 @@ Generate the implementation plan by delegating to the
 `cobalt-crush-dev` agent.
 
 1. Read the full contents of
-   `.opencode/command/speckit.plan.md`.
+   `.opencode/commands/speckit.plan.md`.
 2. Delegate to the `cobalt-crush-dev` agent via the Task
    tool, passing the plan command's instructions as the
    agent's prompt. Include the feature directory path so
@@ -258,7 +258,7 @@ Generate the task list by delegating to the
 `cobalt-crush-dev` agent.
 
 1. Read the full contents of
-   `.opencode/command/speckit.tasks.md`.
+   `.opencode/commands/speckit.tasks.md`.
 2. Delegate to the `cobalt-crush-dev` agent via the Task
    tool, passing the tasks command's instructions as the
    agent's prompt. Include the feature directory path.
@@ -277,7 +277,7 @@ Divisor agents provide equivalent coverage (consistency
 analysis + quality validation) in a single pass.
 
 1. Read the full contents of
-   `.opencode/command/review-council.md`.
+   `.opencode/commands/review-council.md`.
 2. Delegate to the `cobalt-crush-dev` agent via the Task
    tool with the review council's instructions, adding
    the explicit mode override: "Run in **Spec Review
@@ -476,7 +476,7 @@ gate, Phase 1b Gaze quality analysis (if available), and
 Divisor agent reviews.
 
 1. Read the full contents of
-   `.opencode/command/review-council.md`.
+   `.opencode/commands/review-council.md`.
 2. Delegate to the `cobalt-crush-dev` agent via the Task
    tool with the review council's instructions, adding
    the explicit mode override: "Run in **Code Review

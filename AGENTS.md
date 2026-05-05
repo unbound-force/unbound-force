@@ -226,7 +226,7 @@ unbound-force/
 │   │   ├── reviewer-guard.md        # Legacy reviewer (superseded by divisor-*)
 │   │   ├── reviewer-sre.md          # Legacy reviewer (superseded by divisor-*)
 │   │   └── reviewer-testing.md      # Legacy reviewer (superseded by divisor-*)
-│   ├── command/                     # Speckit pipeline commands + utilities
+│   ├── commands/                    # Speckit pipeline commands + utilities
 │   │   ├── speckit.constitution.md
 │   │   ├── speckit.specify.md
 │   │   ├── speckit.clarify.md
@@ -604,7 +604,7 @@ All spec artifacts (`spec.md`, `plan.md`, `tasks.md`, and any other files under 
 
 A mandatory gate at the planning phase. The constitution's four core principles -- Autonomous Collaboration, Composability First, Observable Quality, and Testability -- must each receive a PASS before proceeding. Constitution violations are automatically CRITICAL severity and non-negotiable.
 
-For hero constitution alignment validation, use the `/constitution-check` command. This invokes a dedicated OpenCode agent that compares a hero constitution against the org constitution and produces a structured alignment report with per-principle findings and an overall ALIGNED/NON-ALIGNED verdict. See `.opencode/agents/constitution-check.md` and `.opencode/command/constitution-check.md` for implementation details.
+For hero constitution alignment validation, use the `/constitution-check` command. This invokes a dedicated OpenCode agent that compares a hero constitution against the org constitution and produces a structured alignment report with per-principle findings and an overall ALIGNED/NON-ALIGNED verdict. See `.opencode/agents/constitution-check.md` and `.opencode/commands/constitution-check.md` for implementation details.
 
 ## Strategic vs Tactical: Boundary Guidelines
 

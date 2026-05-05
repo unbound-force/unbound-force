@@ -558,7 +558,7 @@ func TestCheckScaffoldedFiles(t *testing.T) {
 	// Create scaffolded directories with files.
 	createFile(t, dir, ".opencode/agents/agent1.md", "---\ndescription: test\n---\n# Agent")
 	createFile(t, dir, ".opencode/agents/agent2.md", "---\ndescription: test\n---\n# Agent")
-	createFile(t, dir, ".opencode/command/cmd1.md", "# Command")
+	createFile(t, dir, ".opencode/commands/cmd1.md", "# Command")
 	createFile(t, dir, ".opencode/uf/packs/go.md", "# Go pack")
 	createFile(t, dir, ".specify/config.yaml", "# config")
 	createFile(t, dir, "AGENTS.md", "# Agents")
@@ -578,8 +578,8 @@ func TestCheckScaffoldedFiles(t *testing.T) {
 	if r := results[".opencode/agents/"]; r.Severity != Pass {
 		t.Errorf("agents severity = %v, want Pass", r.Severity)
 	}
-	if r := results[".opencode/command/"]; r.Severity != Pass {
-		t.Errorf("command severity = %v, want Pass", r.Severity)
+	if r := results[".opencode/commands/"]; r.Severity != Pass {
+		t.Errorf("commands severity = %v, want Pass", r.Severity)
 	}
 	if r := results[".specify/"]; r.Severity != Pass {
 		t.Errorf("specify severity = %v, want Pass", r.Severity)
@@ -608,6 +608,49 @@ func TestCheckScaffoldedFiles_Missing(t *testing.T) {
 		if r.InstallHint == "" {
 			t.Errorf("%s should have install hint", r.Name)
 		}
+	}
+}
+
+func TestCheckScaffoldedFiles_LegacyCommandDir(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create BOTH legacy .opencode/command/ AND new .opencode/commands/.
+	createFile(t, dir, ".opencode/commands/cmd1.md", "# Command")
+	createFile(t, dir, ".opencode/command/old-cmd.md", "# Legacy Command")
+	createFile(t, dir, ".opencode/agents/agent1.md", "---\ndescription: test\n---\n# Agent")
+	createFile(t, dir, ".opencode/uf/packs/go.md", "# Go pack")
+	createFile(t, dir, ".specify/config.yaml", "# config")
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+	}
+
+	group := checkScaffoldedFiles(opts)
+
+	results := make(map[string]CheckResult)
+	for _, r := range group.Results {
+		results[r.Name] = r
+	}
+
+	// New commands/ directory should pass.
+	if r := results[".opencode/commands/"]; r.Severity != Pass {
+		t.Errorf("commands severity = %v, want Pass", r.Severity)
+	}
+
+	// Legacy command/ directory should produce a warning.
+	r, ok := results[".opencode/command/"]
+	if !ok {
+		t.Fatal("legacy .opencode/command/ warning not found in results")
+	}
+	if r.Severity != Warn {
+		t.Errorf("legacy command severity = %v, want Warn", r.Severity)
+	}
+	if !strings.Contains(r.Message, "legacy") {
+		t.Errorf("legacy command message = %q, want 'legacy' substring", r.Message)
+	}
+	if !strings.Contains(r.InstallHint, "uf init") {
+		t.Errorf("legacy command install hint = %q, want 'uf init'", r.InstallHint)
 	}
 }
 
@@ -803,7 +846,7 @@ func TestDoctorRun(t *testing.T) {
 
 	// Create minimal scaffolded files.
 	createFile(t, dir, ".opencode/agents/test.md", "---\ndescription: test\n---\n# Agent")
-	createFile(t, dir, ".opencode/command/test.md", "# Command")
+	createFile(t, dir, ".opencode/commands/test.md", "# Command")
 	createFile(t, dir, ".opencode/uf/packs/go.md", "# Go")
 	createFile(t, dir, ".specify/config.yaml", "# config")
 	createFile(t, dir, "AGENTS.md", "# Agents")
@@ -881,7 +924,7 @@ func TestDoctorRun_AllPass(t *testing.T) {
 
 	// Create all scaffolded files.
 	createFile(t, dir, ".opencode/agents/test.md", "---\ndescription: test\n---\n# Agent")
-	createFile(t, dir, ".opencode/command/test.md", "# Command")
+	createFile(t, dir, ".opencode/commands/test.md", "# Command")
 	createFile(t, dir, ".opencode/uf/packs/go.md", "# Go")
 	createFile(t, dir, ".specify/config.yaml", "# config")
 	createFile(t, dir, "AGENTS.md", completeAGENTSmd())
@@ -2429,7 +2472,7 @@ func TestDoctorHints_NoBareUnboundReferences(t *testing.T) {
 
 	// Create minimal scaffolded files so all check groups execute.
 	createFile(t, dir, ".opencode/agents/test.md", "---\ndescription: test\n---\n# Agent")
-	createFile(t, dir, ".opencode/command/test.md", "# Command")
+	createFile(t, dir, ".opencode/commands/test.md", "# Command")
 	createFile(t, dir, ".opencode/uf/packs/go.md", "# Go")
 	createFile(t, dir, ".specify/config.yaml", "# config")
 	createFile(t, dir, "AGENTS.md", "# Agents")

@@ -226,6 +226,13 @@ func Run(opts Options) (*Result, error) {
 	// Initialize sub-tools after file scaffolding, before summary.
 	subResults := append([]subToolResult{giResult, agentsResult, claudeResult, cursorResult}, initSubTools(&opts)...)
 
+	// Migrate legacy .opencode/command/ to .opencode/commands/.
+	// Runs after initSubTools() so files created by specify init,
+	// gaze init, etc. in the old directory are caught and moved.
+	if migResult := migrateCommandDir(&opts); migResult != nil {
+		subResults = append(subResults, *migResult)
+	}
+
 	printSummary(opts.Stdout, opts.DivisorOnly, langExplicit, langDetected, result, subResults)
 	return result, nil
 }
@@ -287,7 +294,7 @@ func isToolOwned(relPath string) bool {
 	if strings.HasPrefix(relPath, "openspec/schemas/") {
 		return true
 	}
-	if strings.HasPrefix(relPath, "opencode/command/") {
+	if strings.HasPrefix(relPath, "opencode/commands/") {
 		return true
 	}
 	// Skill files are tool-owned (maintained by unbound init).
@@ -313,7 +320,7 @@ func isDivisorAsset(relPath string) bool {
 	if strings.HasPrefix(relPath, "opencode/agents/divisor-") {
 		return true
 	}
-	if relPath == "opencode/command/review-council.md" {
+	if relPath == "opencode/commands/review-council.md" {
 		return true
 	}
 	if isConventionPack(relPath) {
@@ -779,6 +786,154 @@ func ensureGitignore(opts *Options) subToolResult {
 		name:   ".gitignore",
 		action: "configured",
 	}
+}
+
+// migrateCommandDir moves files from the legacy .opencode/command/
+// directory to the canonical .opencode/commands/ directory. Handles
+// three cases: atomic rename (only old exists), per-file merge (both
+// exist), and no-op (old does not exist). Idempotent and re-runnable.
+// Returns nil when there is nothing to migrate (silent no-op).
+// Skipped in DivisorOnly mode (subset deployment should not rename
+// directories in a foreign repo).
+func migrateCommandDir(opts *Options) *subToolResult {
+	if opts.DivisorOnly {
+		return nil
+	}
+
+	oldDir := filepath.Join(opts.TargetDir, ".opencode", "command")
+	newDir := filepath.Join(opts.TargetDir, ".opencode", "commands")
+
+	// Check if old dir exists. Use Lstat to detect symlinks.
+	oldInfo, err := os.Lstat(oldDir)
+	if err != nil {
+		// Old dir does not exist — nothing to migrate.
+		return nil
+	}
+
+	// Symlink guard: do not migrate symlinked directories.
+	if oldInfo.Mode()&os.ModeSymlink != 0 {
+		return &subToolResult{
+			name:   ".opencode/command/",
+			action: "skipped",
+			detail: "symlink detected; manual migration required",
+		}
+	}
+
+	// Case: only old dir exists — atomic rename.
+	if _, statErr := os.Stat(newDir); os.IsNotExist(statErr) {
+		if renameErr := os.Rename(oldDir, newDir); renameErr != nil {
+			return &subToolResult{
+				name:   ".opencode/command/ → commands/",
+				action: "failed",
+				detail: fmt.Sprintf("rename: %v", renameErr),
+			}
+		}
+		count := countMDFiles(newDir)
+		return &subToolResult{
+			name:   ".opencode/command/ → commands/",
+			action: "migrated",
+			detail: fmt.Sprintf("%d files renamed", count),
+		}
+	}
+
+	// Case: both dirs exist — per-file merge.
+	var moved, skipped, warned int
+	entries, readErr := os.ReadDir(oldDir)
+	if readErr != nil {
+		return &subToolResult{
+			name:   ".opencode/command/ → commands/",
+			action: "failed",
+			detail: fmt.Sprintf("read old dir: %v", readErr),
+		}
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		oldPath := filepath.Join(oldDir, name)
+		newPath := filepath.Join(newDir, name)
+
+		if _, statErr := os.Stat(newPath); statErr == nil {
+			// File exists in both dirs.
+			oldContent, rErr := opts.ReadFile(oldPath)
+			if rErr != nil {
+				_, _ = fmt.Fprintf(opts.Stdout,
+					"  ⚠ %s: read failed: %v\n", name, rErr)
+				warned++
+				continue
+			}
+			newContent, rErr := opts.ReadFile(newPath)
+			if rErr != nil {
+				_, _ = fmt.Fprintf(opts.Stdout,
+					"  ⚠ %s: read failed: %v\n", name, rErr)
+				warned++
+				continue
+			}
+			if !bytes.Equal(oldContent, newContent) {
+				_, _ = fmt.Fprintf(opts.Stdout,
+					"  ⚠ %s: conflict — kept commands/ version"+
+						" (run /uf-init for AI-assisted resolution)\n", name)
+				warned++
+			}
+			// Remove old copy (keep commands/ version).
+			_ = os.Remove(oldPath)
+			skipped++
+		} else {
+			// File only in old dir — move it.
+			if moveErr := moveFile(oldPath, newPath, opts); moveErr != nil {
+				_, _ = fmt.Fprintf(opts.Stdout,
+					"  ⚠ %s: move failed: %v\n", name, moveErr)
+				warned++
+				continue
+			}
+			moved++
+		}
+	}
+
+	// Try to remove old dir if empty.
+	_ = os.Remove(oldDir)
+
+	return &subToolResult{
+		name:   ".opencode/command/ → commands/",
+		action: "migrated",
+		detail: fmt.Sprintf("moved %d, skipped %d duplicates, %d warnings",
+			moved, skipped, warned),
+	}
+}
+
+// moveFile moves a file from src to dst. Uses os.Rename first
+// (fast, atomic on same filesystem). On failure, falls back to
+// read → write → remove.
+func moveFile(src, dst string, opts *Options) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	// Fallback: read → write → remove.
+	content, err := opts.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("read: %w", err)
+	}
+	if err := opts.WriteFile(dst, content, 0o644); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+	return os.Remove(src)
+}
+
+// countMDFiles counts .md files in the given directory.
+func countMDFiles(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			count++
+		}
+	}
+	return count
 }
 
 // agentsmdPackMarker is the heading used to detect whether the
