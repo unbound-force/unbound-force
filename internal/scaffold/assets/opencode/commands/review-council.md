@@ -52,7 +52,7 @@ examining the current branch and workspace:
    - **Code files**: everything else (`.go`, `.ts`, `.js`,
      `.py`, `go.mod`, `go.sum`, `Makefile`, `internal/`,
      `cmd/`, `.opencode/agents/`, `.opencode/commands/`,
-     `.opencode/skill/`, `.opencode/uf/packs/`,
+     `.opencode/skills/`, `.opencode/uf/packs/`,
      etc.)
 
 4. **Detect the workflow tier** from the branch name:
