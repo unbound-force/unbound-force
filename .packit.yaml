@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Packit — Fedora packaging automation
+# =====================================
+# Automates COPR builds on PRs, proposes to Fedora
+# dist-git on release, triggers Koji builds and Bodhi
+# updates after dist-git merge.
+#
+# Targets must be updated with each Fedora release
+# cycle (~every 6 months). See docs/RELEASE_PROCESS.md.
+
+upstream_project_url: https://github.com/unbound-force/unbound-force
+upstream_tag_template: v{version}
+upstream_package_name: unbound-force
+downstream_package_name: unbound-force
+
+specfile_path: unbound-force.spec
+
+files_to_sync:
+  - unbound-force.spec
+  - .packit.yaml
+
+jobs:
+  # Build in COPR on PRs for validation
+  - job: copr_build
+    trigger: pull_request
+    targets:
+      - fedora-rawhide-x86_64
+      - fedora-44-x86_64
+      - fedora-43-x86_64
+
+  # Propose to Fedora dist-git on release
+  - job: propose_downstream
+    trigger: release
+    dist_git_branches:
+      - rawhide
+      - f44
+      - f43
+
+  # Koji builds after dist-git merge
+  - job: koji_build
+    trigger: commit
+    dist_git_branches:
+      - rawhide
+      - f44
+      - f43
+
+  # Bodhi updates for released Fedora versions
+  - job: bodhi_update
+    trigger: commit
+    dist_git_branches:
+      - f44
+      - f43

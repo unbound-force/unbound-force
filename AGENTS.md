@@ -54,7 +54,7 @@ Always run tests with `-race -count=1`. CI enforces this.
 | Security | `ci_security.yml` | OSV-Scanner, Trivy, Scorecards |
 | Dependencies | `ci_dependencies.yml` | Dependency review + dependabot |
 | CRAP Load | `ci_crapload.yml` | CRAP regression analysis |
-| Release | `release.yml` | GoReleaser + Homebrew tap |
+| Release | `release.yml` | workflow_dispatch, GoReleaser + Cosign + Syft + Homebrew tap |
 
 ## Project Structure
 
@@ -80,12 +80,16 @@ unbound-force/
 │   ├── artifacts/                    # Artifact envelope I/O
 │   ├── backlog/                      # Muti-Mind backlog parsing
 │   └── sync/                         # GitHub issue sync
+├── docs/                             # Project documentation
 ├── specs/                            # Architectural specs (001-018)
 ├── openspec/                         # OpenSpec tactical workflow
 ├── schemas/                          # JSON Schema registry (9 types)
 ├── go.mod                            # Go module (1.24+)
 ├── opencode.json                     # MCP server configuration
-└── .goreleaser.yaml                  # Release configuration
+├── .goreleaser.yaml                  # Release configuration
+├── .packit.yaml                      # Fedora packaging (Packit)
+├── unbound-force.spec                # Fedora RPM spec
+└── .fmf/                            # Testing Farm metadata
 ```
 
 All business logic lives under `internal/` and MUST NOT be

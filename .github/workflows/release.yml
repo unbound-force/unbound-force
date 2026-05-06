@@ -2,16 +2,23 @@
 #
 # Release
 # =======
-# Builds cross-platform binaries via GoReleaser, signs
-# macOS archives with Apple Developer ID, notarizes them,
-# and publishes to the Homebrew tap.
+# One-click release pipeline triggered via workflow_dispatch.
+# Validates pre-flight conditions (semver format, tag
+# uniqueness, CI status, unreleased commits), creates the
+# tag, builds cross-platform binaries via GoReleaser with
+# SBOM and Cosign signing, signs macOS archives with Apple
+# Developer ID, notarizes them, and publishes to the
+# Homebrew tap.
 
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.15.0)'
+        required: true
+        type: string
 
 permissions: {}
 
@@ -20,14 +27,119 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  preflight:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    timeout-minutes: 45
+      checks: read
+    timeout-minutes: 10
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
     outputs:
       has_signing_secrets: ${{ steps.check-secrets.outputs.has_secrets }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag format
+        run: |
+          if ! echo "$RELEASE_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid tag format: '$RELEASE_TAG'. Must match vMAJOR.MINOR.PATCH (e.g., v0.15.0)."
+            exit 1
+          fi
+          echo "Tag format valid: $RELEASE_TAG"
+
+      - name: Check tag uniqueness
+        run: |
+          if git ls-remote --tags origin | grep -q "refs/tags/${RELEASE_TAG}$"; then
+            echo "::error::Tag '$RELEASE_TAG' already exists. Choose a different version."
+            exit 1
+          fi
+          echo "Tag '$RELEASE_TAG' does not exist yet."
+
+      - name: Verify semver ordering
+        run: |
+          LATEST=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -1)
+          if [ -z "$LATEST" ]; then
+            echo "No existing tags found. First release."
+            exit 0
+          fi
+          echo "Latest existing tag: $LATEST"
+          # Compare using sort -V: if TAG sorts after LATEST, it is greater
+          HIGHER=$(printf '%s\n%s' "$LATEST" "$RELEASE_TAG" | sort -V | tail -1)
+          if [ "$HIGHER" = "$LATEST" ]; then
+            echo "::error::Tag '$RELEASE_TAG' is not greater than latest release '$LATEST'."
+            exit 1
+          fi
+          echo "Version ordering valid: $RELEASE_TAG > $LATEST"
+
+      - name: Verify CI passed on HEAD
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          HEAD_SHA=$(git rev-parse HEAD)
+          echo "Checking CI status for commit $HEAD_SHA"
+
+          REQUIRED_CHECKS=(
+            "Build and Test"
+            "Standardized CI / Run linters"
+          )
+
+          for CHECK_NAME in "${REQUIRED_CHECKS[@]}"; do
+            STATUS=$(gh api "repos/${GH_REPO}/commits/${HEAD_SHA}/check-runs" \
+              --jq ".check_runs[] | select(.name == \"${CHECK_NAME}\") | .conclusion" \
+              2>/dev/null | head -1)
+            if [ "$STATUS" != "success" ]; then
+              echo "::error::Required check '${CHECK_NAME}' has not passed (status: ${STATUS:-not found}). Push to main and wait for CI before releasing."
+              exit 1
+            fi
+            echo "  ✓ ${CHECK_NAME}: success"
+          done
+
+          # Security checks: verify at least one scan passed
+          SECURITY_PASSED=false
+          for CHECK_NAME in "OSV-Scanner / Trivy Source Scan" "OSV-Scanner / OSV-Scanner / osv-scan"; do
+            STATUS=$(gh api "repos/${GH_REPO}/commits/${HEAD_SHA}/check-runs" \
+              --jq ".check_runs[] | select(.name == \"${CHECK_NAME}\") | .conclusion" \
+              2>/dev/null | head -1)
+            if [ "$STATUS" = "success" ]; then
+              echo "  ✓ ${CHECK_NAME}: success"
+              SECURITY_PASSED=true
+            else
+              echo "  ⚠ ${CHECK_NAME}: ${STATUS:-not found}"
+            fi
+          done
+
+          if [ "$SECURITY_PASSED" != "true" ]; then
+            echo "::error::No security scan checks have passed on HEAD. Push to main and wait for CI before releasing."
+            exit 1
+          fi
+
+          echo "All required CI checks passed."
+
+      - name: Verify unreleased commits
+        run: |
+          LATEST=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -1)
+          if [ -z "$LATEST" ]; then
+            COUNT=$(git rev-list --count HEAD)
+          else
+            COUNT=$(git rev-list --count "${LATEST}..HEAD")
+          fi
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::No unreleased commits since ${LATEST:-initial commit}. Nothing to release."
+            exit 1
+          fi
+          echo "$COUNT commit(s) since ${LATEST:-initial commit}."
+
+      - name: Create and push tag
+        run: |
+          git tag -a "$RELEASE_TAG" -m "$RELEASE_TAG"
+          git push origin "$RELEASE_TAG"
+          echo "Created and pushed tag: $RELEASE_TAG"
+
       - name: Check signing secrets
         id: check-secrets
         run: |
@@ -39,15 +151,34 @@ jobs:
         env:
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
 
+  release:
+    runs-on: ubuntu-latest
+    needs: preflight
+    permissions:
+      contents: write
+      id-token: write
+    timeout-minutes: 45
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    outputs:
+      has_signing_secrets: ${{ needs.preflight.outputs.has_signing_secrets }}
+    steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           fetch-depth: 0
+          ref: ${{ inputs.tag }}
 
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003  # v4.1.1
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8  # v7.2.1
@@ -57,20 +188,21 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
 
       - name: Upload generated cask and formula as release artifacts
         # GoReleaser writes dist/homebrew/Casks/unbound-force.rb and
         # dist/homebrew/Formula/unbound-force.rb with skip_upload: true.
         # Upload both so the sign-macos job can download and patch darwin checksums.
         run: |
-          gh release upload "${GITHUB_REF_NAME}" \
+          gh release upload "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             dist/homebrew/Casks/unbound-force.rb \
             --clobber
 
           # Rename formula to avoid filename collision with cask (both are unbound-force.rb)
           cp dist/homebrew/Formula/unbound-force.rb dist/homebrew/Formula/unbound-force-formula.rb
-          gh release upload "${GITHUB_REF_NAME}" \
+          gh release upload "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             dist/homebrew/Formula/unbound-force-formula.rb \
             --clobber
@@ -84,6 +216,8 @@ jobs:
     permissions:
       contents: write
     timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - name: Import certificate into Keychain
         run: |
@@ -112,10 +246,10 @@ jobs:
       - name: Download darwin archives
         run: |
           set -euo pipefail
-          gh release download "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --pattern "unbound-force_*_darwin_*.tar.gz" --dir ./artifacts
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "unbound-force_*_darwin_*.tar.gz" --dir ./artifacts
 
           # Verify both expected archives were downloaded
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           for arch in amd64 arm64; do
             if [ ! -f "./artifacts/unbound-force_${VERSION}_darwin_${arch}.tar.gz" ]; then
               echo "::error::Expected darwin_${arch} archive not found after download"
@@ -169,10 +303,10 @@ jobs:
         run: |
           set -euo pipefail
           # Upload signed darwin archives (replaces unsigned)
-          gh release upload "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" ./signed/*.tar.gz --clobber
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" ./signed/*.tar.gz --clobber
 
           # Download existing checksums
-          gh release download "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --pattern "checksums.txt" --dir ./
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "checksums.txt" --dir ./
 
           # Remove darwin lines from checksums (keep linux and other lines)
           grep -v darwin checksums.txt > checksums_updated.txt || true
@@ -184,14 +318,14 @@ jobs:
 
           # Replace checksums file
           mv checksums_updated.txt checksums.txt
-          gh release upload "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" checksums.txt --clobber
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" checksums.txt --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update Homebrew cask and formula
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
 
           # Verify signed archives exist before computing checksums
           for arch in arm64 amd64; do
@@ -209,43 +343,33 @@ jobs:
           echo "darwin_amd64 SHA256: $AMD64_SHA"
 
           # Download the GoReleaser-generated cask and formula (uploaded by the release job)
-          gh release download "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --pattern "unbound-force.rb" --dir ./cask-staging
-          gh release download "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --pattern "unbound-force-formula.rb" --dir ./formula-staging
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "unbound-force.rb" --dir ./cask-staging
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "unbound-force-formula.rb" --dir ./formula-staging
 
           CASK_FILE="./cask-staging/unbound-force.rb"
           FORMULA_FILE="./formula-staging/unbound-force-formula.rb"
 
-          # Patch darwin checksums in cask with signed values
-          awk -v amd64="$AMD64_SHA" -v arm64="$ARM64_SHA" '
-            /darwin_amd64/ { found_amd64=1 }
-            /darwin_arm64/ { found_arm64=1 }
-            /sha256/ && found_amd64 {
-              sub(/sha256 "[^"]*"/, "sha256 \"" amd64 "\"")
-              found_amd64=0
-            }
-            /sha256/ && found_arm64 {
-              sub(/sha256 "[^"]*"/, "sha256 \"" arm64 "\"")
-              found_arm64=0
-            }
-            { print }
-          ' "$CASK_FILE" > "${CASK_FILE}.patched"
-          mv "${CASK_FILE}.patched" "$CASK_FILE"
+          # Patch darwin checksums with signed values (shared function for DRY)
+          patch_checksums() {
+            local input="$1" output="${1}.patched"
+            awk -v amd64="$AMD64_SHA" -v arm64="$ARM64_SHA" '
+              /darwin_amd64/ { found_amd64=1 }
+              /darwin_arm64/ { found_arm64=1 }
+              /sha256/ && found_amd64 {
+                sub(/sha256 "[^"]*"/, "sha256 \"" amd64 "\"")
+                found_amd64=0
+              }
+              /sha256/ && found_arm64 {
+                sub(/sha256 "[^"]*"/, "sha256 \"" arm64 "\"")
+                found_arm64=0
+              }
+              { print }
+            ' "$input" > "$output"
+            mv "$output" "$input"
+          }
 
-          # Patch darwin checksums in formula with signed values (same awk pattern)
-          awk -v amd64="$AMD64_SHA" -v arm64="$ARM64_SHA" '
-            /darwin_amd64/ { found_amd64=1 }
-            /darwin_arm64/ { found_arm64=1 }
-            /sha256/ && found_amd64 {
-              sub(/sha256 "[^"]*"/, "sha256 \"" amd64 "\"")
-              found_amd64=0
-            }
-            /sha256/ && found_arm64 {
-              sub(/sha256 "[^"]*"/, "sha256 \"" arm64 "\"")
-              found_arm64=0
-            }
-            { print }
-          ' "$FORMULA_FILE" > "${FORMULA_FILE}.patched"
-          mv "${FORMULA_FILE}.patched" "$FORMULA_FILE"
+          patch_checksums "$CASK_FILE"
+          patch_checksums "$FORMULA_FILE"
 
           # Push both cask and formula to the Homebrew tap
           git clone "https://x-access-token:${HOMEBREW_TAP_GITHUB_TOKEN}@github.com/unbound-force/homebrew-tap.git" tap
@@ -258,7 +382,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Casks/unbound-force.rb Formula/unbound-force.rb
           git diff --cached --quiet && { echo "No tap changes needed"; exit 0; }
-          git commit -m "feat: update unbound-force cask and formula to v${VERSION} (signed)"
+          git commit -m "feat: update unbound-force cask and formula to ${RELEASE_TAG} (signed)"
           git push
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

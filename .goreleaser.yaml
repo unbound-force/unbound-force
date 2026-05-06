@@ -27,6 +27,22 @@ archives:
 checksum:
   name_template: checksums.txt
 
+sboms:
+  - artifacts: archive
+  - id: source
+    artifacts: source
+
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    output: true
+    args:
+      - sign-blob
+      - --yes
+      - --bundle
+      - "${artifact}.sigstore.json"
+      - "${artifact}"
+
 changelog:
   sort: asc
   use: github
