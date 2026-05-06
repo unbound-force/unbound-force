@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+
 version: 2
 
 builds:
@@ -28,36 +30,52 @@ checksum:
   name_template: checksums.txt
 
 sboms:
-  - artifacts: archive
+  - id: archive
+    artifacts: archive
   - id: source
     artifacts: source
 
 signs:
   - cmd: cosign
+    signature: "${artifact}.sigstore.json"
     artifacts: checksum
     output: true
     args:
       - sign-blob
-      - --yes
-      - --bundle
-      - "${artifact}.sigstore.json"
+      - "--bundle=${signature}"
       - "${artifact}"
+      - --yes
 
 changelog:
   sort: asc
   use: github
+  format: "{{ .SHA }}: {{ .Message }} ({{ with .AuthorUsername }}@{{ . }}{{ else }}{{ .AuthorName }}{{ end }})"
   groups:
     - title: Features
       regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 100
+    - title: Security Updates
+      regexp: '^.*?sec(\([[:word:]]+\))??!?:.+$'
+      order: 150
     - title: Bug Fixes
-      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
-    - title: Documentation
-      regexp: '^.*?docs(\([[:word:]]+\))??!?:.+$'
-    - title: Others
-      order: 999
+      regexp: '^.*?(fix|refactor)(\([[:word:]]+\))??!?:.+$'
+      order: 200
+    - title: Dependency Updates
+      regexp: '^.*chore\(deps\):.*$'
+      order: 250
+    - title: Infrastructure Updates
+      regexp: '^.*ci(\(.*\))?:.*$'
+      order: 300
+    - title: Documentation Updates
+      regexp: '^.*?docs?(\([[:word:]]+\))??!?:.+$'
+      order: 400
+    - title: Other Work
+      order: 9999
   filters:
     exclude:
-      - '^chore:'
+      - '^chore(?!\(deps\)):'
+      - '^test:'
+      - Merge pull request
 
 nfpms:
   - id: unbound-force
