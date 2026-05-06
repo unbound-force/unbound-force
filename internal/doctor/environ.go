@@ -264,8 +264,6 @@ func homebrewInstallCmd(toolName string) string {
 		return "brew install anomalyco/tap/opencode"
 	case "gaze":
 		return "brew install unbound-force/tap/gaze"
-	case "mxf":
-		return "brew install unbound-force/tap/unbound-force (mxf is bundled)"
 	case "dewey":
 		return "brew install unbound-force/tap/dewey"
 	case "node":
@@ -297,8 +295,6 @@ func genericInstallCmd(toolName string) string {
 		return "Download from https://go.dev/dl/"
 	case "node":
 		return "Download from https://nodejs.org/"
-	case "mxf":
-		return "Bundled with unbound-force — install unbound-force to get mxf"
 	case "replicator":
 		return "brew install unbound-force/tap/replicator"
 	case "gh":
