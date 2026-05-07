@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/unbound-force/unbound-force/internal/config"
 )
 
 // markerFileExtensions defines which file types receive version markers.
@@ -474,9 +476,11 @@ type subToolResult struct {
 
 // configureOpencodeJSON creates or updates opencode.json with the Dewey
 // MCP server entry (when dewey is in PATH) and the Replicator MCP entry
-// (when replicator is in PATH). Migrates legacy opencode-swarm-plugin
-// entries from the plugin array. Idempotent by default; Force overwrites
-// stale mcp.dewey entries. Returns a subToolResult describing the outcome.
+// (when replicator is in PATH). Respects setup.tools.*.method: skip in
+// .uf/config.yaml — tools configured as "skip" are treated as absent.
+// Migrates legacy opencode-swarm-plugin entries from the plugin array.
+// Idempotent by default; Force overwrites stale mcp.dewey entries.
+// Returns a subToolResult describing the outcome.
 //
 // Design decision: Uses map[string]json.RawMessage to preserve unknown
 // user keys (custom MCP servers, custom config). Per SOLID Open/Closed
@@ -498,14 +502,28 @@ func configureOpencodeJSON(opts *Options) []subToolResult {
 		}}
 	}
 
+	// Load config to respect setup.tools.*.method: skip.
+	// Error ignored: Load returns compiled defaults on missing or
+	// malformed config files — graceful degradation by design.
+	cfg, _ := config.Load(config.LoadOptions{
+		ProjectDir: opts.TargetDir,
+		ReadFile:   opts.ReadFile,
+	})
+
 	// Detect what needs to be configured.
 	hasDewey := false
 	if _, err := opts.LookPath("dewey"); err == nil {
 		hasDewey = true
 	}
+	if tc, ok := cfg.Setup.Tools["dewey"]; ok && tc.Method == "skip" {
+		hasDewey = false
+	}
 	hasReplicator := false
 	if _, err := opts.LookPath("replicator"); err == nil {
 		hasReplicator = true
+	}
+	if tc, ok := cfg.Setup.Tools["replicator"]; ok && tc.Method == "skip" {
+		hasReplicator = false
 	}
 
 	// Nothing to configure — skip.

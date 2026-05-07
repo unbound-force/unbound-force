@@ -4014,10 +4014,10 @@
       "package": "scaffold",
       "function": "configureOpencodeJSON",
       "file": "internal/scaffold/scaffold.go",
-      "line": 485,
-      "complexity": 44,
+      "line": 489,
+      "complexity": 48,
       "line_coverage": 97.02970297029702,
-      "crap": 44.05073468821247,
+      "crap": 48.052231036358876,
       "fix_strategy": "decompose"
     },
     {
@@ -4871,10 +4871,10 @@
         "package": "scaffold",
         "function": "configureOpencodeJSON",
         "file": "internal/scaffold/scaffold.go",
-        "line": 485,
-        "complexity": 44,
+        "line": 489,
+        "complexity": 48,
         "line_coverage": 97.02970297029702,
-        "crap": 44.05073468821247,
+        "crap": 48.052231036358876,
         "fix_strategy": "decompose"
       },
       {

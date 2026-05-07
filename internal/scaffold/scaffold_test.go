@@ -3229,6 +3229,118 @@ func TestConfigureOpencodeJSON_DryRun(t *testing.T) {
 	}
 }
 
+func TestConfigureOpencodeJSON_SkipDewey(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create .uf/config.yaml with dewey method: skip.
+	ufDir := filepath.Join(dir, ".uf")
+	if err := os.MkdirAll(ufDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cfgContent := "setup:\n  tools:\n    dewey:\n      method: skip\n"
+	if err := os.WriteFile(filepath.Join(ufDir, "config.yaml"), []byte(cfgContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey", "replicator": "/usr/local/bin/replicator"}),
+	}
+
+	results := configureOpencodeJSON(opts)
+	if results[0].action == "skipped" {
+		t.Fatal("should not skip entirely — replicator is still active")
+	}
+
+	ocMap := parseOpencodeJSON(t, dir)
+	mcpRaw, ok := ocMap["mcp"]
+	if !ok {
+		t.Fatal("mcp key should exist for replicator")
+	}
+	var mcpMap map[string]json.RawMessage
+	if err := json.Unmarshal(mcpRaw, &mcpMap); err != nil {
+		t.Fatalf("parse mcp: %v", err)
+	}
+	if _, ok := mcpMap["dewey"]; ok {
+		t.Error("mcp.dewey should NOT exist when setup.tools.dewey.method is skip")
+	}
+	if _, ok := mcpMap["replicator"]; !ok {
+		t.Error("mcp.replicator should exist")
+	}
+}
+
+func TestConfigureOpencodeJSON_SkipReplicator(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create .uf/config.yaml with replicator method: skip.
+	ufDir := filepath.Join(dir, ".uf")
+	if err := os.MkdirAll(ufDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cfgContent := "setup:\n  tools:\n    replicator:\n      method: skip\n"
+	if err := os.WriteFile(filepath.Join(ufDir, "config.yaml"), []byte(cfgContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey", "replicator": "/usr/local/bin/replicator"}),
+	}
+
+	results := configureOpencodeJSON(opts)
+	if results[0].action == "skipped" {
+		t.Fatal("should not skip entirely — dewey is still active")
+	}
+
+	ocMap := parseOpencodeJSON(t, dir)
+	mcpRaw, ok := ocMap["mcp"]
+	if !ok {
+		t.Fatal("mcp key should exist for dewey")
+	}
+	var mcpMap map[string]json.RawMessage
+	if err := json.Unmarshal(mcpRaw, &mcpMap); err != nil {
+		t.Fatalf("parse mcp: %v", err)
+	}
+	if _, ok := mcpMap["replicator"]; ok {
+		t.Error("mcp.replicator should NOT exist when setup.tools.replicator.method is skip")
+	}
+	if _, ok := mcpMap["dewey"]; !ok {
+		t.Error("mcp.dewey should exist")
+	}
+}
+
+func TestConfigureOpencodeJSON_SkipBoth(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create .uf/config.yaml with both tools set to skip.
+	ufDir := filepath.Join(dir, ".uf")
+	if err := os.MkdirAll(ufDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cfgContent := "setup:\n  tools:\n    dewey:\n      method: skip\n    replicator:\n      method: skip\n"
+	if err := os.WriteFile(filepath.Join(ufDir, "config.yaml"), []byte(cfgContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey", "replicator": "/usr/local/bin/replicator"}),
+	}
+
+	results := configureOpencodeJSON(opts)
+	if results[0].action != "skipped" {
+		t.Errorf("expected action 'skipped' when both tools are skip, got %q", results[0].action)
+	}
+	if results[0].detail != "nothing to configure" {
+		t.Errorf("expected detail 'nothing to configure', got %q", results[0].detail)
+	}
+
+	// Verify no file was written.
+	if _, err := os.Stat(filepath.Join(dir, "opencode.json")); !os.IsNotExist(err) {
+		t.Error("opencode.json should not be created when both tools are skipped")
+	}
+}
+
 // --- Dewey force re-index tests ---
 
 func TestInitSubTools_DeweyForceReindex(t *testing.T) {
