@@ -164,7 +164,23 @@ gh pr view --json number,url 2>/dev/null
   c. Generate PR body: summarize all commits on the
   branch with a `## Summary` section and bullet points.
 
-  d. Create:
+  d. Show the proposed PR content to the user:
+
+  > **Proposed PR:**
+  >
+  > **Title:** `<title>`
+  >
+  > **Body:**
+  > ```
+  > <body>
+  > ```
+  >
+  > Approve, edit, or provide your own?
+
+  Use the approved (or edited/replaced) title and body
+  for creation.
+
+  e. Create:
   ```bash
   # If targeting upstream fork parent:
   gh pr create --repo <parent> --title "<title>" \
@@ -173,7 +189,7 @@ gh pr view --json number,url 2>/dev/null
   gh pr create --title "<title>" --body "<body>"
   ```
 
-  e. Report the PR URL.
+  f. Report the PR URL.
 
 ### 6. Watch CI Checks
 
@@ -240,6 +256,8 @@ approval with: gh pr merge --rebase --delete-branch
 - **NEVER stage secret files without warning** — always
   prompt
 - **NEVER commit without user approval** of the message
+- **NEVER create a PR without user approval** of the
+  title and body
 - **ALWAYS report the PR URL** so the user can review it
 - **If any step fails**, stop immediately with context
   and options — do not attempt to continue or recover
