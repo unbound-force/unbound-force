@@ -103,6 +103,20 @@ jobs:
             const review = '${{ needs.call_deps_reviewer.outputs.review_conclusion }}';
             const releaseAge = '${{ needs.call_dependabot_reviewer.outputs.release_age_hours }}';
 
+            // Check for existing REQUEST_CHANGES from non-bot users
+            const reviews = await github.rest.pulls.listReviews({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const hasBlockingReview = reviews.data.some(
+              r => r.state === 'CHANGES_REQUESTED' && !r.user.login.endsWith('[bot]')
+            );
+            if (hasBlockingReview) {
+              console.log('Skipping auto-approval: human has requested changes');
+              return;
+            }
+
             github.rest.pulls.createReview({
               owner: context.repo.owner,
               repo: context.repo.repo,

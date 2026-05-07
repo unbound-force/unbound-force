@@ -155,6 +155,31 @@ These rules are non-negotiable. Violations are CRITICAL severity.
 | `/review-council` | Pre-PR (local) | 5+ Divisor agents |
 | `/review-pr [N]` | Post-PR (GitHub) | Single agent, CI analysis |
 
+`/review-pr` key capabilities: PR walkthrough, issue
+linking (`Fixes #N`), suggestion blocks, verdict-aligned
+posting (APPROVE/REQUEST_CHANGES/COMMENT), path-based
+focus heuristics, and review state awareness (fetches
+existing reviews to prevent duplicate findings, warns
+about stale review dismissal, detects CODEOWNER
+requirements).
+
+#### GitHub Review Lifecycle
+
+- **Review states**: `APPROVED`, `CHANGES_REQUESTED`,
+  `COMMENTED`, `DISMISSED`
+- **Stale dismissal**: When `dismiss_stale_reviews` is
+  enabled, APPROVE is auto-invalidated on new commits.
+  `/review-pr` warns before posting APPROVE.
+- **Review requests**: A user can appear in
+  `requestedReviewers` even with a prior APPROVE (it was
+  dismissed). `/review-pr` detects this.
+- **CODEOWNER checks**: `/review-pr` warns when APPROVE
+  may not satisfy `require_code_owner_reviews`.
+- **Duplicate detection**: `/review-pr` warns before
+  posting a second review from the same account.
+- **Dependabot**: `ci_dependencies.yml` respects human
+  `CHANGES_REQUESTED` before auto-approving.
+
 ## Specification Workflow
 
 All non-trivial changes MUST be preceded by a spec workflow.
