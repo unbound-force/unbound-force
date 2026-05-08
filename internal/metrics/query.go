@@ -48,6 +48,10 @@ func (q *Query) Summary(period time.Duration) (*MetricsSnapshot, error) {
 }
 
 // Velocity returns velocity per sprint for the last N sprints.
+// It returns a slice of VelocityPoint values computed from all
+// stored snapshots. When sprints > 0, the result is trimmed to
+// the most recent N entries. Returns an error if no metrics data
+// is available (Store.ReadSnapshots returns empty).
 func (q *Query) Velocity(sprints int) ([]VelocityPoint, error) {
 	snapshots, err := q.Store.ReadSnapshots(time.Time{})
 	if err != nil {

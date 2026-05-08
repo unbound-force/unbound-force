@@ -4272,3 +4272,99 @@ func TestRunSandboxInit_CustomDemoPorts(t *testing.T) {
 	}
 }
 
+// --- Options.defaults tests ---
+
+func TestOptionsDefaults_FillsZeroFields(t *testing.T) {
+	opts := &Options{}
+	opts.defaults()
+
+	if opts.ProjectDir == "" {
+		t.Error("defaults() should set ProjectDir to cwd")
+	}
+	if opts.Mode != ModeIsolated {
+		t.Errorf("Mode = %q, want %q", opts.Mode, ModeIsolated)
+	}
+	if opts.Stdout == nil {
+		t.Error("defaults() should set Stdout")
+	}
+	if opts.Stderr == nil {
+		t.Error("defaults() should set Stderr")
+	}
+	if opts.Stdin == nil {
+		t.Error("defaults() should set Stdin")
+	}
+	if opts.LookPath == nil {
+		t.Error("defaults() should set LookPath")
+	}
+	if opts.ExecCmd == nil {
+		t.Error("defaults() should set ExecCmd")
+	}
+	if opts.ExecInteractive == nil {
+		t.Error("defaults() should set ExecInteractive")
+	}
+	if opts.Getenv == nil {
+		t.Error("defaults() should set Getenv")
+	}
+	if opts.ReadFile == nil {
+		t.Error("defaults() should set ReadFile")
+	}
+	if opts.HTTPGet == nil {
+		t.Error("defaults() should set HTTPGet")
+	}
+	if opts.HTTPDo == nil {
+		t.Error("defaults() should set HTTPDo")
+	}
+}
+
+func TestOptionsDefaults_PreservesExistingValues(t *testing.T) {
+	customDir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader("")
+	customLookPath := func(string) (string, error) { return "", nil }
+	customGetenv := func(string) string { return "custom" }
+
+	opts := &Options{
+		ProjectDir: customDir,
+		Mode:       "direct",
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		Stdin:      stdin,
+		LookPath:   customLookPath,
+		Getenv:     customGetenv,
+	}
+	opts.defaults()
+
+	if opts.ProjectDir != customDir {
+		t.Errorf("ProjectDir = %q, want %q (should preserve)", opts.ProjectDir, customDir)
+	}
+	if opts.Mode != "direct" {
+		t.Errorf("Mode = %q, want %q (should preserve)", opts.Mode, "direct")
+	}
+	if opts.Stdout != &stdout {
+		t.Error("Stdout should be preserved when already set")
+	}
+	if opts.Stderr != &stderr {
+		t.Error("Stderr should be preserved when already set")
+	}
+	if opts.Getenv == nil {
+		t.Error("Getenv should be preserved when already set")
+	}
+	if got := opts.Getenv("any"); got != "custom" {
+		t.Errorf("Getenv(any) = %q, want %q (custom func should be preserved)", got, "custom")
+	}
+
+	// Verify fields that were NOT set got filled.
+	if opts.ExecCmd == nil {
+		t.Error("ExecCmd should be set by defaults()")
+	}
+	if opts.ReadFile == nil {
+		t.Error("ReadFile should be set by defaults()")
+	}
+	if opts.HTTPGet == nil {
+		t.Error("HTTPGet should be set by defaults()")
+	}
+	if opts.HTTPDo == nil {
+		t.Error("HTTPDo should be set by defaults()")
+	}
+}
+

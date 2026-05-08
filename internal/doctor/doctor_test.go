@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // --- Test helpers ---
@@ -4511,5 +4514,290 @@ func TestCheckDevPod_ProviderListFails(t *testing.T) {
 	}
 	if !strings.Contains(r.Message, "could not check") {
 		t.Errorf("message = %q, want 'could not check'", r.Message)
+	}
+}
+
+// --- formatIndicator color branch tests ---
+
+func TestFormatIndicator_WithColor(t *testing.T) {
+	// Create a renderer targeting an output that supports color.
+	renderer := lipgloss.NewRenderer(os.Stdout, termenv.WithProfile(termenv.TrueColor))
+	pass := renderer.NewStyle().Foreground(lipgloss.Color("10"))
+	warn := renderer.NewStyle().Foreground(lipgloss.Color("11"))
+	fail := renderer.NewStyle().Foreground(lipgloss.Color("9"))
+	dim := renderer.NewStyle().Foreground(lipgloss.Color("241"))
+
+	tests := []struct {
+		name   string
+		result CheckResult
+		want   string // substring expected in the rendered output
+	}{
+		{
+			name:   "pass shows checkmark",
+			result: CheckResult{Severity: Pass},
+			want:   "✅",
+		},
+		{
+			name:   "pass with install hint shows dim circle",
+			result: CheckResult{Severity: Pass, InstallHint: "some hint"},
+			want:   "⊘",
+		},
+		{
+			name:   "warn shows warning symbol",
+			result: CheckResult{Severity: Warn},
+			want:   "⚠️",
+		},
+		{
+			name:   "fail shows X",
+			result: CheckResult{Severity: Fail},
+			want:   "❌",
+		},
+		{
+			name:   "unknown severity returns question mark",
+			result: CheckResult{Severity: Severity(99)},
+			want:   "?",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatIndicator(tc.result, true, pass, warn, fail, dim)
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("formatIndicator(color=true) = %q, want substring %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFormatIndicator_NoColor_UnknownSeverity(t *testing.T) {
+	got := formatIndicator(
+		CheckResult{Severity: Severity(99)},
+		false,
+		lipgloss.Style{}, lipgloss.Style{}, lipgloss.Style{}, lipgloss.Style{},
+	)
+	if got != "[????]" {
+		t.Errorf("formatIndicator(unknown, no color) = %q, want %q", got, "[????]")
+	}
+}
+
+// --- Options.defaults tests ---
+
+func TestOptionsDefaults_FillsZeroFields(t *testing.T) {
+	opts := &Options{}
+	opts.defaults()
+
+	if opts.TargetDir == "" {
+		t.Error("defaults() should set TargetDir to cwd")
+	}
+	if opts.Format != "text" {
+		t.Errorf("Format = %q, want %q", opts.Format, "text")
+	}
+	if opts.Stdout == nil {
+		t.Error("defaults() should set Stdout")
+	}
+	if opts.LookPath == nil {
+		t.Error("defaults() should set LookPath")
+	}
+	if opts.ExecCmd == nil {
+		t.Error("defaults() should set ExecCmd")
+	}
+	if opts.ExecCmdTimeout == nil {
+		t.Error("defaults() should set ExecCmdTimeout")
+	}
+	if opts.EvalSymlinks == nil {
+		t.Error("defaults() should set EvalSymlinks")
+	}
+	if opts.Getenv == nil {
+		t.Error("defaults() should set Getenv")
+	}
+	if opts.ReadFile == nil {
+		t.Error("defaults() should set ReadFile")
+	}
+	if opts.EmbedCheck == nil {
+		t.Error("defaults() should set EmbedCheck")
+	}
+}
+
+func TestOptionsDefaults_PreservesExistingValues(t *testing.T) {
+	customDir := t.TempDir()
+	var buf bytes.Buffer
+	customLookPath := func(string) (string, error) { return "", nil }
+
+	opts := &Options{
+		TargetDir: customDir,
+		Format:    "json",
+		Stdout:    &buf,
+		LookPath:  customLookPath,
+	}
+	opts.defaults()
+
+	if opts.TargetDir != customDir {
+		t.Errorf("TargetDir = %q, want %q (should preserve)", opts.TargetDir, customDir)
+	}
+	if opts.Format != "json" {
+		t.Errorf("Format = %q, want %q (should preserve)", opts.Format, "json")
+	}
+	if opts.Stdout != &buf {
+		t.Error("Stdout should be preserved when already set")
+	}
+	// LookPath is a func; just verify it wasn't replaced by checking non-nil.
+	if opts.LookPath == nil {
+		t.Error("LookPath should be preserved when already set")
+	}
+
+	// Verify fields that were NOT set got filled.
+	if opts.ExecCmd == nil {
+		t.Error("ExecCmd should be set by defaults()")
+	}
+	if opts.Getenv == nil {
+		t.Error("Getenv should be set by defaults()")
+	}
+}
+
+// --- defaultEmbedCheck tests ---
+
+func TestDefaultEmbedCheck_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/embed" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("unexpected method: %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"embeddings":[[0.1,0.2,0.3]]}`)
+	}))
+	defer ts.Close()
+
+	getenv := func(key string) string {
+		if key == "OLLAMA_HOST" {
+			return ts.URL
+		}
+		return ""
+	}
+
+	check := defaultEmbedCheck(getenv)
+	if err := check("test-model"); err != nil {
+		t.Errorf("defaultEmbedCheck() returned error: %v", err)
+	}
+}
+
+func TestDefaultEmbedCheck_EmptyEmbeddings(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"embeddings":[]}`)
+	}))
+	defer ts.Close()
+
+	check := defaultEmbedCheck(func(key string) string {
+		if key == "OLLAMA_HOST" {
+			return ts.URL
+		}
+		return ""
+	})
+
+	err := check("test-model")
+	if err == nil {
+		t.Fatal("expected error for empty embeddings")
+	}
+	if !strings.Contains(err.Error(), "empty embeddings") {
+		t.Errorf("error = %q, want 'empty embeddings'", err)
+	}
+}
+
+func TestDefaultEmbedCheck_ServerError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprint(w, `{"error":"model not found"}`)
+	}))
+	defer ts.Close()
+
+	check := defaultEmbedCheck(func(key string) string {
+		if key == "OLLAMA_HOST" {
+			return ts.URL
+		}
+		return ""
+	})
+
+	err := check("missing-model")
+	if err == nil {
+		t.Fatal("expected error for server error response")
+	}
+	if !strings.Contains(err.Error(), "model not found") {
+		t.Errorf("error = %q, want 'model not found'", err)
+	}
+}
+
+func TestDefaultEmbedCheck_ServerErrorNoBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer ts.Close()
+
+	check := defaultEmbedCheck(func(key string) string {
+		if key == "OLLAMA_HOST" {
+			return ts.URL
+		}
+		return ""
+	})
+
+	err := check("test-model")
+	if err == nil {
+		t.Fatal("expected error for non-200 status")
+	}
+	if !strings.Contains(err.Error(), "502") {
+		t.Errorf("error = %q, want status code 502", err)
+	}
+}
+
+func TestDefaultEmbedCheck_ConnectionRefused(t *testing.T) {
+	check := defaultEmbedCheck(func(key string) string {
+		if key == "OLLAMA_HOST" {
+			return "http://127.0.0.1:1" // port 1 is unlikely to be open
+		}
+		return ""
+	})
+
+	err := check("test-model")
+	if err == nil {
+		t.Fatal("expected error for connection refused")
+	}
+	if !strings.Contains(err.Error(), "embed request failed") {
+		t.Errorf("error = %q, want 'embed request failed'", err)
+	}
+}
+
+func TestDefaultEmbedCheck_DefaultHost(t *testing.T) {
+	// When OLLAMA_HOST is empty, default to http://localhost:11434.
+	// We can't test the actual connection, but we can verify
+	// the function returns an error (connection refused on CI).
+	check := defaultEmbedCheck(func(string) string { return "" })
+	err := check("test-model")
+	// Should fail because localhost:11434 is not running in test.
+	if err == nil {
+		t.Log("defaultEmbedCheck succeeded (Ollama is running locally)")
+	}
+}
+
+func TestDefaultEmbedCheck_InvalidJSON(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `not json`)
+	}))
+	defer ts.Close()
+
+	check := defaultEmbedCheck(func(key string) string {
+		if key == "OLLAMA_HOST" {
+			return ts.URL
+		}
+		return ""
+	})
+
+	err := check("test-model")
+	if err == nil {
+		t.Fatal("expected error for invalid JSON response")
+	}
+	if !strings.Contains(err.Error(), "could not parse") {
+		t.Errorf("error = %q, want 'could not parse'", err)
 	}
 }

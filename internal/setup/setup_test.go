@@ -3458,3 +3458,163 @@ func TestSetupRun_SkipViaConfig(t *testing.T) {
 		}
 	}
 }
+
+// --- installGaze unit tests ---
+
+func TestInstallGaze_AlreadyInstalled(t *testing.T) {
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{
+			"gaze": "/usr/local/bin/gaze",
+		}),
+	}
+	env := doctor.DetectedEnvironment{}
+
+	result := installGaze(opts, env)
+	if result.action != "already installed" {
+		t.Errorf("action = %q, want %q", result.action, "already installed")
+	}
+	if result.name != "Gaze" {
+		t.Errorf("name = %q, want %q", result.name, "Gaze")
+	}
+}
+
+func TestInstallGaze_DryRunWithHomebrew(t *testing.T) {
+	opts := &Options{
+		DryRun:   true,
+		LookPath: stubLookPath(map[string]string{}),
+	}
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerHomebrew, Path: "/opt/homebrew/bin/brew"},
+		},
+	}
+
+	result := installGaze(opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("action = %q, want %q", result.action, "dry-run")
+	}
+	if !strings.Contains(result.detail, "brew install") {
+		t.Errorf("detail = %q, want to contain 'brew install'", result.detail)
+	}
+}
+
+func TestInstallGaze_DryRunNoHomebrew(t *testing.T) {
+	opts := &Options{
+		DryRun:   true,
+		LookPath: stubLookPath(map[string]string{}),
+	}
+	env := doctor.DetectedEnvironment{}
+
+	result := installGaze(opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("action = %q, want %q", result.action, "dry-run")
+	}
+	if !strings.Contains(result.detail, "GitHub releases") {
+		t.Errorf("detail = %q, want to contain 'GitHub releases'", result.detail)
+	}
+}
+
+func TestInstallGaze_NoHomebrewSkip(t *testing.T) {
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{}),
+	}
+	env := doctor.DetectedEnvironment{}
+
+	result := installGaze(opts, env)
+	if result.action != "skipped" {
+		t.Errorf("action = %q, want %q", result.action, "skipped")
+	}
+	if !strings.Contains(result.detail, "Homebrew not available") {
+		t.Errorf("detail = %q, want to contain 'Homebrew not available'", result.detail)
+	}
+}
+
+func TestInstallGaze_HomebrewInstallSuccess(t *testing.T) {
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"brew install unbound-force/tap/gaze": "==> Installing gaze",
+		},
+	}
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{}),
+		ExecCmd:  rec.execCmd,
+	}
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerHomebrew, Path: "/opt/homebrew/bin/brew"},
+		},
+	}
+
+	result := installGaze(opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want %q", result.action, "installed")
+	}
+	if !strings.Contains(result.detail, "Homebrew") {
+		t.Errorf("detail = %q, want to contain 'Homebrew'", result.detail)
+	}
+}
+
+func TestInstallGaze_HomebrewInstallFailed(t *testing.T) {
+	rec := &cmdRecorder{
+		errors: map[string]error{
+			"brew install unbound-force/tap/gaze": fmt.Errorf("brew error"),
+		},
+	}
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{}),
+		ExecCmd:  rec.execCmd,
+	}
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerHomebrew, Path: "/opt/homebrew/bin/brew"},
+		},
+	}
+
+	result := installGaze(opts, env)
+	if result.action != "failed" {
+		t.Errorf("action = %q, want %q", result.action, "failed")
+	}
+	if result.err == nil {
+		t.Error("expected non-nil error")
+	}
+}
+
+func TestInstallGaze_ExplicitHomebrewMethod(t *testing.T) {
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"brew install unbound-force/tap/gaze": "installed",
+		},
+	}
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{}),
+		ExecCmd:  rec.execCmd,
+		ToolMethods: map[string]config.ToolConfig{
+			"gaze": {Method: "homebrew"},
+		},
+	}
+	env := doctor.DetectedEnvironment{}
+
+	result := installGaze(opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want %q", result.action, "installed")
+	}
+}
+
+func TestInstallGaze_ExplicitHomebrewDryRun(t *testing.T) {
+	opts := &Options{
+		DryRun:   true,
+		LookPath: stubLookPath(map[string]string{}),
+		ToolMethods: map[string]config.ToolConfig{
+			"gaze": {Method: "homebrew"},
+		},
+	}
+	env := doctor.DetectedEnvironment{}
+
+	result := installGaze(opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("action = %q, want %q", result.action, "dry-run")
+	}
+	if !strings.Contains(result.detail, "brew install") {
+		t.Errorf("detail = %q, want to contain 'brew install'", result.detail)
+	}
+}

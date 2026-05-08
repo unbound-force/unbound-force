@@ -17,7 +17,8 @@ type SprintStore struct {
 	Dir string
 }
 
-// NewSprintStore creates a new sprint store.
+// NewSprintStore creates a new sprint store rooted at the given
+// directory. It returns a SprintStore with Dir set to dir.
 func NewSprintStore(dir string) *SprintStore {
 	return &SprintStore{Dir: dir}
 }
