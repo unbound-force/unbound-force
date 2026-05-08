@@ -196,6 +196,35 @@ func (o *Options) toolMethod(toolName string) string {
 	return "auto"
 }
 
+// stepDef defines a single setup step for data-driven dispatch.
+// Each step has a display name, a skip-tool key, an install function,
+// and optional gate and effect callbacks. This struct replaces the
+// repetitive if/else blocks in Run(), reducing cyclomatic complexity
+// per CS-004 (DRY) and CS-010 (single responsibility).
+type stepDef struct {
+	// name is the display name shown in progress output (e.g., "OpenCode").
+	name string
+
+	// tool is the key passed to shouldSkipTool (e.g., "opencode").
+	// Empty string means the step is never skipped by tool config.
+	tool string
+
+	// install executes the step and returns its result.
+	install func(*Options, doctor.DetectedEnvironment) stepResult
+
+	// gate returns true if the step should run. When non-nil and
+	// returning false, the step is skipped with "prerequisite not met".
+	gate func() bool
+
+	// gateDetail overrides the default "prerequisite not met" skip
+	// detail when the gate returns false.
+	gateDetail string
+
+	// effect is called after a successful install to update mutable
+	// state (e.g., setting nodeAvailable based on the result).
+	effect func(stepResult)
+}
+
 // Run executes the full setup workflow per FR-021/030/032/034/035.
 func Run(opts Options) error {
 	opts.defaults()
@@ -223,14 +252,129 @@ func Run(opts Options) error {
 	}
 	env := doctor.DetectEnvironment(doctorOpts)
 
-	var results []stepResult
+	printHeader(&opts, env)
 
-	// Print header.
+	// Mutable state tracked across steps — gate functions close
+	// over these variables to enforce inter-step dependencies.
+	var nodeAvailable, uvAvailable bool
+	replicatorAvailable := true
+
+	// Define all 16 steps as data. Order matters — later steps
+	// may gate on state set by earlier steps' effect callbacks.
+	steps := buildSteps(&opts, &nodeAvailable, &uvAvailable, &replicatorAvailable)
+
+	results := executeSteps(&opts, env, steps)
+
+	return printSummary(&opts, results)
+}
+
+// buildSteps constructs the ordered step definitions. Gate and effect
+// closures capture mutable state pointers so inter-step dependencies
+// are tracked without branching in Run().
+func buildSteps(opts *Options, nodeAvailable, uvAvailable, replicatorAvailable *bool) []stepDef {
+	return []stepDef{
+		{name: "OpenCode", tool: "opencode", install: installOpenCode},
+		{name: "Gaze", tool: "gaze", install: installGaze},
+		{name: "GitHub CLI", tool: "gh", install: installGH},
+		{
+			name: "Node.js", tool: "node", install: ensureNodeJS,
+			effect: func(r stepResult) {
+				*nodeAvailable = r.err == nil && r.action != "failed"
+			},
+		},
+		{
+			name: "OpenSpec CLI", tool: "openspec", install: installOpenSpec,
+			gate:       func() bool { return *nodeAvailable },
+			gateDetail: "no Node.js",
+		},
+		{
+			name: "uv", tool: "uv", install: installUV,
+			effect: func(r stepResult) {
+				*uvAvailable = r.err == nil && r.action != "failed"
+			},
+		},
+		{
+			name: "Specify CLI", tool: "specify", install: installSpecify,
+			gate:       func() bool { return *uvAvailable },
+			gateDetail: "no uv",
+		},
+		{
+			name: "Replicator", tool: "replicator", install: installReplicator,
+			effect: func(r stepResult) {
+				*replicatorAvailable = r.err == nil && r.action != "failed" && r.action != "skipped"
+			},
+		},
+		{
+			name: "replicator setup",
+			// No tool key — skip logic is handled entirely by the gate.
+			install: func(o *Options, _ doctor.DetectedEnvironment) stepResult {
+				return runReplicatorSetup(o)
+			},
+			gate:       func() bool { return *replicatorAvailable },
+			gateDetail: "no replicator",
+		},
+		{name: "Ollama", tool: "ollama", install: installOllama},
+		{name: "Podman", tool: "podman", install: installPodman},
+		{name: "DevPod", tool: "devpod", install: installDevPod},
+		{
+			name: "DevPod provider",
+			install: func(o *Options, _ doctor.DetectedEnvironment) stepResult {
+				return configureDevPodProvider(o)
+			},
+		},
+		{name: "Dewey", tool: "dewey", install: installDewey},
+		{name: "golangci-lint", tool: "golangci-lint", install: installGolangciLint},
+		{name: "govulncheck", tool: "govulncheck", install: installGovulncheck},
+	}
+}
+
+// executeSteps iterates through step definitions, applying skip/gate
+// logic and collecting results. This is the core dispatch loop that
+// replaces the 16 repetitive if/else blocks.
+func executeSteps(opts *Options, env doctor.DetectedEnvironment, steps []stepDef) []stepResult {
+	total := len(steps)
+	results := make([]stepResult, 0, total)
+
+	for i, step := range steps {
+		fmt.Fprintf(opts.Stdout, "  [%d/%d] %s...\n", i+1, total, step.name)
+
+		// Check tool skip list first.
+		if step.tool != "" && opts.shouldSkipTool(step.tool) {
+			r := stepResult{name: step.name, action: "skipped", detail: "excluded by config"}
+			results = append(results, r)
+			if step.effect != nil {
+				step.effect(r)
+			}
+			continue
+		}
+
+		// Check prerequisite gate.
+		if step.gate != nil && !step.gate() {
+			detail := "prerequisite not met"
+			if step.gateDetail != "" {
+				detail = step.gateDetail
+			}
+			results = append(results, stepResult{name: step.name, action: "skipped", detail: detail})
+			continue
+		}
+
+		r := step.install(opts, env)
+		results = append(results, r)
+
+		if step.effect != nil {
+			step.effect(r)
+		}
+	}
+
+	return results
+}
+
+// printHeader writes the setup banner and detected environment.
+func printHeader(opts *Options, env doctor.DetectedEnvironment) {
 	fmt.Fprintln(opts.Stdout, "Unbound Force Setup")
 	fmt.Fprintln(opts.Stdout, "===================")
 	fmt.Fprintln(opts.Stdout)
 
-	// Print detected environment.
 	fmt.Fprintln(opts.Stdout, "Detected Environment")
 	if len(env.Managers) > 0 {
 		var parts []string
@@ -249,168 +393,25 @@ func Run(opts Options) error {
 	}
 
 	fmt.Fprintln(opts.Stdout, "Installing...")
+}
 
-	// Step 1: Install OpenCode (FR-022).
-	fmt.Fprintf(opts.Stdout, "  [1/16] OpenCode...\n")
-	if opts.shouldSkipTool("opencode") {
-		results = append(results, stepResult{name: "OpenCode", action: "skipped", detail: "excluded by config"})
-	} else {
-		results = append(results, installOpenCode(&opts, env))
-	}
-
-	// Step 2: Install Gaze (FR-023).
-	fmt.Fprintf(opts.Stdout, "  [2/16] Gaze...\n")
-	if opts.shouldSkipTool("gaze") {
-		results = append(results, stepResult{name: "Gaze", action: "skipped", detail: "excluded by config"})
-	} else {
-		results = append(results, installGaze(&opts, env))
-	}
-
-	// Step 3: Install GitHub CLI.
-	fmt.Fprintf(opts.Stdout, "  [3/16] GitHub CLI...\n")
-	if opts.shouldSkipTool("gh") {
-		results = append(results, stepResult{name: "GitHub CLI", action: "skipped", detail: "excluded by config"})
-	} else {
-		results = append(results, installGH(&opts, env))
-	}
-
-	// Step 4: Ensure Node.js (FR-024).
-	fmt.Fprintf(opts.Stdout, "  [4/16] Node.js...\n")
-	nodeAvailable := false
-	if opts.shouldSkipTool("node") {
-		results = append(results, stepResult{name: "Node.js", action: "skipped", detail: "excluded by config"})
-	} else {
-		nodeResult := ensureNodeJS(&opts, env)
-		results = append(results, nodeResult)
-		nodeAvailable = nodeResult.err == nil && nodeResult.action != "failed"
-	}
-
-	// Step 5: Install OpenSpec CLI (Node.js-dependent).
-	if opts.shouldSkipTool("openspec") {
-		results = append(results, stepResult{name: "OpenSpec CLI", action: "skipped", detail: "excluded by config"})
-	} else if nodeAvailable {
-		fmt.Fprintf(opts.Stdout, "  [5/16] OpenSpec CLI...\n")
-		results = append(results, installOpenSpec(&opts, env))
-	} else {
-		results = append(results, stepResult{name: "OpenSpec CLI", action: "skipped", detail: "no Node.js"})
-	}
-
-	// Step 6: Install uv (Python package manager for Specify CLI).
-	fmt.Fprintf(opts.Stdout, "  [6/16] uv...\n")
-	uvAvailable := false
-	if opts.shouldSkipTool("uv") {
-		results = append(results, stepResult{name: "uv", action: "skipped", detail: "excluded by config"})
-	} else {
-		uvResult := installUV(&opts, env)
-		results = append(results, uvResult)
-		uvAvailable = uvResult.err == nil && uvResult.action != "failed"
-	}
-
-	// Step 7: Install Specify CLI (uv-dependent).
-	if opts.shouldSkipTool("specify") {
-		results = append(results, stepResult{name: "Specify CLI", action: "skipped", detail: "excluded by config"})
-	} else if uvAvailable {
-		fmt.Fprintf(opts.Stdout, "  [7/16] Specify CLI...\n")
-		results = append(results, installSpecify(&opts, env))
-	} else {
-		results = append(results, stepResult{name: "Specify CLI", action: "skipped", detail: "no uv"})
-	}
-
-	// Step 8: Install Replicator (Homebrew, replaces Swarm plugin).
-	fmt.Fprintf(opts.Stdout, "  [8/16] Replicator...\n")
-	replicatorSkipped := false
-	if opts.shouldSkipTool("replicator") {
-		results = append(results, stepResult{name: "Replicator", action: "skipped", detail: "excluded by config"})
-		replicatorSkipped = true
-	} else {
-		replicatorResult := installReplicator(&opts, env)
-		results = append(results, replicatorResult)
-		replicatorSkipped = replicatorResult.err != nil || replicatorResult.action == "failed" || replicatorResult.action == "skipped"
-	}
-
-	// Step 9: Run replicator setup.
-	if replicatorSkipped {
-		results = append(results, stepResult{name: "replicator setup", action: "skipped", detail: "no replicator"})
-	} else {
-		fmt.Fprintf(opts.Stdout, "  [9/16] Replicator setup...\n")
-		results = append(results, runReplicatorSetup(&opts))
-	}
-
-	// Step 10: Install Ollama (prerequisite for Dewey + Replicator embeddings).
-	fmt.Fprintf(opts.Stdout, "  [10/16] Ollama...\n")
-	if opts.shouldSkipTool("ollama") {
-		results = append(results, stepResult{name: "Ollama", action: "skipped", detail: "excluded by config"})
-	} else {
-		results = append(results, installOllama(&opts, env))
-	}
-
-	// Step 11: Install Podman (container runtime for sandbox).
-	fmt.Fprintf(opts.Stdout, "  [11/16] Podman...\n")
-	if opts.shouldSkipTool("podman") {
-		results = append(results, stepResult{name: "Podman", action: "skipped", detail: "excluded by config"})
-	} else {
-		results = append(results, installPodman(&opts, env))
-	}
-
-	// Step 12: Install DevPod (workspace manager).
-	fmt.Fprintf(opts.Stdout, "  [12/16] DevPod...\n")
-	if opts.shouldSkipTool("devpod") {
-		results = append(results, stepResult{name: "DevPod", action: "skipped", detail: "excluded by config"})
-	} else {
-		results = append(results, installDevPod(&opts, env))
-	}
-
-	// Step 13: Configure DevPod Podman provider.
-	// Gated on both devpod and podman availability.
-	fmt.Fprintf(opts.Stdout, "  [13/16] DevPod provider...\n")
-	results = append(results, configureDevPodProvider(&opts))
-
-	// Step 14: Install Dewey (after Ollama).
-	fmt.Fprintf(opts.Stdout, "  [14/16] Dewey...\n")
-	if opts.shouldSkipTool("dewey") {
-		results = append(results, stepResult{name: "Dewey", action: "skipped", detail: "excluded by config"})
-	} else {
-		results = append(results, installDewey(&opts, env))
-	}
-
-	// Step 15: Install golangci-lint (Spec 019 FR-012).
-	fmt.Fprintf(opts.Stdout, "  [15/16] golangci-lint...\n")
-	if opts.shouldSkipTool("golangci-lint") {
-		results = append(results, stepResult{name: "golangci-lint", action: "skipped", detail: "excluded by config"})
-	} else {
-		results = append(results, installGolangciLint(&opts, env))
-	}
-
-	// Step 16: Install govulncheck (Spec 019 FR-012).
-	fmt.Fprintf(opts.Stdout, "  [16/16] govulncheck...\n")
-	if opts.shouldSkipTool("govulncheck") {
-		results = append(results, stepResult{name: "govulncheck", action: "skipped", detail: "excluded by config"})
-	} else {
-		results = append(results, installGovulncheck(&opts, env))
-	}
-
-	// Print results.
+// printSummary writes step results and the completion message.
+// Returns an error if any steps failed.
+func printSummary(opts *Options, results []stepResult) error {
 	for _, r := range results {
 		printStepResult(opts.Stdout, r)
 	}
 
-	// Print completion summary (FR-034).
 	fmt.Fprintln(opts.Stdout)
-	hasFailures := false
+
+	failCount := 0
 	for _, r := range results {
 		if r.action == "failed" {
-			hasFailures = true
-			break
+			failCount++
 		}
 	}
 
-	if hasFailures {
-		failCount := 0
-		for _, r := range results {
-			if r.action == "failed" {
-				failCount++
-			}
-		}
+	if failCount > 0 {
 		fmt.Fprintln(opts.Stdout, "Setup partially complete. Fix the errors above, then re-run `uf setup`.")
 		return fmt.Errorf("%d step(s) failed", failCount)
 	}
