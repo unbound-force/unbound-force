@@ -278,6 +278,10 @@ func homebrewInstallCmd(toolName string) string {
 			return "brew install --cask ollama-app && ollama pull granite-embedding:30m"
 		}
 		return "brew install ollama && ollama pull granite-embedding:30m"
+	case "podman":
+		return "brew install podman"
+	case "devpod":
+		return "brew install devpod"
 	default:
 		return "brew install " + toolName
 	}
@@ -301,6 +305,10 @@ func genericInstallCmd(toolName string) string {
 		return "Download from https://cli.github.com/"
 	case "ollama":
 		return "Download from https://ollama.com/download"
+	case "podman":
+		return "Download from https://podman.io/docs/installation"
+	case "devpod":
+		return "Download from https://devpod.sh/docs/getting-started/install"
 	default:
 		return "Install " + toolName
 	}
@@ -336,6 +344,10 @@ func installURL(toolName string) string {
 		return "https://github.com/unbound-force/replicator"
 	case "ollama":
 		return "https://ollama.com"
+	case "podman":
+		return "https://podman.io"
+	case "devpod":
+		return "https://devpod.sh"
 	default:
 		return ""
 	}

@@ -4,3 +4,8 @@
 embedding:
   model: granite-embedding:30m
   endpoint: http://localhost:11434
+synthesis:
+  provider: vertex
+  model: claude-sonnet-4-6
+  project: my-gcp-project
+  region: us-east5

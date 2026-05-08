@@ -251,7 +251,7 @@ func Run(opts Options) error {
 	fmt.Fprintln(opts.Stdout, "Installing...")
 
 	// Step 1: Install OpenCode (FR-022).
-	fmt.Fprintf(opts.Stdout, "  [1/13] OpenCode...\n")
+	fmt.Fprintf(opts.Stdout, "  [1/16] OpenCode...\n")
 	if opts.shouldSkipTool("opencode") {
 		results = append(results, stepResult{name: "OpenCode", action: "skipped", detail: "excluded by config"})
 	} else {
@@ -259,7 +259,7 @@ func Run(opts Options) error {
 	}
 
 	// Step 2: Install Gaze (FR-023).
-	fmt.Fprintf(opts.Stdout, "  [2/13] Gaze...\n")
+	fmt.Fprintf(opts.Stdout, "  [2/16] Gaze...\n")
 	if opts.shouldSkipTool("gaze") {
 		results = append(results, stepResult{name: "Gaze", action: "skipped", detail: "excluded by config"})
 	} else {
@@ -267,7 +267,7 @@ func Run(opts Options) error {
 	}
 
 	// Step 3: Install GitHub CLI.
-	fmt.Fprintf(opts.Stdout, "  [3/13] GitHub CLI...\n")
+	fmt.Fprintf(opts.Stdout, "  [3/16] GitHub CLI...\n")
 	if opts.shouldSkipTool("gh") {
 		results = append(results, stepResult{name: "GitHub CLI", action: "skipped", detail: "excluded by config"})
 	} else {
@@ -275,7 +275,7 @@ func Run(opts Options) error {
 	}
 
 	// Step 4: Ensure Node.js (FR-024).
-	fmt.Fprintf(opts.Stdout, "  [4/13] Node.js...\n")
+	fmt.Fprintf(opts.Stdout, "  [4/16] Node.js...\n")
 	nodeAvailable := false
 	if opts.shouldSkipTool("node") {
 		results = append(results, stepResult{name: "Node.js", action: "skipped", detail: "excluded by config"})
@@ -289,14 +289,14 @@ func Run(opts Options) error {
 	if opts.shouldSkipTool("openspec") {
 		results = append(results, stepResult{name: "OpenSpec CLI", action: "skipped", detail: "excluded by config"})
 	} else if nodeAvailable {
-		fmt.Fprintf(opts.Stdout, "  [5/13] OpenSpec CLI...\n")
+		fmt.Fprintf(opts.Stdout, "  [5/16] OpenSpec CLI...\n")
 		results = append(results, installOpenSpec(&opts, env))
 	} else {
 		results = append(results, stepResult{name: "OpenSpec CLI", action: "skipped", detail: "no Node.js"})
 	}
 
 	// Step 6: Install uv (Python package manager for Specify CLI).
-	fmt.Fprintf(opts.Stdout, "  [6/13] uv...\n")
+	fmt.Fprintf(opts.Stdout, "  [6/16] uv...\n")
 	uvAvailable := false
 	if opts.shouldSkipTool("uv") {
 		results = append(results, stepResult{name: "uv", action: "skipped", detail: "excluded by config"})
@@ -310,14 +310,14 @@ func Run(opts Options) error {
 	if opts.shouldSkipTool("specify") {
 		results = append(results, stepResult{name: "Specify CLI", action: "skipped", detail: "excluded by config"})
 	} else if uvAvailable {
-		fmt.Fprintf(opts.Stdout, "  [7/13] Specify CLI...\n")
+		fmt.Fprintf(opts.Stdout, "  [7/16] Specify CLI...\n")
 		results = append(results, installSpecify(&opts, env))
 	} else {
 		results = append(results, stepResult{name: "Specify CLI", action: "skipped", detail: "no uv"})
 	}
 
 	// Step 8: Install Replicator (Homebrew, replaces Swarm plugin).
-	fmt.Fprintf(opts.Stdout, "  [8/13] Replicator...\n")
+	fmt.Fprintf(opts.Stdout, "  [8/16] Replicator...\n")
 	replicatorSkipped := false
 	if opts.shouldSkipTool("replicator") {
 		results = append(results, stepResult{name: "Replicator", action: "skipped", detail: "excluded by config"})
@@ -332,36 +332,57 @@ func Run(opts Options) error {
 	if replicatorSkipped {
 		results = append(results, stepResult{name: "replicator setup", action: "skipped", detail: "no replicator"})
 	} else {
-		fmt.Fprintf(opts.Stdout, "  [9/13] Replicator setup...\n")
+		fmt.Fprintf(opts.Stdout, "  [9/16] Replicator setup...\n")
 		results = append(results, runReplicatorSetup(&opts))
 	}
 
 	// Step 10: Install Ollama (prerequisite for Dewey + Replicator embeddings).
-	fmt.Fprintf(opts.Stdout, "  [10/13] Ollama...\n")
+	fmt.Fprintf(opts.Stdout, "  [10/16] Ollama...\n")
 	if opts.shouldSkipTool("ollama") {
 		results = append(results, stepResult{name: "Ollama", action: "skipped", detail: "excluded by config"})
 	} else {
 		results = append(results, installOllama(&opts, env))
 	}
 
-	// Step 11: Install Dewey (after Ollama).
-	fmt.Fprintf(opts.Stdout, "  [11/13] Dewey...\n")
+	// Step 11: Install Podman (container runtime for sandbox).
+	fmt.Fprintf(opts.Stdout, "  [11/16] Podman...\n")
+	if opts.shouldSkipTool("podman") {
+		results = append(results, stepResult{name: "Podman", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installPodman(&opts, env))
+	}
+
+	// Step 12: Install DevPod (workspace manager).
+	fmt.Fprintf(opts.Stdout, "  [12/16] DevPod...\n")
+	if opts.shouldSkipTool("devpod") {
+		results = append(results, stepResult{name: "DevPod", action: "skipped", detail: "excluded by config"})
+	} else {
+		results = append(results, installDevPod(&opts, env))
+	}
+
+	// Step 13: Configure DevPod Podman provider.
+	// Gated on both devpod and podman availability.
+	fmt.Fprintf(opts.Stdout, "  [13/16] DevPod provider...\n")
+	results = append(results, configureDevPodProvider(&opts))
+
+	// Step 14: Install Dewey (after Ollama).
+	fmt.Fprintf(opts.Stdout, "  [14/16] Dewey...\n")
 	if opts.shouldSkipTool("dewey") {
 		results = append(results, stepResult{name: "Dewey", action: "skipped", detail: "excluded by config"})
 	} else {
 		results = append(results, installDewey(&opts, env))
 	}
 
-	// Step 12: Install golangci-lint (Spec 019 FR-012).
-	fmt.Fprintf(opts.Stdout, "  [12/13] golangci-lint...\n")
+	// Step 15: Install golangci-lint (Spec 019 FR-012).
+	fmt.Fprintf(opts.Stdout, "  [15/16] golangci-lint...\n")
 	if opts.shouldSkipTool("golangci-lint") {
 		results = append(results, stepResult{name: "golangci-lint", action: "skipped", detail: "excluded by config"})
 	} else {
 		results = append(results, installGolangciLint(&opts, env))
 	}
 
-	// Step 13: Install govulncheck (Spec 019 FR-012).
-	fmt.Fprintf(opts.Stdout, "  [13/13] govulncheck...\n")
+	// Step 16: Install govulncheck (Spec 019 FR-012).
+	fmt.Fprintf(opts.Stdout, "  [16/16] govulncheck...\n")
 	if opts.shouldSkipTool("govulncheck") {
 		results = append(results, stepResult{name: "govulncheck", action: "skipped", detail: "excluded by config"})
 	} else {
@@ -901,6 +922,189 @@ func installOllama(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		return stepResult{name: "Ollama", action: "failed", detail: "brew install failed", err: err}
 	}
 	return stepResult{name: "Ollama", action: "installed", detail: "via Homebrew"}
+}
+
+// podmanMachineTimeout is the timeout in seconds for podman machine
+// init, which downloads a VM image (~300MB) and can be slow on
+// constrained networks. 180 seconds balances patience with preventing
+// indefinite hangs.
+const podmanMachineTimeout = "180"
+
+// installPodman installs Podman if missing. Podman is the container
+// runtime used by the sandbox for isolated agent sessions. On macOS,
+// after installation, a Podman machine is initialized and started
+// (best-effort — failures are reported but do not block the step).
+// A smoke test via `podman info` verifies the installation is
+// functional.
+func installPodman(opts *Options, env doctor.DetectedEnvironment) stepResult {
+	if opts.shouldSkipTool("podman") {
+		return stepResult{name: "Podman", action: "skipped", detail: "excluded by config"}
+	}
+
+	if _, err := opts.LookPath("podman"); err == nil {
+		return stepResult{name: "Podman", action: "already installed"}
+	}
+
+	if opts.DryRun {
+		if doctor.HasManager(env, doctor.ManagerHomebrew) {
+			return stepResult{name: "Podman", action: "dry-run", detail: "Would install: brew install podman"}
+		}
+		return stepResult{name: "Podman", action: "dry-run", detail: "Would install: download from https://podman.io/docs/installation"}
+	}
+
+	if !doctor.HasManager(env, doctor.ManagerHomebrew) {
+		return stepResult{
+			name:   "Podman",
+			action: "skipped",
+			detail: "Homebrew not available. Download from https://podman.io/docs/installation",
+		}
+	}
+
+	if _, err := opts.ExecCmd("brew", "install", "podman"); err != nil {
+		return stepResult{name: "Podman", action: "failed", detail: "brew install failed", err: err}
+	}
+
+	// macOS post-install: initialize and start a Podman machine.
+	// Podman on macOS requires a VM to run Linux containers.
+	detail := "via Homebrew"
+	if opts.GOOS == "darwin" {
+		detail = podmanMachineInit(opts, detail)
+	}
+
+	// Smoke test: verify Podman is functional.
+	if _, err := opts.ExecCmd("podman", "info"); err != nil {
+		detail += "; podman info failed"
+	} else {
+		detail += "; verified"
+	}
+
+	return stepResult{name: "Podman", action: "installed", detail: detail}
+}
+
+// podmanMachineInit checks for an existing Podman machine on macOS
+// and initializes one if none exists. Returns the updated detail
+// string with machine status appended. Machine failures are
+// best-effort — they are reported but do not fail the step (D6).
+func podmanMachineInit(opts *Options, detail string) string {
+	// Check if a machine already exists.
+	output, err := opts.ExecCmd("podman", "machine", "list", "--format", "{{.Name}}")
+	if err == nil && strings.TrimSpace(string(output)) != "" {
+		// Machine already exists — no init needed.
+		return detail
+	}
+
+	// No machine exists — initialize one with timeout to prevent
+	// indefinite hangs on slow networks (D6).
+	if _, err := opts.ExecCmd("timeout", podmanMachineTimeout, "podman", "machine", "init"); err != nil {
+		return detail + "; machine init failed"
+	}
+
+	// Start the machine.
+	if _, err := opts.ExecCmd("podman", "machine", "start"); err != nil {
+		return detail + "; machine start failed"
+	}
+
+	return detail
+}
+
+// installDevPod installs DevPod if missing. DevPod provides
+// persistent workspace management on top of Podman. Follows the
+// installGaze() pattern: Homebrew only, skip with download URL
+// if no Homebrew.
+func installDevPod(opts *Options, env doctor.DetectedEnvironment) stepResult {
+	if opts.shouldSkipTool("devpod") {
+		return stepResult{name: "DevPod", action: "skipped", detail: "excluded by config"}
+	}
+
+	if _, err := opts.LookPath("devpod"); err == nil {
+		return stepResult{name: "DevPod", action: "already installed"}
+	}
+
+	if opts.DryRun {
+		if doctor.HasManager(env, doctor.ManagerHomebrew) {
+			return stepResult{name: "DevPod", action: "dry-run", detail: "Would install: brew install devpod"}
+		}
+		return stepResult{name: "DevPod", action: "dry-run", detail: "Would install: download from https://devpod.sh/docs/getting-started/install"}
+	}
+
+	if !doctor.HasManager(env, doctor.ManagerHomebrew) {
+		return stepResult{
+			name:   "DevPod",
+			action: "skipped",
+			detail: "Homebrew not available. Download from https://devpod.sh/docs/getting-started/install",
+		}
+	}
+
+	if _, err := opts.ExecCmd("brew", "install", "devpod"); err != nil {
+		return stepResult{name: "DevPod", action: "failed", detail: "brew install failed", err: err}
+	}
+	return stepResult{name: "DevPod", action: "installed", detail: "via Homebrew"}
+}
+
+// configureDevPodProvider configures the DevPod Podman provider
+// alias. The standalone podman provider was removed from DevPod;
+// users must alias the Docker provider with DOCKER_COMMAND=podman
+// (D3). This step is gated on both devpod and podman being
+// available in PATH. Provider detection uses exact first-column
+// name matching on `devpod provider list` output (D5).
+func configureDevPodProvider(opts *Options) stepResult {
+	// Gate: both devpod and podman must be available.
+	if _, err := opts.LookPath("devpod"); err != nil {
+		return stepResult{name: "DevPod provider", action: "skipped", detail: "no devpod"}
+	}
+	if _, err := opts.LookPath("podman"); err != nil {
+		return stepResult{name: "DevPod provider", action: "skipped", detail: "no podman"}
+	}
+
+	if opts.DryRun {
+		return stepResult{
+			name:   "DevPod provider",
+			action: "dry-run",
+			detail: "Would run: devpod provider add docker --name podman -o DOCKER_COMMAND=podman",
+		}
+	}
+
+	// Check if provider is already registered.
+	output, err := opts.ExecCmd("devpod", "provider", "list")
+	if err != nil {
+		return stepResult{
+			name:   "DevPod provider",
+			action: "skipped",
+			detail: "devpod provider list failed — check devpod installation",
+		}
+	}
+
+	// Parse provider list output: exact first-column name matching
+	// to avoid false positives from providers like "podman-custom" (D5).
+	if hasProvider(string(output), "podman") {
+		return stepResult{name: "DevPod provider", action: "already installed"}
+	}
+
+	// Provider missing — add the Docker provider aliased to Podman.
+	addCmd := "devpod provider add docker --name podman -o DOCKER_COMMAND=podman"
+	if _, err := opts.ExecCmd("devpod", "provider", "add", "docker", "--name", "podman", "-o", "DOCKER_COMMAND=podman"); err != nil {
+		return stepResult{
+			name:   "DevPod provider",
+			action: "failed",
+			detail: "Run manually: " + addCmd,
+			err:    err,
+		}
+	}
+	return stepResult{name: "DevPod provider", action: "installed", detail: "podman provider configured"}
+}
+
+// hasProvider checks if a provider name appears as an exact match
+// in the first column of `devpod provider list` output. Uses exact
+// matching to avoid false positives from providers with similar
+// names (e.g., "podman-custom" should not match "podman").
+func hasProvider(output, name string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == name {
+			return true
+		}
+	}
+	return false
 }
 
 // installDewey installs Dewey and pulls the embedding model.

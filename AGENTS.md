@@ -36,11 +36,12 @@ make build
 make test
 # or: go test -race -count=1 ./...
 
-# Run all checks (build, test, vet, lint)
+# Run all checks (lint, test, build)
 make check
 
-# Lint
-golangci-lint run
+# Lint (vet + golangci-lint)
+make lint
+# or: go vet ./... && golangci-lint run
 ```
 
 Always run tests with `-race -count=1`. CI enforces this.
@@ -55,6 +56,7 @@ Always run tests with `-race -count=1`. CI enforces this.
 | Dependencies | `ci_dependencies.yml` | Dependency review + dependabot |
 | CRAP Load | `ci_crapload.yml` | CRAP regression analysis |
 | Release | `release.yml` | workflow_dispatch, GoReleaser + Cosign + Syft + Homebrew tap |
+| Scheduled | `ci_scheduled.yml` | Daily OSV-Scanner + Scorecards |
 
 ## Project Structure
 
@@ -62,12 +64,14 @@ Always run tests with `-race -count=1`. CI enforces this.
 unbound-force/
 ├── .specify/                         # Speckit framework (templates, scripts, memory)
 ├── .opencode/
-│   ├── agents/                       # Hero persona agents (12 active)
-│   ├── commands/                     # Slash commands (18 files)
+│   ├── agents/                       # Hero persona agents (18 active)
+│   ├── commands/                     # Slash commands (46 files)
 │   ├── skill/                        # Swarm skills packages
+│   ├── skills/                       # Additional skills packages
 │   └── uf/packs/                     # Convention packs
 ├── cmd/unbound-force/                # Cobra CLI entry point
 ├── cmd/mutimind/                     # Muti-Mind backend CLI
+├── cmd/mxf/                          # Mx F backend CLI
 ├── internal/
 │   ├── artifacts/                    # Artifact envelope I/O
 │   ├── backlog/                      # Muti-Mind backlog parsing
@@ -79,7 +83,7 @@ unbound-force/
 │   ├── impediment/                   # Impediment tracking and detection
 │   ├── metrics/                      # Metrics collection and health analysis
 │   ├── orchestration/                # Swarm orchestration engine
-│   ├── sandbox/                      # Containerized sessions (Podman/Che)
+│   ├── sandbox/                      # Containerized sessions (Podman/DevPod)
 │   ├── scaffold/                     # Core scaffold engine (embed.FS)
 │   ├── schemas/                      # JSON Schema generation/validation
 │   ├── setup/                        # Automated tool installation
@@ -88,8 +92,8 @@ unbound-force/
 ├── docs/                             # User-facing documentation
 ├── specs/                            # Architectural specs (001-035)
 ├── openspec/                         # OpenSpec tactical workflow
-├── schemas/                          # JSON Schema registry (9 types)
-├── go.mod                            # Go module (1.24+)
+├── schemas/                          # JSON Schema registry (11 types)
+├── go.mod                            # Go module (1.25+)
 ├── opencode.json                     # MCP server configuration
 ├── .goreleaser.yaml                  # Release configuration
 ├── .packit.yaml                      # Fedora packaging (Packit)
@@ -122,6 +126,19 @@ imported externally.
 - **Isolation**: `t.TempDir()` for filesystem tests
 - **Drift detection**: Tests MUST verify embedded assets match
   canonical sources
+
+## Technology Stack
+
+- **Language**: Go 1.25+ (module: `github.com/unbound-force/unbound-force`)
+- **CLI framework**: `github.com/spf13/cobra`
+- **Logging**: `github.com/charmbracelet/log`
+- **Terminal styling**: `github.com/charmbracelet/lipgloss`
+- **YAML**: `gopkg.in/yaml.v3`, `github.com/goccy/go-yaml`
+- **JSON Schema**: `github.com/invopop/jsonschema`,
+  `github.com/santhosh-tekuri/jsonschema/v6`
+- **Container runtime**: Podman (>= 4.3)
+- **Workspace manager**: DevPod (>= 0.5.0, optional)
+- **Embedding model**: `granite-embedding:30m` via Ollama
 
 ## Behavioral Rules
 
@@ -259,3 +276,5 @@ before writing or reviewing code.
 - `.opencode/uf/packs/content-custom.md`
 - `.opencode/uf/packs/go.md`
 - `.opencode/uf/packs/go-custom.md`
+- `.opencode/uf/packs/typescript.md`
+- `.opencode/uf/packs/typescript-custom.md`

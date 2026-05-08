@@ -171,8 +171,9 @@ func TestSetupRun_AllPresent(t *testing.T) {
 
 	rec := &cmdRecorder{
 		outputs: map[string]string{
-			"node --version": "v22.15.0",
-			"ollama list":    "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
+			"node --version":    "v22.15.0",
+			"ollama list":       "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
+			"devpod provider list": "podman   docker   v0.1.0\n",
 		},
 	}
 
@@ -194,6 +195,8 @@ func TestSetupRun_AllPresent(t *testing.T) {
 			"replicator":    "/usr/local/bin/replicator",
 			"dewey":         "/usr/local/bin/dewey",
 			"ollama":        "/usr/local/bin/ollama",
+			"podman":        "/usr/local/bin/podman",
+			"devpod":        "/usr/local/bin/devpod",
 			"golangci-lint": "/usr/local/bin/golangci-lint",
 			"govulncheck":   "/usr/local/bin/govulncheck",
 		}),
@@ -1305,8 +1308,9 @@ func TestSetupRun_DeweyAlreadyInstalled(t *testing.T) {
 
 	rec := &cmdRecorder{
 		outputs: map[string]string{
-			"node --version": "v22.15.0",
-			"ollama list":    "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
+			"node --version":       "v22.15.0",
+			"ollama list":          "NAME                    ID              SIZE\ngranite-embedding:30m   abc123          63 MB\n",
+			"devpod provider list": "podman   docker   v0.1.0\n",
 		},
 	}
 
@@ -1324,6 +1328,8 @@ func TestSetupRun_DeweyAlreadyInstalled(t *testing.T) {
 			"replicator": "/usr/local/bin/replicator",
 			"dewey":      "/usr/local/bin/dewey",
 			"ollama":     "/usr/local/bin/ollama",
+			"podman":     "/usr/local/bin/podman",
+			"devpod":     "/usr/local/bin/devpod",
 		}),
 		ExecCmd:      rec.execCmd,
 		EvalSymlinks: stubEvalSymlinks(nil),
@@ -2579,6 +2585,838 @@ func TestEmbeddingDim_Override(t *testing.T) {
 	opts := Options{EmbeddingDimensions: 1024}
 	if d := opts.embeddingDim(); d != "1024" {
 		t.Errorf("embeddingDim = %q, want 1024", d)
+	}
+}
+
+// --- Podman installation tests ---
+
+func TestInstallPodman_AlreadyInstalled(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := Options{
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"podman": "/usr/local/bin/podman",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installPodman(&opts, env)
+	if result.action != "already installed" {
+		t.Errorf("expected 'already installed', got %q", result.action)
+	}
+}
+
+func TestInstallPodman_BrewInstall(t *testing.T) {
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"podman info": "host:\n  os: linux\n",
+		},
+	}
+
+	opts := Options{
+		GOOS:   "linux",
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installPodman(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "via Homebrew") {
+		t.Errorf("expected 'via Homebrew' in detail, got %q", result.detail)
+	}
+	if !strings.Contains(result.detail, "verified") {
+		t.Errorf("expected 'verified' in detail, got %q", result.detail)
+	}
+
+	found := false
+	for _, call := range rec.calls {
+		if call == "brew install podman" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'brew install podman' call, got: %v", rec.calls)
+	}
+}
+
+func TestInstallPodman_NoHomebrew(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := Options{
+		Stdout:       &bytes.Buffer{},
+		Stderr:       &bytes.Buffer{},
+		LookPath:     stubLookPath(map[string]string{}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installPodman(&opts, env)
+	if result.action != "skipped" {
+		t.Errorf("expected 'skipped', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "podman.io/docs/installation") {
+		t.Errorf("expected download URL in detail, got %q", result.detail)
+	}
+}
+
+func TestInstallPodman_DarwinMachineInit(t *testing.T) {
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			// No machine exists — empty output.
+			"podman machine list --format {{.Name}}": "",
+			"podman info": "host:\n  os: darwin\n",
+		},
+	}
+
+	opts := Options{
+		GOOS:   "darwin",
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installPodman(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "verified") {
+		t.Errorf("expected 'verified' in detail, got %q", result.detail)
+	}
+
+	// Verify machine init and start were called.
+	initCalled := false
+	startCalled := false
+	for _, call := range rec.calls {
+		if strings.Contains(call, "podman machine init") {
+			initCalled = true
+		}
+		if call == "podman machine start" {
+			startCalled = true
+		}
+	}
+	if !initCalled {
+		t.Errorf("expected 'podman machine init' call, got: %v", rec.calls)
+	}
+	if !startCalled {
+		t.Errorf("expected 'podman machine start' call, got: %v", rec.calls)
+	}
+}
+
+func TestInstallPodman_DarwinMachineAlreadyExists(t *testing.T) {
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"podman machine list --format {{.Name}}": "podman-machine-default",
+			"podman info": "host:\n  os: darwin\n",
+		},
+	}
+
+	opts := Options{
+		GOOS:   "darwin",
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installPodman(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+
+	// Verify machine init was NOT called.
+	for _, call := range rec.calls {
+		if strings.Contains(call, "podman machine init") {
+			t.Error("should not call machine init when machine already exists")
+		}
+	}
+}
+
+func TestInstallPodman_DarwinMachineInitFails(t *testing.T) {
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"podman machine list --format {{.Name}}": "",
+			"podman info": "host:\n  os: darwin\n",
+		},
+		errors: map[string]error{
+			"timeout 180 podman machine init": fmt.Errorf("init failed"),
+		},
+	}
+
+	opts := Options{
+		GOOS:   "darwin",
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installPodman(&opts, env)
+	// Machine init failure does not fail the step.
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "machine init failed") {
+		t.Errorf("expected 'machine init failed' in detail, got %q", result.detail)
+	}
+}
+
+func TestInstallPodman_DarwinMachineStartFails(t *testing.T) {
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"podman machine list --format {{.Name}}": "",
+			"podman info": "host:\n  os: darwin\n",
+		},
+		errors: map[string]error{
+			"podman machine start": fmt.Errorf("start failed"),
+		},
+	}
+
+	opts := Options{
+		GOOS:   "darwin",
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installPodman(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "machine start failed") {
+		t.Errorf("expected 'machine start failed' in detail, got %q", result.detail)
+	}
+}
+
+func TestInstallPodman_LinuxNoMachineInit(t *testing.T) {
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"podman info": "host:\n  os: linux\n",
+		},
+	}
+
+	opts := Options{
+		GOOS:   "linux",
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installPodman(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+
+	// Verify no machine init on Linux.
+	for _, call := range rec.calls {
+		if strings.Contains(call, "machine") {
+			t.Errorf("should not call machine commands on Linux: %s", call)
+		}
+	}
+}
+
+func TestInstallPodman_SmokeTestPasses(t *testing.T) {
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"podman info": "host:\n  os: linux\n",
+		},
+	}
+
+	opts := Options{
+		GOOS:   "linux",
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installPodman(&opts, env)
+	if !strings.Contains(result.detail, "verified") {
+		t.Errorf("expected 'verified' in detail, got %q", result.detail)
+	}
+}
+
+func TestInstallPodman_SmokeTestFails(t *testing.T) {
+	rec := &cmdRecorder{
+		errors: map[string]error{
+			"podman info": fmt.Errorf("cannot connect to Podman"),
+		},
+	}
+
+	opts := Options{
+		GOOS:   "linux",
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installPodman(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "podman info failed") {
+		t.Errorf("expected 'podman info failed' in detail, got %q", result.detail)
+	}
+}
+
+func TestInstallPodman_DryRun(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := Options{
+		DryRun: true,
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installPodman(&opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("expected 'dry-run', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "brew install podman") {
+		t.Errorf("expected brew install hint, got %q", result.detail)
+	}
+}
+
+func TestInstallPodman_SkipViaConfig(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := Options{
+		SkipTools: []string{"podman"},
+		Stdout:    &bytes.Buffer{},
+		Stderr:    &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installPodman(&opts, env)
+	if result.action != "skipped" {
+		t.Errorf("expected 'skipped', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "excluded by config") {
+		t.Errorf("expected 'excluded by config' in detail, got %q", result.detail)
+	}
+}
+
+// --- DevPod installation tests ---
+
+func TestInstallDevPod_AlreadyInstalled(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := Options{
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"devpod": "/usr/local/bin/devpod",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installDevPod(&opts, env)
+	if result.action != "already installed" {
+		t.Errorf("expected 'already installed', got %q", result.action)
+	}
+}
+
+func TestInstallDevPod_BrewInstall(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := Options{
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installDevPod(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "via Homebrew") {
+		t.Errorf("expected 'via Homebrew' in detail, got %q", result.detail)
+	}
+
+	found := false
+	for _, call := range rec.calls {
+		if call == "brew install devpod" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'brew install devpod' call, got: %v", rec.calls)
+	}
+}
+
+func TestInstallDevPod_NoHomebrew(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := Options{
+		Stdout:       &bytes.Buffer{},
+		Stderr:       &bytes.Buffer{},
+		LookPath:     stubLookPath(map[string]string{}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installDevPod(&opts, env)
+	if result.action != "skipped" {
+		t.Errorf("expected 'skipped', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "devpod.sh/docs/getting-started/install") {
+		t.Errorf("expected download URL in detail, got %q", result.detail)
+	}
+}
+
+func TestInstallDevPod_DryRun(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := Options{
+		DryRun: true,
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installDevPod(&opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("expected 'dry-run', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "brew install devpod") {
+		t.Errorf("expected brew install hint, got %q", result.detail)
+	}
+}
+
+func TestInstallDevPod_SkipViaConfig(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := Options{
+		SkipTools: []string{"devpod"},
+		Stdout:    &bytes.Buffer{},
+		Stderr:    &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installDevPod(&opts, env)
+	if result.action != "skipped" {
+		t.Errorf("expected 'skipped', got %q", result.action)
+	}
+}
+
+// --- DevPod provider configuration tests ---
+
+func TestConfigureDevPodProvider_AlreadyRegistered(t *testing.T) {
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"devpod provider list": "podman   docker   v0.1.0\nkubernetes   kubernetes   v0.2.0\n",
+		},
+	}
+
+	opts := Options{
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"devpod": "/usr/local/bin/devpod",
+			"podman": "/usr/local/bin/podman",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	result := configureDevPodProvider(&opts)
+	if result.action != "already installed" {
+		t.Errorf("expected 'already installed', got %q", result.action)
+	}
+}
+
+func TestConfigureDevPodProvider_MissingInstall(t *testing.T) {
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"devpod provider list": "kubernetes   kubernetes   v0.2.0\n",
+		},
+	}
+
+	opts := Options{
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"devpod": "/usr/local/bin/devpod",
+			"podman": "/usr/local/bin/podman",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	result := configureDevPodProvider(&opts)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+
+	// Verify the provider add command was called.
+	found := false
+	for _, call := range rec.calls {
+		if call == "devpod provider add docker --name podman -o DOCKER_COMMAND=podman" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected provider add call, got: %v", rec.calls)
+	}
+}
+
+func TestConfigureDevPodProvider_AddFails(t *testing.T) {
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"devpod provider list": "kubernetes   kubernetes   v0.2.0\n",
+		},
+		errors: map[string]error{
+			"devpod provider add docker --name podman -o DOCKER_COMMAND=podman": fmt.Errorf("provider add failed"),
+		},
+	}
+
+	opts := Options{
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"devpod": "/usr/local/bin/devpod",
+			"podman": "/usr/local/bin/podman",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	result := configureDevPodProvider(&opts)
+	if result.action != "failed" {
+		t.Errorf("expected 'failed', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "devpod provider add docker --name podman") {
+		t.Errorf("expected manual command in detail, got %q", result.detail)
+	}
+}
+
+func TestConfigureDevPodProvider_ListFails(t *testing.T) {
+	rec := &cmdRecorder{
+		errors: map[string]error{
+			"devpod provider list": fmt.Errorf("devpod error"),
+		},
+	}
+
+	opts := Options{
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"devpod": "/usr/local/bin/devpod",
+			"podman": "/usr/local/bin/podman",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	result := configureDevPodProvider(&opts)
+	if result.action != "skipped" {
+		t.Errorf("expected 'skipped', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "provider list failed") {
+		t.Errorf("expected warning about list failure, got %q", result.detail)
+	}
+}
+
+func TestConfigureDevPodProvider_NoDevPod(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := Options{
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"podman": "/usr/local/bin/podman",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	result := configureDevPodProvider(&opts)
+	if result.action != "skipped" {
+		t.Errorf("expected 'skipped', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "no devpod") {
+		t.Errorf("expected 'no devpod' in detail, got %q", result.detail)
+	}
+}
+
+func TestConfigureDevPodProvider_NoPodman(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := Options{
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"devpod": "/usr/local/bin/devpod",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	result := configureDevPodProvider(&opts)
+	if result.action != "skipped" {
+		t.Errorf("expected 'skipped', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "no podman") {
+		t.Errorf("expected 'no podman' in detail, got %q", result.detail)
+	}
+}
+
+func TestConfigureDevPodProvider_DryRun(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	opts := Options{
+		DryRun: true,
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"devpod": "/usr/local/bin/devpod",
+			"podman": "/usr/local/bin/podman",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	result := configureDevPodProvider(&opts)
+	if result.action != "dry-run" {
+		t.Errorf("expected 'dry-run', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "devpod provider add docker --name podman") {
+		t.Errorf("expected provider add hint, got %q", result.detail)
+	}
+}
+
+// --- hasProvider tests ---
+
+func TestHasProvider_ExactMatch(t *testing.T) {
+	output := "podman   docker   v0.1.0\nkubernetes   kubernetes   v0.2.0\n"
+	if !hasProvider(output, "podman") {
+		t.Error("expected to find 'podman' provider")
+	}
+}
+
+func TestHasProvider_SubstringNotMatched(t *testing.T) {
+	output := "podman-custom   docker   v0.1.0\nkubernetes   kubernetes   v0.2.0\n"
+	if hasProvider(output, "podman") {
+		t.Error("'podman-custom' should not match 'podman' (exact match required)")
+	}
+}
+
+func TestHasProvider_NotFound(t *testing.T) {
+	output := "docker   docker   v0.1.0\nkubernetes   kubernetes   v0.2.0\n"
+	if hasProvider(output, "podman") {
+		t.Error("expected not to find 'podman' provider")
+	}
+}
+
+func TestHasProvider_EmptyOutput(t *testing.T) {
+	if hasProvider("", "podman") {
+		t.Error("expected not to find provider in empty output")
 	}
 }
 

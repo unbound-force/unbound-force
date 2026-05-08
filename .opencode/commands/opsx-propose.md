@@ -38,10 +38,32 @@ When ready to implement, run /unleash (autonomous) or /opsx-apply (sequential)
    git checkout -b opsx/<name>
    ```
 
-   **Guard**: Before creating the branch, check the current branch:
-   - If already on `opsx/<name>` (exact match): skip branch creation, proceed.
-   - If on a different `opsx/*` branch: **STOP** with error: "Already on branch `opsx/<other>` -- finish or archive that change first."
-   - If on `main` or any non-opsx branch: create and checkout `opsx/<name>`.
+   **Guard**: Before creating the branch, perform these
+   checks in order:
+
+   a. **Dirty working tree check**: Run `git status --short`.
+      If there are uncommitted changes (staged, unstaged,
+      or untracked files that appear related to work):
+      - **STOP** and ask the user for confirmation before
+        switching branches. Show what uncommitted changes
+        exist and warn that switching branches with a
+        dirty working tree may cause changes to be
+        applied to the wrong branch.
+      - If the user confirms, proceed. If not, abort.
+      - Exception: if the user explicitly requested a
+        new change in the same message (e.g.,
+        `/opsx-propose fix-typos`), this still requires
+        confirmation -- never silently switch branches
+        with uncommitted work.
+
+   b. **Branch check**: Check the current branch:
+      - If already on `opsx/<name>` (exact match): skip
+        branch creation, proceed.
+      - If on a different `opsx/*` branch: **STOP** with
+        error: "Already on branch `opsx/<other>` --
+        finish or archive that change first."
+      - If on `main` or any non-opsx branch: create and
+        checkout `opsx/<name>`.
 
 ### Retrieve Context from Dewey (optional)
 

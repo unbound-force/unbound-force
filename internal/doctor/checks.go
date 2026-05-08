@@ -129,6 +129,14 @@ var coreToolSpecs = []toolSpec{
 	{
 		name: "ollama",
 	},
+	{
+		name:         "podman",
+		required:     true,
+		versionCmd:   []string{"podman", "--version"},
+		versionParse: parsePodmanVersion,
+		minVersion:   "4.3",
+		versionCheck: checkPodmanVersion,
+	},
 }
 
 // checkCoreTools checks the core binaries per FR-001/002/003.
@@ -148,6 +156,20 @@ func checkCoreTools(opts *Options, env DetectedEnvironment) CheckGroup {
 			result = checkOllamaModel(opts, result)
 			// Replace the last result with the enriched one.
 			group.Results[len(group.Results)-1] = result
+		}
+
+		// Podman post-check: when podman passes presence +
+		// version, verify runtime health via `podman info`.
+		// Platform-aware: macOS checks machine existence first.
+		if spec.name == "podman" && result.Severity == Pass && result.Message != "not found" {
+			runtimeResult := checkPodmanRuntime(opts)
+			group.Results = append(group.Results, runtimeResult)
+
+			// Docker shim detection: check if `docker` in
+			// PATH is a symlink/shim to Podman (D8a).
+			if shimResult := checkDockerPodmanShim(opts); shimResult != nil {
+				group.Results = append(group.Results, *shimResult)
+			}
 		}
 	}
 
@@ -175,6 +197,105 @@ func checkOllamaModel(opts *Options, base CheckResult) CheckResult {
 	base.InstallHint = "ollama pull " + model
 	base.Message = base.Message + " (model not pulled)"
 	return base
+}
+
+// checkPodmanRuntime validates that Podman is functional by
+// running `podman info`. On macOS, first checks for a Podman
+// machine via `podman machine list`. Uses opts.goos() for
+// platform branching to enable cross-platform test isolation
+// per Constitution Principle IV and design D8.
+func checkPodmanRuntime(opts *Options) CheckResult {
+	if opts.goos() == "darwin" {
+		return checkPodmanRuntimeDarwin(opts)
+	}
+	return checkPodmanRuntimeLinux(opts)
+}
+
+// checkPodmanRuntimeDarwin checks Podman runtime health on macOS.
+// First verifies a Podman machine exists, then checks `podman info`.
+func checkPodmanRuntimeDarwin(opts *Options) CheckResult {
+	// Check for machine existence.
+	machineOutput, machineErr := opts.ExecCmd("podman", "machine", "list", "--format", "{{.Name}}")
+	if machineErr != nil || strings.TrimSpace(string(machineOutput)) == "" {
+		return CheckResult{
+			Name:        "podman runtime",
+			Severity:    Fail,
+			Message:     "no Podman machine found",
+			InstallHint: "podman machine init && podman machine start",
+		}
+	}
+
+	// Machine exists — check if podman info succeeds.
+	_, infoErr := opts.ExecCmd("podman", "info")
+	if infoErr != nil {
+		return CheckResult{
+			Name:        "podman runtime",
+			Severity:    Fail,
+			Message:     "Podman machine may not be running",
+			InstallHint: "podman machine start",
+		}
+	}
+
+	return CheckResult{
+		Name:     "podman runtime",
+		Severity: Pass,
+		Message:  "running",
+	}
+}
+
+// checkPodmanRuntimeLinux checks Podman runtime health on Linux.
+// Runs `podman info` directly since Linux does not use machines.
+func checkPodmanRuntimeLinux(opts *Options) CheckResult {
+	_, infoErr := opts.ExecCmd("podman", "info")
+	if infoErr != nil {
+		return CheckResult{
+			Name:        "podman runtime",
+			Severity:    Fail,
+			Message:     "Podman not responding",
+			InstallHint: "systemctl --user status podman.socket",
+		}
+	}
+
+	return CheckResult{
+		Name:     "podman runtime",
+		Severity: Pass,
+		Message:  "running",
+	}
+}
+
+// checkDockerPodmanShim checks whether `docker` in PATH is a
+// symlink or shim pointing to Podman. Returns nil if docker is
+// not in PATH (silently skipped). When docker is found, resolves
+// the binary via EvalSymlinks and checks if the resolved path
+// contains "podman". Informational only (Pass severity in both
+// cases). Design decision D8a.
+func checkDockerPodmanShim(opts *Options) *CheckResult {
+	dockerPath, err := opts.LookPath("docker")
+	if err != nil {
+		// docker not in PATH — skip silently.
+		return nil
+	}
+
+	resolved, evalErr := opts.EvalSymlinks(dockerPath)
+	if evalErr != nil {
+		// Cannot resolve symlink — skip silently.
+		return nil
+	}
+
+	if strings.Contains(strings.ToLower(resolved), "podman") {
+		return &CheckResult{
+			Name:     "docker",
+			Severity: Pass,
+			Message:  "docker is a Podman shim (" + resolved + ")",
+		}
+	}
+
+	return &CheckResult{
+		Name:     "docker",
+		Severity: Pass,
+		Message:  "Docker detected (not Podman)",
+		Detail:   "Sandbox uses Podman, not Docker. docker and podman commands may behave differently.",
+	}
 }
 
 // checkOneTool checks a single tool binary.
@@ -347,6 +468,34 @@ func checkNodeVersion(version, min string) bool {
 	vMajor, _ := parseVersionParts(version)
 	mMajor, _ := parseVersionParts(min)
 	return vMajor >= mMajor
+}
+
+// parsePodmanVersion extracts the version from `podman --version`
+// output. Expected format: "podman version X.Y.Z". Follows the
+// doctor versionParse pattern (returns string, error) rather than
+// the sandbox package's (int, int, error) pattern per design R5.
+func parsePodmanVersion(output string) (string, error) {
+	parts := strings.Fields(strings.TrimSpace(output))
+	if len(parts) < 3 {
+		return "", fmt.Errorf("could not parse podman version from: %s", output)
+	}
+	version := parts[len(parts)-1]
+	// Verify it looks like a version number.
+	if len(version) == 0 || version[0] < '0' || version[0] > '9' {
+		return "", fmt.Errorf("could not parse podman version from: %s", output)
+	}
+	return version, nil
+}
+
+// checkPodmanVersion verifies Podman version >= minimum using
+// major.minor comparison.
+func checkPodmanVersion(version, min string) bool {
+	vMajor, vMinor := parseVersionParts(version)
+	mMajor, mMinor := parseVersionParts(min)
+	if vMajor != mMajor {
+		return vMajor > mMajor
+	}
+	return vMinor >= mMinor
 }
 
 // checkReplicator checks the Replicator installation, runs
@@ -1160,10 +1309,65 @@ func isDevPodDetected(opts *Options) bool {
 		strings.Contains(string(data), "backend: \"devpod\"")
 }
 
-// checkDevPod checks DevPod-related components: binary presence
-// and devcontainer configuration. The group is only included
-// when DevPod is detected (isDevPodDetected), keeping output
-// clean for Podman-only users per design D8.
+// parseDevPodVersion extracts the version from `devpod version`
+// output. Expected format: "v0.X.Y" or "0.X.Y". Strips leading
+// "v" prefix and handles pre-release suffixes (e.g., "0.6.15-beta")
+// by truncating at the first hyphen. Follows the doctor
+// versionParse pattern per design D7a.
+func parseDevPodVersion(output string) (string, error) {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return "", fmt.Errorf("could not parse devpod version: empty output")
+	}
+	// Strip leading "v" prefix.
+	trimmed = strings.TrimPrefix(trimmed, "v")
+	// Truncate at first hyphen to handle pre-release suffixes.
+	if idx := strings.IndexByte(trimmed, '-'); idx >= 0 {
+		trimmed = trimmed[:idx]
+	}
+	// Verify it looks like a version number.
+	if len(trimmed) == 0 || trimmed[0] < '0' || trimmed[0] > '9' {
+		return "", fmt.Errorf("could not parse devpod version from: %s", output)
+	}
+	return trimmed, nil
+}
+
+// checkDevPodVersionMin verifies DevPod version >= minimum using
+// major.minor comparison. Uses the same parseVersionParts helper
+// as other version checks.
+func checkDevPodVersionMin(version, min string) bool {
+	vMajor, vMinor := parseVersionParts(version)
+	mMajor, mMinor := parseVersionParts(min)
+	if vMajor != mMajor {
+		return vMajor > mMajor
+	}
+	return vMinor >= mMinor
+}
+
+// hasDevPodProvider checks whether a provider named "podman" is
+// registered in DevPod by parsing `devpod provider list` output.
+// Uses exact first-column name matching per design D5 to avoid
+// false positives from providers like "podman-custom".
+func hasDevPodProvider(opts *Options, providerName string) (found bool, listFailed bool) {
+	output, err := opts.ExecCmd("devpod", "provider", "list")
+	if err != nil {
+		return false, true
+	}
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == providerName {
+			return true, false
+		}
+	}
+	return false, false
+}
+
+// checkDevPod checks DevPod-related components: binary presence,
+// version, provider registration, and devcontainer configuration.
+// The group is only included when DevPod is detected
+// (isDevPodDetected), keeping output clean for Podman-only users
+// per design D8.
 func checkDevPod(opts *Options) *CheckGroup {
 	if !isDevPodDetected(opts) {
 		return nil
@@ -1182,15 +1386,73 @@ func checkDevPod(opts *Options) *CheckGroup {
 			Message:     "not found",
 			InstallHint: "Install DevPod: https://devpod.sh/docs/getting-started/install",
 		})
+		return group
+	}
+
+	group.Results = append(group.Results, CheckResult{
+		Name:     "devpod",
+		Severity: Pass,
+		Message:  "installed",
+	})
+
+	// Check 2: devpod version >= 0.5.0.
+	versionOutput, versionErr := opts.ExecCmd("devpod", "version")
+	if versionErr == nil {
+		version, parseErr := parseDevPodVersion(string(versionOutput))
+		if parseErr == nil {
+			if checkDevPodVersionMin(version, "0.5") {
+				group.Results = append(group.Results, CheckResult{
+					Name:     "devpod version",
+					Severity: Pass,
+					Message:  version,
+				})
+			} else {
+				group.Results = append(group.Results, CheckResult{
+					Name:        "devpod version",
+					Severity:    Warn,
+					Message:     version + " (requires >= 0.5.0)",
+					InstallHint: "brew upgrade devpod",
+				})
+			}
+		} else {
+			group.Results = append(group.Results, CheckResult{
+				Name:     "devpod version",
+				Severity: Warn,
+				Message:  "version could not be parsed",
+			})
+		}
 	} else {
 		group.Results = append(group.Results, CheckResult{
-			Name:     "devpod",
-			Severity: Pass,
-			Message:  "installed",
+			Name:     "devpod version",
+			Severity: Warn,
+			Message:  "version could not be verified",
 		})
 	}
 
-	// Check 2: .devcontainer/devcontainer.json existence.
+	// Check 3: podman provider registration.
+	found, listFailed := hasDevPodProvider(opts, "podman")
+	if listFailed {
+		group.Results = append(group.Results, CheckResult{
+			Name:     "podman provider",
+			Severity: Warn,
+			Message:  "could not check providers (devpod provider list failed)",
+		})
+	} else if found {
+		group.Results = append(group.Results, CheckResult{
+			Name:     "podman provider",
+			Severity: Pass,
+			Message:  "registered",
+		})
+	} else {
+		group.Results = append(group.Results, CheckResult{
+			Name:        "podman provider",
+			Severity:    Warn,
+			Message:     "not registered",
+			InstallHint: "devpod provider add docker --name podman -o DOCKER_COMMAND=podman",
+		})
+	}
+
+	// Check 4: .devcontainer/devcontainer.json existence.
 	dcPath := filepath.Join(opts.TargetDir,
 		".devcontainer", "devcontainer.json")
 	if _, err := os.Stat(dcPath); err == nil {

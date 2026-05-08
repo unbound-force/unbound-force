@@ -69,6 +69,23 @@ type Options struct {
 	// EmbeddingModel is the embedding model name from config.
 	// Used instead of the compiled default when non-empty.
 	EmbeddingModel string
+
+	// GOOS overrides runtime.GOOS when non-empty. Used for
+	// platform-aware checks (e.g., Podman runtime health) and
+	// enables cross-platform test isolation per Constitution
+	// Principle IV. Matches the setup.Options GOOS pattern.
+	GOOS string
+}
+
+// goos returns the resolved OS string. When GOOS is non-empty,
+// it is used as the override; otherwise runtime.GOOS is returned.
+// This enables cross-platform test isolation per Constitution
+// Principle IV.
+func (o *Options) goos() string {
+	if o.GOOS != "" {
+		return o.GOOS
+	}
+	return runtime.GOOS
 }
 
 // defaults fills zero-value fields with production implementations.
