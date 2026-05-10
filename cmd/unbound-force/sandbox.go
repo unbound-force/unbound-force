@@ -65,6 +65,9 @@ func applySandboxConfig(opts *sandbox.Options, stderr io.Writer) {
 	if opts.Image == "" && cfg.Sandbox.Image != "" {
 		opts.Image = cfg.Sandbox.Image
 	}
+	if opts.IDE == "" && cfg.Sandbox.IDE != "" {
+		opts.IDE = cfg.Sandbox.IDE
+	}
 	if opts.Memory == "" && cfg.Sandbox.Resources.Memory != "" {
 		opts.Memory = cfg.Sandbox.Resources.Memory
 	}
@@ -166,6 +169,7 @@ type sandboxCreateParams struct {
 	memory     string
 	cpus       string
 	name       string
+	ide        string
 	detach     bool
 	uidmap     bool
 	demoPorts  []int
@@ -181,6 +185,7 @@ func runSandboxCreate(p sandboxCreateParams) error {
 		Memory:        p.memory,
 		CPUs:          p.cpus,
 		WorkspaceName: p.name,
+		IDE:           p.ide,
 		Detach:        p.detach,
 		UIDMap:        p.uidmap,
 		DemoPorts:     p.demoPorts,
@@ -206,6 +211,7 @@ The workspace persists across stop/start cycles. Use
 			memory, _ := cmd.Flags().GetString("memory")
 			cpus, _ := cmd.Flags().GetString("cpus")
 			name, _ := cmd.Flags().GetString("name")
+			ide, _ := cmd.Flags().GetString("ide")
 			detach, _ := cmd.Flags().GetBool("detach")
 			uidmap, _ := cmd.Flags().GetBool("uidmap")
 			demoPorts, _ := cmd.Flags().GetIntSlice("demo-ports")
@@ -222,6 +228,7 @@ The workspace persists across stop/start cycles. Use
 				memory:     memory,
 				cpus:       cpus,
 				name:       name,
+				ide:        ide,
 				detach:     detach,
 				uidmap:     uidmap,
 				demoPorts:  demoPorts,
@@ -241,6 +248,8 @@ The workspace persists across stop/start cycles. Use
 		"CPU limit (default \"4\")")
 	cmd.Flags().String("name", "",
 		"Workspace name override (default \"uf-sandbox-<project-name>\")")
+	cmd.Flags().String("ide", "none",
+		"IDE to open: none, vscode, openvscode, fleet, jupyternotebook, cursor (DevPod only)")
 	cmd.Flags().Bool("detach", false,
 		"Start without attaching TUI")
 	cmd.Flags().IntSlice("demo-ports", nil,
@@ -329,6 +338,7 @@ Use --force to destroy even if the workspace is running.`,
 type sandboxStartParams struct {
 	projectDir string
 	mode       string
+	ide        string
 	detach     bool
 	noParent   bool
 	uidmap     bool
@@ -344,6 +354,7 @@ func runSandboxStart(p sandboxStartParams) error {
 	opts := sandbox.Options{
 		ProjectDir:  p.projectDir,
 		Mode:        p.mode,
+		IDE:         p.ide,
 		Detach:      p.detach,
 		NoParent:    p.noParent,
 		UIDMap:      p.uidmap,
@@ -372,6 +383,7 @@ Use --mode direct for read-write mounts (changes apply
 directly to the host filesystem).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			mode, _ := cmd.Flags().GetString("mode")
+			ide, _ := cmd.Flags().GetString("ide")
 			detach, _ := cmd.Flags().GetBool("detach")
 			noParent, _ := cmd.Flags().GetBool("no-parent")
 			uidmap, _ := cmd.Flags().GetBool("uidmap")
@@ -388,6 +400,7 @@ directly to the host filesystem).`,
 			return runSandboxStart(sandboxStartParams{
 				projectDir: cwd,
 				mode:       mode,
+				ide:        ide,
 				detach:     detach,
 				noParent:   noParent,
 				uidmap:     uidmap,
@@ -403,6 +416,8 @@ directly to the host filesystem).`,
 
 	cmd.Flags().String("mode", "isolated",
 		"Mount mode: isolated (read-only) or direct (read-write)")
+	cmd.Flags().String("ide", "none",
+		"IDE to open: none, vscode, openvscode, fleet, jupyternotebook, cursor (DevPod only)")
 	cmd.Flags().Bool("detach", false,
 		"Start container without attaching TUI")
 	cmd.Flags().String("image", "",

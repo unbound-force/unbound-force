@@ -8,6 +8,28 @@ import (
 	"strings"
 )
 
+// validIDEs lists the IDE values supported by DevPod.
+// Used by validateIDE to reject unknown values before
+// invoking devpod up.
+var validIDEs = []string{
+	"none", "vscode", "openvscode",
+	"fleet", "jupyternotebook", "cursor",
+}
+
+// validateIDE checks that the IDE value is in the set of
+// DevPod-supported IDEs. Returns an error listing all valid
+// values when the input is not recognized.
+func validateIDE(ide string) error {
+	for _, v := range validIDEs {
+		if ide == v {
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"unknown IDE: %s, use one of: %s",
+		ide, strings.Join(validIDEs, ", "))
+}
+
 // DevPodBackend implements Backend for DevPod workspaces
 // using devcontainer.json configuration. DevPod is invoked
 // as a subprocess via the ExecCmd injection pattern (D1:
@@ -60,6 +82,12 @@ func (b *DevPodBackend) Create(opts Options) error {
 				"run `uf sandbox init` to create it")
 	}
 
+	// Validate IDE before building args — fail early with
+	// a clear error listing valid values (D3).
+	if err := validateIDE(opts.IDE); err != nil {
+		return err
+	}
+
 	wsName := devpodWorkspaceName(opts)
 
 	// Build devpod up arguments.
@@ -67,7 +95,7 @@ func (b *DevPodBackend) Create(opts Options) error {
 		"up", opts.ProjectDir,
 		"--provider", "podman",
 		"--id", wsName,
-		"--ide", "none",
+		"--ide", opts.IDE,
 	}
 
 	// Gateway env var injection via --workspace-env (D4).
@@ -85,7 +113,7 @@ func (b *DevPodBackend) Create(opts Options) error {
 
 	out, err := opts.ExecCmd("devpod", args...)
 	if err != nil {
-		return fmt.Errorf("devpod up failed: %s",
+		return fmt.Errorf("devpod up failed: %w: %s", err,
 			strings.TrimSpace(string(out)))
 	}
 
@@ -99,19 +127,41 @@ func (b *DevPodBackend) Start(opts Options) error {
 	opts.defaults()
 	opts = DefaultConfig(opts)
 
+	// Validate IDE before building args — fail early with
+	// a clear error listing valid values (D3).
+	if err := validateIDE(opts.IDE); err != nil {
+		return err
+	}
+
 	wsName := devpodWorkspaceName(opts)
 
-	args := []string{"up", "--id", wsName}
+	args := []string{"up", "--id", wsName, "--ide", opts.IDE}
 
 	fmt.Fprintf(opts.Stderr, "Resuming DevPod workspace %s...\n", wsName)
 
 	out, err := opts.ExecCmd("devpod", args...)
 	if err != nil {
-		return fmt.Errorf("devpod up failed: %s",
+		return fmt.Errorf("devpod up failed: %w: %s", err,
 			strings.TrimSpace(string(out)))
 	}
 
 	serverURL := fmt.Sprintf("http://localhost:%d", DefaultServerPort)
+
+	// Wait for the OpenCode server health check before
+	// attaching. DevPod containers may take a moment to
+	// start the server via postStartCommand.
+	//
+	// D3: Health timeout is non-fatal for DevPod because
+	// VS Code connects independently via its own tunnel.
+	// The user can still attach manually via
+	// "uf sandbox attach".
+	fmt.Fprintf(opts.Stderr, "Waiting for OpenCode server...\n")
+	if err := waitForHealth(opts, HealthTimeout); err != nil {
+		fmt.Fprintf(opts.Stderr,
+			"Warning: OpenCode server not responding (%v).\n"+
+				"VS Code may still be connected. Try: uf sandbox attach\n", err)
+		return nil
+	}
 
 	if opts.Detach {
 		fmt.Fprintf(opts.Stdout,
@@ -131,7 +181,7 @@ func (b *DevPodBackend) Stop(opts Options) error {
 
 	out, err := opts.ExecCmd("devpod", "stop", wsName)
 	if err != nil {
-		return fmt.Errorf("devpod stop failed: %s",
+		return fmt.Errorf("devpod stop failed: %w: %s", err,
 			strings.TrimSpace(string(out)))
 	}
 
@@ -147,7 +197,7 @@ func (b *DevPodBackend) Destroy(opts Options) error {
 
 	out, err := opts.ExecCmd("devpod", "delete", wsName, "--force")
 	if err != nil {
-		return fmt.Errorf("devpod delete failed: %s",
+		return fmt.Errorf("devpod delete failed: %w: %s", err,
 			strings.TrimSpace(string(out)))
 	}
 

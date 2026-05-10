@@ -82,6 +82,12 @@ type Options struct {
 
 	// --- New fields for Spec 029 ---
 
+	// IDE selects which IDE DevPod opens after workspace
+	// provisioning. Supported values: none, vscode,
+	// openvscode, fleet, jupyternotebook, cursor.
+	// Default: none. Only applies to DevPod backend.
+	IDE string
+
 	// BackendName selects the backend: "auto" or "podman".
 	// Default: "auto" (auto-detect).
 	BackendName string
@@ -426,17 +432,35 @@ func Create(opts Options) error {
 }
 
 // Destroy permanently deletes the sandbox workspace and all
-// associated state. Resolves the backend and delegates to
-// backend.Destroy(). Idempotent.
+// associated state. For persistent workspaces, resolves the
+// backend and delegates to backend.Destroy(). For ephemeral
+// mode (no persistent workspace), performs Podman cleanup
+// directly. Idempotent.
 func Destroy(opts Options) error {
 	opts.defaults()
 
-	backend, err := ResolveBackend(opts)
-	if err != nil {
-		return err
+	// Persistent workspace: delegate to backend.Destroy()
+	// which handles DevPod and persistent Podman workspaces.
+	if isPersistentWorkspace(opts) {
+		backend, err := ResolveBackend(opts)
+		if err != nil {
+			return err
+		}
+		return backend.Destroy(opts)
 	}
 
-	return backend.Destroy(opts)
+	// --- Ephemeral mode ---
+	// Stop and remove the ephemeral container if it exists.
+	// No named volume to destroy in ephemeral mode.
+	if isContainerExists(opts) {
+		_, _ = opts.ExecCmd("podman", "stop", ContainerName)
+		_, _ = opts.ExecCmd("podman", "rm", "-f", ContainerName)
+		fmt.Fprintf(opts.Stdout, "Sandbox destroyed.\n")
+		return nil
+	}
+
+	fmt.Fprintf(opts.Stdout, "No sandbox to destroy.\n")
+	return nil
 }
 
 // isPersistentWorkspace checks if a persistent workspace
@@ -674,6 +698,10 @@ func Stop(opts Options) error {
 
 // Attach connects the TUI to the running sandbox's OpenCode
 // server via `opencode attach`.
+//
+// For persistent workspaces (Podman named volume or DevPod),
+// delegates to the backend's Attach method. For ephemeral
+// mode, checks the ephemeral container directly.
 func Attach(opts Options) error {
 	opts.defaults()
 
@@ -682,6 +710,18 @@ func Attach(opts Options) error {
 		return fmt.Errorf(
 			"opencode not found. Install: brew install anomalyco/tap/opencode")
 	}
+
+	// Persistent workspace: delegate to backend.Attach()
+	// which handles DevPod and persistent Podman workspaces.
+	if isPersistentWorkspace(opts) {
+		backend, err := ResolveBackend(opts)
+		if err != nil {
+			return err
+		}
+		return backend.Attach(opts)
+	}
+
+	// --- Ephemeral mode ---
 
 	// Verify container is running.
 	running, err := isContainerRunning(opts)
