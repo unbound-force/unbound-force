@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,6 +105,81 @@ func createFile(t *testing.T, dir, name, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// --- Options.defaults tests ---
+
+func TestOptions_Defaults_FillsZeroFields(t *testing.T) {
+	var opts Options
+	opts.defaults()
+
+	if opts.TargetDir == "" {
+		t.Error("defaults() should set TargetDir when empty")
+	}
+	if opts.Format != "text" {
+		t.Errorf("Format = %q, want %q", opts.Format, "text")
+	}
+	if opts.Stdout == nil {
+		t.Error("defaults() should set Stdout when nil")
+	}
+	if opts.LookPath == nil {
+		t.Error("defaults() should set LookPath when nil")
+	}
+	if opts.ExecCmd == nil {
+		t.Error("defaults() should set ExecCmd when nil")
+	}
+	if opts.ExecCmdTimeout == nil {
+		t.Error("defaults() should set ExecCmdTimeout when nil")
+	}
+	if opts.EvalSymlinks == nil {
+		t.Error("defaults() should set EvalSymlinks when nil")
+	}
+	if opts.Getenv == nil {
+		t.Error("defaults() should set Getenv when nil")
+	}
+	if opts.ReadFile == nil {
+		t.Error("defaults() should set ReadFile when nil")
+	}
+	if opts.EmbedCheck == nil {
+		t.Error("defaults() should set EmbedCheck when nil")
+	}
+}
+
+func TestOptions_Defaults_PreservesNonZeroFields(t *testing.T) {
+	customDir := "/custom/dir"
+	customFormat := "json"
+	var customBuf bytes.Buffer
+	customLookPath := func(string) (string, error) { return "custom", nil }
+
+	opts := Options{
+		TargetDir: customDir,
+		Format:    customFormat,
+		Stdout:    &customBuf,
+		LookPath:  customLookPath,
+	}
+	opts.defaults()
+
+	if opts.TargetDir != customDir {
+		t.Errorf("TargetDir = %q, want %q (should preserve)", opts.TargetDir, customDir)
+	}
+	if opts.Format != customFormat {
+		t.Errorf("Format = %q, want %q (should preserve)", opts.Format, customFormat)
+	}
+	if opts.Stdout != &customBuf {
+		t.Error("Stdout should be preserved when non-nil")
+	}
+	// LookPath is a function; test it returns the custom value.
+	path, _ := opts.LookPath("anything")
+	if path != "custom" {
+		t.Error("LookPath should be preserved when non-nil")
+	}
+	// Other fields should still be populated.
+	if opts.ExecCmd == nil {
+		t.Error("ExecCmd should be set even when LookPath is pre-set")
+	}
+	if opts.EmbedCheck == nil {
+		t.Error("EmbedCheck should be set by defaults()")
 	}
 }
 
@@ -1631,6 +1708,46 @@ func TestFormatIndicator_AllCases(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("formatIndicator(%v, false) = %q, want %q", tt.result.Severity, got, tt.want)
 		}
+	}
+}
+
+func TestFormatIndicator_NoColor_UnknownSeverity(t *testing.T) {
+	r := CheckResult{Severity: Severity(99)}
+	got := formatIndicator(r, false, lipgloss.Style{}, lipgloss.Style{}, lipgloss.Style{}, lipgloss.Style{})
+	if got != "[????]" {
+		t.Errorf("formatIndicator(unknown, false) = %q, want %q", got, "[????]")
+	}
+}
+
+func TestFormatIndicator_Color_AllCases(t *testing.T) {
+	// With hasColor=true, lipgloss renders styled strings.
+	// We verify the output is non-empty and contains the expected symbols.
+	var buf bytes.Buffer
+	renderer := lipgloss.NewRenderer(&buf)
+	pass := renderer.NewStyle()
+	warn := renderer.NewStyle()
+	fail := renderer.NewStyle()
+	dim := renderer.NewStyle()
+
+	tests := []struct {
+		name   string
+		result CheckResult
+		want   string // expected substring
+	}{
+		{"pass", CheckResult{Severity: Pass}, "✅"},
+		{"pass-optional", CheckResult{Severity: Pass, InstallHint: "hint"}, "⊘"},
+		{"warn", CheckResult{Severity: Warn}, "⚠"},
+		{"fail", CheckResult{Severity: Fail}, "❌"},
+		{"unknown", CheckResult{Severity: Severity(99)}, "?"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatIndicator(tc.result, true, pass, warn, fail, dim)
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("formatIndicator(%v, true) = %q, want to contain %q", tc.result.Severity, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -3710,4 +3827,224 @@ func TestCheckAgentContext_BranchProtection(t *testing.T) {
 			}
 		}
 	})
+}
+
+// --- defaultEmbedCheck tests ---
+
+func TestDefaultEmbedCheck_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/embed" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("unexpected method: %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"embeddings":[[0.1,0.2,0.3]]}`))
+	}))
+	defer ts.Close()
+
+	getenv := func(key string) string {
+		if key == "OLLAMA_HOST" {
+			return ts.URL
+		}
+		return ""
+	}
+
+	check := defaultEmbedCheck(getenv)
+	err := check("test-model")
+	if err != nil {
+		t.Errorf("defaultEmbedCheck() error = %v, want nil", err)
+	}
+}
+
+func TestDefaultEmbedCheck_DefaultHost(t *testing.T) {
+	// When OLLAMA_HOST is empty, it defaults to http://localhost:11434.
+	// We verify the returned function uses the default by calling it
+	// with a nonexistent model. The error depends on whether Ollama
+	// is running locally:
+	// - Running: "model not found" or similar server error
+	// - Not running: "embed request failed: connection refused"
+	// Either way, we get a non-nil error for a bogus model name.
+	getenv := func(string) string { return "" }
+	check := defaultEmbedCheck(getenv)
+
+	err := check("__nonexistent_gaze_test_model__")
+	if err == nil {
+		t.Error("expected error for nonexistent model, got nil")
+	}
+}
+
+func TestDefaultEmbedCheck_NonOKStatus(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"model not found"}`))
+	}))
+	defer ts.Close()
+
+	getenv := func(key string) string {
+		if key == "OLLAMA_HOST" {
+			return ts.URL
+		}
+		return ""
+	}
+
+	check := defaultEmbedCheck(getenv)
+	err := check("nonexistent-model")
+	if err == nil {
+		t.Fatal("expected error for non-OK status")
+	}
+	if !strings.Contains(err.Error(), "model not found") {
+		t.Errorf("error = %v, want to contain 'model not found'", err)
+	}
+}
+
+func TestDefaultEmbedCheck_NonOKStatusNoBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("not json"))
+	}))
+	defer ts.Close()
+
+	getenv := func(key string) string {
+		if key == "OLLAMA_HOST" {
+			return ts.URL
+		}
+		return ""
+	}
+
+	check := defaultEmbedCheck(getenv)
+	err := check("test-model")
+	if err == nil {
+		t.Fatal("expected error for 500 status")
+	}
+	if !strings.Contains(err.Error(), "status 500") {
+		t.Errorf("error = %v, want to contain 'status 500'", err)
+	}
+}
+
+func TestDefaultEmbedCheck_EmptyEmbeddings(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"embeddings":[]}`))
+	}))
+	defer ts.Close()
+
+	getenv := func(key string) string {
+		if key == "OLLAMA_HOST" {
+			return ts.URL
+		}
+		return ""
+	}
+
+	check := defaultEmbedCheck(getenv)
+	err := check("test-model")
+	if err == nil {
+		t.Fatal("expected error for empty embeddings")
+	}
+	if !strings.Contains(err.Error(), "empty embeddings") {
+		t.Errorf("error = %v, want to contain 'empty embeddings'", err)
+	}
+}
+
+func TestDefaultEmbedCheck_MalformedResponse(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("not valid json at all"))
+	}))
+	defer ts.Close()
+
+	getenv := func(key string) string {
+		if key == "OLLAMA_HOST" {
+			return ts.URL
+		}
+		return ""
+	}
+
+	check := defaultEmbedCheck(getenv)
+	err := check("test-model")
+	if err == nil {
+		t.Fatal("expected error for malformed response")
+	}
+	if !strings.Contains(err.Error(), "could not parse embed response") {
+		t.Errorf("error = %v, want to contain 'could not parse embed response'", err)
+	}
+}
+
+// --- checkEmbeddingCapability tests ---
+
+func TestCheckEmbeddingCapability_Success(t *testing.T) {
+	opts := &Options{
+		EmbedCheck: func(model string) error {
+			return nil
+		},
+	}
+
+	result := checkEmbeddingCapability(opts)
+	if result.Severity != Pass {
+		t.Errorf("severity = %v, want Pass", result.Severity)
+	}
+	if !strings.Contains(result.Message, "generating embeddings") {
+		t.Errorf("message = %q, want to contain 'generating embeddings'", result.Message)
+	}
+}
+
+func TestCheckEmbeddingCapability_ConnectionRefused(t *testing.T) {
+	opts := &Options{
+		EmbedCheck: func(string) error {
+			return fmt.Errorf("embed request failed: connection refused")
+		},
+	}
+
+	result := checkEmbeddingCapability(opts)
+	if result.Severity != Warn {
+		t.Errorf("severity = %v, want Warn", result.Severity)
+	}
+	if !strings.Contains(result.Message, "Ollama not running") {
+		t.Errorf("message = %q, want to contain 'Ollama not running'", result.Message)
+	}
+	if !strings.Contains(result.InstallHint, "ollama serve") {
+		t.Errorf("install hint = %q, want 'ollama serve'", result.InstallHint)
+	}
+}
+
+func TestCheckEmbeddingCapability_ModelNotFound(t *testing.T) {
+	opts := &Options{
+		EmbedCheck: func(string) error {
+			return fmt.Errorf("model not found")
+		},
+	}
+
+	result := checkEmbeddingCapability(opts)
+	if result.Severity != Warn {
+		t.Errorf("severity = %v, want Warn", result.Severity)
+	}
+	if !strings.Contains(result.Message, "model not loaded") {
+		t.Errorf("message = %q, want to contain 'model not loaded'", result.Message)
+	}
+	if !strings.Contains(result.InstallHint, "ollama pull") {
+		t.Errorf("install hint = %q, want 'ollama pull'", result.InstallHint)
+	}
+}
+
+func TestCheckEmbeddingCapability_GenericError(t *testing.T) {
+	opts := &Options{
+		EmbedCheck: func(string) error {
+			return fmt.Errorf("timeout waiting for response")
+		},
+	}
+
+	result := checkEmbeddingCapability(opts)
+	if result.Severity != Warn {
+		t.Errorf("severity = %v, want Warn", result.Severity)
+	}
+	if !strings.Contains(result.Message, "cannot generate embeddings") {
+		t.Errorf("message = %q, want to contain 'cannot generate embeddings'", result.Message)
+	}
+	if !strings.Contains(result.InstallHint, "ollama serve") {
+		t.Errorf("install hint = %q, want combined hint with 'ollama serve'", result.InstallHint)
+	}
+	if !strings.Contains(result.InstallHint, "ollama pull") {
+		t.Errorf("install hint = %q, want combined hint with 'ollama pull'", result.InstallHint)
+	}
 }
