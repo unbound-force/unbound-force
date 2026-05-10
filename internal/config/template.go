@@ -55,6 +55,7 @@ func Template() string {
 #   runtime: auto                # auto | podman | docker
 #   backend: auto                # auto | podman
 #   image: quay.io/unbound-force/opencode-dev:latest
+#   ide: none                    # none | vscode | openvscode | fleet | jupyternotebook | cursor
 #   resources:
 #     memory: 8g
 #     cpus: "4"

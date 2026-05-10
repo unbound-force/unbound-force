@@ -64,6 +64,7 @@ type SandboxConfig struct {
 	Runtime   string          `yaml:"runtime"    json:"runtime"`
 	Backend   string          `yaml:"backend"    json:"backend"`
 	Image     string          `yaml:"image"      json:"image"`
+	IDE       string          `yaml:"ide"        json:"ide"`
 	Resources ResourcesConfig `yaml:"resources"  json:"resources"`
 	Mode      string          `yaml:"mode"       json:"mode"`
 	DemoPorts []int           `yaml:"demo_ports" json:"demo_ports"`
@@ -223,6 +224,9 @@ func merge(base, overlay Config) Config {
 	if overlay.Sandbox.Image != "" {
 		result.Sandbox.Image = overlay.Sandbox.Image
 	}
+	if overlay.Sandbox.IDE != "" {
+		result.Sandbox.IDE = overlay.Sandbox.IDE
+	}
 	if overlay.Sandbox.Resources.Memory != "" {
 		result.Sandbox.Resources.Memory = overlay.Sandbox.Resources.Memory
 	}
@@ -297,6 +301,9 @@ func applyEnvOverrides(cfg Config, getenv func(string) string) Config {
 	if v := getenv("UF_SANDBOX_IMAGE"); v != "" {
 		cfg.Sandbox.Image = v
 	}
+	if v := getenv("UF_SANDBOX_IDE"); v != "" {
+		cfg.Sandbox.IDE = v
+	}
 	if v := getenv("UF_SANDBOX_BACKEND"); v != "" {
 		cfg.Sandbox.Backend = v
 	}
@@ -338,6 +345,7 @@ func Defaults() Config {
 			Runtime: "auto",
 			Backend: "auto",
 			Image:   "quay.io/unbound-force/opencode-dev:latest",
+			IDE:     "none",
 			Resources: ResourcesConfig{
 				Memory: "8g",
 				CPUs:   "4",
@@ -370,6 +378,7 @@ func (s SandboxConfig) IsEmpty() bool {
 	return s.Runtime == d.Runtime &&
 		s.Backend == d.Backend &&
 		s.Image == d.Image &&
+		s.IDE == d.IDE &&
 		s.Resources.Memory == d.Resources.Memory &&
 		s.Resources.CPUs == d.Resources.CPUs &&
 		s.Mode == d.Mode &&

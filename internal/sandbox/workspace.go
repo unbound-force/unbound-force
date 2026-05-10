@@ -93,6 +93,11 @@ type SandboxConfig struct {
 	// Default: "auto".
 	Backend string `yaml:"backend"`
 
+	// IDE is the default IDE for DevPod workspaces.
+	// Supported values: none, vscode, openvscode, fleet,
+	// jupyternotebook, cursor. Default: "none".
+	IDE string `yaml:"ide"`
+
 	// DemoPorts lists port numbers to expose for demos.
 	DemoPorts []int `yaml:"demo_ports"`
 }

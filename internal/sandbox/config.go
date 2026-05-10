@@ -38,6 +38,10 @@ const (
 
 	// ModeDirect mounts the project directory read-write.
 	ModeDirect = "direct"
+
+	// DefaultIDE is the default IDE value for DevPod
+	// workspaces. "none" means no IDE is opened.
+	DefaultIDE = "none"
 )
 
 // forwardedAPIKeys lists environment variable names that are
@@ -99,6 +103,13 @@ func DefaultConfig(opts Options) Options {
 	}
 	if opts.Mode == "" {
 		opts.Mode = ModeIsolated
+	}
+	if opts.IDE == "" {
+		if envIDE := opts.Getenv("UF_SANDBOX_IDE"); envIDE != "" {
+			opts.IDE = envIDE
+		} else {
+			opts.IDE = DefaultIDE
+		}
 	}
 	return opts
 }

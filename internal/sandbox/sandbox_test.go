@@ -4385,3 +4385,426 @@ func TestOptionsDefaults_PreservesExistingValues(t *testing.T) {
 	}
 }
 
+// ============================================================
+// IDE Flag Tests (sandbox-ide-flag change)
+// ============================================================
+
+// --- validateIDE tests (Task 4.1) ---
+
+func TestValidateIDE_AllValidValues(t *testing.T) {
+	valid := []string{
+		"none", "vscode", "openvscode",
+		"fleet", "jupyternotebook", "cursor",
+	}
+	for _, ide := range valid {
+		t.Run(ide, func(t *testing.T) {
+			if err := validateIDE(ide); err != nil {
+				t.Errorf("validateIDE(%q) = %v, want nil", ide, err)
+			}
+		})
+	}
+}
+
+func TestValidateIDE_InvalidValue(t *testing.T) {
+	err := validateIDE("sublime")
+	if err == nil {
+		t.Fatal("expected error for invalid IDE value")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "unknown IDE: sublime") {
+		t.Errorf("expected 'unknown IDE: sublime' in error, got: %s", errMsg)
+	}
+	// Verify all valid values are listed in the error message.
+	for _, v := range []string{"none", "vscode", "openvscode", "fleet", "jupyternotebook", "cursor"} {
+		if !strings.Contains(errMsg, v) {
+			t.Errorf("expected %q in error message, got: %s", v, errMsg)
+		}
+	}
+}
+
+// --- DevPod Create IDE passthrough tests (Task 4.2) ---
+
+func TestDevPodCreate_IDEPassthrough(t *testing.T) {
+	var capturedArgs []string
+	opts := testOpts()
+	opts.Detach = true
+	opts.IDE = "vscode"
+	opts.LookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" {
+			if len(args) > 0 && args[0] == "version" {
+				return []byte("v0.5.18\n"), nil
+			}
+			if len(args) > 0 && args[0] == "up" {
+				capturedArgs = args
+				return []byte("workspace created"), nil
+			}
+		}
+		return []byte(""), nil
+	}
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{"image":"test"}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	b := &DevPodBackend{}
+	err := b.Create(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	joined := strings.Join(capturedArgs, " ")
+	if !strings.Contains(joined, "--ide vscode") {
+		t.Errorf("expected --ide vscode, got: %s", joined)
+	}
+}
+
+func TestDevPodCreate_IDEDefaultNone(t *testing.T) {
+	var capturedArgs []string
+	opts := testOpts()
+	opts.Detach = true
+	// IDE defaults to "none" via DefaultConfig.
+	opts.LookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" {
+			if len(args) > 0 && args[0] == "version" {
+				return []byte("v0.5.18\n"), nil
+			}
+			if len(args) > 0 && args[0] == "up" {
+				capturedArgs = args
+				return []byte("workspace created"), nil
+			}
+		}
+		return []byte(""), nil
+	}
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{"image":"test"}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	b := &DevPodBackend{}
+	err := b.Create(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	joined := strings.Join(capturedArgs, " ")
+	if !strings.Contains(joined, "--ide none") {
+		t.Errorf("expected --ide none, got: %s", joined)
+	}
+}
+
+func TestDevPodCreate_InvalidIDEReturnsError(t *testing.T) {
+	opts := testOpts()
+	opts.IDE = "sublime"
+	opts.LookPath = func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" && len(args) > 0 && args[0] == "version" {
+			return []byte("v0.5.18\n"), nil
+		}
+		return []byte(""), nil
+	}
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{"image":"test"}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	b := &DevPodBackend{}
+	err := b.Create(opts)
+	if err == nil {
+		t.Fatal("expected error for invalid IDE value")
+	}
+	if !strings.Contains(err.Error(), "unknown IDE: sublime") {
+		t.Errorf("expected 'unknown IDE: sublime' in error, got: %s", err.Error())
+	}
+}
+
+// --- DevPod Start IDE passthrough tests (Task 4.3) ---
+
+func TestDevPodStart_IDEPassthrough(t *testing.T) {
+	var capturedArgs []string
+	opts := testOpts()
+	opts.Detach = true
+	opts.IDE = "vscode"
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" && len(args) > 0 && args[0] == "up" {
+			capturedArgs = args
+			return []byte("workspace resumed"), nil
+		}
+		return []byte(""), nil
+	}
+
+	b := &DevPodBackend{}
+	err := b.Start(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	joined := strings.Join(capturedArgs, " ")
+	if !strings.Contains(joined, "--id uf-sandbox-test-project") {
+		t.Errorf("expected --id uf-sandbox-test-project, got: %s", joined)
+	}
+	if !strings.Contains(joined, "--ide vscode") {
+		t.Errorf("expected --ide vscode, got: %s", joined)
+	}
+}
+
+func TestDevPodStart_IDEDefaultNone(t *testing.T) {
+	var capturedArgs []string
+	opts := testOpts()
+	opts.Detach = true
+	// IDE defaults to "none" via DefaultConfig.
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "devpod" && len(args) > 0 && args[0] == "up" {
+			capturedArgs = args
+			return []byte("workspace resumed"), nil
+		}
+		return []byte(""), nil
+	}
+
+	b := &DevPodBackend{}
+	err := b.Start(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	joined := strings.Join(capturedArgs, " ")
+	if !strings.Contains(joined, "--ide none") {
+		t.Errorf("expected --ide none on resume, got: %s", joined)
+	}
+}
+
+func TestDevPodStart_InvalidIDEReturnsError(t *testing.T) {
+	opts := testOpts()
+	opts.IDE = "emacs"
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		t.Fatal("ExecCmd should not be called for invalid IDE")
+		return nil, nil
+	}
+
+	b := &DevPodBackend{}
+	err := b.Start(opts)
+	if err == nil {
+		t.Fatal("expected error for invalid IDE value")
+	}
+	if !strings.Contains(err.Error(), "unknown IDE: emacs") {
+		t.Errorf("expected 'unknown IDE: emacs' in error, got: %s", err.Error())
+	}
+}
+
+// --- DefaultConfig IDE resolution tests (Task 4.4) ---
+
+func TestDefaultConfig_IDEPrecedence(t *testing.T) {
+	// Test 1: Flag value takes precedence over env var.
+	opts := testOpts()
+	opts.IDE = "vscode"
+	opts.Getenv = func(key string) string {
+		if key == "UF_SANDBOX_IDE" {
+			return "fleet"
+		}
+		return ""
+	}
+
+	result := DefaultConfig(opts)
+	if result.IDE != "vscode" {
+		t.Errorf("expected flag IDE 'vscode', got: %s", result.IDE)
+	}
+
+	// Test 2: Env var used when no flag.
+	opts.IDE = ""
+	result = DefaultConfig(opts)
+	if result.IDE != "fleet" {
+		t.Errorf("expected env IDE 'fleet', got: %s", result.IDE)
+	}
+
+	// Test 3: Default "none" when neither flag nor env.
+	opts.Getenv = func(key string) string { return "" }
+	opts.IDE = ""
+	result = DefaultConfig(opts)
+	if result.IDE != DefaultIDE {
+		t.Errorf("expected default IDE %q, got: %s", DefaultIDE, result.IDE)
+	}
+}
+
+// --- Ephemeral Podman mode ignores IDE (Task 4.5) ---
+
+// --- Attach persistent workspace detection tests ---
+
+func TestAttach_DetectsPersistentDevPodWorkspace(t *testing.T) {
+	attachCalled := false
+	opts := testOpts()
+	opts.LookPath = func(name string) (string, error) {
+		if name == "opencode" || name == "podman" || name == "devpod" {
+			return "/usr/bin/" + name, nil
+		}
+		return "", fmt.Errorf("not found")
+	}
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 && args[0] == "volume" {
+			return nil, fmt.Errorf("no such volume")
+		}
+		// DevPod workspace exists.
+		if name == "devpod" && len(args) > 0 && args[0] == "status" {
+			return []byte(`{"id":"ws","state":"Running"}`), nil
+		}
+		return []byte(""), nil
+	}
+	opts.ExecInteractive = func(name string, args ...string) error {
+		if name == "opencode" {
+			attachCalled = true
+		}
+		return nil
+	}
+
+	err := Attach(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !attachCalled {
+		t.Error("expected opencode attach to be called for DevPod workspace")
+	}
+}
+
+func TestAttach_FallsBackToEphemeral(t *testing.T) {
+	opts := testOpts()
+	// Default testOpts has no persistent workspace and no
+	// running container, so Attach should report error.
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 {
+			if args[0] == "volume" {
+				return nil, fmt.Errorf("no such volume")
+			}
+			if args[0] == "inspect" {
+				return nil, fmt.Errorf("no such container")
+			}
+		}
+		return []byte(""), nil
+	}
+
+	err := Attach(opts)
+	if err == nil {
+		t.Fatal("expected error when no sandbox running")
+	}
+	if !strings.Contains(err.Error(), "no sandbox running") {
+		t.Errorf("expected no sandbox message, got: %s", err.Error())
+	}
+}
+
+// --- Destroy ephemeral mode tests ---
+
+func TestDestroy_EphemeralNoContainer(t *testing.T) {
+	opts := testOpts()
+	// No persistent workspace, no ephemeral container.
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 {
+			if args[0] == "volume" {
+				return nil, fmt.Errorf("no such volume")
+			}
+			if args[0] == "inspect" {
+				return nil, fmt.Errorf("no such container")
+			}
+		}
+		return []byte(""), nil
+	}
+
+	err := Destroy(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout(opts), "No sandbox to destroy") {
+		t.Errorf("expected 'no sandbox' message, got: %s", stdout(opts))
+	}
+}
+
+func TestDestroy_EphemeralCleansUpContainer(t *testing.T) {
+	stopCalled := false
+	rmCalled := false
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				return nil, fmt.Errorf("no such volume")
+			case "inspect":
+				// Container exists (ephemeral).
+				return []byte(`[{"State":{"Running":true}}]`), nil
+			case "stop":
+				stopCalled = true
+				return []byte(""), nil
+			case "rm":
+				rmCalled = true
+				return []byte(""), nil
+			}
+		}
+		return []byte(""), nil
+	}
+
+	err := Destroy(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !stopCalled {
+		t.Error("expected podman stop to be called")
+	}
+	if !rmCalled {
+		t.Error("expected podman rm to be called")
+	}
+	if !strings.Contains(stdout(opts), "Sandbox destroyed") {
+		t.Errorf("expected 'destroyed' message, got: %s", stdout(opts))
+	}
+}
+
+func TestStart_EphemeralIgnoresIDE(t *testing.T) {
+	var runArgs string
+	opts := testOpts()
+	opts.Detach = true
+	opts.IDE = "vscode"
+	opts.Platform = &PlatformConfig{OS: "linux", Arch: "amd64", UIDMapSupported: true}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				return nil, fmt.Errorf("no such volume")
+			case "--version":
+				return []byte("podman version 5.0.0\n"), nil
+			case "inspect":
+				return nil, fmt.Errorf("no such container")
+			case "image":
+				return []byte(""), nil
+			case "run":
+				runArgs = strings.Join(args, " ")
+				return []byte("container-id"), nil
+			}
+		}
+		return []byte(""), nil
+	}
+
+	err := Start(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify --ide is NOT passed to podman run.
+	if strings.Contains(runArgs, "--ide") {
+		t.Errorf("expected no --ide in podman run args, got: %s", runArgs)
+	}
+}
+
