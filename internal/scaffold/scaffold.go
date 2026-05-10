@@ -112,13 +112,6 @@ func Run(opts Options) (*Result, error) {
 		// Strip "assets/" prefix to get the relative path
 		relPath := strings.TrimPrefix(path, "assets/")
 
-		// Devcontainer assets are NOT deployed by uf init.
-		// They are only used by uf sandbox init via
-		// DevcontainerContent(). Per design D7.
-		if strings.HasPrefix(relPath, "devcontainer/") {
-			return nil
-		}
-
 		// DivisorOnly mode: skip non-Divisor assets
 		if opts.DivisorOnly && !isDivisorAsset(relPath) {
 			return nil
@@ -286,8 +279,8 @@ func mapAssetPath(relPath string) string {
 		return relPath
 	case strings.HasPrefix(relPath, "devcontainer/"):
 		// devcontainer/ assets map to .devcontainer/ in the
-		// target directory. NOT deployed by uf init — only
-		// used by uf sandbox init via DevcontainerContent().
+		// target directory. Deployed by both uf init and
+		// uf sandbox init (D7).
 		return "." + relPath
 	default:
 		// Unknown prefix — pass through unchanged but this

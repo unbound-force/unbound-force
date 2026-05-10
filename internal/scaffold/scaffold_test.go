@@ -51,13 +51,6 @@ func TestEmbeddedAssets_MatchSource(t *testing.T) {
 	}
 
 	for _, relPath := range paths {
-		// Skip non-deployed assets that have no canonical source
-		// at the repo root (e.g., devcontainer template is
-		// embedded-only, created by uf sandbox init).
-		if strings.HasPrefix(relPath, "devcontainer/") {
-			continue
-		}
-
 		// Map asset path to canonical source path
 		srcRel := mapAssetToSource(relPath)
 		srcPath := filepath.Join(root, srcRel)
@@ -170,6 +163,8 @@ var expectedAssetPaths = []string{
 	"openspec/schemas/unbound-force/templates/tasks.md",
 	// Swarm skills (1)
 	"opencode/skills/speckit-workflow/SKILL.md",
+	// Devcontainer template (1) — deployed by uf init (D7)
+	"devcontainer/devcontainer.json",
 }
 
 // nonDeployedAssetPaths lists embedded assets that are NOT
@@ -177,10 +172,7 @@ var expectedAssetPaths = []string{
 // functions (e.g., DevcontainerContent()) and are skipped
 // during the Run() walk. They must be listed here so
 // TestAssetPaths_MatchExpected accounts for them.
-var nonDeployedAssetPaths = []string{
-	// Devcontainer template — deployed by uf sandbox init, not uf init (D7)
-	"devcontainer/devcontainer.json",
-}
+var nonDeployedAssetPaths = []string{}
 
 func TestAssetPaths_MatchExpected(t *testing.T) {
 	paths, err := assetPaths()

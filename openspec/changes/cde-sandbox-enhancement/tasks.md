@@ -185,15 +185,31 @@
   `.devcontainer/devcontainer.json` exists unless
   `--force`
 - [x] 5.5 Add `devcontainer/devcontainer.json` to
-  `knownNonEmbeddedFiles` in `scaffold_test.go`
-  (not deployed by `uf init`, only by
-  `uf sandbox init`)
+  `expectedAssetPaths` in `scaffold_test.go`
+  (deployed by `uf init` alongside agents/commands)
 - [x] 5.6 Add test: `TestRunSandboxInit_Creates` —
   verify devcontainer.json created with correct content
 - [x] 5.7 Add test: `TestRunSandboxInit_ExistingSkips`
 - [x] 5.8 Add test: `TestRunSandboxInit_ForceOverwrites`
 - [x] 5.9 Add test: `TestRunSandboxInit_CustomDemoPorts`
   — verify extra ports in forwardPorts array
+- [x] 5.10 Add `postStartCommand` to devcontainer
+  template that relays DevPod git credentials to
+  `gh auth` via `printf` + `git credential fill` +
+  `gh auth login --with-token`, with `|| true` for
+  graceful degradation (D9). Also starts OpenCode
+  server via `opencode serve --port 4096`.
+- [x] 5.12 Move `devcontainer/devcontainer.json` from
+  `knownNonEmbeddedFiles` to `expectedAssetPaths` in
+  `internal/scaffold/scaffold_test.go` so `uf init`
+  deploys it as part of the standard scaffold.
+- [x] 5.13 Update file count assertions in
+  `scaffold_test.go` and `cmd/unbound-force/main_test.go`
+  to reflect the new asset.
+- [x] 5.11 Update scaffold tests if
+  `TestRunSandboxInit_Creates` does exact content
+  matching on devcontainer.json — verify
+  `postStartCommand` field is present in output
 
 ## 6. DevPod Doctor Checks
 

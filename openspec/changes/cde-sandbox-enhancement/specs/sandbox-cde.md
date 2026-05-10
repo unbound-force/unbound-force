@@ -191,13 +191,35 @@ Previously: `buildPersistentRunArgs()` called
   `-e ANTHROPIC_BASE_URL=http://host.containers.internal:53147`
   and MUST NOT include provider-specific keys
 
+### Requirement: Devcontainer deployed by uf init
+
+`uf init` MUST deploy `.devcontainer/devcontainer.json`
+as part of the standard scaffold, alongside agents,
+commands, and packs. The scaffold engine's idempotency
+ensures the file is skipped if it already exists.
+
+#### Scenario: uf init deploys devcontainer
+
+- **GIVEN** no `.devcontainer/devcontainer.json` exists
+- **WHEN** `uf init` runs
+- **THEN** `.devcontainer/devcontainer.json` MUST be
+  created with image, ports, gateway env vars,
+  postStartCommand, and remoteUser
+
+#### Scenario: uf init skips existing devcontainer
+
+- **GIVEN** `.devcontainer/devcontainer.json` exists
+- **WHEN** `uf init` runs
+- **THEN** the existing file MUST be preserved (skipped)
+
 ### Requirement: Devcontainer scaffolding command
 
-`uf sandbox init` MUST generate
-`.devcontainer/devcontainer.json` in the project root.
-The command MUST accept `--image` (default from config),
-`--demo-ports` (int slice), and `--force` (overwrite)
-flags.
+`uf sandbox init` MUST also generate
+`.devcontainer/devcontainer.json` as a standalone
+command for users who want to regenerate or customize
+the devcontainer independently. The command MUST accept
+`--image` (default from config), `--demo-ports` (int
+slice), and `--force` (overwrite) flags.
 
 The generated devcontainer MUST include:
 - `image` set to the container image
@@ -205,6 +227,13 @@ The generated devcontainer MUST include:
 - `containerEnv` with `ANTHROPIC_BASE_URL` and
   `ANTHROPIC_API_KEY=gateway`
 - `remoteUser` set to `dev`
+
+The generated devcontainer MUST also include a
+`postStartCommand` that relays DevPod git credentials
+to `gh auth login --with-token`. This enables `gh` CLI
+commands (PR reviews, issue management) inside DevPod
+sessions. The relay MUST degrade gracefully when git
+credentials are not available or `gh` is not installed.
 
 Idempotent: skip if `.devcontainer/devcontainer.json`
 exists unless `--force` is set.
@@ -227,6 +256,30 @@ exists unless `--force` is set.
 - **GIVEN** `.devcontainer/devcontainer.json` exists
 - **WHEN** `uf sandbox init --force` is called
 - **THEN** the existing file MUST be overwritten
+
+#### Scenario: gh CLI authenticated on container start
+
+- **GIVEN** a DevPod workspace is running with git
+  credential proxying active
+- **WHEN** the container starts (postStartCommand runs)
+- **THEN** `gh auth status` shows authenticated to
+  github.com
+
+#### Scenario: gh auth relay degrades gracefully
+
+- **GIVEN** no git credentials are available (e.g.,
+  running outside DevPod or `gh` is not installed)
+- **WHEN** the container starts (postStartCommand runs)
+- **THEN** the container starts normally without error
+- **AND** `gh auth status` shows not authenticated
+
+#### Scenario: git credentials without password field
+
+- **GIVEN** `git credential fill` returns a response
+  without a `password=` line
+- **WHEN** the container starts (postStartCommand runs)
+- **THEN** the container starts normally without error
+- **AND** `gh auth status` shows not authenticated
 
 ### Requirement: Extract behavior for persistent workspaces
 

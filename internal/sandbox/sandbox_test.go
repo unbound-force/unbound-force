@@ -4089,6 +4089,7 @@ func testDevcontainerTemplate() []byte {
     "ANTHROPIC_BASE_URL": "http://host.containers.internal:53147",
     "ANTHROPIC_API_KEY": "gateway"
   },
+  "postStartCommand": "nohup opencode serve --port 4096 > /tmp/opencode-server.log 2>&1 & printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill 2>/dev/null | grep '^password=' | cut -d= -f2 | gh auth login --with-token 2>/dev/null || true",
   "remoteUser": "dev"
 }
 `)
@@ -4144,6 +4145,15 @@ func TestRunSandboxInit_Creates(t *testing.T) {
 
 	if parsed["remoteUser"] != "dev" {
 		t.Errorf("remoteUser = %v, want dev", parsed["remoteUser"])
+	}
+
+	// Verify postStartCommand is present (D9: opencode serve + gh auth relay).
+	if psc, ok := parsed["postStartCommand"].(string); !ok || psc == "" {
+		t.Error("expected postStartCommand in devcontainer.json")
+	} else if !strings.Contains(psc, "opencode serve") {
+		t.Errorf("postStartCommand missing 'opencode serve', got: %s", psc)
+	} else if !strings.Contains(psc, "gh auth login") {
+		t.Errorf("postStartCommand missing 'gh auth login', got: %s", psc)
 	}
 
 	// Verify _comment key is present (sentinel explanation).

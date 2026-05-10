@@ -150,19 +150,27 @@ new backend behind a separate spec.
 
 The devcontainer template lives at
 `internal/scaffold/assets/devcontainer/devcontainer.json`
-and is embedded via `embed.FS`. `uf sandbox init`
-writes it to `.devcontainer/devcontainer.json` in the
-project root. Includes a version marker comment for
-drift detection.
+and is embedded via `embed.FS`. The template is deployed
+to `.devcontainer/devcontainer.json` in the project root
+by both `uf init` (standard scaffold) and
+`uf sandbox init` (standalone with custom flags).
 
-NOT deployed by `uf init` — only written by
-`uf sandbox init`. Keeps `uf init` lightweight.
+Deployed by `uf init` alongside agents, commands, and
+packs. The devcontainer is a standard spec recognized
+by VS Code, GitHub Codespaces, JetBrains, and DevPod —
+having it present is harmless for non-DevPod users and
+saves an extra step for DevPod users.
 
-Because this asset is not deployed by `uf init`, it
-MUST be added to `knownNonEmbeddedFiles` in
-`scaffold_test.go` (not `expectedAssetPaths`). This
-follows the pattern established by externalized Speckit
-assets.
+`uf sandbox init` remains as a standalone command for
+users who want to regenerate the devcontainer with
+custom flags (`--image`, `--demo-ports`, `--force`)
+without running full `uf init`.
+
+Because this asset IS deployed by `uf init`, it MUST
+be added to `expectedAssetPaths` in `scaffold_test.go`
+(not `knownNonEmbeddedFiles`). The scaffold engine's
+idempotency ensures `uf init` skips the file if it
+already exists.
 
 The expected devcontainer.json output:
 ```json
@@ -174,9 +182,15 @@ The expected devcontainer.json output:
       "http://host.containers.internal:53147",
     "ANTHROPIC_API_KEY": "gateway"
   },
+  "postStartCommand": "nohup opencode serve --port 4096 > /tmp/opencode-server.log 2>&1 & printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill 2>/dev/null | grep '^password=' | cut -d= -f2 | gh auth login --with-token 2>/dev/null || true",
   "remoteUser": "dev"
 }
 ```
+
+Note: `\\n` in JSON becomes `\n` in shell. The
+`postStartCommand` value is not directly paste-able
+from the JSON source — the escaping is handled by
+the JSON parser at runtime.
 
 Note: `ANTHROPIC_API_KEY=gateway` is a sentinel value
 indicating the gateway proxy handles authentication.
@@ -196,6 +210,56 @@ cluttering output for Podman-only users.
 Checks: (1) `devpod` binary presence with install hint,
 (2) `.devcontainer/devcontainer.json` existence with
 `uf sandbox init` hint.
+
+### D9: gh CLI auth relay via postStartCommand
+
+DevPod proxies git credentials into containers via its
+own credential helper, but this does NOT relay `gh` CLI
+authentication. The `gh` CLI uses a separate token store
+(`~/.config/gh/hosts.yml`). Without explicit relay,
+`gh` commands (PR reviews, issue management, etc.) fail
+inside DevPod sessions.
+
+The `postStartCommand` includes a pipeline that extracts
+the GitHub token from DevPod's git credential proxy and
+pipes it to `gh auth login --with-token`:
+
+```sh
+printf 'protocol=https\nhost=github.com\n\n' \
+  | git credential fill 2>/dev/null \
+  | grep '^password=' | cut -d= -f2 \
+  | gh auth login --with-token 2>/dev/null || true
+```
+
+Design choices:
+- **`postStartCommand` over `postCreateCommand`**: runs
+  on every container start (not just first creation),
+  so rotated or refreshed tokens are picked up
+  automatically.
+- **`|| true` for graceful degradation**: if git
+  credentials are not available (e.g., running outside
+  DevPod, or `gh` is not installed), the command fails
+  silently and the container starts normally.
+- **JSON escaping**: `\\n` in JSON becomes `\n` in
+  shell. The command is not directly paste-able from
+  the JSON source file.
+- **Injection safety**: the pipeline uses only hardcoded
+  literals and stdin piping. No user-controlled input is
+  interpolated into shell commands. The token flows
+  through pipes (stdin), never as a command-line
+  argument, preventing `/proc/cmdline` exposure.
+- **Token persistence**: `gh auth login --with-token`
+  overwrites any existing token in
+  `~/.config/gh/hosts.yml` (0600 permissions). The
+  relayed token inherits whatever scope DevPod's
+  credential helper provides (typically a GitHub PAT
+  with repo scope). Running on every start ensures
+  rotated tokens take effect.
+- **Log isolation**: `/tmp/opencode-server.log` captures
+  only the backgrounded `opencode serve` process. The
+  credential pipeline runs in the foreground with its
+  own `2>/dev/null` redirections. Tokens cannot leak
+  into the log file.
 
 ## Risks / Trade-offs
 
