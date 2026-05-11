@@ -1015,11 +1015,15 @@ func TestDoctorRun_AllPass(t *testing.T) {
 			"opencode":   "/usr/local/bin/opencode",
 			"gaze":       "/usr/local/bin/gaze",
 			"replicator": "/usr/local/bin/replicator",
+			"podman":     "/usr/local/bin/podman",
 		}),
 		ExecCmd: stubExecCmd(
 			map[string]string{
-				"go version":        "go version go1.24.3 darwin/arm64",
-				"replicator doctor": replicatorOut,
+				"go version":                             "go version go1.24.3 darwin/arm64",
+				"replicator doctor":                      replicatorOut,
+				"podman --version":                       "podman version 5.3.1",
+				"podman info":                            "host info",
+				"podman machine list --format {{.Name}}": "podman-machine-default",
 			},
 			nil,
 		),
@@ -3701,7 +3705,14 @@ func TestDevPodChecks_AllPresent(t *testing.T) {
 	opts := &Options{
 		TargetDir: dir,
 		LookPath:  stubLookPath(map[string]string{"devpod": "/usr/local/bin/devpod"}),
-		ReadFile:  os.ReadFile,
+		ExecCmd: stubExecCmd(
+			map[string]string{
+				"devpod version":       "v0.6.15",
+				"devpod provider list": "podman   docker   true\n",
+			},
+			nil,
+		),
+		ReadFile: os.ReadFile,
 	}
 
 	group := checkDevPod(opts)
@@ -3711,11 +3722,13 @@ func TestDevPodChecks_AllPresent(t *testing.T) {
 	if group.Name != "DevPod" {
 		t.Errorf("group name = %q, want DevPod", group.Name)
 	}
-	if len(group.Results) != 2 {
-		t.Fatalf("expected 2 checks, got %d", len(group.Results))
+	// 4 checks: devpod binary, devpod version, podman provider,
+	// devcontainer config.
+	if len(group.Results) != 4 {
+		t.Fatalf("expected 4 checks, got %d", len(group.Results))
 	}
 
-	// Both checks should pass.
+	// All checks should pass.
 	for _, r := range group.Results {
 		if r.Severity != Pass {
 			t.Errorf("check %q: severity = %v, want Pass", r.Name, r.Severity)
@@ -3745,7 +3758,14 @@ func TestDevPodChecks_MissingDevcontainer(t *testing.T) {
 	opts := &Options{
 		TargetDir: dir,
 		LookPath:  stubLookPath(map[string]string{"devpod": "/usr/local/bin/devpod"}),
-		ReadFile:  os.ReadFile,
+		ExecCmd: stubExecCmd(
+			map[string]string{
+				"devpod version":       "v0.6.15",
+				"devpod provider list": "podman   docker   true\n",
+			},
+			nil,
+		),
+		ReadFile: os.ReadFile,
 	}
 
 	group := checkDevPod(opts)
