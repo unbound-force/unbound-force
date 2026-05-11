@@ -4084,12 +4084,13 @@ func testDevcontainerTemplate() []byte {
 	return []byte(`{
   "_comment": "ANTHROPIC_API_KEY=gateway is a sentinel value.",
   "image": "quay.io/unbound-force/opencode-dev:latest",
+  "runArgs": ["--userns=keep-id:uid=1000,gid=1000"],
   "forwardPorts": [4096],
   "containerEnv": {
     "ANTHROPIC_BASE_URL": "http://host.containers.internal:53147",
     "ANTHROPIC_API_KEY": "gateway"
   },
-  "postStartCommand": "nohup opencode serve --port 4096 > /tmp/opencode-server.log 2>&1 & printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill 2>/dev/null | grep '^password=' | cut -d= -f2 | gh auth login --with-token 2>/dev/null || true",
+  "postStartCommand": "nohup opencode serve --port 4096 > /tmp/opencode-server.log 2>&1 &",
   "remoteUser": "dev"
 }
 `)
@@ -4147,13 +4148,19 @@ func TestRunSandboxInit_Creates(t *testing.T) {
 		t.Errorf("remoteUser = %v, want dev", parsed["remoteUser"])
 	}
 
-	// Verify postStartCommand is present (D9: opencode serve + gh auth relay).
+	// Verify runArgs contains UID mapping (D10).
+	runArgs, ok := parsed["runArgs"].([]interface{})
+	if !ok || len(runArgs) == 0 {
+		t.Error("expected runArgs in devcontainer.json")
+	} else if ra, ok := runArgs[0].(string); !ok || !strings.Contains(ra, "--userns=keep-id") {
+		t.Errorf("runArgs[0] = %v, want --userns=keep-id:uid=1000,gid=1000", runArgs[0])
+	}
+
+	// Verify postStartCommand is present (opencode serve).
 	if psc, ok := parsed["postStartCommand"].(string); !ok || psc == "" {
 		t.Error("expected postStartCommand in devcontainer.json")
 	} else if !strings.Contains(psc, "opencode serve") {
 		t.Errorf("postStartCommand missing 'opencode serve', got: %s", psc)
-	} else if !strings.Contains(psc, "gh auth login") {
-		t.Errorf("postStartCommand missing 'gh auth login', got: %s", psc)
 	}
 
 	// Verify _comment key is present (sentinel explanation).

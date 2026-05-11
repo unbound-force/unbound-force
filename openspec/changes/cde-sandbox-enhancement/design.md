@@ -176,21 +176,17 @@ The expected devcontainer.json output:
 ```json
 {
   "image": "quay.io/unbound-force/opencode-dev:latest",
+  "runArgs": ["--userns=keep-id:uid=1000,gid=1000"],
   "forwardPorts": [4096],
   "containerEnv": {
     "ANTHROPIC_BASE_URL":
       "http://host.containers.internal:53147",
     "ANTHROPIC_API_KEY": "gateway"
   },
-  "postStartCommand": "nohup opencode serve --port 4096 > /tmp/opencode-server.log 2>&1 & printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill 2>/dev/null | grep '^password=' | cut -d= -f2 | gh auth login --with-token 2>/dev/null || true",
+  "postStartCommand": "nohup opencode serve --port 4096 > /tmp/opencode-server.log 2>&1 &",
   "remoteUser": "dev"
 }
 ```
-
-Note: `\\n` in JSON becomes `\n` in shell. The
-`postStartCommand` value is not directly paste-able
-from the JSON source — the escaping is handled by
-the JSON parser at runtime.
 
 Note: `ANTHROPIC_API_KEY=gateway` is a sentinel value
 indicating the gateway proxy handles authentication.
@@ -211,55 +207,81 @@ Checks: (1) `devpod` binary presence with install hint,
 (2) `.devcontainer/devcontainer.json` existence with
 `uf sandbox init` hint.
 
-### D9: gh CLI auth relay via postStartCommand
+### D9: gh CLI auth relay — DEFERRED
 
 DevPod proxies git credentials into containers via its
 own credential helper, but this does NOT relay `gh` CLI
-authentication. The `gh` CLI uses a separate token store
-(`~/.config/gh/hosts.yml`). Without explicit relay,
-`gh` commands (PR reviews, issue management, etc.) fail
-inside DevPod sessions.
+authentication. The original plan was to extract the
+GitHub token from DevPod's git credential proxy via
+`git credential fill` in the `postStartCommand` and
+pipe it to `gh auth login --with-token`.
 
-The `postStartCommand` includes a pipeline that extracts
-the GitHub token from DevPod's git credential proxy and
-pipes it to `gh auth login --with-token`:
+**Blocker**: DevPod v0.6.x has a nil pointer panic in
+`tunnelserver.GitCredentials` when `git credential fill`
+is called during `postStartCommand`. The crash occurs
+in DevPod's gRPC handler
+(`tunnelserver.go:221 +0xf0`), taking down the entire
+DevPod agent and failing workspace creation. The
+`|| true` fallback cannot catch a process-level panic.
 
+This feature is deferred until DevPod fixes the
+credential tunnel crash. The `gh auth` relay design
+(pipeline, injection safety, token persistence) remains
+valid and can be re-enabled when the upstream bug is
+resolved. Track via a DevPod upstream issue.
+
+The `postStartCommand` currently contains only the
+OpenCode server start:
 ```sh
-printf 'protocol=https\nhost=github.com\n\n' \
-  | git credential fill 2>/dev/null \
-  | grep '^password=' | cut -d= -f2 \
-  | gh auth login --with-token 2>/dev/null || true
+nohup opencode serve --port 4096 \
+  > /tmp/opencode-server.log 2>&1 &
 ```
 
+### D10: UID mapping via devcontainer runArgs
+
+The devcontainer template MUST include `runArgs` with
+`--userns=keep-id:uid=1000,gid=1000` to map the host
+user's UID to UID 1000 (`dev`) inside the container.
+This is the same flag proven in the Podman backend
+(`opsx/sandbox-uid-mapping`) and eliminates the
+`root:nobody` ownership problem at the source.
+
+```json
+"runArgs": ["--userns=keep-id:uid=1000,gid=1000"]
+```
+
+Without this flag, DevPod's Docker provider (aliased
+to Podman via `DOCKER_COMMAND=podman`) calls
+`podman run` without UID mapping, causing all workspace
+files to appear as `root:nobody` inside the container.
+The `dev` user (UID 1000) cannot write to these files,
+blocking editing, git operations, and builds.
+
 Design choices:
-- **`postStartCommand` over `postCreateCommand`**: runs
-  on every container start (not just first creation),
-  so rotated or refreshed tokens are picked up
-  automatically.
-- **`|| true` for graceful degradation**: if git
-  credentials are not available (e.g., running outside
-  DevPod, or `gh` is not installed), the command fails
-  silently and the container starts normally.
-- **JSON escaping**: `\\n` in JSON becomes `\n` in
-  shell. The command is not directly paste-able from
-  the JSON source file.
-- **Injection safety**: the pipeline uses only hardcoded
-  literals and stdin piping. No user-controlled input is
-  interpolated into shell commands. The token flows
-  through pipes (stdin), never as a command-line
-  argument, preventing `/proc/cmdline` exposure.
-- **Token persistence**: `gh auth login --with-token`
-  overwrites any existing token in
-  `~/.config/gh/hosts.yml` (0600 permissions). The
-  relayed token inherits whatever scope DevPod's
-  credential helper provides (typically a GitHub PAT
-  with repo scope). Running on every start ensures
-  rotated tokens take effect.
-- **Log isolation**: `/tmp/opencode-server.log` captures
-  only the backgrounded `opencode serve` process. The
-  credential pipeline runs in the foreground with its
-  own `2>/dev/null` redirections. Tokens cannot leak
-  into the log file.
+- **`runArgs` over custom provider**: the devcontainer
+  spec's `runArgs` field passes extra arguments to the
+  underlying `docker run` / `podman run` command. This
+  avoids creating a custom DevPod provider while giving
+  us the same UID mapping capability.
+- **`--userns=keep-id:uid=1000,gid=1000` over
+  `chown`**: namespace mapping is instant (no
+  performance penalty on large repos), works at the
+  kernel level, and requires no `sudo` in the container
+  image. The `chown -R` alternative scales with repo
+  size and requires either `sudo` or `containerUser:
+  root`.
+- **macOS virtiofs caveat**: on macOS, the Podman
+  machine's virtiofs must support `--userns=keep-id`.
+  Most modern Podman machine configurations support
+  this. If a user's Podman machine does not, they can
+  remove the `runArgs` line and add a
+  `postStartCommand` with `sudo chown -R dev:dev
+  /workspaces/<name>` as a fallback. This mirrors the
+  `--uidmap` escape hatch from the Podman backend.
+- **Requires Podman >= 4.3**: the extended
+  `:uid=N,gid=N` syntax was added in Podman 4.3. This
+  is already enforced by `uf doctor` and
+  `parseDevPodVersion()` / `parsePodmanVersion()`.
 
 ## Risks / Trade-offs
 
