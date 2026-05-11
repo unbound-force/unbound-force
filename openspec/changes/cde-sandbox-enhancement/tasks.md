@@ -194,11 +194,9 @@
 - [x] 5.9 Add test: `TestRunSandboxInit_CustomDemoPorts`
   — verify extra ports in forwardPorts array
 - [x] 5.10 Add `postStartCommand` to devcontainer
-  template that relays DevPod git credentials to
-  `gh auth` via `printf` + `git credential fill` +
-  `gh auth login --with-token`, with `|| true` for
-  graceful degradation (D9). Also starts OpenCode
-  server via `opencode serve --port 4096`.
+  template that starts OpenCode server via
+  `opencode serve --port 4096`. gh auth relay (D9)
+  deferred due to DevPod v0.6.x tunnel crash.
 - [x] 5.12 Move `devcontainer/devcontainer.json` from
   `knownNonEmbeddedFiles` to `expectedAssetPaths` in
   `internal/scaffold/scaffold_test.go` so `uf init`
@@ -210,6 +208,18 @@
   `TestRunSandboxInit_Creates` does exact content
   matching on devcontainer.json — verify
   `postStartCommand` field is present in output
+- [x] 5.14 Add `"runArgs":
+  ["--userns=keep-id:uid=1000,gid=1000"]` to the
+  devcontainer template at
+  `internal/scaffold/assets/devcontainer/devcontainer.json`
+  to fix workspace file ownership (D10).
+- [x] 5.15 Update `.devcontainer/devcontainer.json` on
+  disk to match the embedded template (drift detection).
+- [x] 5.16 Update `testDevcontainerTemplate()` fixture
+  in `internal/sandbox/sandbox_test.go` to include
+  `runArgs`. Add assertion to
+  `TestRunSandboxInit_Creates` verifying `runArgs`
+  contains `--userns=keep-id:uid=1000,gid=1000`.
 
 ## 6. DevPod Doctor Checks
 

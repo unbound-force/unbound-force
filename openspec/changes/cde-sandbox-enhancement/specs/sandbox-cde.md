@@ -203,8 +203,8 @@ ensures the file is skipped if it already exists.
 - **GIVEN** no `.devcontainer/devcontainer.json` exists
 - **WHEN** `uf init` runs
 - **THEN** `.devcontainer/devcontainer.json` MUST be
-  created with image, ports, gateway env vars,
-  postStartCommand, and remoteUser
+  created with image, runArgs (UID mapping), ports,
+  gateway env vars, postStartCommand, and remoteUser
 
 #### Scenario: uf init skips existing devcontainer
 
@@ -223,17 +223,22 @@ slice), and `--force` (overwrite) flags.
 
 The generated devcontainer MUST include:
 - `image` set to the container image
+- `runArgs` with `--userns=keep-id:uid=1000,gid=1000`
+  to map the host user to UID 1000 (`dev`) inside the
+  container, ensuring workspace files are owned by
+  `dev:dev` (D10)
 - `forwardPorts` with port 4096 plus demo ports
 - `containerEnv` with `ANTHROPIC_BASE_URL` and
   `ANTHROPIC_API_KEY=gateway`
 - `remoteUser` set to `dev`
 
 The generated devcontainer MUST also include a
-`postStartCommand` that relays DevPod git credentials
-to `gh auth login --with-token`. This enables `gh` CLI
-commands (PR reviews, issue management) inside DevPod
-sessions. The relay MUST degrade gracefully when git
-credentials are not available or `gh` is not installed.
+`postStartCommand` that starts the OpenCode server
+via `opencode serve --port 4096`.
+
+Note: gh CLI auth relay via `git credential fill` is
+deferred due to a DevPod v0.6.x crash in
+`tunnelserver.GitCredentials` (D9 — DEFERRED).
 
 Idempotent: skip if `.devcontainer/devcontainer.json`
 exists unless `--force` is set.
@@ -257,29 +262,39 @@ exists unless `--force` is set.
 - **WHEN** `uf sandbox init --force` is called
 - **THEN** the existing file MUST be overwritten
 
-#### Scenario: gh CLI authenticated on container start
+#### Scenario: gh CLI authenticated on container start — DEFERRED
 
-- **GIVEN** a DevPod workspace is running with git
-  credential proxying active
-- **WHEN** the container starts (postStartCommand runs)
-- **THEN** `gh auth status` shows authenticated to
-  github.com
+Deferred due to DevPod v0.6.x crash in
+`tunnelserver.GitCredentials` (see D9). Re-enable
+when DevPod fixes the credential tunnel panic.
 
-#### Scenario: gh auth relay degrades gracefully
+#### Scenario: gh auth relay degrades gracefully — DEFERRED
 
-- **GIVEN** no git credentials are available (e.g.,
-  running outside DevPod or `gh` is not installed)
-- **WHEN** the container starts (postStartCommand runs)
-- **THEN** the container starts normally without error
-- **AND** `gh auth status` shows not authenticated
+Deferred (same blocker as above).
 
-#### Scenario: git credentials without password field
+#### Scenario: git credentials without password field — DEFERRED
 
-- **GIVEN** `git credential fill` returns a response
-  without a `password=` line
-- **WHEN** the container starts (postStartCommand runs)
-- **THEN** the container starts normally without error
-- **AND** `gh auth status` shows not authenticated
+Deferred (same blocker as above).
+
+#### Scenario: Workspace files owned by dev user
+
+- **GIVEN** a DevPod workspace is created with the
+  devcontainer template containing `runArgs` with
+  `--userns=keep-id:uid=1000,gid=1000`
+- **WHEN** the `dev` user lists workspace files
+- **THEN** files are owned by `dev:dev` (UID 1000)
+- **AND** the `dev` user can read and write all
+  workspace files
+
+#### Scenario: UID mapping fallback on macOS
+
+- **GIVEN** the Podman machine's virtiofs does not
+  support `--userns=keep-id`
+- **WHEN** `devpod up` fails due to the `runArgs`
+- **THEN** the user can remove the `runArgs` line from
+  `.devcontainer/devcontainer.json` and add a
+  `postStartCommand` with `sudo chown -R dev:dev
+  /workspaces/<name>` as a workaround
 
 ### Requirement: Extract behavior for persistent workspaces
 
