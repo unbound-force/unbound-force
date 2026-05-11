@@ -1280,25 +1280,61 @@
       "package": "doctor",
       "function": "checkCoreTools",
       "file": "internal/doctor/checks.go",
-      "line": 135,
-      "complexity": 5,
-      "line_coverage": 100,
-      "crap": 5
+      "line": 143,
+      "complexity": 9,
+      "line_coverage": 92.3076923076923,
+      "crap": 9.0368684569868
     },
     {
       "package": "doctor",
       "function": "checkOllamaModel",
       "file": "internal/doctor/checks.go",
-      "line": 160,
+      "line": 182,
       "complexity": 3,
       "line_coverage": 81.81818181818181,
       "crap": 3.0540946656649135
     },
     {
       "package": "doctor",
+      "function": "checkPodmanRuntime",
+      "file": "internal/doctor/checks.go",
+      "line": 207,
+      "complexity": 2,
+      "line_coverage": 66.66666666666667,
+      "crap": 2.148148148148148
+    },
+    {
+      "package": "doctor",
+      "function": "checkPodmanRuntimeDarwin",
+      "file": "internal/doctor/checks.go",
+      "line": 216,
+      "complexity": 4,
+      "line_coverage": 71.42857142857143,
+      "crap": 4.373177842565598
+    },
+    {
+      "package": "doctor",
+      "function": "checkPodmanRuntimeLinux",
+      "file": "internal/doctor/checks.go",
+      "line": 248,
+      "complexity": 2,
+      "line_coverage": 0,
+      "crap": 6
+    },
+    {
+      "package": "doctor",
+      "function": "checkDockerPodmanShim",
+      "file": "internal/doctor/checks.go",
+      "line": 272,
+      "complexity": 4,
+      "line_coverage": 33.333333333333336,
+      "crap": 8.74074074074074
+    },
+    {
+      "package": "doctor",
       "function": "checkOneTool",
       "file": "internal/doctor/checks.go",
-      "line": 181,
+      "line": 302,
       "complexity": 17,
       "line_coverage": 91.17647058823529,
       "crap": 17.198529411764707,
@@ -1308,7 +1344,7 @@
       "package": "doctor",
       "function": "parseGoVersion",
       "file": "internal/doctor/checks.go",
-      "line": 283,
+      "line": 404,
       "complexity": 7,
       "line_coverage": 100,
       "crap": 7
@@ -1317,7 +1353,7 @@
       "package": "doctor",
       "function": "checkGoVersion",
       "file": "internal/doctor/checks.go",
-      "line": 298,
+      "line": 419,
       "complexity": 2,
       "line_coverage": 100,
       "crap": 2
@@ -1326,7 +1362,7 @@
       "package": "doctor",
       "function": "parseVersionParts",
       "file": "internal/doctor/checks.go",
-      "line": 311,
+      "line": 432,
       "complexity": 3,
       "line_coverage": 100,
       "crap": 3
@@ -1335,7 +1371,7 @@
       "package": "doctor",
       "function": "extractLeadingDigits",
       "file": "internal/doctor/checks.go",
-      "line": 326,
+      "line": 447,
       "complexity": 4,
       "line_coverage": 100,
       "crap": 4
@@ -1344,7 +1380,7 @@
       "package": "doctor",
       "function": "parseNodeVersion",
       "file": "internal/doctor/checks.go",
-      "line": 337,
+      "line": 458,
       "complexity": 2,
       "line_coverage": 100,
       "crap": 2
@@ -1353,16 +1389,34 @@
       "package": "doctor",
       "function": "checkNodeVersion",
       "file": "internal/doctor/checks.go",
-      "line": 346,
+      "line": 467,
       "complexity": 1,
       "line_coverage": 100,
       "crap": 1
     },
     {
       "package": "doctor",
+      "function": "parsePodmanVersion",
+      "file": "internal/doctor/checks.go",
+      "line": 477,
+      "complexity": 5,
+      "line_coverage": 71.42857142857143,
+      "crap": 5.5830903790087465
+    },
+    {
+      "package": "doctor",
+      "function": "checkPodmanVersion",
+      "file": "internal/doctor/checks.go",
+      "line": 492,
+      "complexity": 2,
+      "line_coverage": 80,
+      "crap": 2.032
+    },
+    {
+      "package": "doctor",
       "function": "checkReplicator",
       "file": "internal/doctor/checks.go",
-      "line": 354,
+      "line": 503,
       "complexity": 13,
       "line_coverage": 94.28571428571429,
       "crap": 13.031533527696793
@@ -1371,7 +1425,7 @@
       "package": "doctor",
       "function": "checkConfiguration",
       "file": "internal/doctor/checks.go",
-      "line": 473,
+      "line": 622,
       "complexity": 3,
       "line_coverage": 100,
       "crap": 3
@@ -1380,7 +1434,7 @@
       "package": "doctor",
       "function": "checkScaffoldedFiles",
       "file": "internal/doctor/checks.go",
-      "line": 511,
+      "line": 660,
       "complexity": 5,
       "line_coverage": 100,
       "crap": 5
@@ -1389,7 +1443,7 @@
       "package": "doctor",
       "function": "checkDirWithCount",
       "file": "internal/doctor/checks.go",
-      "line": 562,
+      "line": 711,
       "complexity": 6,
       "line_coverage": 90,
       "crap": 6.036
@@ -1398,7 +1452,7 @@
       "package": "doctor",
       "function": "checkHeroAvailability",
       "file": "internal/doctor/checks.go",
-      "line": 598,
+      "line": 747,
       "complexity": 8,
       "line_coverage": 86.36363636363636,
       "crap": 8.162283996994741
@@ -1407,7 +1461,7 @@
       "package": "doctor",
       "function": "countDivisorPersonas",
       "file": "internal/doctor/checks.go",
-      "line": 661,
+      "line": 810,
       "complexity": 6,
       "line_coverage": 87.5,
       "crap": 6.0703125
@@ -1416,7 +1470,7 @@
       "package": "doctor",
       "function": "checkMCPConfig",
       "file": "internal/doctor/checks.go",
-      "line": 677,
+      "line": 826,
       "complexity": 9,
       "line_coverage": 88.88888888888889,
       "crap": 9.11111111111111
@@ -1425,7 +1479,7 @@
       "package": "doctor",
       "function": "extractMCPBinary",
       "file": "internal/doctor/checks.go",
-      "line": 760,
+      "line": 909,
       "complexity": 5,
       "line_coverage": 85.71428571428571,
       "crap": 5.072886297376093
@@ -1434,7 +1488,7 @@
       "package": "doctor",
       "function": "checkAgentSkillIntegrity",
       "file": "internal/doctor/checks.go",
-      "line": 782,
+      "line": 931,
       "complexity": 4,
       "line_coverage": 100,
       "crap": 4
@@ -1443,7 +1497,7 @@
       "package": "doctor",
       "function": "validateAgents",
       "file": "internal/doctor/checks.go",
-      "line": 807,
+      "line": 956,
       "complexity": 10,
       "line_coverage": 86.20689655172414,
       "crap": 10.262413383082537
@@ -1452,7 +1506,7 @@
       "package": "doctor",
       "function": "validateSkills",
       "file": "internal/doctor/checks.go",
-      "line": 879,
+      "line": 1028,
       "complexity": 11,
       "line_coverage": 93.54838709677419,
       "crap": 11.032493034809171
@@ -1461,7 +1515,7 @@
       "package": "doctor",
       "function": "defaultEmbedCheck",
       "file": "internal/doctor/checks.go",
-      "line": 957,
+      "line": 1106,
       "complexity": 8,
       "line_coverage": 95.65217391304348,
       "crap": 8.005260129859456
@@ -1470,7 +1524,7 @@
       "package": "doctor",
       "function": "checkEmbeddingCapability",
       "file": "internal/doctor/checks.go",
-      "line": 1004,
+      "line": 1153,
       "complexity": 4,
       "line_coverage": 100,
       "crap": 4
@@ -1479,7 +1533,7 @@
       "package": "doctor",
       "function": "checkDewey",
       "file": "internal/doctor/checks.go",
-      "line": 1050,
+      "line": 1199,
       "complexity": 6,
       "line_coverage": 100,
       "crap": 6
@@ -1488,25 +1542,52 @@
       "package": "doctor",
       "function": "isDevPodDetected",
       "file": "internal/doctor/checks.go",
-      "line": 1146,
+      "line": 1295,
       "complexity": 4,
       "line_coverage": 85.71428571428571,
       "crap": 4.0466472303206995
     },
     {
       "package": "doctor",
+      "function": "parseDevPodVersion",
+      "file": "internal/doctor/checks.go",
+      "line": 1317,
+      "complexity": 6,
+      "line_coverage": 66.66666666666667,
+      "crap": 7.333333333333332
+    },
+    {
+      "package": "doctor",
+      "function": "checkDevPodVersionMin",
+      "file": "internal/doctor/checks.go",
+      "line": 1338,
+      "complexity": 2,
+      "line_coverage": 80,
+      "crap": 2.032
+    },
+    {
+      "package": "doctor",
+      "function": "hasDevPodProvider",
+      "file": "internal/doctor/checks.go",
+      "line": 1351,
+      "complexity": 5,
+      "line_coverage": 77.77777777777777,
+      "crap": 5.274348422496571
+    },
+    {
+      "package": "doctor",
       "function": "checkDevPod",
       "file": "internal/doctor/checks.go",
-      "line": 1167,
-      "complexity": 4,
-      "line_coverage": 90.9090909090909,
-      "crap": 4.012021036814425
+      "line": 1371,
+      "complexity": 9,
+      "line_coverage": 74.07407407407408,
+      "crap": 10.411522633744855
     },
     {
       "package": "doctor",
       "function": "parseFrontmatter",
       "file": "internal/doctor/checks.go",
-      "line": 1216,
+      "line": 1478,
       "complexity": 9,
       "line_coverage": 87.5,
       "crap": 9.158203125
@@ -1515,7 +1596,7 @@
       "package": "doctor",
       "function": "detectAGENTSmdSections",
       "file": "internal/doctor/checks.go",
-      "line": 1321,
+      "line": 1583,
       "complexity": 6,
       "line_coverage": 100,
       "crap": 6
@@ -1524,7 +1605,7 @@
       "package": "doctor",
       "function": "hasBuildCodeBlocks",
       "file": "internal/doctor/checks.go",
-      "line": 1344,
+      "line": 1606,
       "complexity": 7,
       "line_coverage": 100,
       "crap": 7
@@ -1533,7 +1614,7 @@
       "package": "doctor",
       "function": "hasSpecNumberedDirs",
       "file": "internal/doctor/checks.go",
-      "line": 1373,
+      "line": 1635,
       "complexity": 5,
       "line_coverage": 87.5,
       "crap": 5.048828125
@@ -1542,7 +1623,7 @@
       "package": "doctor",
       "function": "checkBridgeFile",
       "file": "internal/doctor/checks.go",
-      "line": 1391,
+      "line": 1653,
       "complexity": 3,
       "line_coverage": 100,
       "crap": 3
@@ -1551,16 +1632,25 @@
       "package": "doctor",
       "function": "checkAgentContext",
       "file": "internal/doctor/checks.go",
-      "line": 1423,
+      "line": 1685,
       "complexity": 13,
       "line_coverage": 100,
       "crap": 13
     },
     {
       "package": "doctor",
+      "function": "(*Options).goos",
+      "file": "internal/doctor/doctor.go",
+      "line": 84,
+      "complexity": 2,
+      "line_coverage": 66.66666666666667,
+      "crap": 2.148148148148148
+    },
+    {
+      "package": "doctor",
       "function": "(*Options).defaults",
       "file": "internal/doctor/doctor.go",
-      "line": 75,
+      "line": 92,
       "complexity": 11,
       "line_coverage": 100,
       "crap": 11
@@ -1569,7 +1659,7 @@
       "package": "doctor",
       "function": "defaultExecCmd",
       "file": "internal/doctor/doctor.go",
-      "line": 109,
+      "line": 126,
       "complexity": 1,
       "line_coverage": 0,
       "crap": 2
@@ -1578,7 +1668,7 @@
       "package": "doctor",
       "function": "defaultExecCmdTimeout",
       "file": "internal/doctor/doctor.go",
-      "line": 115,
+      "line": 132,
       "complexity": 1,
       "line_coverage": 0,
       "crap": 2
@@ -1587,7 +1677,7 @@
       "package": "doctor",
       "function": "Run",
       "file": "internal/doctor/doctor.go",
-      "line": 124,
+      "line": 141,
       "complexity": 4,
       "line_coverage": 84.61538461538461,
       "crap": 4.058261265361857,
@@ -1599,7 +1689,7 @@
       "package": "doctor",
       "function": "filterSkippedChecks",
       "file": "internal/doctor/doctor.go",
-      "line": 175,
+      "line": 192,
       "complexity": 8,
       "line_coverage": 100,
       "crap": 8
@@ -1608,7 +1698,7 @@
       "package": "doctor",
       "function": "computeSummary",
       "file": "internal/doctor/doctor.go",
-      "line": 208,
+      "line": 225,
       "complexity": 6,
       "line_coverage": 100,
       "crap": 6
@@ -1670,24 +1760,24 @@
       "function": "homebrewInstallCmd",
       "file": "internal/doctor/environ.go",
       "line": 259,
-      "complexity": 10,
-      "line_coverage": 91.66666666666667,
-      "crap": 10.05787037037037
+      "complexity": 12,
+      "line_coverage": 85.71428571428571,
+      "crap": 12.419825072886297
     },
     {
       "package": "doctor",
       "function": "genericInstallCmd",
       "file": "internal/doctor/environ.go",
-      "line": 288,
-      "complexity": 8,
-      "line_coverage": 100,
-      "crap": 8
+      "line": 292,
+      "complexity": 10,
+      "line_coverage": 90.9090909090909,
+      "crap": 10.075131480090159
     },
     {
       "package": "doctor",
       "function": "HasManager",
       "file": "internal/doctor/environ.go",
-      "line": 311,
+      "line": 319,
       "complexity": 3,
       "line_coverage": 100,
       "crap": 3,
@@ -1699,10 +1789,10 @@
       "package": "doctor",
       "function": "installURL",
       "file": "internal/doctor/environ.go",
-      "line": 321,
-      "complexity": 9,
-      "line_coverage": 90,
-      "crap": 9.081
+      "line": 329,
+      "complexity": 11,
+      "line_coverage": 83.33333333333333,
+      "crap": 11.560185185185185
     },
     {
       "package": "doctor",
@@ -2713,7 +2803,7 @@
       "package": "metrics",
       "function": "(*Query).Velocity",
       "file": "internal/metrics/query.go",
-      "line": 51,
+      "line": 55,
       "complexity": 5,
       "line_coverage": 77.77777777777777,
       "crap": 5.274348422496571,
@@ -2730,7 +2820,7 @@
       "package": "metrics",
       "function": "(*Query).CycleTime",
       "file": "internal/metrics/query.go",
-      "line": 69,
+      "line": 73,
       "complexity": 5,
       "line_coverage": 83.33333333333333,
       "crap": 5.1157407407407405,
@@ -2742,7 +2832,7 @@
       "package": "metrics",
       "function": "(*Query).Bottlenecks",
       "file": "internal/metrics/query.go",
-      "line": 92,
+      "line": 96,
       "complexity": 3,
       "line_coverage": 80,
       "crap": 3.072,
@@ -2754,7 +2844,7 @@
       "package": "metrics",
       "function": "(*Query).Health",
       "file": "internal/metrics/query.go",
-      "line": 121,
+      "line": 125,
       "complexity": 3,
       "line_coverage": 71.42857142857143,
       "crap": 3.2099125364431487,
@@ -3637,9 +3727,8 @@
       "file": "internal/sandbox/sandbox.go",
       "line": 198,
       "complexity": 14,
-      "line_coverage": 57.69230769230769,
-      "crap": 28.84274010013654,
-      "fix_strategy": "add_tests"
+      "line_coverage": 100,
+      "crap": 14
     },
     {
       "package": "sandbox",
@@ -3948,11 +4037,11 @@
       "function": "Run",
       "file": "internal/scaffold/scaffold.go",
       "line": 61,
-      "complexity": 33,
-      "line_coverage": 82.22222222222223,
-      "crap": 39.118716049382705,
+      "complexity": 32,
+      "line_coverage": 82.95454545454545,
+      "crap": 37.071374906085644,
       "contract_coverage": 100,
-      "gaze_crap": 33,
+      "gaze_crap": 32,
       "quadrant": "Q4_Dangerous",
       "fix_strategy": "decompose"
     },
@@ -3960,7 +4049,7 @@
       "package": "scaffold",
       "function": "warnLegacyReviewerFiles",
       "file": "internal/scaffold/scaffold.go",
-      "line": 253,
+      "line": 246,
       "complexity": 4,
       "line_coverage": 100,
       "crap": 4
@@ -3969,16 +4058,16 @@
       "package": "scaffold",
       "function": "mapAssetPath",
       "file": "internal/scaffold/scaffold.go",
-      "line": 280,
+      "line": 273,
       "complexity": 4,
-      "line_coverage": 80,
-      "crap": 4.128
+      "line_coverage": 100,
+      "crap": 4
     },
     {
       "package": "scaffold",
       "function": "isToolOwned",
       "file": "internal/scaffold/scaffold.go",
-      "line": 307,
+      "line": 300,
       "complexity": 5,
       "line_coverage": 100,
       "crap": 5
@@ -3987,7 +4076,7 @@
       "package": "scaffold",
       "function": "isDivisorAsset",
       "file": "internal/scaffold/scaffold.go",
-      "line": 333,
+      "line": 326,
       "complexity": 4,
       "line_coverage": 100,
       "crap": 4
@@ -3996,7 +4085,7 @@
       "package": "scaffold",
       "function": "isConventionPack",
       "file": "internal/scaffold/scaffold.go",
-      "line": 348,
+      "line": 341,
       "complexity": 1,
       "line_coverage": 100,
       "crap": 1
@@ -4005,7 +4094,7 @@
       "package": "scaffold",
       "function": "shouldDeployPack",
       "file": "internal/scaffold/scaffold.go",
-      "line": 357,
+      "line": 350,
       "complexity": 9,
       "line_coverage": 100,
       "crap": 9
@@ -4014,7 +4103,7 @@
       "package": "scaffold",
       "function": "detectLang",
       "file": "internal/scaffold/scaffold.go",
-      "line": 379,
+      "line": 372,
       "complexity": 3,
       "line_coverage": 100,
       "crap": 3
@@ -4023,7 +4112,7 @@
       "package": "scaffold",
       "function": "versionMarker",
       "file": "internal/scaffold/scaffold.go",
-      "line": 401,
+      "line": 394,
       "complexity": 2,
       "line_coverage": 100,
       "crap": 2
@@ -4032,7 +4121,7 @@
       "package": "scaffold",
       "function": "stripExistingMarkers",
       "file": "internal/scaffold/scaffold.go",
-      "line": 415,
+      "line": 408,
       "complexity": 4,
       "line_coverage": 100,
       "crap": 4
@@ -4041,7 +4130,7 @@
       "package": "scaffold",
       "function": "insertMarkerAfterFrontmatter",
       "file": "internal/scaffold/scaffold.go",
-      "line": 436,
+      "line": 429,
       "complexity": 6,
       "line_coverage": 86.66666666666667,
       "crap": 6.085333333333334
@@ -4050,7 +4139,7 @@
       "package": "scaffold",
       "function": "configureOpencodeJSON",
       "file": "internal/scaffold/scaffold.go",
-      "line": 489,
+      "line": 482,
       "complexity": 48,
       "line_coverage": 97.16981132075472,
       "crap": 48.052231036358876,
@@ -4060,7 +4149,7 @@
       "package": "scaffold",
       "function": "ensureGitignore",
       "file": "internal/scaffold/scaffold.go",
-      "line": 772,
+      "line": 765,
       "complexity": 10,
       "line_coverage": 82.3529411764706,
       "crap": 10.549562385507835
@@ -4069,7 +4158,7 @@
       "package": "scaffold",
       "function": "migrateCommandDir",
       "file": "internal/scaffold/scaffold.go",
-      "line": 828,
+      "line": 821,
       "complexity": 14,
       "line_coverage": 80.85106382978724,
       "crap": 15.376226847615653,
@@ -4079,7 +4168,7 @@
       "package": "scaffold",
       "function": "moveFile",
       "file": "internal/scaffold/scaffold.go",
-      "line": 939,
+      "line": 932,
       "complexity": 4,
       "line_coverage": 25,
       "crap": 10.75
@@ -4088,7 +4177,7 @@
       "package": "scaffold",
       "function": "countMDFiles",
       "file": "internal/scaffold/scaffold.go",
-      "line": 955,
+      "line": 948,
       "complexity": 5,
       "line_coverage": 87.5,
       "crap": 5.048828125
@@ -4097,7 +4186,7 @@
       "package": "scaffold",
       "function": "ensureAGENTSmdPackSection",
       "file": "internal/scaffold/scaffold.go",
-      "line": 978,
+      "line": 971,
       "complexity": 7,
       "line_coverage": 86.95652173913044,
       "crap": 7.10873674693844
@@ -4106,7 +4195,7 @@
       "package": "scaffold",
       "function": "replaceManagedBlock",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1037,
+      "line": 1030,
       "complexity": 3,
       "line_coverage": 100,
       "crap": 3
@@ -4115,7 +4204,7 @@
       "package": "scaffold",
       "function": "buildCLAUDEmdBlock",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1054,
+      "line": 1047,
       "complexity": 2,
       "line_coverage": 100,
       "crap": 2
@@ -4124,7 +4213,7 @@
       "package": "scaffold",
       "function": "ensureCLAUDEmd",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1080,
+      "line": 1073,
       "complexity": 13,
       "line_coverage": 84.61538461538461,
       "crap": 13.615384615384615
@@ -4133,7 +4222,7 @@
       "package": "scaffold",
       "function": "buildCursorrulesBlock",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1154,
+      "line": 1147,
       "complexity": 2,
       "line_coverage": 100,
       "crap": 2
@@ -4142,7 +4231,7 @@
       "package": "scaffold",
       "function": "ensureCursorrules",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1184,
+      "line": 1177,
       "complexity": 13,
       "line_coverage": 84.61538461538461,
       "crap": 13.615384615384615
@@ -4151,7 +4240,7 @@
       "package": "scaffold",
       "function": "collectDeployedPacks",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1258,
+      "line": 1251,
       "complexity": 3,
       "line_coverage": 100,
       "crap": 3
@@ -4160,7 +4249,7 @@
       "package": "scaffold",
       "function": "initSubTools",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1277,
+      "line": 1270,
       "complexity": 25,
       "line_coverage": 95.08196721311475,
       "crap": 25.074345429793684,
@@ -4170,7 +4259,7 @@
       "package": "scaffold",
       "function": "subToolSymbol",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1431,
+      "line": 1424,
       "complexity": 3,
       "line_coverage": 75,
       "crap": 3.140625
@@ -4179,7 +4268,7 @@
       "package": "scaffold",
       "function": "printSummary",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1455,
+      "line": 1448,
       "complexity": 25,
       "line_coverage": 100,
       "crap": 25,
@@ -4189,7 +4278,7 @@
       "package": "scaffold",
       "function": "assetPaths",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1550,
+      "line": 1543,
       "complexity": 3,
       "line_coverage": 88.88888888888889,
       "crap": 3.0123456790123457
@@ -4198,7 +4287,7 @@
       "package": "scaffold",
       "function": "assetContent",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1567,
+      "line": 1560,
       "complexity": 1,
       "line_coverage": 100,
       "crap": 1
@@ -4207,7 +4296,7 @@
       "package": "scaffold",
       "function": "generateDeweySources",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1581,
+      "line": 1574,
       "complexity": 11,
       "line_coverage": 88.46153846153847,
       "crap": 11.185878470641784
@@ -4216,7 +4305,7 @@
       "package": "scaffold",
       "function": "isDefaultSourcesConfig",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1651,
+      "line": 1644,
       "complexity": 1,
       "line_coverage": 100,
       "crap": 1
@@ -4225,7 +4314,7 @@
       "package": "scaffold",
       "function": "extractGitHubOrg",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1660,
+      "line": 1653,
       "complexity": 8,
       "line_coverage": 90,
       "crap": 8.064
@@ -4234,7 +4323,7 @@
       "package": "scaffold",
       "function": "DevcontainerContent",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1699,
+      "line": 1692,
       "complexity": 1,
       "line_coverage": 0,
       "crap": 2
@@ -4243,7 +4332,7 @@
       "package": "scaffold",
       "function": "writeSourcesConfig",
       "file": "internal/scaffold/scaffold.go",
-      "line": 1708,
+      "line": 1701,
       "complexity": 4,
       "line_coverage": 100,
       "crap": 4
@@ -4420,20 +4509,55 @@
       "package": "setup",
       "function": "Run",
       "file": "internal/setup/setup.go",
-      "line": 200,
-      "complexity": 30,
-      "line_coverage": 90.09009009009009,
-      "crap": 30.875894155660408,
+      "line": 229,
+      "complexity": 2,
+      "line_coverage": 92.3076923076923,
+      "crap": 2.0018206645425582,
       "contract_coverage": 100,
-      "gaze_crap": 30,
-      "quadrant": "Q4_Dangerous",
-      "fix_strategy": "decompose"
+      "gaze_crap": 2,
+      "quadrant": "Q1_Safe"
+    },
+    {
+      "package": "setup",
+      "function": "buildSteps",
+      "file": "internal/setup/setup.go",
+      "line": 274,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5
+    },
+    {
+      "package": "setup",
+      "function": "executeSteps",
+      "file": "internal/setup/setup.go",
+      "line": 334,
+      "complexity": 9,
+      "line_coverage": 95.23809523809524,
+      "crap": 9.008746355685131
+    },
+    {
+      "package": "setup",
+      "function": "printHeader",
+      "file": "internal/setup/setup.go",
+      "line": 373,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "setup",
+      "function": "printSummary",
+      "file": "internal/setup/setup.go",
+      "line": 400,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5
     },
     {
       "package": "setup",
       "function": "installOpenCode",
       "file": "internal/setup/setup.go",
-      "line": 410,
+      "line": 432,
       "complexity": 9,
       "line_coverage": 93.33333333333333,
       "crap": 9.024000000000001
@@ -4442,7 +4566,7 @@
       "package": "setup",
       "function": "installGH",
       "file": "internal/setup/setup.go",
-      "line": 448,
+      "line": 470,
       "complexity": 6,
       "line_coverage": 90.9090909090909,
       "crap": 6.027047332832457
@@ -4451,7 +4575,7 @@
       "package": "setup",
       "function": "installOpenSpec",
       "file": "internal/setup/setup.go",
-      "line": 476,
+      "line": 498,
       "complexity": 4,
       "line_coverage": 100,
       "crap": 4
@@ -4460,17 +4584,16 @@
       "package": "setup",
       "function": "installGaze",
       "file": "internal/setup/setup.go",
-      "line": 497,
+      "line": 519,
       "complexity": 10,
-      "line_coverage": 63.1578947368421,
-      "crap": 15.0007289692375,
-      "fix_strategy": "add_tests"
+      "line_coverage": 89.47368421052632,
+      "crap": 10.116635077999709
     },
     {
       "package": "setup",
       "function": "ensureNodeJS",
       "file": "internal/setup/setup.go",
-      "line": 541,
+      "line": 563,
       "complexity": 5,
       "line_coverage": 88.88888888888889,
       "crap": 5.034293552812072
@@ -4479,7 +4602,7 @@
       "package": "setup",
       "function": "parseNodeMajor",
       "file": "internal/setup/setup.go",
-      "line": 564,
+      "line": 586,
       "complexity": 2,
       "line_coverage": 75,
       "crap": 2.0625
@@ -4488,7 +4611,7 @@
       "package": "setup",
       "function": "installNodeJS",
       "file": "internal/setup/setup.go",
-      "line": 574,
+      "line": 596,
       "complexity": 11,
       "line_coverage": 92,
       "crap": 11.061952
@@ -4497,7 +4620,7 @@
       "package": "setup",
       "function": "installUV",
       "file": "internal/setup/setup.go",
-      "line": 628,
+      "line": 650,
       "complexity": 9,
       "line_coverage": 86.66666666666667,
       "crap": 9.192
@@ -4506,7 +4629,7 @@
       "package": "setup",
       "function": "installSpecify",
       "file": "internal/setup/setup.go",
-      "line": 667,
+      "line": 689,
       "complexity": 5,
       "line_coverage": 100,
       "crap": 5
@@ -4515,7 +4638,7 @@
       "package": "setup",
       "function": "installReplicator",
       "file": "internal/setup/setup.go",
-      "line": 699,
+      "line": 721,
       "complexity": 6,
       "line_coverage": 100,
       "crap": 6
@@ -4524,7 +4647,7 @@
       "package": "setup",
       "function": "runReplicatorSetup",
       "file": "internal/setup/setup.go",
-      "line": 727,
+      "line": 749,
       "complexity": 5,
       "line_coverage": 100,
       "crap": 5
@@ -4533,7 +4656,7 @@
       "package": "setup",
       "function": "installGolangciLint",
       "file": "internal/setup/setup.go",
-      "line": 748,
+      "line": 770,
       "complexity": 6,
       "line_coverage": 54.54545454545455,
       "crap": 9.3809166040571
@@ -4542,7 +4665,7 @@
       "package": "setup",
       "function": "installGovulncheck",
       "file": "internal/setup/setup.go",
-      "line": 780,
+      "line": 802,
       "complexity": 4,
       "line_coverage": 85.71428571428571,
       "crap": 4.0466472303206995
@@ -4551,7 +4674,7 @@
       "package": "setup",
       "function": "rpmURL",
       "file": "internal/setup/setup.go",
-      "line": 797,
+      "line": 819,
       "complexity": 1,
       "line_coverage": 100,
       "crap": 1
@@ -4560,7 +4683,7 @@
       "package": "setup",
       "function": "repoName",
       "file": "internal/setup/setup.go",
-      "line": 809,
+      "line": 831,
       "complexity": 2,
       "line_coverage": 100,
       "crap": 2
@@ -4569,7 +4692,7 @@
       "package": "setup",
       "function": "rpmArch",
       "file": "internal/setup/setup.go",
-      "line": 819,
+      "line": 841,
       "complexity": 2,
       "line_coverage": 66.66666666666667,
       "crap": 2.148148148148148
@@ -4578,7 +4701,7 @@
       "package": "setup",
       "function": "installViaRpm",
       "file": "internal/setup/setup.go",
-      "line": 830,
+      "line": 852,
       "complexity": 4,
       "line_coverage": 100,
       "crap": 4
@@ -4587,7 +4710,7 @@
       "package": "setup",
       "function": "ollamaBrew",
       "file": "internal/setup/setup.go",
-      "line": 864,
+      "line": 886,
       "complexity": 2,
       "line_coverage": 100,
       "crap": 2
@@ -4596,16 +4719,61 @@
       "package": "setup",
       "function": "installOllama",
       "file": "internal/setup/setup.go",
-      "line": 875,
+      "line": 897,
       "complexity": 6,
       "line_coverage": 100,
       "crap": 6
     },
     {
       "package": "setup",
+      "function": "installPodman",
+      "file": "internal/setup/setup.go",
+      "line": 940,
+      "complexity": 9,
+      "line_coverage": 94.73684210526316,
+      "crap": 9.011809301647471
+    },
+    {
+      "package": "setup",
+      "function": "podmanMachineInit",
+      "file": "internal/setup/setup.go",
+      "line": 989,
+      "complexity": 5,
+      "line_coverage": 100,
+      "crap": 5
+    },
+    {
+      "package": "setup",
+      "function": "installDevPod",
+      "file": "internal/setup/setup.go",
+      "line": 1015,
+      "complexity": 7,
+      "line_coverage": 92.3076923076923,
+      "crap": 7.022303140646336
+    },
+    {
+      "package": "setup",
+      "function": "configureDevPodProvider",
+      "file": "internal/setup/setup.go",
+      "line": 1051,
+      "complexity": 7,
+      "line_coverage": 100,
+      "crap": 7
+    },
+    {
+      "package": "setup",
+      "function": "hasProvider",
+      "file": "internal/setup/setup.go",
+      "line": 1101,
+      "complexity": 4,
+      "line_coverage": 100,
+      "crap": 4
+    },
+    {
+      "package": "setup",
       "function": "installDewey",
       "file": "internal/setup/setup.go",
-      "line": 913,
+      "line": 1118,
       "complexity": 7,
       "line_coverage": 85.71428571428571,
       "crap": 7.142857142857143
@@ -4614,7 +4782,7 @@
       "package": "setup",
       "function": "pullEmbeddingModel",
       "file": "internal/setup/setup.go",
-      "line": 950,
+      "line": 1155,
       "complexity": 6,
       "line_coverage": 80,
       "crap": 6.287999999999999
@@ -4623,7 +4791,7 @@
       "package": "setup",
       "function": "printStepResult",
       "file": "internal/setup/setup.go",
-      "line": 978,
+      "line": 1183,
       "complexity": 6,
       "line_coverage": 100,
       "crap": 6
@@ -4632,7 +4800,7 @@
       "package": "setup",
       "function": "FormatSetupText",
       "file": "internal/setup/setup.go",
-      "line": 1003,
+      "line": 1208,
       "complexity": 2,
       "line_coverage": 100,
       "crap": 2,
@@ -4645,7 +4813,7 @@
       "package": "setup",
       "function": "atomicWriteFile",
       "file": "internal/setup/setup.go",
-      "line": 1011,
+      "line": 1216,
       "complexity": 7,
       "line_coverage": 61.111111111111114,
       "crap": 9.881858710562414
@@ -4675,7 +4843,7 @@
       "package": "sprint",
       "function": "NewSprintStore",
       "file": "internal/sprint/sprint.go",
-      "line": 21,
+      "line": 22,
       "complexity": 1,
       "line_coverage": 100,
       "crap": 1,
@@ -4692,7 +4860,7 @@
       "package": "sprint",
       "function": "(*SprintStore).Plan",
       "file": "internal/sprint/sprint.go",
-      "line": 26,
+      "line": 27,
       "complexity": 5,
       "line_coverage": 86.66666666666667,
       "crap": 5.059259259259259,
@@ -4704,7 +4872,7 @@
       "package": "sprint",
       "function": "(*SprintStore).Review",
       "file": "internal/sprint/sprint.go",
-      "line": 61,
+      "line": 62,
       "complexity": 2,
       "line_coverage": 83.33333333333333,
       "crap": 2.0185185185185186,
@@ -4716,7 +4884,7 @@
       "package": "sprint",
       "function": "(*SprintStore).Save",
       "file": "internal/sprint/sprint.go",
-      "line": 74,
+      "line": 75,
       "complexity": 3,
       "line_coverage": 71.42857142857143,
       "crap": 3.2099125364431487,
@@ -4728,7 +4896,7 @@
       "package": "sprint",
       "function": "(*SprintStore).Load",
       "file": "internal/sprint/sprint.go",
-      "line": 89,
+      "line": 90,
       "complexity": 3,
       "line_coverage": 87.5,
       "crap": 3.017578125,
@@ -4740,7 +4908,7 @@
       "package": "sprint",
       "function": "(*SprintStore).Latest",
       "file": "internal/sprint/sprint.go",
-      "line": 104,
+      "line": 105,
       "complexity": 8,
       "line_coverage": 78.57142857142857,
       "crap": 8.629737609329446,
@@ -4752,7 +4920,7 @@
       "package": "sprint",
       "function": "Standup",
       "file": "internal/sprint/sprint.go",
-      "line": 130,
+      "line": 131,
       "complexity": 6,
       "line_coverage": 75,
       "crap": 6.5625,
@@ -4852,25 +5020,25 @@
     }
   ],
   "summary": {
-    "total_functions": 481,
-    "avg_complexity": 5.0623700623700625,
-    "avg_line_coverage": 80.86042174687877,
-    "avg_crap": 5.888015052500889,
-    "crapload": 29,
+    "total_functions": 500,
+    "avg_complexity": 5.02,
+    "avg_line_coverage": 80.87089973972401,
+    "avg_crap": 5.798838957722534,
+    "crapload": 26,
     "crap_threshold": 15,
-    "gaze_crapload": 15,
+    "gaze_crapload": 14,
     "gaze_crap_threshold": 15,
-    "avg_gaze_crap": 7.492657466383581,
+    "avg_gaze_crap": 7.3079440905874025,
     "avg_contract_coverage": 83.12101910828025,
     "quadrant_counts": {
-      "Q1_Safe": 140,
+      "Q1_Safe": 141,
       "Q2_ComplexButTested": 2,
       "Q3_SimpleButUnderspecified": 5,
-      "Q4_Dangerous": 10
+      "Q4_Dangerous": 9
     },
     "fix_strategy_counts": {
-      "add_tests": 9,
-      "decompose": 20
+      "add_tests": 7,
+      "decompose": 19
     },
     "worst_crap": [
       {
@@ -4897,7 +5065,7 @@
         "package": "scaffold",
         "function": "configureOpencodeJSON",
         "file": "internal/scaffold/scaffold.go",
-        "line": 489,
+        "line": 482,
         "complexity": 48,
         "line_coverage": 97.16981132075472,
         "crap": 48.052231036358876,
@@ -4918,11 +5086,11 @@
         "function": "Run",
         "file": "internal/scaffold/scaffold.go",
         "line": 61,
-        "complexity": 33,
-        "line_coverage": 82.22222222222223,
-        "crap": 39.118716049382705,
+        "complexity": 32,
+        "line_coverage": 82.95454545454545,
+        "crap": 37.071374906085644,
         "contract_coverage": 100,
-        "gaze_crap": 33,
+        "gaze_crap": 32,
         "quadrant": "Q4_Dangerous",
         "fix_strategy": "decompose"
       }
@@ -4954,19 +5122,6 @@
         "quadrant": "Q3_SimpleButUnderspecified"
       },
       {
-        "package": "scaffold",
-        "function": "Run",
-        "file": "internal/scaffold/scaffold.go",
-        "line": 61,
-        "complexity": 33,
-        "line_coverage": 82.22222222222223,
-        "crap": 39.118716049382705,
-        "contract_coverage": 100,
-        "gaze_crap": 33,
-        "quadrant": "Q4_Dangerous",
-        "fix_strategy": "decompose"
-      },
-      {
         "package": "orchestration",
         "function": "(*Orchestrator).Advance",
         "file": "internal/orchestration/engine.go",
@@ -4974,6 +5129,19 @@
         "complexity": 32,
         "line_coverage": 86.44067796610169,
         "crap": 34.552782903802246,
+        "contract_coverage": 100,
+        "gaze_crap": 32,
+        "quadrant": "Q4_Dangerous",
+        "fix_strategy": "decompose"
+      },
+      {
+        "package": "scaffold",
+        "function": "Run",
+        "file": "internal/scaffold/scaffold.go",
+        "line": 61,
+        "complexity": 32,
+        "line_coverage": 82.95454545454545,
+        "crap": 37.071374906085644,
         "contract_coverage": 100,
         "gaze_crap": 32,
         "quadrant": "Q4_Dangerous",
@@ -5011,15 +5179,6 @@
         "fix_strategy": "add_tests",
         "crap": 42,
         "complexity": 6
-      },
-      {
-        "function": "(*Options).defaults",
-        "package": "sandbox",
-        "file": "internal/sandbox/sandbox.go",
-        "line": 198,
-        "fix_strategy": "add_tests",
-        "crap": 28.84274010013654,
-        "complexity": 14
       },
       {
         "function": "runSandboxStatus",
@@ -5065,19 +5224,10 @@
         "function": "migrateCommandDir",
         "package": "scaffold",
         "file": "internal/scaffold/scaffold.go",
-        "line": 828,
+        "line": 821,
         "fix_strategy": "add_tests",
         "crap": 15.376226847615653,
         "complexity": 14
-      },
-      {
-        "function": "installGaze",
-        "package": "setup",
-        "file": "internal/setup/setup.go",
-        "line": 497,
-        "fix_strategy": "add_tests",
-        "crap": 15.0007289692375,
-        "complexity": 10
       },
       {
         "function": "merge",
@@ -5092,7 +5242,7 @@
         "function": "configureOpencodeJSON",
         "package": "scaffold",
         "file": "internal/scaffold/scaffold.go",
-        "line": 489,
+        "line": 482,
         "fix_strategy": "decompose",
         "crap": 48.052231036358876,
         "complexity": 48
@@ -5103,9 +5253,9 @@
         "file": "internal/scaffold/scaffold.go",
         "line": 61,
         "fix_strategy": "decompose",
-        "crap": 39.118716049382705,
-        "gaze_crap": 33,
-        "complexity": 33,
+        "crap": 37.071374906085644,
+        "gaze_crap": 32,
+        "complexity": 32,
         "quadrant": "Q4_Dangerous"
       },
       {
@@ -5128,17 +5278,6 @@
         "crap": 34.552782903802246,
         "gaze_crap": 32,
         "complexity": 32,
-        "quadrant": "Q4_Dangerous"
-      },
-      {
-        "function": "Run",
-        "package": "setup",
-        "file": "internal/setup/setup.go",
-        "line": 200,
-        "fix_strategy": "decompose",
-        "crap": 30.875894155660408,
-        "gaze_crap": 30,
-        "complexity": 30,
         "quadrant": "Q4_Dangerous"
       },
       {
@@ -5165,7 +5304,7 @@
         "function": "initSubTools",
         "package": "scaffold",
         "file": "internal/scaffold/scaffold.go",
-        "line": 1277,
+        "line": 1270,
         "fix_strategy": "decompose",
         "crap": 25.074345429793684,
         "complexity": 25
@@ -5174,7 +5313,7 @@
         "function": "printSummary",
         "package": "scaffold",
         "file": "internal/scaffold/scaffold.go",
-        "line": 1455,
+        "line": 1448,
         "fix_strategy": "decompose",
         "crap": 25,
         "complexity": 25
@@ -5187,6 +5326,37 @@
         "fix_strategy": "decompose",
         "crap": 20.218375,
         "complexity": 19
+      },
+      {
+        "function": "runRetro",
+        "package": "main",
+        "file": "cmd/mxf/main.go",
+        "line": 564,
+        "fix_strategy": "decompose",
+        "crap": 19.029232443678183,
+        "complexity": 17
+      },
+      {
+        "function": "Detect",
+        "package": "impediment",
+        "file": "internal/impediment/detect.go",
+        "line": 11,
+        "fix_strategy": "decompose",
+        "crap": 18.279883381924197,
+        "gaze_crap": 18,
+        "complexity": 18,
+        "quadrant": "Q4_Dangerous"
+      },
+      {
+        "function": "DetectProvenance",
+        "package": "doctor",
+        "file": "internal/doctor/environ.go",
+        "line": 123,
+        "fix_strategy": "decompose",
+        "crap": 18,
+        "gaze_crap": 18,
+        "complexity": 18,
+        "quadrant": "Q4_Dangerous"
       }
     ]
   }
