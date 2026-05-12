@@ -51,6 +51,13 @@ func TestEmbeddedAssets_MatchSource(t *testing.T) {
 	}
 
 	for _, relPath := range paths {
+		// devcontainer/ assets are OS-specific and gitignored.
+		// No canonical source file exists in the repo to drift
+		// against — the embedded template is the source of truth.
+		if strings.HasPrefix(relPath, "devcontainer/") {
+			continue
+		}
+
 		// Map asset path to canonical source path
 		srcRel := mapAssetToSource(relPath)
 		srcPath := filepath.Join(root, srcRel)
@@ -163,8 +170,6 @@ var expectedAssetPaths = []string{
 	"openspec/schemas/unbound-force/templates/tasks.md",
 	// Swarm skills (1)
 	"opencode/skills/speckit-workflow/SKILL.md",
-	// Devcontainer template (1) — deployed by uf init (D7)
-	"devcontainer/devcontainer.json",
 }
 
 // nonDeployedAssetPaths lists embedded assets that are NOT
@@ -172,7 +177,11 @@ var expectedAssetPaths = []string{
 // functions (e.g., DevcontainerContent()) and are skipped
 // during the Run() walk. They must be listed here so
 // TestAssetPaths_MatchExpected accounts for them.
-var nonDeployedAssetPaths = []string{}
+var nonDeployedAssetPaths = []string{
+	// Devcontainer template — OS-specific, generated per-user
+	// by uf sandbox init (not deployed by uf init).
+	"devcontainer/devcontainer.json",
+}
 
 func TestAssetPaths_MatchExpected(t *testing.T) {
 	paths, err := assetPaths()
@@ -3940,6 +3949,7 @@ func TestEnsureGitignore_FreshDir(t *testing.T) {
 		".uf/replicator/*.db",
 		".uf/muti-mind/artifacts/",
 		".uf/mx-f/data/",
+		".devcontainer/",
 		".dewey/",
 		".hive/",
 		".unbound-force/",

@@ -1448,7 +1448,7 @@ func checkDevPod(opts *Options) *CheckGroup {
 			Name:        "podman provider",
 			Severity:    Warn,
 			Message:     "not registered",
-			InstallHint: "devpod provider add docker --name podman -o DOCKER_COMMAND=podman",
+			InstallHint: "devpod provider add docker --name podman -o DOCKER_PATH=podman",
 		})
 	}
 

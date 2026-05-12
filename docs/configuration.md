@@ -162,12 +162,16 @@ sessions.
 | `mode` | string | `isolated` | Sandbox isolation mode. |
 | `demo_ports` | list of ints | `[]` | Ports to expose from the container. |
 | `uid_map` | bool | `false` | Enable UID mapping for rootless containers. |
+| `ide` | string | `none` | IDE for DevPod to open after workspace creation. |
 
 Valid values for `runtime`: `auto`, `podman`, `docker`.
 
 Valid values for `backend`: `auto`, `podman`, `devpod`.
 
 Valid values for `mode`: `isolated`, `direct`.
+
+Valid values for `ide`: `none`, `vscode`, `openvscode`,
+`fleet`, `jupyternotebook`, `cursor`.
 
 **Environment variable overrides:**
 
@@ -177,6 +181,7 @@ Valid values for `mode`: `isolated`, `direct`.
 | `UF_SANDBOX_BACKEND` | `sandbox.backend` |
 | `UF_SANDBOX_RUNTIME` | `sandbox.runtime` |
 | `UF_SANDBOX_UIDMAP` | `sandbox.uid_map` (set to `1` or `true`) |
+| `UF_SANDBOX_IDE` | `sandbox.ide` |
 
 ```yaml
 sandbox:
@@ -187,6 +192,7 @@ sandbox:
     memory: 16g
     cpus: "8"
   mode: isolated
+  ide: none
   demo_ports:
     - 8080
     - 3000
@@ -378,17 +384,26 @@ with `.devcontainer/devcontainer.json` support.
 ```yaml
 sandbox:
   backend: devpod
+  ide: vscode  # optional: none, vscode, openvscode, fleet, jupyternotebook, cursor
 ```
 
 Initialize a DevPod workspace definition:
 
 ```bash
-# Scaffold .devcontainer/devcontainer.json
+# Scaffold .devcontainer/devcontainer.json (OS-specific)
 uf sandbox init
 
 # Create and enter the workspace
 uf sandbox create --backend devpod
+
+# Create with VS Code IDE
+uf sandbox create --backend devpod --ide vscode
 ```
+
+`.devcontainer/` is gitignored because the generated config
+is OS-specific (macOS and Linux use different Podman user
+namespace flags). Each developer runs `uf sandbox init` to
+generate their platform-appropriate config.
 
 Auto-detection prefers DevPod when both the `devpod`
 binary and `.devcontainer/devcontainer.json` exist in

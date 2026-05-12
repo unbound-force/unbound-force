@@ -12,7 +12,7 @@ verify version or provider configuration.
 
 The DevPod ecosystem changed: the standalone `podman`
 provider was removed. Users must alias the Docker
-provider: `devpod provider add docker --name podman -o DOCKER_COMMAND=podman`.
+provider: `devpod provider add docker --name podman -o DOCKER_PATH=podman`.
 
 ## Goals / Non-Goals
 
@@ -56,11 +56,11 @@ missing) in the conditional DevPod check group. DevPod
 adds persistent workspace management on top of Podman
 but the ephemeral sandbox path works without it.
 
-### D3: DOCKER_COMMAND over DOCKER_HOST
+### D3: DOCKER_PATH over DOCKER_HOST
 
-The provider alias uses `-o DOCKER_COMMAND=podman`
+The provider alias uses `-o DOCKER_PATH=podman`
 rather than `-o DOCKER_HOST=unix:///run/user/$UID/podman/podman.sock`.
-DOCKER_COMMAND is simpler, portable across platforms,
+DOCKER_PATH is simpler, portable across platforms,
 and avoids UID-dependent socket paths that vary between
 Linux and macOS Podman machine configurations.
 

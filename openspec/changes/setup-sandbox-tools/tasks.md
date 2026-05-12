@@ -96,7 +96,7 @@
     name matching for "podman" (not substring)
   - If `devpod provider list` fails, skip with warning
   - Warn if missing with install hint:
-    `devpod provider add docker --name podman -o DOCKER_COMMAND=podman`
+    `devpod provider add docker --name podman -o DOCKER_PATH=podman`
 - [x] 3.3 [P] Add tests for enhanced DevPod checks in
   `internal/doctor/doctor_test.go`:
   - `parseDevPodVersion`: parse "v0.6.15", "0.5.0",
@@ -173,7 +173,7 @@
     using exact first-column name matching
   - If `devpod provider list` fails, skip with warning
   - If provider missing: run
-    `devpod provider add docker --name podman -o DOCKER_COMMAND=podman`
+    `devpod provider add docker --name podman -o DOCKER_PATH=podman`
   - If provider add fails, report "failed" with the
     manual command as detail
   - DryRun support

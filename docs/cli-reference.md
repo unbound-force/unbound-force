@@ -137,6 +137,13 @@ with DevPod or other devcontainer-compatible tools. The template
 includes the OpenCode dev image, gateway proxy environment
 variables, and port forwarding for the OpenCode server.
 
+The generated config is **OS-specific**: macOS uses
+`--userns=keep-id:uid=1000,gid=1000` for Podman VM UID mapping,
+Linux uses plain `--userns=keep-id` to avoid subuid range
+conflicts on container restart. `.devcontainer/` is gitignored
+because each developer must generate their platform-appropriate
+config by running `uf sandbox init`.
+
 ```
 uf sandbox init [flags]
 ```
@@ -180,6 +187,7 @@ uf sandbox create [flags]
 | `--detach` | bool | `false` | Start without attaching TUI |
 | `--uidmap` | bool | `false` | Use explicit UID/GID mapping (for macOS when Podman machine virtiofs does not support `--userns=keep-id`) |
 | `--demo-ports` | int slice | `nil` | Additional ports to expose for demos (comma-separated, e.g., `3000,8080`) |
+| `--ide` | string | `"none"` | IDE for DevPod to open: `none`, `vscode`, `openvscode`, `fleet`, `jupyternotebook`, `cursor` |
 
 **Example**
 
@@ -238,6 +246,7 @@ uf sandbox start [flags]
 | `--backend` | string | `"auto"` | Backend: `auto`, `podman`, or `devpod` |
 | `--no-parent` | bool | `false` | Mount only the project directory (disable parent directory mount) |
 | `--uidmap` | bool | `false` | Use explicit UID/GID mapping (for macOS when Podman machine virtiofs does not support `--userns=keep-id`) |
+| `--ide` | string | `"none"` | IDE for DevPod to open: `none`, `vscode`, `openvscode`, `fleet`, `jupyternotebook`, `cursor` |
 
 **Example**
 

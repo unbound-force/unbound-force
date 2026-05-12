@@ -126,7 +126,7 @@ no provider named "podman" is registered. Provider
 detection MUST use exact name matching on the first
 column of `devpod provider list` output (not substring
 matching). Setup MUST use
-`devpod provider add docker --name podman -o DOCKER_COMMAND=podman`.
+`devpod provider add docker --name podman -o DOCKER_PATH=podman`.
 
 #### Scenario: Both tools installed, no podman provider
 
@@ -135,7 +135,7 @@ matching). Setup MUST use
 - **AND** `devpod provider list` output does not contain
   a provider named "podman"
 - **WHEN** `uf setup` runs the provider config step
-- **THEN** `devpod provider add docker --name podman -o DOCKER_COMMAND=podman` is executed
+- **THEN** `devpod provider add docker --name podman -o DOCKER_PATH=podman` is executed
 - **AND** the step result reports "installed"
 
 #### Scenario: Provider already registered
@@ -167,7 +167,7 @@ matching). Setup MUST use
 - **WHEN** `uf setup` runs the provider config step
 - **THEN** the step result reports "failed"
 - **AND** detail includes
-  "devpod provider add docker --name podman -o DOCKER_COMMAND=podman"
+  "devpod provider add docker --name podman -o DOCKER_PATH=podman"
 - **AND** subsequent setup steps continue
 
 #### Scenario: Provider list command fails
@@ -416,7 +416,7 @@ severity with the fix command as install hint.
 - **WHEN** `uf doctor` runs
 - **THEN** the provider check reports Warn
 - **AND** the install hint is
-  `devpod provider add docker --name podman -o DOCKER_COMMAND=podman`
+  `devpod provider add docker --name podman -o DOCKER_PATH=podman`
 
 ### Requirement: Install hints for Podman and DevPod
 

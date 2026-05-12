@@ -2795,7 +2795,10 @@ func TestInstallPodman_DarwinMachineInitFails(t *testing.T) {
 			"podman info": "host:\n  os: darwin\n",
 		},
 		errors: map[string]error{
-			"timeout 180 podman machine init": fmt.Errorf("init failed"),
+			// No gtimeout or timeout in LookPath, so
+			// initMachineWithTimeout falls back to direct
+			// podman machine init (no timeout wrapper).
+			"podman machine init": fmt.Errorf("init failed"),
 		},
 	}
 
@@ -3004,37 +3007,6 @@ func TestInstallPodman_DryRun(t *testing.T) {
 	}
 }
 
-func TestInstallPodman_SkipViaConfig(t *testing.T) {
-	rec := &cmdRecorder{}
-
-	opts := Options{
-		SkipTools: []string{"podman"},
-		Stdout:    &bytes.Buffer{},
-		Stderr:    &bytes.Buffer{},
-		LookPath: stubLookPath(map[string]string{
-			"brew": "/opt/homebrew/bin/brew",
-		}),
-		ExecCmd:      rec.execCmd,
-		EvalSymlinks: stubEvalSymlinks(nil),
-		Getenv:       stubGetenv(map[string]string{}),
-	}
-	opts.defaults()
-
-	env := doctor.DetectEnvironment(&doctor.Options{
-		LookPath:     opts.LookPath,
-		EvalSymlinks: opts.EvalSymlinks,
-		Getenv:       opts.Getenv,
-	})
-
-	result := installPodman(&opts, env)
-	if result.action != "skipped" {
-		t.Errorf("expected 'skipped', got %q", result.action)
-	}
-	if !strings.Contains(result.detail, "excluded by config") {
-		t.Errorf("expected 'excluded by config' in detail, got %q", result.detail)
-	}
-}
-
 // --- DevPod installation tests ---
 
 func TestInstallDevPod_AlreadyInstalled(t *testing.T) {
@@ -3163,34 +3135,6 @@ func TestInstallDevPod_DryRun(t *testing.T) {
 	}
 }
 
-func TestInstallDevPod_SkipViaConfig(t *testing.T) {
-	rec := &cmdRecorder{}
-
-	opts := Options{
-		SkipTools: []string{"devpod"},
-		Stdout:    &bytes.Buffer{},
-		Stderr:    &bytes.Buffer{},
-		LookPath: stubLookPath(map[string]string{
-			"brew": "/opt/homebrew/bin/brew",
-		}),
-		ExecCmd:      rec.execCmd,
-		EvalSymlinks: stubEvalSymlinks(nil),
-		Getenv:       stubGetenv(map[string]string{}),
-	}
-	opts.defaults()
-
-	env := doctor.DetectEnvironment(&doctor.Options{
-		LookPath:     opts.LookPath,
-		EvalSymlinks: opts.EvalSymlinks,
-		Getenv:       opts.Getenv,
-	})
-
-	result := installDevPod(&opts, env)
-	if result.action != "skipped" {
-		t.Errorf("expected 'skipped', got %q", result.action)
-	}
-}
-
 // --- DevPod provider configuration tests ---
 
 func TestConfigureDevPodProvider_AlreadyRegistered(t *testing.T) {
@@ -3247,7 +3191,7 @@ func TestConfigureDevPodProvider_MissingInstall(t *testing.T) {
 	// Verify the provider add command was called.
 	found := false
 	for _, call := range rec.calls {
-		if call == "devpod provider add docker --name podman -o DOCKER_COMMAND=podman" {
+		if call == "devpod provider add docker --name podman -o DOCKER_PATH=podman" {
 			found = true
 		}
 	}
@@ -3262,7 +3206,7 @@ func TestConfigureDevPodProvider_AddFails(t *testing.T) {
 			"devpod provider list": "kubernetes   kubernetes   v0.2.0\n",
 		},
 		errors: map[string]error{
-			"devpod provider add docker --name podman -o DOCKER_COMMAND=podman": fmt.Errorf("provider add failed"),
+			"devpod provider add docker --name podman -o DOCKER_PATH=podman": fmt.Errorf("provider add failed"),
 		},
 	}
 

@@ -925,10 +925,10 @@ func installOllama(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	return stepResult{name: "Ollama", action: "installed", detail: "via Homebrew"}
 }
 
-// podmanMachineTimeout is the timeout in seconds for podman machine
-// init, which downloads a VM image (~300MB) and can be slow on
-// constrained networks. 180 seconds balances patience with preventing
-// indefinite hangs.
+// podmanMachineTimeout is the timeout for podman machine init,
+// which downloads a VM image (~300MB) and can be slow on
+// constrained networks. 180 seconds balances patience with
+// preventing indefinite hangs.
 const podmanMachineTimeout = "180"
 
 // installPodman installs Podman if missing. Podman is the container
@@ -938,10 +938,6 @@ const podmanMachineTimeout = "180"
 // A smoke test via `podman info` verifies the installation is
 // functional.
 func installPodman(opts *Options, env doctor.DetectedEnvironment) stepResult {
-	if opts.shouldSkipTool("podman") {
-		return stepResult{name: "Podman", action: "skipped", detail: "excluded by config"}
-	}
-
 	if _, err := opts.LookPath("podman"); err == nil {
 		return stepResult{name: "Podman", action: "already installed"}
 	}
@@ -995,8 +991,10 @@ func podmanMachineInit(opts *Options, detail string) string {
 	}
 
 	// No machine exists — initialize one with timeout to prevent
-	// indefinite hangs on slow networks (D6).
-	if _, err := opts.ExecCmd("timeout", podmanMachineTimeout, "podman", "machine", "init"); err != nil {
+	// indefinite hangs on slow networks (D6). Try gtimeout (macOS
+	// coreutils) first, then timeout (Linux), then fall back to
+	// running without a timeout wrapper.
+	if _, err := initMachineWithTimeout(opts); err != nil {
 		return detail + "; machine init failed"
 	}
 
@@ -1008,15 +1006,27 @@ func podmanMachineInit(opts *Options, detail string) string {
 	return detail
 }
 
+// initMachineWithTimeout runs podman machine init with a timeout
+// wrapper. Tries gtimeout (macOS Homebrew coreutils), then timeout
+// (Linux/GNU), then falls back to running without a timeout.
+func initMachineWithTimeout(opts *Options) ([]byte, error) {
+	// macOS: gtimeout from brew install coreutils.
+	if _, err := opts.LookPath("gtimeout"); err == nil {
+		return opts.ExecCmd("gtimeout", podmanMachineTimeout, "podman", "machine", "init")
+	}
+	// Linux: GNU timeout is standard.
+	if _, err := opts.LookPath("timeout"); err == nil {
+		return opts.ExecCmd("timeout", podmanMachineTimeout, "podman", "machine", "init")
+	}
+	// Fallback: no timeout wrapper available.
+	return opts.ExecCmd("podman", "machine", "init")
+}
+
 // installDevPod installs DevPod if missing. DevPod provides
 // persistent workspace management on top of Podman. Follows the
 // installGaze() pattern: Homebrew only, skip with download URL
 // if no Homebrew.
 func installDevPod(opts *Options, env doctor.DetectedEnvironment) stepResult {
-	if opts.shouldSkipTool("devpod") {
-		return stepResult{name: "DevPod", action: "skipped", detail: "excluded by config"}
-	}
-
 	if _, err := opts.LookPath("devpod"); err == nil {
 		return stepResult{name: "DevPod", action: "already installed"}
 	}
@@ -1044,7 +1054,7 @@ func installDevPod(opts *Options, env doctor.DetectedEnvironment) stepResult {
 
 // configureDevPodProvider configures the DevPod Podman provider
 // alias. The standalone podman provider was removed from DevPod;
-// users must alias the Docker provider with DOCKER_COMMAND=podman
+// users must alias the Docker provider with DOCKER_PATH=podman
 // (D3). This step is gated on both devpod and podman being
 // available in PATH. Provider detection uses exact first-column
 // name matching on `devpod provider list` output (D5).
@@ -1061,7 +1071,7 @@ func configureDevPodProvider(opts *Options) stepResult {
 		return stepResult{
 			name:   "DevPod provider",
 			action: "dry-run",
-			detail: "Would run: devpod provider add docker --name podman -o DOCKER_COMMAND=podman",
+			detail: "Would run: devpod provider add docker --name podman -o DOCKER_PATH=podman",
 		}
 	}
 
@@ -1082,8 +1092,8 @@ func configureDevPodProvider(opts *Options) stepResult {
 	}
 
 	// Provider missing — add the Docker provider aliased to Podman.
-	addCmd := "devpod provider add docker --name podman -o DOCKER_COMMAND=podman"
-	if _, err := opts.ExecCmd("devpod", "provider", "add", "docker", "--name", "podman", "-o", "DOCKER_COMMAND=podman"); err != nil {
+	addCmd := "devpod provider add docker --name podman -o DOCKER_PATH=podman"
+	if _, err := opts.ExecCmd("devpod", "provider", "add", "docker", "--name", "podman", "-o", "DOCKER_PATH=podman"); err != nil {
 		return stepResult{
 			name:   "DevPod provider",
 			action: "failed",

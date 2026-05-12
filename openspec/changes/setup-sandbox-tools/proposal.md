@@ -8,7 +8,7 @@ manually install Podman, install DevPod, and configure the
 DevPod Podman provider. The provider configuration changed:
 the old standalone `podman` provider no longer exists in
 DevPod; users must alias the Docker provider via
-`devpod provider add docker --name podman -o DOCKER_COMMAND=podman`.
+`devpod provider add docker --name podman -o DOCKER_PATH=podman`.
 
 This manual process is error-prone and undiscoverable.
 There is no diagnostic feedback when the provider is
@@ -30,7 +30,7 @@ pipeline and enhance `uf doctor` diagnostics for both tools.
   fallback to download link.
 - `setup: devpod provider config`: Automatically configure
   the DevPod Podman provider using the Docker provider alias
-  (`devpod provider add docker --name podman -o DOCKER_COMMAND=podman`).
+  (`devpod provider add docker --name podman -o DOCKER_PATH=podman`).
 - `setup: podman smoke test`: After install and machine
   init (macOS), run `podman info` to verify Podman is
   functional. Report result but do not block subsequent

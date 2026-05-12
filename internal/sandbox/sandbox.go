@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -935,7 +937,8 @@ func FormatStatus(w io.Writer, s ContainerStatus) {
 }
 
 // InitDevcontainerOptions configures a devcontainer scaffolding
-// operation. Separated from Options to keep the init concern
+// operation. This is a separate options struct from Options
+// because init is a project-setup concern (scaffolding) that is
 // distinct from runtime sandbox operations.
 type InitDevcontainerOptions struct {
 	// ProjectDir is the project root where .devcontainer/
@@ -960,12 +963,28 @@ type InitDevcontainerOptions struct {
 	// template bytes. Injected for testability — production
 	// callers pass scaffold.DevcontainerContent().
 	TemplateContent []byte
+
+	// GOOS overrides runtime.GOOS for testability. When
+	// empty, defaults to runtime.GOOS. On macOS ("darwin"),
+	// runArgs uses --userns=keep-id:uid=1000,gid=1000 to
+	// map the host user to the container's dev user (UID
+	// 1000) through the Podman VM. On Linux, plain
+	// --userns=keep-id avoids UID mapping conflicts on
+	// container restart under rootless Podman.
+	GOOS string
 }
 
 // InitDevcontainer creates .devcontainer/devcontainer.json from
-// the embedded template. Substitutes image and demo ports when
-// overrides are provided. Idempotent: skips if the file exists
-// unless Force is set.
+// the embedded template. Substitutes image, demo ports, and
+// OS-specific runArgs when overrides are provided. Idempotent:
+// skips if the file exists unless Force is set.
+//
+// On macOS ("darwin"), runArgs is set to
+// --userns=keep-id:uid=1000,gid=1000 to map the host user
+// through the Podman VM to the container's dev user (UID 1000).
+// On Linux, plain --userns=keep-id is used to avoid UID mapping
+// conflicts on container restart under rootless Podman where
+// subuid-mapped UIDs can fall outside the explicit range.
 func InitDevcontainer(opts InitDevcontainerOptions) error {
 	if opts.ProjectDir == "" {
 		cwd, err := os.Getwd()
@@ -976,6 +995,9 @@ func InitDevcontainer(opts InitDevcontainerOptions) error {
 	}
 	if opts.Stdout == nil {
 		opts.Stdout = os.Stdout
+	}
+	if opts.GOOS == "" {
+		opts.GOOS = runtime.GOOS
 	}
 
 	outPath := filepath.Join(opts.ProjectDir,
@@ -1008,12 +1030,21 @@ func InitDevcontainer(opts InitDevcontainerOptions) error {
 		tmpl["forwardPorts"] = existing
 	}
 
+	// OS-specific runArgs: macOS needs explicit UID mapping
+	// through the Podman VM; Linux uses plain keep-id.
+	tmpl["runArgs"] = devcontainerRunArgs(opts.GOOS)
+
 	// Marshal with 2-space indent for readability.
-	output, err := json.MarshalIndent(tmpl, "", "  ")
-	if err != nil {
+	// Use an encoder with SetEscapeHTML(false) to preserve
+	// shell characters like > and & in postStartCommand.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(tmpl); err != nil {
 		return fmt.Errorf("marshal devcontainer.json: %w", err)
 	}
-	output = append(output, '\n')
+	output := buf.Bytes()
 
 	// Create .devcontainer/ directory.
 	dir := filepath.Dir(outPath)
@@ -1030,8 +1061,21 @@ func InitDevcontainer(opts InitDevcontainerOptions) error {
 	if opts.Force {
 		action = "Overwritten"
 	}
-	fmt.Fprintf(opts.Stdout, "%s .devcontainer/devcontainer.json\n", action)
+	fmt.Fprintf(opts.Stdout, "%s .devcontainer/devcontainer.json (%s)\n", action, opts.GOOS)
 	return nil
+}
+
+// devcontainerRunArgs returns the OS-appropriate runArgs for
+// the devcontainer.json template. macOS requires explicit
+// uid/gid mapping through the Podman VM; Linux uses plain
+// keep-id to avoid subuid range conflicts on restart.
+func devcontainerRunArgs(goos string) []interface{} {
+	switch goos {
+	case "darwin":
+		return []interface{}{"--userns=keep-id:uid=1000,gid=1000"}
+	default:
+		return []interface{}{"--userns=keep-id"}
+	}
 }
 
 // isYes returns true if the response is a yes confirmation.

@@ -4076,15 +4076,49 @@ func TestCreate_NoCloudProvider_SkipsGateway(t *testing.T) {
 	}
 }
 
+// --- devcontainerRunArgs tests ---
+
+func TestDevcontainerRunArgs_Linux(t *testing.T) {
+	args := devcontainerRunArgs("linux")
+	if len(args) != 1 {
+		t.Fatalf("expected 1 arg, got %d", len(args))
+	}
+	if args[0] != "--userns=keep-id" {
+		t.Errorf("Linux: got %v, want --userns=keep-id", args[0])
+	}
+}
+
+func TestDevcontainerRunArgs_Darwin(t *testing.T) {
+	args := devcontainerRunArgs("darwin")
+	if len(args) != 1 {
+		t.Fatalf("expected 1 arg, got %d", len(args))
+	}
+	if args[0] != "--userns=keep-id:uid=1000,gid=1000" {
+		t.Errorf("darwin: got %v, want --userns=keep-id:uid=1000,gid=1000", args[0])
+	}
+}
+
+func TestDevcontainerRunArgs_UnknownOS(t *testing.T) {
+	// Unknown OS falls back to Linux behavior (plain keep-id).
+	args := devcontainerRunArgs("windows")
+	if len(args) != 1 {
+		t.Fatalf("expected 1 arg, got %d", len(args))
+	}
+	if args[0] != "--userns=keep-id" {
+		t.Errorf("windows: got %v, want --userns=keep-id (default)", args[0])
+	}
+}
+
 // --- InitDevcontainer tests ---
 
 // testDevcontainerTemplate returns a minimal devcontainer.json
-// template for testing. Mirrors the embedded asset structure.
+// template for testing. Uses --userns=keep-id (Linux default);
+// InitDevcontainer applies OS-specific runArgs at init time.
 func testDevcontainerTemplate() []byte {
 	return []byte(`{
   "_comment": "ANTHROPIC_API_KEY=gateway is a sentinel value.",
   "image": "quay.io/unbound-force/opencode-dev:latest",
-  "runArgs": ["--userns=keep-id:uid=1000,gid=1000"],
+  "runArgs": ["--userns=keep-id"],
   "forwardPorts": [4096],
   "containerEnv": {
     "ANTHROPIC_BASE_URL": "http://host.containers.internal:53147",
@@ -4103,6 +4137,7 @@ func TestRunSandboxInit_Creates(t *testing.T) {
 	err := InitDevcontainer(InitDevcontainerOptions{
 		ProjectDir:      dir,
 		Stdout:          &buf,
+		GOOS:            "linux",
 		TemplateContent: testDevcontainerTemplate(),
 	})
 	if err != nil {
@@ -4152,8 +4187,8 @@ func TestRunSandboxInit_Creates(t *testing.T) {
 	runArgs, ok := parsed["runArgs"].([]interface{})
 	if !ok || len(runArgs) == 0 {
 		t.Error("expected runArgs in devcontainer.json")
-	} else if ra, ok := runArgs[0].(string); !ok || !strings.Contains(ra, "--userns=keep-id") {
-		t.Errorf("runArgs[0] = %v, want --userns=keep-id:uid=1000,gid=1000", runArgs[0])
+	} else if ra, ok := runArgs[0].(string); !ok || ra != "--userns=keep-id" {
+		t.Errorf("runArgs[0] = %v, want --userns=keep-id", runArgs[0])
 	}
 
 	// Verify postStartCommand is present (opencode serve).
@@ -4163,14 +4198,89 @@ func TestRunSandboxInit_Creates(t *testing.T) {
 		t.Errorf("postStartCommand missing 'opencode serve', got: %s", psc)
 	}
 
+	// Verify postStartCommand preserves shell characters (not
+	// escaped to \u003e / \u0026 by json.MarshalIndent).
+	raw := string(data)
+	if !strings.Contains(raw, "> /tmp/opencode-server.log 2>&1 &") {
+		t.Error("postStartCommand shell chars escaped; expected literal > and &")
+	}
+
 	// Verify _comment key is present (sentinel explanation).
 	if _, hasComment := parsed["_comment"]; !hasComment {
 		t.Error("expected _comment key explaining sentinel value")
 	}
 
-	// Verify output message.
+	// Verify output message includes OS.
 	if !strings.Contains(buf.String(), "Created") {
 		t.Errorf("expected 'Created' in output, got: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "linux") {
+		t.Errorf("expected 'linux' in output, got: %s", buf.String())
+	}
+}
+
+func TestRunSandboxInit_LinuxRunArgs(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	err := InitDevcontainer(InitDevcontainerOptions{
+		ProjectDir:      dir,
+		Stdout:          &buf,
+		GOOS:            "linux",
+		TemplateContent: testDevcontainerTemplate(),
+	})
+	if err != nil {
+		t.Fatalf("InitDevcontainer error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, ".devcontainer", "devcontainer.json"))
+	var parsed map[string]interface{}
+	if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
+		t.Fatalf("parse devcontainer.json: %v", jsonErr)
+	}
+
+	runArgs, ok := parsed["runArgs"].([]interface{})
+	if !ok || len(runArgs) == 0 {
+		t.Fatal("expected runArgs in devcontainer.json")
+	}
+	ra := runArgs[0].(string)
+	if ra != "--userns=keep-id" {
+		t.Errorf("Linux runArgs[0] = %q, want --userns=keep-id (no uid/gid suffix)", ra)
+	}
+}
+
+func TestRunSandboxInit_DarwinRunArgs(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	err := InitDevcontainer(InitDevcontainerOptions{
+		ProjectDir:      dir,
+		Stdout:          &buf,
+		GOOS:            "darwin",
+		TemplateContent: testDevcontainerTemplate(),
+	})
+	if err != nil {
+		t.Fatalf("InitDevcontainer error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, ".devcontainer", "devcontainer.json"))
+	var parsed map[string]interface{}
+	if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
+		t.Fatalf("parse devcontainer.json: %v", jsonErr)
+	}
+
+	runArgs, ok := parsed["runArgs"].([]interface{})
+	if !ok || len(runArgs) == 0 {
+		t.Fatal("expected runArgs in devcontainer.json")
+	}
+	ra := runArgs[0].(string)
+	if ra != "--userns=keep-id:uid=1000,gid=1000" {
+		t.Errorf("macOS runArgs[0] = %q, want --userns=keep-id:uid=1000,gid=1000", ra)
+	}
+
+	// Verify output includes darwin.
+	if !strings.Contains(buf.String(), "darwin") {
+		t.Errorf("expected 'darwin' in output, got: %s", buf.String())
 	}
 }
 

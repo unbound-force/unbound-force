@@ -30,9 +30,10 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 
 	// Verify the summary includes a non-trivial file count
-	// 36 = 35 prior + 1 devcontainer/devcontainer.json
-	if !strings.Contains(output, "36 files processed") {
-		t.Errorf("expected '36 files processed' in output, got:\n%s", output)
+	// 35 assets deployed by uf init (devcontainer excluded —
+	// OS-specific, generated per-user by uf sandbox init).
+	if !strings.Contains(output, "35 files processed") {
+		t.Errorf("expected '35 files processed' in output, got:\n%s", output)
 	}
 
 	// Verify a user-owned file was created

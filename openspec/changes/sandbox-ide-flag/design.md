@@ -269,6 +269,32 @@ No integration or e2e tests required.
   explicit "n", EOF/pipe, bare `\r` — all print
   "Cancelled." via `bufio.Scanner`
 
+### OS-aware devcontainer runArgs (D15)
+
+`.devcontainer/devcontainer.json` is now gitignored and
+generated per-user by `uf sandbox init`. The `runArgs`
+are OS-specific:
+
+- **macOS** (`darwin`): `--userns=keep-id:uid=1000,gid=1000`
+  Maps the host user through the Podman VM to the
+  container's dev user (UID 1000). Required because
+  macOS runs Podman in a Linux VM with different UID
+  semantics.
+- **Linux** (default): `--userns=keep-id`
+  Plain keep-id without explicit uid/gid suffix. The
+  explicit range breaks container restart on Fedora
+  rootless Podman where subuid-mapped UIDs (e.g.,
+  4203716) fall outside the 0-1000 range.
+
+`uf init` no longer deploys the devcontainer template
+(skipped in scaffold walk). The embedded asset remains
+for `DevcontainerContent()` used by `uf sandbox init`.
+
+`json.MarshalIndent` replaced with `json.NewEncoder` +
+`SetEscapeHTML(false)` to prevent shell characters
+(`>`, `&`) in `postStartCommand` from being escaped
+to `\u003e`/`\u0026`.
+
 ### Manual verification (not unit-testable)
 
 - `postStartCommand` (D9): verified by task 7.4
