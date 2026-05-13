@@ -103,7 +103,17 @@ func (b *PodmanBackend) Create(opts Options) error {
 	_ = setupGitSync(opts)
 
 	fmt.Fprintf(opts.Stderr, "Sandbox created: %s\n", ctrName)
-	return nil
+
+	serverURL := fmt.Sprintf("http://localhost:%d", DefaultServerPort)
+
+	if opts.Detach {
+		fmt.Fprintf(opts.Stdout,
+			"Sandbox created (detached).\nServer: %s\n", serverURL)
+		return nil
+	}
+
+	fmt.Fprintf(opts.Stderr, "Attaching to sandbox...\n")
+	return b.Attach(opts)
 }
 
 // Start resumes a stopped persistent workspace.

@@ -390,8 +390,9 @@ func waitForHealth(opts Options, timeout time.Duration) error {
 // Create provisions a persistent sandbox workspace using the
 // selected backend. Resolves the backend from flags, env, config,
 // or auto-detection, then delegates to backend.Create().
-// After successful creation, auto-attaches the TUI unless
-// --detach is set.
+// Attach/detach is handled by each backend's Create method
+// internally (via attachOrDetach) — the dispatcher does not
+// call Attach separately to avoid double-attach on exit.
 func Create(opts Options) error {
 	opts.defaults()
 	opts = DefaultConfig(opts)
@@ -417,30 +418,7 @@ func Create(opts Options) error {
 		return err
 	}
 
-	if err := backend.Create(opts); err != nil {
-		return err
-	}
-
-	// Display demo endpoint URLs after create.
-	ws, err := backend.Status(opts)
-	if err == nil && len(ws.DemoEndpoints) > 0 {
-		fmt.Fprintf(opts.Stderr, "Demo endpoints:\n")
-		for _, ep := range ws.DemoEndpoints {
-			fmt.Fprintf(opts.Stderr, "  %s: %s\n", ep.Name, ep.URL)
-		}
-	}
-
-	// Auto-attach unless --detach.
-	if opts.Detach {
-		serverURL := fmt.Sprintf("http://localhost:%d", DefaultServerPort)
-		if ws.ServerURL != "" {
-			serverURL = ws.ServerURL
-		}
-		fmt.Fprintf(opts.Stdout, "Sandbox created (detached).\nServer: %s\n", serverURL)
-		return nil
-	}
-
-	return backend.Attach(opts)
+	return backend.Create(opts)
 }
 
 // Destroy permanently deletes the sandbox workspace and all
