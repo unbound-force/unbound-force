@@ -92,7 +92,7 @@ unbound-force/
 ├── docs/                             # User-facing documentation
 ├── specs/                            # Architectural specs (001-035)
 ├── openspec/                         # OpenSpec tactical workflow
-├── schemas/                          # JSON Schema registry (11 types)
+├── schemas/                          # JSON Schema registry
 │   └── feedback-triage/              # Feedback triage schemas
 ├── go.mod                            # Go module (1.25+)
 ├── opencode.json                     # MCP server configuration
