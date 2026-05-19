@@ -542,6 +542,68 @@ enforce. Rules are tagged by severity:
 |---------|------|--------------|
 | `/review-council` | Pre-PR (local) | Discovers available personas, runs them in parallel, produces APPROVE or REQUEST CHANGES |
 | `/review-pr [N]` | Post-PR (GitHub) | Single agent reviews a specific PR, analyzes CI results |
+| `/address-feedback [N]` | Post-PR (GitHub) | Triage + address reviewer feedback |
+
+### Addressing Feedback
+
+The `/address-feedback` command closes the gap between
+PR creation and merge. After reviewers comment on a PR,
+the author runs `/address-feedback` to systematically
+ingest, assess, triage, and respond to every piece of
+feedback.
+
+**Four-phase workflow**:
+1. **Ingest** -- Fetch all unresolved review threads
+   from GitHub, filtering out resolved and outdated
+   items.
+2. **Assess** -- Classify each item as data-driven or
+   subjective using convention packs and constitution
+   principles as evidence.
+3. **Triage** -- Present each item to the author with a
+   recommendation. The author chooses one of four
+   decisions: accept, modify, reject, or ask.
+4. **Execute** -- Commit code fixes (one per item), run
+   `/review-council` on the changes, push, and post
+   reply comments to each thread.
+
+**Tiered assessment architecture**:
+
+- **Tier 1 (direct)** -- The command agent assesses
+  simple items itself: formatting, naming, typos, clear
+  convention matches, single-file scope. Fast (~2-3s
+  per item).
+- **Tier 2 (Divisor escalation)** -- Complex items are
+  delegated to the relevant Divisor persona via Task
+  tool: security concerns to the Adversary,
+  architectural changes to the Architect, test strategy
+  to Testing, and so on. Slower (~10-20s) but uses
+  specialized expertise.
+
+If Divisor agents are not available, all items fall
+back to Tier 1. This follows Constitution Principle II
+(Composability First).
+
+**Authority matrix**: The command adjusts
+recommendations based on reviewer role (derived from
+GitHub's `author_association` field). Data-driven
+feedback from any reviewer role produces an ACCEPT
+recommendation. Subjective feedback is always
+AUTHOR-DECIDES regardless of role. Bot and external
+reviewer findings are cross-referenced against
+convention packs before recommending acceptance.
+
+**Schema relationship**: The Divisor's `review-verdict`
+schema captures outbound review findings (what
+reviewers flag). The `feedback-triage` schema captures
+the inbound response (how the author triaged each
+finding). Together they form the complete review
+feedback loop: `review-verdict` → reviewer comments →
+`feedback-triage`.
+
+The command is re-entrant -- run it again after
+reviewers respond to your ASK items or post new
+feedback. Local cache under `.uf/feedback/` accelerates
+subsequent rounds by skipping unchanged threads.
 
 
 ## Quality Analysis (Gaze)
@@ -677,6 +739,7 @@ without direct coordination.
   artifacts/
     quality-report/    Gaze analysis output
     review-verdict/    Divisor review decisions
+    feedback-triage/   Author response to review feedback
     acceptance-decision/  Muti-Mind accept/reject
   muti-mind/
     backlog.yaml       Product backlog

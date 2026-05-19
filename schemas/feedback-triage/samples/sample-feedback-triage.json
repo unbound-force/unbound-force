@@ -1,0 +1,132 @@
+{
+  "pr_number": 42,
+  "pr_url": "https://github.com/unbound-force/unbound-force/pull/42",
+  "branch": "opsx/gateway-fix",
+  "round": 1,
+  "items": [
+    {
+      "thread_id": "PRR_kwDOABC123_1",
+      "reviewer": "alice-maintainer",
+      "reviewer_role": "maintainer",
+      "file": "internal/gateway/proxy.go",
+      "line": 142,
+      "classification": "data-driven",
+      "tier": 1,
+      "evidence": [
+        "Hardcoded timeout violates CS-003 (no magic numbers)",
+        "Convention pack default.md requires named constants"
+      ],
+      "recommendation": "accept",
+      "decision": "accept",
+      "decision_reasoning": null,
+      "commit_sha": "a1b2c3d",
+      "divisor_agents_used": [],
+      "tier2_unavailable": false,
+      "conflict_flag": false
+    },
+    {
+      "thread_id": "PRR_kwDOABC123_2",
+      "reviewer": "bob-contributor",
+      "reviewer_role": "contributor",
+      "file": "internal/gateway/proxy.go",
+      "line": 87,
+      "classification": "subjective",
+      "tier": 1,
+      "evidence": [],
+      "recommendation": "author-decides",
+      "decision": "reject",
+      "decision_reasoning": "Private method, concise naming preferred per Go conventions",
+      "commit_sha": null,
+      "divisor_agents_used": [],
+      "tier2_unavailable": false,
+      "conflict_flag": false
+    },
+    {
+      "thread_id": "PRR_kwDOABC123_3",
+      "reviewer": "alice-maintainer",
+      "reviewer_role": "maintainer",
+      "file": "internal/gateway/proxy.go",
+      "line": 203,
+      "classification": "data-driven",
+      "tier": 2,
+      "evidence": [
+        "Missing url.Parse validation allows open redirect",
+        "OWASP Unvalidated Redirects (A10:2021)"
+      ],
+      "recommendation": "accept",
+      "decision": "accept",
+      "decision_reasoning": null,
+      "commit_sha": "d4e5f6g",
+      "divisor_agents_used": [
+        "adversary"
+      ],
+      "tier2_unavailable": false,
+      "conflict_flag": false
+    },
+    {
+      "thread_id": "PRR_kwDOABC123_4",
+      "reviewer": "carol-collaborator",
+      "reviewer_role": "collaborator",
+      "file": "internal/gateway/handler.go",
+      "line": 55,
+      "classification": "data-driven",
+      "tier": 1,
+      "evidence": [
+        "Go convention: use errors.New for static messages"
+      ],
+      "recommendation": "accept",
+      "decision": "modify",
+      "decision_reasoning": "Using fmt.Errorf with %w for wrapping context",
+      "commit_sha": null,
+      "divisor_agents_used": [],
+      "tier2_unavailable": false,
+      "conflict_flag": false
+    },
+    {
+      "thread_id": "PRR_kwDOABC123_5",
+      "reviewer": "dave-external",
+      "reviewer_role": "external",
+      "file": null,
+      "line": null,
+      "classification": "subjective",
+      "tier": 1,
+      "evidence": [],
+      "recommendation": "author-decides",
+      "decision": "ask",
+      "decision_reasoning": "Could you clarify the expected retry behavior?",
+      "commit_sha": null,
+      "divisor_agents_used": [],
+      "tier2_unavailable": false,
+      "conflict_flag": false
+    },
+    {
+      "thread_id": "PRR_kwDOABC123_6",
+      "reviewer": "dependabot[bot]",
+      "reviewer_role": "bot",
+      "file": "internal/gateway/proxy.go",
+      "line": 100,
+      "classification": "subjective",
+      "tier": 2,
+      "evidence": [],
+      "recommendation": "author-decides",
+      "decision": "reject",
+      "decision_reasoning": "No project convention enforces max function length",
+      "commit_sha": null,
+      "divisor_agents_used": [],
+      "tier2_unavailable": false,
+      "conflict_flag": true
+    }
+  ],
+  "summary": {
+    "total_items": 6,
+    "accepted": 2,
+    "modified": 1,
+    "rejected": 2,
+    "asked": 1,
+    "tier1_count": 4,
+    "tier2_count": 2,
+    "divisor_agents_invoked": [
+      "adversary"
+    ]
+  }
+}

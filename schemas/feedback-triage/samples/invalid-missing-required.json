@@ -1,0 +1,28 @@
+{
+  "pr_url": "https://github.com/unbound-force/unbound-force/pull/99",
+  "branch": "feat/feedback-triage",
+  "round": 1,
+  "items": [
+    {
+      "thread_id": "PRRC_001",
+      "reviewer": "octocat",
+      "reviewer_role": "maintainer",
+      "classification": "data-driven",
+      "tier": 1,
+      "evidence": ["CI failure log shows race condition"],
+      "recommendation": "accept",
+      "decision": "accept",
+      "divisor_agents_used": ["guard"]
+    }
+  ],
+  "summary": {
+    "total_items": 1,
+    "accepted": 1,
+    "modified": 0,
+    "rejected": 0,
+    "asked": 0,
+    "tier1_count": 1,
+    "tier2_count": 0,
+    "divisor_agents_invoked": ["guard"]
+  }
+}

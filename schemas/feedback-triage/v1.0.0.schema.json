@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/unbound-force/unbound-force/internal/schemas/feedback-triage-payload",
+  "properties": {
+    "pr_number": {
+      "type": "integer",
+      "description": "Pull request number"
+    },
+    "pr_url": {
+      "type": "string",
+      "description": "Pull request URL"
+    },
+    "branch": {
+      "type": "string",
+      "description": "Branch name the PR targets or originates from"
+    },
+    "round": {
+      "type": "integer",
+      "description": "Feedback triage round number"
+    },
+    "items": {
+      "items": {
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "description": "Unique identifier for the review thread"
+          },
+          "reviewer": {
+            "type": "string",
+            "description": "GitHub username of the reviewer"
+          },
+          "reviewer_role": {
+            "type": "string",
+            "enum": [
+              "maintainer",
+              "collaborator",
+              "contributor",
+              "external",
+              "bot"
+            ],
+            "description": "Role of the reviewer in the repository"
+          },
+          "file": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "File path the feedback applies to"
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Line number the feedback applies to"
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "data-driven",
+              "subjective"
+            ],
+            "description": "Whether the feedback is data-driven or subjective"
+          },
+          "tier": {
+            "type": "integer",
+            "description": "Priority tier of the feedback item"
+          },
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "description": "Supporting evidence for the classification"
+          },
+          "recommendation": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "author-decides"
+            ],
+            "description": "Triage recommendation for the feedback item"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "modify",
+              "reject",
+              "ask"
+            ],
+            "description": "Final decision on the feedback item"
+          },
+          "decision_reasoning": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reasoning behind the decision"
+          },
+          "commit_sha": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Commit SHA the feedback references"
+          },
+          "divisor_agents_used": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "description": "Divisor agents consulted for this item"
+          },
+          "tier2_unavailable": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether tier 2 analysis was unavailable"
+          },
+          "conflict_flag": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether this item conflicts with another item"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "thread_id",
+          "reviewer",
+          "reviewer_role",
+          "classification",
+          "tier",
+          "evidence",
+          "recommendation",
+          "decision",
+          "divisor_agents_used"
+        ]
+      },
+      "type": "array",
+      "description": "Individual feedback triage items"
+    },
+    "summary": {
+      "properties": {
+        "total_items": {
+          "type": "integer",
+          "description": "Total number of feedback items triaged"
+        },
+        "accepted": {
+          "type": "integer",
+          "description": "Number of items accepted"
+        },
+        "modified": {
+          "type": "integer",
+          "description": "Number of items accepted with modifications"
+        },
+        "rejected": {
+          "type": "integer",
+          "description": "Number of items rejected"
+        },
+        "asked": {
+          "type": "integer",
+          "description": "Number of items requiring further clarification"
+        },
+        "tier1_count": {
+          "type": "integer",
+          "description": "Number of tier 1 items"
+        },
+        "tier2_count": {
+          "type": "integer",
+          "description": "Number of tier 2 items"
+        },
+        "divisor_agents_invoked": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "All Divisor agents invoked during triage"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "total_items",
+        "accepted",
+        "modified",
+        "rejected",
+        "asked",
+        "tier1_count",
+        "tier2_count",
+        "divisor_agents_invoked"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "pr_number",
+    "pr_url",
+    "branch",
+    "round",
+    "items",
+    "summary"
+  ]
+}

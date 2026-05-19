@@ -56,6 +56,33 @@ operations, intent drift). You receive an **APPROVE** or
 council auto-detects whether to review code or specs
 based on what changed on your branch.
 
+### Address Review Feedback
+
+After creating a PR and receiving reviewer feedback, use
+`/address-feedback` to systematically triage and respond:
+
+```text
+/address-feedback [PR_NUMBER]
+```
+
+The command runs four phases:
+
+1. **Ingest** — Fetches all unresolved review threads from
+   GitHub, groups threaded conversations, and identifies
+   reviewer roles
+2. **Assess** — Classifies each item as data-driven or
+   subjective using project conventions. Simple items are
+   assessed directly (Tier 1); complex items are escalated
+   to Divisor agents (Tier 2)
+3. **Triage** — Presents each item one-by-one with the
+   assessment. You choose: Accept, Modify, Reject, or Ask
+4. **Execute** — Implements code fixes, runs review-council,
+   pushes changes, and posts reply comments
+
+The command is re-entrant: run it multiple times as
+reviewers respond. It only shows unresolved threads and
+uses a local cache to speed up re-assessment.
+
 ### Propose a Change (Small)
 
 For bug fixes, minor enhancements, and tasks under 3
@@ -214,6 +241,7 @@ for details.
 |---------|-------------|
 | `/review-council` | Run the 9-persona review council |
 | `/review-pr` | Review a GitHub PR (post-PR) |
+| `/address-feedback` | Triage and address PR review feedback |
 | `/opsx-propose` | Create a change proposal with plan and tasks |
 | `/opsx-apply` | Implement tasks from an OpenSpec change |
 | `/opsx-explore` | Think through ideas (read-only) |

@@ -1,0 +1,30 @@
+{
+  "pr_number": 99,
+  "pr_url": "https://github.com/unbound-force/unbound-force/pull/99",
+  "branch": "feat/feedback-triage",
+  "round": 1,
+  "items": [
+    {
+      "thread_id": "PRRC_001",
+      "reviewer": "octocat",
+      "reviewer_role": "maintainer",
+      "classification": "subjective",
+      "tier": 2,
+      "evidence": ["Style preference noted in comment"],
+      "recommendation": "author-decides",
+      "decision": "reject",
+      "divisor_agents_used": ["adversary"],
+      "priority": "high"
+    }
+  ],
+  "summary": {
+    "total_items": 1,
+    "accepted": 0,
+    "modified": 0,
+    "rejected": 1,
+    "asked": 0,
+    "tier1_count": 0,
+    "tier2_count": 1,
+    "divisor_agents_invoked": ["adversary"]
+  }
+}

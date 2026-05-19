@@ -168,6 +168,113 @@ func TestSchemaRegistry_NoDrift(t *testing.T) {
 	}
 }
 
+// handAuthoredSchemas lists schema types that are hand-authored
+// (not generated from Go structs). These need dedicated validation
+// tests since they are not covered by the registry-based tests.
+var handAuthoredSchemas = []string{
+	"feedback-triage",
+}
+
+// TestHandAuthoredSchemas_SampleValidates validates the positive
+// sample for each hand-authored schema against its schema file.
+func TestHandAuthoredSchemas_SampleValidates(t *testing.T) {
+	schemasDir := repoSchemasDir()
+
+	for _, typeName := range handAuthoredSchemas {
+		t.Run(typeName, func(t *testing.T) {
+			schemaPath := filepath.Join(schemasDir, typeName, "v1.0.0.schema.json")
+			samplePath := filepath.Join(schemasDir, typeName, "samples", "sample-"+typeName+".json")
+
+			if _, err := os.Stat(schemaPath); err != nil {
+				t.Fatalf("schema file missing: %v", err)
+			}
+			if _, err := os.Stat(samplePath); err != nil {
+				t.Fatalf("sample file missing: %v", err)
+			}
+
+			if err := schemas.ValidateArtifact(schemaPath, samplePath); err != nil {
+				t.Errorf("positive sample validation failed: %v", err)
+			}
+		})
+	}
+}
+
+// TestHandAuthoredSchemas_NegativeFixturesRejected validates that
+// invalid sample files are correctly rejected by the schema.
+func TestHandAuthoredSchemas_NegativeFixturesRejected(t *testing.T) {
+	schemasDir := repoSchemasDir()
+
+	for _, typeName := range handAuthoredSchemas {
+		samplesDir := filepath.Join(schemasDir, typeName, "samples")
+		schemaPath := filepath.Join(schemasDir, typeName, "v1.0.0.schema.json")
+
+		if _, err := os.Stat(schemaPath); err != nil {
+			t.Fatalf("schema file missing for %s: %v", typeName, err)
+		}
+
+		entries, err := os.ReadDir(samplesDir)
+		if err != nil {
+			t.Fatalf("read samples dir for %s: %v", typeName, err)
+		}
+
+		var invalidCount int
+		for _, entry := range entries {
+			if !strings.HasPrefix(entry.Name(), "invalid-") {
+				continue
+			}
+			invalidCount++
+
+			t.Run(typeName+"/"+entry.Name(), func(t *testing.T) {
+				fixturePath := filepath.Join(samplesDir, entry.Name())
+				err := schemas.ValidateArtifact(schemaPath, fixturePath)
+				if err == nil {
+					t.Errorf("expected schema to reject %s, but validation passed", entry.Name())
+				}
+			})
+		}
+
+		if invalidCount == 0 {
+			t.Errorf("no invalid-* fixtures found for %s", typeName)
+		}
+		t.Logf("validated %d negative fixtures for %s", invalidCount, typeName)
+	}
+}
+
+// TestHandAuthoredSchemas_DirectoryStructure verifies hand-authored
+// schemas have the expected directory structure.
+func TestHandAuthoredSchemas_DirectoryStructure(t *testing.T) {
+	schemasDir := repoSchemasDir()
+
+	for _, typeName := range handAuthoredSchemas {
+		t.Run(typeName, func(t *testing.T) {
+			typeDir := filepath.Join(schemasDir, typeName)
+
+			info, err := os.Stat(typeDir)
+			if err != nil {
+				t.Fatalf("type directory missing: %v", err)
+			}
+			if !info.IsDir() {
+				t.Fatal("expected directory, got file")
+			}
+
+			schemaPath := filepath.Join(typeDir, "v1.0.0.schema.json")
+			if _, err := os.Stat(schemaPath); err != nil {
+				t.Errorf("schema file missing: %v", err)
+			}
+
+			samplesDir := filepath.Join(typeDir, "samples")
+			if _, err := os.Stat(samplesDir); err != nil {
+				t.Errorf("samples directory missing: %v", err)
+			}
+
+			readmePath := filepath.Join(typeDir, "README.md")
+			if _, err := os.Stat(readmePath); err != nil {
+				t.Errorf("README.md missing: %v", err)
+			}
+		})
+	}
+}
+
 // isSchemaFile returns true if the path ends with .schema.json.
 func isSchemaFile(path string) bool {
 	return strings.HasSuffix(path, ".schema.json")

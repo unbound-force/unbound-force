@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file.
 Each entry follows the format: `- <change-name>: <summary>`.
 
+## Unreleased
+
+### Added
+- `/address-feedback` slash command for structured PR review
+  feedback triage (Spec: openspec/changes/address-feedback/)
+- `feedback-triage` JSON schema (v1.0.0) for capturing triage
+  decisions as artifacts (Spec: openspec/changes/address-feedback/)
+
 ## Recent Changes
 
 - opsx/setup-sandbox-tools: Added Podman and DevPod to `uf setup` (13→16 steps) and `uf doctor`. Setup installs Podman via Homebrew with macOS Podman machine initialization (best-effort, with timeout via gtimeout/timeout fallback), installs DevPod via Homebrew, and configures the DevPod Podman provider alias (`devpod provider add docker --name podman -o DOCKER_PATH=podman`). Corrected DevPod provider option from `DOCKER_COMMAND` to `DOCKER_PATH` across setup, doctor, and spec artifacts. Doctor adds conditional DevPod check group (only when DevPod is detected): binary presence, version >= 0.5.0, podman provider registration, and `.devcontainer/devcontainer.json` existence. Podman doctor checks: version >= 4.3, runtime health via `podman info` (platform-aware), and Docker-to-Podman shim detection. Refactored setup step dispatch from 16 repetitive if/else blocks to data-driven `stepDef` slice with `executeSteps()` loop (CRAP 32 → 2). Added `hasProvider()` helper with exact first-column name matching for provider detection. Added `podmanMachineInit()` with `initMachineWithTimeout()` helper for macOS post-install (tries gtimeout, timeout, then no-timeout fallback). 6 new doctor tests, 12 new setup tests. Modified files: `internal/setup/setup.go`, `internal/setup/setup_test.go`, `internal/doctor/checks.go`, `internal/doctor/doctor.go`, `internal/doctor/doctor_test.go`, `internal/doctor/environ.go`. Website issue: unbound-force/website#121.
