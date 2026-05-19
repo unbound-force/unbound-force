@@ -310,6 +310,18 @@ func buildPersistentRunArgs(opts Options, platform PlatformConfig, ctrName, volN
 	// UID/GID mapping (before image argument).
 	args = append(args, uidMappingArgs(opts)...)
 
+	// Working directory: podman cp copies the project
+	// directory (not its contents) into /workspace/,
+	// creating /workspace/<basename>/. Set --workdir and
+	// WORKSPACE so the entrypoint's cd "$WORKSPACE" lands
+	// in the project directory (D1, mirrors PR #123 fix
+	// for the ephemeral path in buildRunArgs).
+	projectSubdir := fmt.Sprintf("/workspace/%s",
+		filepath.Base(opts.ProjectDir))
+	args = append(args, "--workdir", projectSubdir)
+	args = append(args, "-e",
+		fmt.Sprintf("WORKSPACE=%s", projectSubdir))
+
 	// Image name (last argument).
 	args = append(args, opts.Image)
 
