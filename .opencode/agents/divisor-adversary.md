@@ -71,10 +71,14 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
   not exist regardless of how well it is pinned.
 - Are there known CVEs in direct or transitive dependencies?
 - Are CI/CD pipelines using pinned dependency versions (commit SHAs, not mutable tags)?
-- Are downloaded binaries verified by checksum (SHA256)?
-  A curl-to-execute pattern without checksum verification
-  is a direct supply chain attack vector — classify at
-  least as HIGH (worse than an unpinned action tag).
+- Are downloaded binaries content-integrity-verified
+  (SHA256 checksum)? HTTPS + pinned version provides
+  transport security and deterministic URLs but is
+  name-addressed, not content-addressed — the publisher
+  can replace the artifact under the same tag. Assess
+  severity based on context: a missing checksum in a
+  `--privileged` CI container is MEDIUM on its own;
+  compound with other factors per `severity.md`.
 - Are secrets in CI workflows properly scoped and never echoed?
 - **CI bot corroboration**: If Scorecard, Trivy,
   `github-advanced-security[bot]`, or other CI bots have
