@@ -520,6 +520,56 @@ For each CI failure classified in Step 3a, provide analysis:
 - Brief root cause analysis if determinable from the error output
 - Note that this will be addressed in Step 10 (fix-branch offer)
 
+#### 8e. CI Bot Annotation Cross-referencing
+
+Before proceeding to consolidation, cross-reference the
+inline comments from Step 7.5b against the findings
+generated in Steps 8a–8d. Identify comments from CI
+bots (Scorecard, Trivy, `github-advanced-security[bot]`,
+Dependabot, CodeQL, etc.) that address the same files
+or concern classes as your findings.
+
+For each match:
+- **Cite the bot finding** in your own finding as
+  corroborating evidence (e.g., "Scorecard flagged the
+  same step for unpinned dependencies").
+- **Use the bot finding to strengthen** your severity
+  classification — if a bot already flagged a concern
+  and your analysis confirms it, the combined evidence
+  supports a higher confidence level.
+- Do NOT dismiss bot findings as "related but different"
+  when they address the same class of problem (e.g.,
+  dependency integrity, secrets exposure, container
+  misconfig) in the same pipeline stage or file.
+
+#### 8f. Finding Consolidation
+
+After generating all findings from Steps 8a–8e, perform
+a consolidation pass before formatting output.
+
+**Consolidation rule**: Group findings that (a) affect
+the same component, pipeline stage, or file cluster,
+(b) share a common root cause, and (c) together produce
+a risk greater than any individual finding. Merge each
+group into a single finding.
+
+For each consolidated finding:
+1. Use the highest individual severity as the floor,
+   then apply the compound severity escalation rule from
+   `severity.md` to determine if the combined severity
+   is higher.
+2. List each contributing factor as a sub-point in the
+   finding description.
+3. Cite the original category (alignment, security,
+   constitution) for each contributing factor so
+   traceability is preserved.
+4. Present one unified recommendation that addresses
+   the root cause, not separate fixes for each symptom.
+
+**When NOT to consolidate**: Findings with independent
+root causes and independent blast radii MUST remain
+separate even if they appear in the same file.
+
 ### 9. Output Format
 
 Present findings in this structured format:

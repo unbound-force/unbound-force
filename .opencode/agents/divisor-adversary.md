@@ -64,9 +64,29 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 
 #### 2. Dependency CVEs and Supply Chain [PACK]
 
+- **Necessity before integrity**: Is each external tool,
+  binary, or library justified? Could the project's
+  existing toolchain cover the same use case? An
+  unnecessary dependency is attack surface that should
+  not exist regardless of how well it is pinned.
 - Are there known CVEs in direct or transitive dependencies?
 - Are CI/CD pipelines using pinned dependency versions (commit SHAs, not mutable tags)?
+- Are downloaded binaries content-integrity-verified
+  (SHA256 checksum)? HTTPS + pinned version provides
+  transport security and deterministic URLs but is
+  name-addressed, not content-addressed — the publisher
+  can replace the artifact under the same tag. Assess
+  severity based on context: a missing checksum in a
+  `--privileged` CI container is MEDIUM on its own;
+  compound with other factors per `severity.md`.
 - Are secrets in CI workflows properly scoped and never echoed?
+- **CI bot corroboration**: If Scorecard, Trivy,
+  `github-advanced-security[bot]`, or other CI bots have
+  already flagged dependency/supply-chain issues on the
+  same PR, treat their findings as corroborating evidence
+  for your own assessment — not as separate concerns.
+  Cite the bot finding and use it to strengthen severity
+  classification.
 - Check the convention pack's guidance for dependency security if available.
 
 #### 3. Error Handling and Resilience
