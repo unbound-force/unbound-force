@@ -1,0 +1,92 @@
+# Temporary WIF authentication test
+#
+# Validates that GitHub Actions in the unbound-force org can authenticate
+# to GCP via the ITPC centralized WIF pool (itpc-identity-pool).
+#
+# Prerequisites:
+# 1. unbound-force org registered with ITPC (done — cortega confirmed)
+# 2. roles/aiplatform.user granted on target GCP project to principalSet
+# 3. Org secrets: GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_PROJECT_ID
+#
+# Remove this workflow after validation.
+
+name: WIF Auth Test
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  wif-auth-test:
+    name: Test ITPC WIF Authentication
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud (ITPC WIF)
+        id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+
+      - name: Verify WIF identity
+        id: wif-check
+        run: |
+          echo "=== WIF Authentication Results ==="
+          echo ""
+          echo "Auth outcome: ${{ steps.auth.outcome }}"
+          echo "Project: ${{ steps.auth.outputs.project_id }}"
+          echo "ADC file: ${GOOGLE_APPLICATION_CREDENTIALS:-${CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE:-not set}}"
+          echo ""
+
+          if [[ -f "${CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE:-}" ]]; then
+            echo "ADC file exists: yes"
+            echo "ADC type: $(python3 -c "import json; print(json.load(open('${CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE}'))['type'])" 2>/dev/null || echo 'unknown')"
+          else
+            echo "ADC file exists: no"
+          fi
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify GCP API access
+        run: |
+          echo "=== GCP API Access Check ==="
+          echo ""
+
+          echo "--- gcloud auth list ---"
+          gcloud auth list
+          echo ""
+
+          echo "--- Vertex AI API check ---"
+          set +e
+          gcloud ai models list --project="${{ secrets.GCP_PROJECT_ID }}" --region=us-east5 --format="value(name)" 2>&1
+          AI_EXIT=$?
+          set -e
+
+          if [[ "${AI_EXIT}" -eq 0 ]]; then
+            echo "Vertex AI API: accessible"
+          else
+            echo "::warning::Vertex AI API returned exit ${AI_EXIT} (may need roles/aiplatform.user or Claude models not yet enabled)"
+          fi
+
+          echo ""
+          echo "--- Project metadata ---"
+          gcloud projects describe "${{ secrets.GCP_PROJECT_ID }}" --format="table(projectId,projectNumber,name)" 2>&1 || true
+
+  no-secrets-check:
+    name: Verify Skip Without Secrets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secret availability
+        env:
+          HAS_WIF: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER != '' }}
+        run: |
+          echo "WIF secret configured: ${HAS_WIF}"
+          if [[ "${HAS_WIF}" != "true" ]]; then
+            echo "No WIF secrets — this is expected for fork PRs or unconfigured repos."
+            echo "The wif-auth-test job will fail at the auth step if secrets are missing."
+          fi
