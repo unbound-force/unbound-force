@@ -1,15 +1,16 @@
 <!--
   SYNC IMPACT REPORT
   ==================
-  Version change: 1.0.0 → 1.1.0 (MINOR: new principle added)
+  Version change: 1.1.0 → 1.2.0 (MINOR: new principle added)
 
   Added principles:
-    - IV. Testability
+    - V. Security by Default
 
   Unchanged principles:
     - I. Autonomous Collaboration
     - II. Composability First
     - III. Observable Quality
+    - IV. Testability
 
   Unchanged sections:
     - Hero Constitution Alignment
@@ -19,7 +20,7 @@
   Templates requiring updates:
     ✅ .specify/templates/plan-template.md — no changes needed;
        Constitution Check section is generic and will align at
-       plan time using these four principles.
+       plan time using these five principles.
     ✅ .specify/templates/spec-template.md — no changes needed.
     ✅ .specify/templates/tasks-template.md — no changes needed.
     ✅ .specify/templates/checklist-template.md — no changes needed.
@@ -27,7 +28,9 @@
 
   Hero constitution alignment:
     ✅ Gaze v1.1.0 — Testability principle already matches.
-    ⚠  Website v1.0.0 — Will need to be reviewed for Testability alignment.
+    ⚠  Gaze v1.1.0 — Will need Principle V alignment review.
+    ⚠  Website v1.0.0 — Will need Testability + Principle V
+       alignment review.
 -->
 
 # Unbound Force Constitution
@@ -139,6 +142,43 @@ its own unverified complexity. Testability is a first-class governance
 concern because untestable code cannot be reliably verified by Gaze or
 any other automated mechanism. Unverified code cannot be trusted.
 
+### V. Security by Default
+
+Every component built within the Unbound Force ecosystem MUST treat
+security as a structural property, not a review-time afterthought.
+Supply chain integrity, input validation, and least privilege MUST be
+enforced by design.
+
+- **Supply chain integrity**: Dependencies MUST be verified by content
+  hash (SHA256 or equivalent) when downloaded outside a package manager's
+  built-in verification. Pinning by name and version alone (tag, semver)
+  is name-addressed and insufficient — publishers can replace artifacts
+  under the same tag. CI pipelines MUST pin actions and reusable
+  workflows by commit SHA, not mutable tags.
+- **Input validation**: All external inputs (user input, API payloads,
+  file contents, environment variables used as data, CI workflow inputs)
+  MUST be validated and sanitized before reaching any security-sensitive
+  operation (file path construction, shell execution, query building,
+  privilege decisions). Validation MUST reject unexpected types, lengths,
+  formats, and case variations.
+- **Least privilege**: Components MUST operate with the minimum
+  permissions necessary. CI containers SHOULD NOT run with `--privileged`
+  unless explicitly justified. Secrets MUST be scoped to the narrowest
+  context needed. File permissions MUST default to restrictive values
+  (0o644 for files, 0o755 for executables and directories).
+- **Dependency necessity**: Before adding an external dependency, the
+  adopter MUST justify that the project's existing toolchain cannot
+  cover the same use case. Every dependency is attack surface; the
+  default answer is "do not add."
+
+**Rationale**: AI agents make adding dependencies and generating code
+trivially fast. Without structural security guardrails, the attack
+surface of the system grows with each generation cycle. Security by
+Default ensures that supply chain integrity, input hygiene, and
+privilege boundaries are enforced before code reaches review — not
+discovered during review when anchoring bias and finding fragmentation
+can cause under-classification.
+
 ## Hero Constitution Alignment
 
 Every hero repository MUST maintain its own constitution in
@@ -148,7 +188,7 @@ org constitution — they MUST NOT contradict any org principle.
 - Hero constitutions MUST include a `parent_constitution` reference
   indicating which version of the Unbound Force org constitution
   they align with.
-- Hero constitutions MAY add principles beyond the three org
+- Hero constitutions MAY add principles beyond the five org
   principles, provided the additional principles do not contradict
   any org-level MUST rule.
 - When the org constitution is amended, all hero constitutions MUST
@@ -232,4 +272,4 @@ and project-specific guidance.
   implicit priority over another; resolution is context-dependent
   and requires written justification.
 
-**Version**: 1.1.0 | **Ratified**: 2026-02-25 | **Last Amended**: 2026-03-09
+**Version**: 1.2.0 | **Ratified**: 2026-02-25 | **Last Amended**: 2026-06-01

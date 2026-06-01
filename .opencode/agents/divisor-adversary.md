@@ -64,9 +64,29 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 
 #### 2. Dependency CVEs and Supply Chain [PACK]
 
+- **Necessity before integrity**: Is each external tool,
+  binary, or library justified? Could the project's
+  existing toolchain cover the same use case? An
+  unnecessary dependency is attack surface that should
+  not exist regardless of how well it is pinned.
 - Are there known CVEs in direct or transitive dependencies?
 - Are CI/CD pipelines using pinned dependency versions (commit SHAs, not mutable tags)?
+- Are downloaded binaries content-integrity-verified
+  (SHA256 checksum)? HTTPS + pinned version provides
+  transport security and deterministic URLs but is
+  name-addressed, not content-addressed — the publisher
+  can replace the artifact under the same tag. Assess
+  severity based on context: a missing checksum in a
+  `--privileged` CI container is MEDIUM on its own;
+  compound with other factors per `severity.md`.
 - Are secrets in CI workflows properly scoped and never echoed?
+- **CI bot corroboration**: If Scorecard, Trivy,
+  `github-advanced-security[bot]`, or other CI bots have
+  already flagged dependency/supply-chain issues on the
+  same PR, treat their findings as corroborating evidence
+  for your own assessment — not as separate concerns.
+  Cite the bot finding and use it to strengthen severity
+  classification.
 - Check the convention pack's guidance for dependency security if available.
 
 #### 3. Error Handling and Resilience
@@ -84,14 +104,40 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
 - Are there injection vectors (SQL, command, YAML, template) in user-facing inputs?
 - Does the code follow symlinks? If so, is there a guard against symlink loops or escape?
 
-#### 5. Language-Specific Security Patterns [PACK]
+#### 5. Adversarial Input Enumeration
+
+For each new input, parameter, secret, or
+configuration value introduced by the change:
+
+- **Enumerate valid and invalid values**: What is the
+  expected type, range, and format? What happens with
+  empty, null, wrong-type, wrong-case, excessively
+  long, or injection-payload values?
+- **Trace to security-sensitive operations**: Does the
+  input reach a file path, shell command, SQL query,
+  template, or privilege decision? Is it validated
+  before that point?
+- **Check bypass controls**: If the input controls a
+  security-relevant behavior (e.g., skipping a check,
+  disabling verification), is there an audit trail?
+  Can a misconfigured or malicious caller use the
+  input to silently disable a security layer?
+- **Assess severity by blast radius**: An unvalidated
+  input that controls a cosmetic label is LOW; one
+  that silently disables a security check is HIGH.
+
+This enumeration supplements the category-based checks
+above. Categories identify *classes* of vulnerability;
+input enumeration identifies *specific* vectors.
+
+#### 6. Language-Specific Security Patterns [PACK]
 
 > Skip this section if no convention pack is loaded from `.opencode/uf/packs/`.
 
 - Check the convention pack's `security_checks` section for language-specific vulnerability patterns.
 - Apply the pack's error handling conventions to the changed code.
 
-#### 6. Gate Tampering
+#### 7. Gate Tampering
 
 - Has this change removed or weakened any CI security control (`-race` flag, `govulncheck`, linter rules, pinned action SHAs, coverage thresholds)?
 - Flag as HIGH if a security-relevant gate was weakened without documented justification.
