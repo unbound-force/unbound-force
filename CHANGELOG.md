@@ -10,6 +10,33 @@ Each entry follows the format: `- <change-name>: <summary>`.
   feedback triage (Spec: openspec/changes/address-feedback/)
 - `feedback-triage` JSON schema (v1.0.0) for capturing triage
   decisions as artifacts (Spec: openspec/changes/address-feedback/)
+- Constitution Principle V (Security by Default) covering
+  supply chain integrity, input validation, least privilege,
+  and dependency necessity (version 1.1.0 → 1.2.0)
+  (Spec: openspec/changes/review-finding-consolidation/)
+- Compound Severity Escalation section in `severity.md` —
+  instructs personas to assess combined severity when
+  multiple findings share a root cause
+  (Spec: openspec/changes/review-finding-consolidation/)
+- Severity Calibration step (8g) in `/review-pr` — forces
+  re-reading `severity.md` definitions to counter anchoring
+  bias (Fixes #233)
+- Adversarial Input Enumeration in `divisor-adversary.md`
+  (new checklist item 5) and `/review-pr` Step 8b — per-input
+  threat analysis for new parameters/secrets
+  (Fixes #233)
+- Issue Suggestion Gap Detection in `/review-pr` Step 8a —
+  checks linked issues for unimplemented code suggestions
+  (Fixes #233)
+- CI Bot Annotation Cross-referencing (Step 8e) and Finding
+  Consolidation (Step 8f) in `/review-pr` — ingests bot
+  findings as corroborating evidence and merges related
+  findings by root cause (Fixes #228)
+- Cross-persona finding consolidation in `/review-council`
+  Code Review Step 3 and Spec Review Step 2 (Fixes #228)
+- Dependency necessity check and content-integrity
+  verification guidance in `divisor-adversary.md` Audit
+  Checklist item 2 (Fixes #228)
 
 ## Recent Changes
 

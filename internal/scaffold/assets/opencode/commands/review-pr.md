@@ -478,6 +478,18 @@ Compare the PR intent (title + description + linked spec + linked issues) agains
 - **Completeness**: Are there partial implementations that could leave the system in an inconsistent state?
 - **Drift detection**: Does the code do anything NOT described in the intent/spec? Flag undocumented behavioral changes.
 - **Issue criteria coverage**: For each acceptance criterion from linked issues (Step 6a), verify the code changes address it. Report uncovered criteria as MEDIUM findings with per-criterion status (COVERED / NOT COVERED / PARTIAL).
+- **Issue suggestion gap detection**: After checking
+  acceptance criteria, scan each linked issue body for
+  explicit code suggestions — fenced code blocks
+  (` ``` `), inline code spans, or clearly proposed
+  one-line fixes. For each suggestion found:
+  - Check whether the PR implemented the suggested
+    change.
+  - If implemented: no finding needed.
+  - If not implemented: flag as a finding. Assess
+    severity based on the risk of the gap (e.g., a
+    missing guard clause on a destructive operation is
+    HIGH; a missing style preference is LOW).
 
 #### 8b. Security Review
 
@@ -497,6 +509,27 @@ Examine the diff for security vulnerabilities that linters cannot catch:
 - **Privilege escalation**: Does the code grant permissions or elevate privileges without proper validation?
 - **Secrets and credentials**: Are there hardcoded secrets, tokens, or API keys? Are secrets logged or exposed in error messages?
 - **Dependency risks**: Are new dependencies well-maintained and from trusted sources?
+
+**Adversarial input enumeration**: For each new input,
+parameter, secret, or configuration value introduced
+by the PR, enumerate:
+- What values can a caller pass? (valid range, type,
+  format)
+- What happens for each edge case: empty string, wrong
+  type, wrong case (e.g., `"True"` vs `"true"`),
+  excessively long value, injection payload,
+  null/undefined?
+- Does validation exist? Is it sufficient? Is it
+  applied before the value reaches any security-
+  sensitive operation?
+- If the input controls a security-relevant behavior
+  (e.g., `skip_org_check`, `disable_verification`),
+  is there an audit trail when the input is used to
+  bypass a control?
+
+Flag missing or insufficient validation as findings
+with severity based on the blast radius of the
+unvalidated input.
 
 #### 8c. Constitution Compliance (AI-only items)
 
@@ -519,6 +552,82 @@ For each CI failure classified in Step 3a, provide analysis:
 - Confirm the failure also exists on the base branch
 - Brief root cause analysis if determinable from the error output
 - Note that this will be addressed in Step 10 (fix-branch offer)
+
+#### 8e. CI Bot Annotation Cross-referencing
+
+Before proceeding to consolidation, cross-reference the
+inline comments from Step 7.5b against the findings
+generated in Steps 8a–8d. Identify comments from CI
+bots (Scorecard, Trivy, `github-advanced-security[bot]`,
+Dependabot, CodeQL, etc.) that address the same files
+or concern classes as your findings.
+
+For each match:
+- **Cite the bot finding** in your own finding as
+  corroborating evidence (e.g., "Scorecard flagged the
+  same step for unpinned dependencies").
+- **Use the bot finding to strengthen** your severity
+  classification — if a bot already flagged a concern
+  and your analysis confirms it, the combined evidence
+  supports a higher confidence level.
+- Do NOT dismiss bot findings as "related but different"
+  when they address the same class of problem (e.g.,
+  dependency integrity, secrets exposure, container
+  misconfig) in the same pipeline stage or file.
+
+#### 8f. Finding Consolidation
+
+After generating all findings from Steps 8a–8e, perform
+a consolidation pass before formatting output.
+
+**Consolidation rule**: Group findings that (a) affect
+the same component, pipeline stage, or file cluster,
+(b) share a common root cause, and (c) together produce
+a risk greater than any individual finding. Merge each
+group into a single finding.
+
+For each consolidated finding:
+1. Use the highest individual severity as the floor,
+   then apply the compound severity escalation rule from
+   `severity.md` to determine if the combined severity
+   is higher.
+2. List each contributing factor as a sub-point in the
+   finding description.
+3. Cite the original category (alignment, security,
+   constitution) for each contributing factor so
+   traceability is preserved.
+4. Present one unified recommendation that addresses
+   the root cause, not separate fixes for each symptom.
+
+**When NOT to consolidate**: Findings with independent
+root causes and independent blast radii MUST remain
+separate even if they appear in the same file.
+
+#### 8g. Severity Calibration
+
+After consolidation, perform a calibration pass over
+every finding (including consolidated findings from
+Step 8f). This step counters anchoring bias — the
+tendency to compress all severities toward a "feels
+right" level based on overall PR quality impressions.
+
+For each finding:
+1. Re-read the `severity.md` definition for the
+   currently assigned severity level.
+2. Quote the specific definition clause or example
+   that matches the finding. If no clause matches,
+   check the adjacent severity levels (one above, one
+   below).
+3. If the quoted definition maps to a **different**
+   severity than the current assignment, adjust the
+   severity and note the change (e.g., "Reclassified
+   from MEDIUM to HIGH — matches HIGH definition:
+   'unpinned CI action on mutable tag'").
+4. If the definition confirms the current assignment,
+   retain it with the quoted evidence.
+
+The calibration pass MUST NOT introduce new findings
+— it only adjusts severity levels on existing findings.
 
 ### 9. Output Format
 
