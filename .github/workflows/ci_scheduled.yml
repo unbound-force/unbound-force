@@ -26,4 +26,4 @@ jobs:
       actions: read
       security-events: write
       id-token: write
-    uses: complytime/org-infra/.github/workflows/reusable_scheduled.yml@393ab96ded06d41472526fb46ebe7a7188c422d3 # v0.2.0
+    uses: complytime/org-infra/.github/workflows/reusable_scheduled.yml@cfd981e757253218aefb37c91969c32827e5c4b1 # v0.2.1
