@@ -12,7 +12,7 @@
 
 ## 1. Fix backup write error handling
 
-- [ ] 1.1 In `internal/config/init.go` at line 80, replace
+- [x] 1.1 In `internal/config/init.go` at line 80, replace
   `_ = opts.WriteFile(backupPath, existing, 0o644)` with a
   checked call that returns `fmt.Errorf("write backup
   config: %w", err)` on failure. Add a comment citing CS-006
@@ -20,9 +20,9 @@
 
 ## 2. Add regression test
 
-- [ ] 2.1 In `internal/config/init_test.go`, add import `"fmt"`
+- [x] 2.1 In `internal/config/init_test.go`, add import `"fmt"`
   if not present.
-- [ ] 2.2 [P] Add test `TestInitFile_BackupWriteFailureAbortsUpdate`
+- [x] 2.2 [P] Add test `TestInitFile_BackupWriteFailureAbortsUpdate`
   that: (a) creates a config missing the `gateway` section to
   trigger an update path; (b) injects a `WriteFile` stub via
   `InitOptions.WriteFile` that returns an error for `.bak`
@@ -32,7 +32,7 @@
 
 ## 3. Verify
 
-- [ ] 3.1 Run `go test -race -count=1 ./internal/config/...`
+- [x] 3.1 Run `go test -race -count=1 ./internal/config/...`
   and confirm all tests pass including the new regression test.
-- [ ] 3.2 Run `go vet ./internal/config/...` and confirm no
+- [x] 3.2 Run `go vet ./internal/config/...` and confirm no
   issues.

@@ -76,8 +76,13 @@ func InitFile(opts InitOptions) (*InitResult, error) {
 	}
 
 	// Back up the existing file before overwriting.
+	// Abort if the backup fails — proceeding without a valid
+	// backup risks data loss (CS-006: errors MUST NOT be
+	// silently swallowed).
 	backupPath := configPath + ".bak"
-	_ = opts.WriteFile(backupPath, existing, 0o644)
+	if err := opts.WriteFile(backupPath, existing, 0o644); err != nil {
+		return nil, fmt.Errorf("write backup config: %w", err)
+	}
 
 	if err := opts.WriteFile(configPath, []byte(updated), 0o644); err != nil {
 		return nil, fmt.Errorf("write updated config: %w", err)
