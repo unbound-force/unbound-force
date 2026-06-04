@@ -1007,7 +1007,7 @@ func ensureAGENTSmdPackSection(opts *Options, lang string) subToolResult {
 		}
 	}
 
-	packs := collectDeployedPacks(lang)
+	packs := collectDeployedPacks(lang, opts.TargetDir)
 	var section strings.Builder
 	section.WriteString("\n" + agentsmdPackMarker + "\n\n")
 	section.WriteString("This repository uses convention packs scaffolded by\n")
@@ -1058,8 +1058,11 @@ func replaceManagedBlock(content, marker, newBlock string) (string, bool) {
 const claudemdMarker = "# Unbound Force — managed by uf init"
 
 // buildCLAUDEmdBlock generates the managed block for CLAUDE.md.
-func buildCLAUDEmdBlock(lang string) string {
-	packs := collectDeployedPacks(lang)
+// root is the project root directory; when non-empty, empty custom
+// packs are excluded from the generated @-import lines (see
+// collectDeployedPacks).
+func buildCLAUDEmdBlock(lang, root string) string {
+	packs := collectDeployedPacks(lang, root)
 	var block strings.Builder
 	block.WriteString(claudemdMarker + "\n\n")
 	block.WriteString("@AGENTS.md\n")
@@ -1096,7 +1099,7 @@ func ensureCLAUDEmd(opts *Options, lang string) subToolResult {
 		}
 	}
 
-	newBlock := buildCLAUDEmdBlock(lang)
+	newBlock := buildCLAUDEmdBlock(lang, opts.TargetDir)
 
 	// Marker present -- check whether managed block needs updating.
 	if readErr == nil && strings.Contains(string(existing), claudemdMarker) {
@@ -1158,8 +1161,10 @@ func ensureCLAUDEmd(opts *Options, lang string) subToolResult {
 const cursorrulesMarker = claudemdMarker
 
 // buildCursorrulesBlock generates the managed block for .cursorrules.
-func buildCursorrulesBlock(lang string) string {
-	packs := collectDeployedPacks(lang)
+// root is the project root directory; when non-empty, empty custom
+// packs are excluded (see collectDeployedPacks).
+func buildCursorrulesBlock(lang, root string) string {
+	packs := collectDeployedPacks(lang, root)
 	var block strings.Builder
 	block.WriteString(cursorrulesMarker + "\n\n")
 	block.WriteString("This project follows coding conventions defined in\n")
@@ -1200,7 +1205,7 @@ func ensureCursorrules(opts *Options, lang string) subToolResult {
 		}
 	}
 
-	newBlock := buildCursorrulesBlock(lang)
+	newBlock := buildCursorrulesBlock(lang, opts.TargetDir)
 
 	// Marker present -- check whether managed block needs updating.
 	if readErr == nil && strings.Contains(string(existing), cursorrulesMarker) {
@@ -1257,13 +1262,41 @@ func ensureCursorrules(opts *Options, lang string) subToolResult {
 	}
 }
 
+// hasRuleContent reports whether the convention pack file at path
+// contains actual rule content — defined as at least one non-whitespace
+// character after the last occurrence of the placeholder sentinel
+// comment. If the file cannot be read (missing, permission error,
+// etc.), hasRuleContent returns true so that the caller fails open and
+// does not silently drop an import the user may have populated.
+func hasRuleContent(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return true // fail-open: unknown → include
+	}
+	const sentinel = "<!-- Add project-specific rules below this line -->"
+	content := string(data)
+	idx := strings.LastIndex(content, sentinel)
+	if idx < 0 {
+		return true // no sentinel → assume non-empty scaffold
+	}
+	after := content[idx+len(sentinel):]
+	return strings.TrimSpace(after) != ""
+}
+
 // collectDeployedPacks returns the list of convention pack filenames
 // that would be deployed for the given resolved language. The list
 // always includes default.md, default-custom.md, severity.md,
 // content.md, and content-custom.md. Language-specific packs are
 // added when lang is not "default".
-func collectDeployedPacks(lang string) []string {
-	packs := []string{
+//
+// When root is non-empty, each *-custom.md entry is checked with
+// hasRuleContent against the file on disk at
+// <root>/.opencode/uf/packs/<name>. Empty stubs are omitted from the
+// returned list. Non-custom packs are always included regardless of
+// root. When root is empty the function behaves as before (all packs
+// returned, no filesystem access).
+func collectDeployedPacks(lang, root string) []string {
+	candidates := []string{
 		"default.md",
 		"default-custom.md",
 		"severity.md",
@@ -1271,7 +1304,20 @@ func collectDeployedPacks(lang string) []string {
 		"content-custom.md",
 	}
 	if lang != "" && lang != "default" {
-		packs = append(packs, lang+".md", lang+"-custom.md")
+		candidates = append(candidates, lang+".md", lang+"-custom.md")
+	}
+	if root == "" {
+		return candidates
+	}
+	packs := make([]string, 0, len(candidates))
+	for _, name := range candidates {
+		if strings.HasSuffix(name, "-custom.md") {
+			path := filepath.Join(root, ".opencode", "uf", "packs", name)
+			if !hasRuleContent(path) {
+				continue // skip empty stub
+			}
+		}
+		packs = append(packs, name)
 	}
 	return packs
 }

@@ -4811,7 +4811,7 @@ func TestReplaceManagedBlock_PreservesPrefix(t *testing.T) {
 func TestEnsureCLAUDEmd_AlreadyConfigured(t *testing.T) {
 	dir := t.TempDir()
 
-	existing := buildCLAUDEmdBlock("go")
+	existing := buildCLAUDEmdBlock("go", "")
 	claudePath := filepath.Join(dir, "CLAUDE.md")
 	if err := os.WriteFile(claudePath, []byte(existing), 0o644); err != nil {
 		t.Fatalf("write CLAUDE.md: %v", err)
@@ -5016,7 +5016,7 @@ func TestEnsureCursorrules_ExistingWithoutMarker(t *testing.T) {
 func TestEnsureCursorrules_AlreadyConfigured(t *testing.T) {
 	dir := t.TempDir()
 
-	existing := buildCursorrulesBlock("go")
+	existing := buildCursorrulesBlock("go", "")
 	rulesPath := filepath.Join(dir, ".cursorrules")
 	if err := os.WriteFile(rulesPath, []byte(existing), 0o644); err != nil {
 		t.Fatalf("write .cursorrules: %v", err)
@@ -5145,7 +5145,7 @@ func TestEnsureCursorrules_Idempotent(t *testing.T) {
 }
 
 func TestCollectDeployedPacks_Go(t *testing.T) {
-	packs := collectDeployedPacks("go")
+	packs := collectDeployedPacks("go", "")
 
 	expected := map[string]bool{
 		"default.md":        true,
@@ -5168,7 +5168,7 @@ func TestCollectDeployedPacks_Go(t *testing.T) {
 }
 
 func TestCollectDeployedPacks_TypeScript(t *testing.T) {
-	packs := collectDeployedPacks("typescript")
+	packs := collectDeployedPacks("typescript", "")
 
 	found := false
 	for _, p := range packs {
@@ -5182,7 +5182,7 @@ func TestCollectDeployedPacks_TypeScript(t *testing.T) {
 }
 
 func TestCollectDeployedPacks_Default(t *testing.T) {
-	packs := collectDeployedPacks("default")
+	packs := collectDeployedPacks("default", "")
 
 	for _, p := range packs {
 		if p == "default.md" || p == "default-custom.md" ||
@@ -5194,6 +5194,274 @@ func TestCollectDeployedPacks_Default(t *testing.T) {
 	}
 	if len(packs) != 5 {
 		t.Errorf("expected 5 packs for default lang, got %d", len(packs))
+	}
+}
+
+// --- hasRuleContent tests ---
+
+func TestHasRuleContent_EmptyStub(t *testing.T) {
+	dir := t.TempDir()
+	stub := `---
+pack_id: default-custom
+language: Any
+version: 1.0.0
+---
+
+# Custom Rules: Default
+
+Project-specific conventions.
+
+## Custom Rules
+
+<!-- Add project-specific rules below this line -->`
+	path := filepath.Join(dir, "default-custom.md")
+	if err := os.WriteFile(path, []byte(stub), 0o644); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+
+	if hasRuleContent(path) {
+		t.Error("expected false for empty stub, got true")
+	}
+}
+
+func TestHasRuleContent_WhitespaceOnlyAfterSentinel(t *testing.T) {
+	dir := t.TempDir()
+	stub := "<!-- Add project-specific rules below this line -->\n\n   \n\t\n"
+	path := filepath.Join(dir, "go-custom.md")
+	if err := os.WriteFile(path, []byte(stub), 0o644); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+
+	if hasRuleContent(path) {
+		t.Error("expected false for whitespace-only after sentinel, got true")
+	}
+}
+
+func TestHasRuleContent_PopulatedFile(t *testing.T) {
+	dir := t.TempDir()
+	populated := `---
+pack_id: go-custom
+language: Go
+version: 1.0.0
+---
+
+## Custom Rules
+
+<!-- Add project-specific rules below this line -->
+
+## CR-001 [MUST] Use structured logging
+
+All log calls MUST use charmbracelet/log.
+`
+	path := filepath.Join(dir, "go-custom.md")
+	if err := os.WriteFile(path, []byte(populated), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	if !hasRuleContent(path) {
+		t.Error("expected true for populated file, got false")
+	}
+}
+
+func TestHasRuleContent_NoSentinel(t *testing.T) {
+	dir := t.TempDir()
+	// File with content but no sentinel — treat as non-empty (fail-open).
+	path := filepath.Join(dir, "content-custom.md")
+	if err := os.WriteFile(path, []byte("some content"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	if !hasRuleContent(path) {
+		t.Error("expected true (no sentinel → fail-open), got false")
+	}
+}
+
+func TestHasRuleContent_MissingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nonexistent.md")
+
+	if !hasRuleContent(path) {
+		t.Error("expected true for missing file (fail-open), got false")
+	}
+}
+
+// --- collectDeployedPacks with root tests ---
+
+func TestCollectDeployedPacks_WithRoot_AllEmpty(t *testing.T) {
+	dir := t.TempDir()
+	packsDir := filepath.Join(dir, ".opencode", "uf", "packs")
+	if err := os.MkdirAll(packsDir, 0o755); err != nil {
+		t.Fatalf("mkdir packs: %v", err)
+	}
+
+	sentinel := "<!-- Add project-specific rules below this line -->"
+	stubs := []string{"default-custom.md", "content-custom.md", "go-custom.md"}
+	for _, name := range stubs {
+		if err := os.WriteFile(filepath.Join(packsDir, name), []byte(sentinel), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	packs := collectDeployedPacks("go", dir)
+
+	for _, p := range packs {
+		if strings.HasSuffix(p, "-custom.md") {
+			t.Errorf("empty custom pack %q should be excluded, but was included", p)
+		}
+	}
+	// Non-custom packs must still be present.
+	required := []string{"default.md", "severity.md", "content.md", "go.md"}
+	packSet := make(map[string]bool, len(packs))
+	for _, p := range packs {
+		packSet[p] = true
+	}
+	for _, r := range required {
+		if !packSet[r] {
+			t.Errorf("required pack %q missing from result", r)
+		}
+	}
+}
+
+func TestCollectDeployedPacks_WithRoot_OnePopulated(t *testing.T) {
+	dir := t.TempDir()
+	packsDir := filepath.Join(dir, ".opencode", "uf", "packs")
+	if err := os.MkdirAll(packsDir, 0o755); err != nil {
+		t.Fatalf("mkdir packs: %v", err)
+	}
+
+	sentinel := "<!-- Add project-specific rules below this line -->"
+	// default-custom and content-custom are empty stubs.
+	for _, name := range []string{"default-custom.md", "content-custom.md"} {
+		if err := os.WriteFile(filepath.Join(packsDir, name), []byte(sentinel), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	// go-custom is populated.
+	populated := sentinel + "\n\n## CR-001 [MUST] Example rule\n"
+	if err := os.WriteFile(filepath.Join(packsDir, "go-custom.md"), []byte(populated), 0o644); err != nil {
+		t.Fatalf("write go-custom.md: %v", err)
+	}
+
+	packs := collectDeployedPacks("go", dir)
+
+	packSet := make(map[string]bool, len(packs))
+	for _, p := range packs {
+		packSet[p] = true
+	}
+	if !packSet["go-custom.md"] {
+		t.Error("go-custom.md should be included (populated)")
+	}
+	if packSet["default-custom.md"] {
+		t.Error("default-custom.md should be excluded (empty)")
+	}
+	if packSet["content-custom.md"] {
+		t.Error("content-custom.md should be excluded (empty)")
+	}
+}
+
+func TestCollectDeployedPacks_WithRoot_EmptyRootFallback(t *testing.T) {
+	// When root is "", all packs including empty custom packs are returned
+	// (backward-compatible behaviour; no filesystem access).
+	packs := collectDeployedPacks("go", "")
+
+	packSet := make(map[string]bool, len(packs))
+	for _, p := range packs {
+		packSet[p] = true
+	}
+	for _, name := range []string{"default-custom.md", "content-custom.md", "go-custom.md"} {
+		if !packSet[name] {
+			t.Errorf("expected %q in packs when root is empty, got: %v", name, packs)
+		}
+	}
+}
+
+// --- ensureCLAUDEmd with empty custom packs tests ---
+
+func TestEnsureCLAUDEmd_EmptyCustomPacksOmitted(t *testing.T) {
+	dir := t.TempDir()
+	packsDir := filepath.Join(dir, ".opencode", "uf", "packs")
+	if err := os.MkdirAll(packsDir, 0o755); err != nil {
+		t.Fatalf("mkdir packs: %v", err)
+	}
+
+	sentinel := "<!-- Add project-specific rules below this line -->"
+	for _, name := range []string{"default-custom.md", "content-custom.md", "go-custom.md"} {
+		if err := os.WriteFile(filepath.Join(packsDir, name), []byte(sentinel), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+	}
+
+	result := ensureCLAUDEmd(opts, "go")
+	if result.action == "failed" {
+		t.Fatalf("ensureCLAUDEmd failed: %s", result.detail)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	content := string(data)
+
+	for _, name := range []string{"default-custom.md", "content-custom.md", "go-custom.md"} {
+		if strings.Contains(content, name) {
+			t.Errorf("empty custom pack %q should not appear in CLAUDE.md, but found it", name)
+		}
+	}
+	// Non-custom packs must be present.
+	for _, name := range []string{"default.md", "severity.md", "content.md", "go.md"} {
+		if !strings.Contains(content, name) {
+			t.Errorf("required pack %q missing from CLAUDE.md", name)
+		}
+	}
+}
+
+func TestEnsureCLAUDEmd_PopulatedCustomPackIncluded(t *testing.T) {
+	dir := t.TempDir()
+	packsDir := filepath.Join(dir, ".opencode", "uf", "packs")
+	if err := os.MkdirAll(packsDir, 0o755); err != nil {
+		t.Fatalf("mkdir packs: %v", err)
+	}
+
+	sentinel := "<!-- Add project-specific rules below this line -->"
+	// default-custom empty, go-custom populated.
+	if err := os.WriteFile(filepath.Join(packsDir, "default-custom.md"), []byte(sentinel), 0o644); err != nil {
+		t.Fatalf("write default-custom.md: %v", err)
+	}
+	populated := sentinel + "\n\n## CR-001 [MUST] rule\n"
+	if err := os.WriteFile(filepath.Join(packsDir, "go-custom.md"), []byte(populated), 0o644); err != nil {
+		t.Fatalf("write go-custom.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(packsDir, "content-custom.md"), []byte(sentinel), 0o644); err != nil {
+		t.Fatalf("write content-custom.md: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+	}
+
+	result := ensureCLAUDEmd(opts, "go")
+	if result.action == "failed" {
+		t.Fatalf("ensureCLAUDEmd failed: %s", result.detail)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "go-custom.md") {
+		t.Error("go-custom.md should appear in CLAUDE.md (populated)")
+	}
+	if strings.Contains(content, "default-custom.md") {
+		t.Error("default-custom.md should not appear in CLAUDE.md (empty)")
 	}
 }
 
