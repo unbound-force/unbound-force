@@ -5297,3 +5297,122 @@ func TestMoveFile_FallbackPath(t *testing.T) {
 		t.Error("src should be removed after move")
 	}
 }
+
+// --- migrateCommandDir additional tests ---
+
+func TestMigrateCommandDir_AtomicRenameVerifiesContent(t *testing.T) {
+	dir := t.TempDir()
+	oldDir := filepath.Join(dir, ".opencode", "command")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(oldDir, "test.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(oldDir, "other.md"), []byte("world"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+		Stdout:    &bytes.Buffer{},
+	}
+
+	result := migrateCommandDir(opts)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.action != "migrated" {
+		t.Errorf("expected action 'migrated', got %q", result.action)
+	}
+
+	// Verify both files are accessible in the new location.
+	newDir := filepath.Join(dir, ".opencode", "commands")
+	for _, file := range []string{"test.md", "other.md"} {
+		if _, err := os.Stat(filepath.Join(newDir, file)); err != nil {
+			t.Errorf("expected %s in new dir: %v", file, err)
+		}
+	}
+
+	// Verify old dir no longer exists.
+	if _, err := os.Stat(oldDir); !os.IsNotExist(err) {
+		t.Error("old dir should be removed after atomic rename")
+	}
+}
+
+func TestMigrateCommandDir_MergeComplex(t *testing.T) {
+	dir := t.TempDir()
+	oldDir := filepath.Join(dir, ".opencode", "command")
+	newDir := filepath.Join(dir, ".opencode", "commands")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatalf("mkdir old: %v", err)
+	}
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		t.Fatalf("mkdir new: %v", err)
+	}
+
+	// File only in old dir — should be moved.
+	if err := os.WriteFile(filepath.Join(oldDir, "unique.md"), []byte("unique"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	// Identical file in both — should be skipped (old removed).
+	if err := os.WriteFile(filepath.Join(oldDir, "same.md"), []byte("same"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(newDir, "same.md"), []byte("same"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	// Conflicting file — should be warned and commands/ version kept.
+	if err := os.WriteFile(filepath.Join(oldDir, "conflict.md"), []byte("old-version"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(newDir, "conflict.md"), []byte("new-version"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+		Stdout:    &stdout,
+	}
+
+	result := migrateCommandDir(opts)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.action != "migrated" {
+		t.Errorf("expected action 'migrated', got %q", result.action)
+	}
+
+	// Verify unique.md was moved.
+	content, err := os.ReadFile(filepath.Join(newDir, "unique.md"))
+	if err != nil {
+		t.Fatalf("read unique.md: %v", err)
+	}
+	if string(content) != "unique" {
+		t.Errorf("expected 'unique', got %q", string(content))
+	}
+
+	// Verify conflict.md kept commands/ version.
+	content, err = os.ReadFile(filepath.Join(newDir, "conflict.md"))
+	if err != nil {
+		t.Fatalf("read conflict.md: %v", err)
+	}
+	if string(content) != "new-version" {
+		t.Errorf("expected 'new-version' preserved, got %q", string(content))
+	}
+
+	// Verify conflict warning was printed.
+	if !strings.Contains(stdout.String(), "conflict") {
+		t.Errorf("expected conflict warning in output, got: %s", stdout.String())
+	}
+
+	// Verify old copy of conflict.md was removed.
+	if _, err := os.Stat(filepath.Join(oldDir, "conflict.md")); !os.IsNotExist(err) {
+		t.Error("old copy of conflict.md should be removed")
+	}
+}

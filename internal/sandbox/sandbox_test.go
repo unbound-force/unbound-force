@@ -3126,6 +3126,100 @@ func TestDetectPlatform_LinuxAlwaysSupported(t *testing.T) {
 	}
 }
 
+func TestDetectPlatform_ReturnsPlatformFields(t *testing.T) {
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		// Allow the macOS UID mapping probe.
+		if name == "podman" && len(args) > 0 && args[0] == "run" {
+			return []byte("1000\n"), nil
+		}
+		// Allow getenforce on Linux.
+		if name == "getenforce" {
+			return []byte("Disabled\n"), nil
+		}
+		return []byte(""), nil
+	}
+
+	p := DetectPlatform(opts)
+
+	// Must always set OS and Arch from runtime.
+	if p.OS != runtime.GOOS {
+		t.Errorf("expected OS=%q, got %q", runtime.GOOS, p.OS)
+	}
+	if p.Arch != runtime.GOARCH {
+		t.Errorf("expected Arch=%q, got %q", runtime.GOARCH, p.Arch)
+	}
+}
+
+func TestDetectPlatform_SELinuxReadFileError(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("SELinux path only runs on Linux")
+	}
+	opts := testOpts()
+	// ReadFile returns error for selinux config — SELinux
+	// should be false (default).
+	opts.ReadFile = func(path string) ([]byte, error) {
+		return nil, fmt.Errorf("permission denied")
+	}
+
+	p := DetectPlatform(opts)
+	if p.SELinux {
+		t.Error("expected SELinux=false when selinux config unreadable")
+	}
+}
+
+func TestDetectPlatform_SELinuxGetenforceError(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("SELinux path only runs on Linux")
+	}
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if path == "/etc/selinux/config" {
+			return []byte("SELINUX=enforcing\n"), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "getenforce" {
+			return nil, fmt.Errorf("command not found")
+		}
+		return []byte(""), nil
+	}
+
+	p := DetectPlatform(opts)
+	// Config says enforcing, but getenforce fails — should
+	// be false (fail-safe).
+	if p.SELinux {
+		t.Error("expected SELinux=false when getenforce fails")
+	}
+}
+
+func TestDetectPlatform_SELinuxPermissive(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("SELinux path only runs on Linux")
+	}
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if path == "/etc/selinux/config" {
+			return []byte("SELINUX=enforcing\n"), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "getenforce" {
+			return []byte("Permissive\n"), nil
+		}
+		return []byte(""), nil
+	}
+
+	p := DetectPlatform(opts)
+	// Config says enforcing, but runtime is Permissive — should
+	// be false.
+	if p.SELinux {
+		t.Error("expected SELinux=false when runtime is Permissive")
+	}
+}
+
 // --- Start() integration with Platform injection (8.13, 8.14) ---
 
 func TestStart_DarwinUIDMapNotSupported(t *testing.T) {

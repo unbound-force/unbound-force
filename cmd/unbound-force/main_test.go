@@ -180,6 +180,128 @@ func TestVersionCmd_Output(t *testing.T) {
 
 // TestRootCmd_HelpOutput is a regression guard for FR-004: the help
 // output must show the alias relationship and correct usage line.
+// --- newDoctorCmd tests ---
+
+func TestNewDoctorCmd_DefaultFormatFlag(t *testing.T) {
+	cmd := newDoctorCmd()
+
+	formatFlag := cmd.Flag("format")
+	if formatFlag == nil {
+		t.Fatal("expected 'format' flag to be registered")
+	}
+	if formatFlag.DefValue != "text" {
+		t.Errorf("expected format default 'text', got %q", formatFlag.DefValue)
+	}
+}
+
+func TestNewDoctorCmd_InvalidFormatRejected(t *testing.T) {
+	cmd := newDoctorCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"--format", "xml"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid format 'xml'")
+	}
+	if !strings.Contains(err.Error(), "invalid format") {
+		t.Errorf("expected 'invalid format' error, got: %s", err.Error())
+	}
+}
+
+func TestNewDoctorCmd_AcceptsTextFormat(t *testing.T) {
+	// Use a temp dir with no tools installed to avoid
+	// real system probing. The doctor command may return
+	// an error (failing checks) but should NOT reject
+	// the format flag.
+	dir := t.TempDir()
+	cmd := newDoctorCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"--format", "text", "--dir", dir})
+
+	// Execute — we expect it to run (format accepted).
+	// It may or may not return an error depending on checks.
+	_ = cmd.Execute()
+
+	// If it got past the format validation, output should
+	// contain something (header, check results, etc.)
+	if buf.Len() == 0 {
+		t.Error("expected some output from doctor command with text format")
+	}
+}
+
+func TestNewDoctorCmd_AcceptsJSONFormat(t *testing.T) {
+	dir := t.TempDir()
+	cmd := newDoctorCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"--format", "json", "--dir", dir})
+
+	_ = cmd.Execute()
+
+	output := buf.String()
+	// JSON format should produce a JSON object.
+	if !strings.Contains(output, "{") {
+		t.Errorf("expected JSON output, got: %s", output)
+	}
+}
+
+func TestNewDoctorCmd_DirFlag(t *testing.T) {
+	cmd := newDoctorCmd()
+
+	dirFlag := cmd.Flag("dir")
+	if dirFlag == nil {
+		t.Fatal("expected 'dir' flag to be registered")
+	}
+	if dirFlag.DefValue != "." {
+		t.Errorf("expected dir default '.', got %q", dirFlag.DefValue)
+	}
+}
+
+func TestRunDoctor_TextFormat(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	// runDoctor with a clean temp dir — no tools to find.
+	// This exercises the text formatting path (lines 155-163).
+	_ = runDoctor(doctorParams{
+		targetDir: dir,
+		format:    "text",
+		stdout:    &buf,
+	})
+
+	output := buf.String()
+	// Text output should contain some check results.
+	if buf.Len() == 0 {
+		t.Error("expected non-empty text output from runDoctor")
+	}
+	// Verify text format is used (not JSON).
+	if strings.HasPrefix(strings.TrimSpace(output), "{") {
+		t.Error("expected text format, got JSON-like output")
+	}
+}
+
+func TestRunDoctor_JSONFormat(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	_ = runDoctor(doctorParams{
+		targetDir: dir,
+		format:    "json",
+		stdout:    &buf,
+	})
+
+	output := buf.String()
+	// JSON format should produce a JSON object.
+	if !strings.Contains(output, "{") {
+		t.Errorf("expected JSON output from runDoctor, got: %s", output)
+	}
+}
+
 func TestRootCmd_HelpOutput(t *testing.T) {
 	root := &cobra.Command{
 		Use:   "unbound-force",

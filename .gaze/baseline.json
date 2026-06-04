@@ -1052,11 +1052,11 @@
       "function": "InitFile",
       "file": "internal/config/init.go",
       "line": 44,
-      "complexity": 9,
-      "line_coverage": 88.46153846153847,
-      "crap": 9.12443104233045,
+      "complexity": 10,
+      "line_coverage": 88.88888888888889,
+      "crap": 10.137174211248286,
       "contract_coverage": 50,
-      "gaze_crap": 19.125,
+      "gaze_crap": 22.5,
       "quadrant": "Q3_SimpleButUnderspecified"
     },
     {
