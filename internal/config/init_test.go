@@ -3,6 +3,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,6 +236,71 @@ func TestInitFile_BackupCreated(t *testing.T) {
 	backupPath := filepath.Join(ufDir, "config.yaml.bak")
 	if _, err := os.Stat(backupPath); err != nil {
 		t.Errorf("backup file not created: %v", err)
+	}
+}
+
+func TestInitFile_BackupWriteFailureAbortsUpdate(t *testing.T) {
+	dir := t.TempDir()
+	ufDir := filepath.Join(dir, ".uf")
+	if err := os.MkdirAll(ufDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a config missing the "gateway" section so that
+	// the update path (and therefore the backup write) runs.
+	tmpl := Template()
+	lines := strings.Split(tmpl, "\n")
+	var filtered []string
+	skip := false
+	for _, line := range lines {
+		if strings.Contains(line, "─── Gateway") {
+			skip = true
+			continue
+		}
+		if skip && strings.HasPrefix(line, "# ───") {
+			skip = false
+		}
+		if !skip {
+			filtered = append(filtered, line)
+		}
+	}
+	originalContent := strings.Join(filtered, "\n")
+	configPath := filepath.Join(ufDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(originalContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Inject a WriteFile stub that fails for .bak paths.
+	failOnBackup := func(path string, data []byte, perm os.FileMode) error {
+		if strings.HasSuffix(path, ".bak") {
+			return fmt.Errorf("simulated disk full")
+		}
+		return writeFileAtomic(path, data, perm)
+	}
+
+	_, err := InitFile(InitOptions{
+		ProjectDir: dir,
+		WriteFile:  failOnBackup,
+	})
+	if err == nil {
+		t.Fatal("expected error when backup write fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "write backup config") {
+		t.Errorf("error %q does not contain 'write backup config'", err.Error())
+	}
+
+	// The original config MUST NOT have been modified.
+	got, readErr := os.ReadFile(configPath)
+	if readErr != nil {
+		t.Fatalf("could not read config after failed update: %v", readErr)
+	}
+	if string(got) != originalContent {
+		t.Error("original config was modified despite backup failure")
+	}
+
+	// No .bak file should exist.
+	if _, statErr := os.Stat(configPath + ".bak"); statErr == nil {
+		t.Error("backup file must not exist after backup write failure")
 	}
 }
 
