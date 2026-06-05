@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/unbound-force/unbound-force/internal/config"
 )
@@ -1291,96 +1292,175 @@ func initSubTools(opts *Options) []subToolResult {
 		opts.WriteFile = os.WriteFile
 	}
 
-	var results []subToolResult
-
 	// NOTE: .uf/config.yaml is no longer created by uf init.
 	// Users create it via `uf config init` when they need
 	// customization. See internal/config/ package.
 
-	// Dewey: init + index if binary available and workspace absent.
-	// Force re-index if workspace exists and Force is set.
-	if _, err := opts.LookPath("dewey"); err == nil {
-		deweyDir := filepath.Join(opts.TargetDir, ".uf", "dewey")
-		if _, statErr := os.Stat(deweyDir); os.IsNotExist(statErr) {
-			// First run: initialize workspace and build index.
-			_, _ = fmt.Fprintf(opts.Stdout, "  Initializing Dewey workspace...\n")
-			if _, initErr := opts.ExecCmd("dewey", "init"); initErr != nil {
-				results = append(results, subToolResult{
-					name: ".uf/dewey/", action: "failed",
-					detail: "dewey init failed"})
-				// Skip index if init failed, but still configure opencode.json.
-				results = append(results, configureOpencodeJSON(opts)...)
-				return results
-			}
-			results = append(results, subToolResult{
-				name: ".uf/dewey/", action: "initialized"})
+	// Load config to respect setup.tools.*.method: skip.
+	// Must happen here (not just in configureOpencodeJSON) so that
+	// skipped tools are never init'd or indexed.
+	// Error ignored: Load returns compiled defaults on missing or
+	// malformed config files — graceful degradation by design.
+	cfg, _ := config.Load(config.LoadOptions{
+		ProjectDir: opts.TargetDir,
+		ReadFile:   opts.ReadFile,
+	})
 
-			// Auto-detect sibling repos for Dewey sources config.
-			// Runs after dewey init creates default sources.yaml
-			// and before dewey index ingests all sources.
-			if sr := generateDeweySources(opts, false); sr != nil {
-				results = append(results, *sr)
-			}
+	// shouldSkipTool returns true when the user has configured
+	// setup.tools.<name>.method: skip in .uf/config.yaml (or
+	// the user-level config).
+	shouldSkipTool := func(name string) bool {
+		if tc, ok := cfg.Setup.Tools[name]; ok && tc.Method == "skip" {
+			return true
+		}
+		return false
+	}
 
-			_, _ = fmt.Fprintf(opts.Stdout, "  Indexing Dewey sources (this may take a moment)...\n")
-			if _, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
-				results = append(results, subToolResult{
-					name: "dewey index", action: "failed",
-					detail: "dewey index failed"})
-			} else {
-				results = append(results, subToolResult{
-					name: "dewey index", action: "completed"})
-			}
-		} else if opts.Force {
-			// Force: regenerate sources.yaml + re-index.
-			// Regenerate first so the updated sources config
-			// (e.g., recursive: false on disk-org) is used for
-			// the re-index. Bypasses the customization check.
-			if sr := generateDeweySources(opts, true); sr != nil {
-				results = append(results, *sr)
-			}
-			_, _ = fmt.Fprintf(opts.Stdout, "  Re-indexing Dewey sources...\n")
-			if _, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
-				results = append(results, subToolResult{
-					name: "dewey index", action: "failed",
-					detail: "dewey index failed"})
-			} else {
-				results = append(results, subToolResult{
-					name: "dewey index", action: "re-indexed"})
-			}
+	// Concurrent sub-tool initialization (D1, D2 from design.md).
+	//
+	// Group A (Dewey): dewey init -> generateDeweySources ->
+	//   dewey index — sequential within its goroutine.
+	// Group B (others): replicator, specify, openspec, gaze —
+	//   each in its own goroutine, all concurrent with Group A.
+	//
+	// sync.WaitGroup coordinates completion; sync.Mutex guards
+	// the shared results slice. Individual tool failures are
+	// non-fatal (FR-005) — all tools attempt init regardless.
+
+	var (
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		results []subToolResult
+	)
+
+	// appendResult safely appends to the shared results slice.
+	appendResult := func(r subToolResult) {
+		mu.Lock()
+		results = append(results, r)
+		mu.Unlock()
+	}
+
+	// appendResults safely appends multiple results.
+	appendResults := func(rs []subToolResult) {
+		mu.Lock()
+		results = append(results, rs...)
+		mu.Unlock()
+	}
+
+	// logf safely writes to opts.Stdout from any goroutine.
+	// opts.Stdout may be a bytes.Buffer in tests, which is
+	// not goroutine-safe.
+	logf := func(format string, a ...interface{}) {
+		mu.Lock()
+		_, _ = fmt.Fprintf(opts.Stdout, format, a...)
+		mu.Unlock()
+	}
+
+	// --- Group A: Dewey (sequential within goroutine) ---
+
+	if !shouldSkipTool("dewey") {
+		if _, err := opts.LookPath("dewey"); err == nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				deweyDir := filepath.Join(opts.TargetDir, ".uf", "dewey")
+				if _, statErr := os.Stat(deweyDir); os.IsNotExist(statErr) {
+					// First run: initialize workspace and build index.
+					logf("  Initializing Dewey workspace...\n")
+					if _, initErr := opts.ExecCmd("dewey", "init"); initErr != nil {
+						appendResult(subToolResult{
+							name: ".uf/dewey/", action: "failed",
+							detail: "dewey init failed"})
+						// Skip index if init failed; other tools
+						// continue independently (FR-005).
+						return
+					}
+					appendResult(subToolResult{
+						name: ".uf/dewey/", action: "initialized"})
+
+					// Auto-detect sibling repos for Dewey sources config.
+					// Runs after dewey init creates default sources.yaml
+					// and before dewey index ingests all sources.
+					if sr := generateDeweySources(opts, false); sr != nil {
+						appendResult(*sr)
+					}
+
+					logf("  Indexing Dewey sources (this may take a moment)...\n")
+					if _, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
+						appendResult(subToolResult{
+							name: "dewey index", action: "failed",
+							detail: "dewey index failed"})
+					} else {
+						appendResult(subToolResult{
+							name: "dewey index", action: "completed"})
+					}
+				} else if opts.Force {
+					// Force: regenerate sources.yaml + re-index.
+					// Regenerate first so the updated sources config
+					// (e.g., recursive: false on disk-org) is used for
+					// the re-index. Bypasses the customization check.
+					if sr := generateDeweySources(opts, true); sr != nil {
+						appendResult(*sr)
+					}
+					logf("  Re-indexing Dewey sources...\n")
+					if _, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
+						appendResult(subToolResult{
+							name: "dewey index", action: "failed",
+							detail: "dewey index failed"})
+					} else {
+						appendResult(subToolResult{
+							name: "dewey index", action: "re-indexed"})
+					}
+				}
+			}()
 		}
 	}
 
+	// --- Group B: Independent tools (each in own goroutine) ---
+
 	// Replicator: init if binary available and .uf/replicator/ absent.
-	// Follows the Dewey init delegation pattern above.
-	if _, err := opts.LookPath("replicator"); err == nil {
-		replicatorDir := filepath.Join(opts.TargetDir, ".uf", "replicator")
-		if _, statErr := os.Stat(replicatorDir); os.IsNotExist(statErr) {
-			_, _ = fmt.Fprintf(opts.Stdout, "  Initializing Replicator workspace...\n")
-			if _, initErr := opts.ExecCmd("replicator", "init"); initErr != nil {
-				results = append(results, subToolResult{
-					name: ".uf/replicator/", action: "failed",
-					detail: "replicator init failed"})
-			} else {
-				results = append(results, subToolResult{
-					name: ".uf/replicator/", action: "initialized"})
-			}
+	// Respects setup.tools.replicator.method: skip.
+	if !shouldSkipTool("replicator") {
+		if _, err := opts.LookPath("replicator"); err == nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				replicatorDir := filepath.Join(opts.TargetDir, ".uf", "replicator")
+				if _, statErr := os.Stat(replicatorDir); os.IsNotExist(statErr) {
+					logf("  Initializing Replicator workspace...\n")
+					if _, initErr := opts.ExecCmd("replicator", "init"); initErr != nil {
+						appendResult(subToolResult{
+							name: ".uf/replicator/", action: "failed",
+							detail: "replicator init failed"})
+					} else {
+						appendResult(subToolResult{
+							name: ".uf/replicator/", action: "initialized"})
+					}
+				}
+			}()
 		}
 	}
 
 	// Specify: init if binary available and .specify/ absent.
-	if _, err := opts.LookPath("specify"); err == nil {
-		specifyDir := filepath.Join(opts.TargetDir, ".specify")
-		if _, statErr := os.Stat(specifyDir); os.IsNotExist(statErr) {
-			_, _ = fmt.Fprintf(opts.Stdout, "  Initializing Speckit framework...\n")
-			if _, initErr := opts.ExecCmd("specify", "init"); initErr != nil {
-				results = append(results, subToolResult{
-					name: ".specify/", action: "failed",
-					detail: "specify init failed"})
-			} else {
-				results = append(results, subToolResult{
-					name: ".specify/", action: "initialized"})
-			}
+	// Respects setup.tools.specify.method: skip.
+	if !shouldSkipTool("specify") {
+		if _, err := opts.LookPath("specify"); err == nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				specifyDir := filepath.Join(opts.TargetDir, ".specify")
+				if _, statErr := os.Stat(specifyDir); os.IsNotExist(statErr) {
+					logf("  Initializing Speckit framework...\n")
+					if _, initErr := opts.ExecCmd("specify", "init"); initErr != nil {
+						appendResult(subToolResult{
+							name: ".specify/", action: "failed",
+							detail: "specify init failed"})
+					} else {
+						appendResult(subToolResult{
+							name: ".specify/", action: "initialized"})
+					}
+				}
+			}()
 		}
 	}
 
@@ -1388,40 +1468,58 @@ func initSubTools(opts *Options) []subToolResult {
 	// Gate on config.yaml (not openspec/ directory) because the
 	// embedded custom schema creates openspec/schemas/ before
 	// initSubTools() runs.
-	if _, err := opts.LookPath("openspec"); err == nil {
-		openspecConfig := filepath.Join(opts.TargetDir, "openspec", "config.yaml")
-		if _, statErr := os.Stat(openspecConfig); os.IsNotExist(statErr) {
-			_, _ = fmt.Fprintf(opts.Stdout, "  Initializing OpenSpec framework...\n")
-			if _, initErr := opts.ExecCmd("openspec", "init", "--tools", "opencode"); initErr != nil {
-				results = append(results, subToolResult{
-					name: "openspec/", action: "failed",
-					detail: "openspec init failed"})
-			} else {
-				results = append(results, subToolResult{
-					name: "openspec/", action: "initialized"})
-			}
+	// Respects setup.tools.openspec.method: skip.
+	if !shouldSkipTool("openspec") {
+		if _, err := opts.LookPath("openspec"); err == nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				openspecConfig := filepath.Join(opts.TargetDir, "openspec", "config.yaml")
+				if _, statErr := os.Stat(openspecConfig); os.IsNotExist(statErr) {
+					logf("  Initializing OpenSpec framework...\n")
+					if _, initErr := opts.ExecCmd("openspec", "init", "--tools", "opencode"); initErr != nil {
+						appendResult(subToolResult{
+							name: "openspec/", action: "failed",
+							detail: "openspec init failed"})
+					} else {
+						appendResult(subToolResult{
+							name: "openspec/", action: "initialized"})
+					}
+				}
+			}()
 		}
 	}
 
 	// Gaze: init if binary available and gaze agent file absent.
-	if _, err := opts.LookPath("gaze"); err == nil {
-		gazeAgent := filepath.Join(opts.TargetDir, ".opencode", "agents", "gaze-reporter.md")
-		if _, statErr := os.Stat(gazeAgent); os.IsNotExist(statErr) {
-			_, _ = fmt.Fprintf(opts.Stdout, "  Initializing Gaze integration...\n")
-			if _, initErr := opts.ExecCmd("gaze", "init"); initErr != nil {
-				results = append(results, subToolResult{
-					name: "gaze", action: "failed",
-					detail: "gaze init failed"})
-			} else {
-				results = append(results, subToolResult{
-					name: "gaze", action: "initialized"})
-			}
+	// Respects setup.tools.gaze.method: skip.
+	if !shouldSkipTool("gaze") {
+		if _, err := opts.LookPath("gaze"); err == nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				gazeAgent := filepath.Join(opts.TargetDir, ".opencode", "agents", "gaze-reporter.md")
+				if _, statErr := os.Stat(gazeAgent); os.IsNotExist(statErr) {
+					logf("  Initializing Gaze integration...\n")
+					if _, initErr := opts.ExecCmd("gaze", "init"); initErr != nil {
+						appendResult(subToolResult{
+							name: "gaze", action: "failed",
+							detail: "gaze init failed"})
+					} else {
+						appendResult(subToolResult{
+							name: "gaze", action: "initialized"})
+					}
+				}
+			}()
 		}
 	}
 
+	// Wait for all concurrent groups to finish before
+	// configuring opencode.json (FR-004, D4).
+	wg.Wait()
+
 	// Configure opencode.json with Dewey MCP server and Replicator MCP
 	// entries. Runs after all sub-tool initialization steps.
-	results = append(results, configureOpencodeJSON(opts)...)
+	appendResults(configureOpencodeJSON(opts))
 
 	return results
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -1822,6 +1823,7 @@ func stubScaffoldLookPath(found map[string]string) func(string) (string, error) 
 
 // scaffoldCmdRecorder records ExecCmd calls for scaffold tests.
 type scaffoldCmdRecorder struct {
+	mu     sync.Mutex
 	calls  []string
 	errors map[string]error
 }
@@ -1831,9 +1833,13 @@ func (r *scaffoldCmdRecorder) execCmd(name string, args ...string) ([]byte, erro
 	if len(args) > 0 {
 		key = name + " " + strings.Join(args, " ")
 	}
-	r.calls = append(r.calls, key)
 
-	if err, ok := r.errors[key]; ok {
+	r.mu.Lock()
+	r.calls = append(r.calls, key)
+	err, ok := r.errors[key]
+	r.mu.Unlock()
+
+	if ok {
 		return nil, err
 	}
 	return []byte(""), nil
@@ -3439,6 +3445,409 @@ func TestInitSubTools_DeweyExistsNoForce(t *testing.T) {
 		if call == "dewey init" || call == "dewey index" {
 			t.Errorf("unexpected dewey command when Force=false: %s", call)
 		}
+	}
+}
+
+func TestInitSubTools_DeweySkippedByConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create .uf/config.yaml with dewey method: skip.
+	ufDir := filepath.Join(dir, ".uf")
+	if err := os.MkdirAll(ufDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cfgContent := "setup:\n  tools:\n    dewey:\n      method: skip\n"
+	if err := os.WriteFile(filepath.Join(ufDir, "config.yaml"), []byte(cfgContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Dewey commands should NOT have been called.
+	for _, call := range rec.calls {
+		if call == "dewey init" || call == "dewey index" {
+			t.Errorf("dewey command should NOT be called when method is skip: %s", call)
+		}
+	}
+
+	// No dewey-related results should appear.
+	for _, r := range results {
+		if r.name == ".uf/dewey/" || r.name == "dewey index" {
+			t.Errorf("unexpected dewey result when method is skip: %s %s", r.name, r.action)
+		}
+	}
+
+	// .uf/dewey/ directory should NOT have been created.
+	if _, err := os.Stat(filepath.Join(dir, ".uf", "dewey")); !os.IsNotExist(err) {
+		t.Error(".uf/dewey/ should not exist when dewey method is skip")
+	}
+}
+
+func TestInitSubTools_DeweySkippedByConfig_ForceIgnored(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create .uf/config.yaml with dewey method: skip.
+	ufDir := filepath.Join(dir, ".uf")
+	if err := os.MkdirAll(ufDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cfgContent := "setup:\n  tools:\n    dewey:\n      method: skip\n"
+	if err := os.WriteFile(filepath.Join(ufDir, "config.yaml"), []byte(cfgContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	// Create .uf/dewey/ — even with Force, skip should win.
+	if err := os.MkdirAll(filepath.Join(dir, ".uf", "dewey"), 0o755); err != nil {
+		t.Fatalf("mkdir dewey: %v", err)
+	}
+
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		Force:     true,
+		LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Even with Force=true, skip config should prevent re-index.
+	for _, call := range rec.calls {
+		if call == "dewey init" || call == "dewey index" {
+			t.Errorf("dewey command should NOT be called when method is skip (even with Force): %s", call)
+		}
+	}
+	for _, r := range results {
+		if r.name == ".uf/dewey/" || r.name == "dewey index" {
+			t.Errorf("unexpected dewey result when method is skip: %s %s", r.name, r.action)
+		}
+	}
+}
+
+func TestInitSubTools_ReplicatorSkippedByConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create .uf/config.yaml with replicator method: skip.
+	ufDir := filepath.Join(dir, ".uf")
+	if err := os.MkdirAll(ufDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cfgContent := "setup:\n  tools:\n    replicator:\n      method: skip\n"
+	if err := os.WriteFile(filepath.Join(ufDir, "config.yaml"), []byte(cfgContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"replicator": "/usr/local/bin/replicator"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Replicator commands should NOT have been called.
+	for _, call := range rec.calls {
+		if call == "replicator init" {
+			t.Errorf("replicator init should NOT be called when method is skip")
+		}
+	}
+	for _, r := range results {
+		if r.name == ".uf/replicator/" {
+			t.Errorf("unexpected replicator result when method is skip: %s %s", r.name, r.action)
+		}
+	}
+}
+
+func TestInitSubTools_AllToolsSkippedByConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create .uf/config.yaml with all tools set to skip.
+	ufDir := filepath.Join(dir, ".uf")
+	if err := os.MkdirAll(ufDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cfgContent := "setup:\n  tools:\n    dewey:\n      method: skip\n    replicator:\n      method: skip\n    specify:\n      method: skip\n    openspec:\n      method: skip\n    gaze:\n      method: skip\n"
+	if err := os.WriteFile(filepath.Join(ufDir, "config.yaml"), []byte(cfgContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath: stubScaffoldLookPath(map[string]string{
+			"dewey":      "/usr/local/bin/dewey",
+			"replicator": "/usr/local/bin/replicator",
+			"specify":    "/usr/local/bin/specify",
+			"openspec":   "/usr/local/bin/openspec",
+			"gaze":       "/usr/local/bin/gaze",
+		}),
+		ExecCmd: rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// No tool commands should have been called.
+	if len(rec.calls) != 0 {
+		t.Errorf("expected no commands when all tools are skipped, got: %v", rec.calls)
+	}
+
+	// Only result should be opencode.json skipped (nothing to configure).
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result (opencode.json), got %d: %v", len(results), results)
+	}
+	if results[0].name != "opencode.json" {
+		t.Errorf("expected opencode.json result, got %s", results[0].name)
+	}
+}
+
+// Phase: Concurrent execution tests (FR-001 through FR-005).
+
+func TestInitSubTools_ConcurrentAllResults(t *testing.T) {
+	// FR-001, FR-003: All five tools available — results from all
+	// tools are collected regardless of execution order.
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath: stubScaffoldLookPath(map[string]string{
+			"dewey":      "/usr/local/bin/dewey",
+			"replicator": "/usr/local/bin/replicator",
+			"specify":    "/usr/local/bin/specify",
+			"openspec":   "/usr/local/bin/openspec",
+			"gaze":       "/usr/local/bin/gaze",
+		}),
+		ExecCmd: rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Expect results from: dewey init, dewey index, replicator,
+	// specify, openspec, gaze, opencode.json.
+	// (dewey sources may or may not appear depending on filesystem.)
+	expectedNames := map[string]bool{
+		".uf/dewey/":      false,
+		"dewey index":     false,
+		".uf/replicator/": false,
+		".specify/":       false,
+		"openspec/":       false,
+		"gaze":            false,
+		"opencode.json":   false,
+	}
+
+	for _, r := range results {
+		if _, ok := expectedNames[r.name]; ok {
+			expectedNames[r.name] = true
+		}
+	}
+
+	for name, found := range expectedNames {
+		if !found {
+			t.Errorf("missing result for %q in concurrent run", name)
+		}
+	}
+
+	// Verify all expected commands were issued.
+	rec.mu.Lock()
+	callsCopy := make([]string, len(rec.calls))
+	copy(callsCopy, rec.calls)
+	rec.mu.Unlock()
+
+	expectedCmds := []string{
+		"dewey init", "dewey index",
+		"replicator init", "specify init",
+		"openspec init --tools opencode", "gaze init",
+	}
+	for _, cmd := range expectedCmds {
+		found := false
+		for _, call := range callsCopy {
+			if call == cmd {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected command %q in concurrent run, got calls: %v", cmd, callsCopy)
+		}
+	}
+}
+
+func TestInitSubTools_ConcurrentMissingToolSkipped(t *testing.T) {
+	// FR-001: Missing tools are skipped; available tools still
+	// complete their init without delay.
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	// Only dewey and gaze available; others missing.
+	opts := &Options{
+		TargetDir: dir,
+		LookPath: stubScaffoldLookPath(map[string]string{
+			"dewey": "/usr/local/bin/dewey",
+			"gaze":  "/usr/local/bin/gaze",
+		}),
+		ExecCmd: rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Should see results for dewey, gaze, and opencode.json.
+	// Should NOT see replicator, specify, or openspec results.
+	resultNames := map[string]bool{}
+	for _, r := range results {
+		resultNames[r.name] = true
+	}
+
+	if !resultNames[".uf/dewey/"] {
+		t.Error("expected dewey result when dewey is available")
+	}
+	if !resultNames["gaze"] {
+		t.Error("expected gaze result when gaze is available")
+	}
+	if resultNames[".uf/replicator/"] {
+		t.Error("unexpected replicator result when replicator is not available")
+	}
+	if resultNames[".specify/"] {
+		t.Error("unexpected specify result when specify is not available")
+	}
+	if resultNames["openspec/"] {
+		t.Error("unexpected openspec result when openspec is not available")
+	}
+}
+
+func TestInitSubTools_ConcurrentOneFailureNoBlock(t *testing.T) {
+	// FR-005: One tool failure does not prevent other tools from
+	// completing. Dewey init fails; replicator and gaze succeed.
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{errors: map[string]error{
+		"dewey init": fmt.Errorf("simulated dewey failure"),
+	}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath: stubScaffoldLookPath(map[string]string{
+			"dewey":      "/usr/local/bin/dewey",
+			"replicator": "/usr/local/bin/replicator",
+			"gaze":       "/usr/local/bin/gaze",
+		}),
+		ExecCmd: rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Dewey should appear with "failed" action.
+	deweyFailed := false
+	replicatorOK := false
+	gazeOK := false
+	opencodeOK := false
+	for _, r := range results {
+		switch r.name {
+		case ".uf/dewey/":
+			if r.action == "failed" {
+				deweyFailed = true
+			}
+		case ".uf/replicator/":
+			if r.action == "initialized" {
+				replicatorOK = true
+			}
+		case "gaze":
+			if r.action == "initialized" {
+				gazeOK = true
+			}
+		case "opencode.json":
+			opencodeOK = true
+		}
+	}
+
+	if !deweyFailed {
+		t.Error("expected dewey to report failure")
+	}
+	if !replicatorOK {
+		t.Error("expected replicator to succeed despite dewey failure")
+	}
+	if !gazeOK {
+		t.Error("expected gaze to succeed despite dewey failure")
+	}
+	if !opencodeOK {
+		t.Error("expected opencode.json result after concurrent completion")
+	}
+
+	// Verify dewey index was NOT called (init failed).
+	rec.mu.Lock()
+	for _, call := range rec.calls {
+		if call == "dewey index" {
+			t.Error("dewey index should not run when dewey init fails")
+		}
+	}
+	rec.mu.Unlock()
+}
+
+func TestInitSubTools_ConcurrentOpencodeJSONAfterAll(t *testing.T) {
+	// FR-004: configureOpencodeJSON runs after all concurrent
+	// groups complete. Verified by checking opencode.json result
+	// is present and contains correct MCP entries.
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{errors: map[string]error{}}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath: stubScaffoldLookPath(map[string]string{
+			"dewey":      "/usr/local/bin/dewey",
+			"replicator": "/usr/local/bin/replicator",
+		}),
+		ExecCmd: rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// opencode.json must be present in results.
+	opencodeFound := false
+	for _, r := range results {
+		if r.name == "opencode.json" {
+			opencodeFound = true
+		}
+	}
+	if !opencodeFound {
+		t.Fatal("expected opencode.json result after concurrent init")
+	}
+
+	// opencode.json file should exist on disk (written by
+	// configureOpencodeJSON after wg.Wait).
+	opencodeJSON := filepath.Join(dir, "opencode.json")
+	data, err := os.ReadFile(opencodeJSON)
+	if err != nil {
+		t.Fatalf("opencode.json should exist: %v", err)
+	}
+
+	// Verify it contains expected MCP server entries for both
+	// tools that were initialized.
+	var parsed map[string]interface{}
+	if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
+		t.Fatalf("opencode.json is not valid JSON: %v", jsonErr)
+	}
+	mcp, ok := parsed["mcp"]
+	if !ok {
+		t.Fatal("opencode.json missing mcp key")
+	}
+	mcpMap, ok := mcp.(map[string]interface{})
+	if !ok {
+		t.Fatal("opencode.json mcp is not a map")
+	}
+	if _, hasDewey := mcpMap["dewey"]; !hasDewey {
+		t.Error("opencode.json should contain dewey MCP entry")
+	}
+	if _, hasReplicator := mcpMap["replicator"]; !hasReplicator {
+		t.Error("opencode.json should contain replicator MCP entry")
 	}
 }
 
