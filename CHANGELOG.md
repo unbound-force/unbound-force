@@ -6,6 +6,17 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- `python-convention-pack`: Added Python convention pack
+  (`python.md`, `python-custom.md`) with 46 rules across 7
+  sections (Coding Style, Architectural Patterns, Security
+  Checks, Testing Conventions, Type Annotations, Documentation
+  Requirements, Custom Rules). Expanded `detectLang()` with 5
+  additional Python markers (`setup.py`, `setup.cfg`,
+  `requirements.txt`, `tox.ini`, `Pipfile`). Added conditional
+  "Python Tools" doctor check group with 9 tool categories
+  and tool-agnostic alternative detection (ruff satisfies
+  formatter, linter, import sorter, security scanner).
+  (Spec: openspec/changes/python-convention-pack/)
 - `/address-feedback` slash command for structured PR review
   feedback triage (Spec: openspec/changes/address-feedback/)
 - `feedback-triage` JSON schema (v1.0.0) for capturing triage

@@ -285,5 +285,7 @@ before writing or reviewing code.
 - `.opencode/uf/packs/content-custom.md`
 - `.opencode/uf/packs/go.md`
 - `.opencode/uf/packs/go-custom.md`
+- `.opencode/uf/packs/python.md`
+- `.opencode/uf/packs/python-custom.md`
 - `.opencode/uf/packs/typescript.md`
 - `.opencode/uf/packs/typescript-custom.md`
