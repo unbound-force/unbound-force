@@ -1830,3 +1830,144 @@ func checkAgentContext(opts *Options) CheckGroup {
 
 	return group
 }
+
+// pythonMarkerFiles lists the files that indicate a Python project.
+// Duplicated from scaffold.detectLang() to avoid a cross-package
+// import (per design D6 in the python-convention-pack spec).
+var pythonMarkerFiles = []string{
+	"pyproject.toml",
+	"setup.py",
+	"setup.cfg",
+	"requirements.txt",
+	"tox.ini",
+	"Pipfile",
+}
+
+// isPythonProject returns true if any Python project marker file
+// exists in the target directory.
+func isPythonProject(targetDir string) bool {
+	for _, f := range pythonMarkerFiles {
+		if _, err := os.Stat(filepath.Join(targetDir, f)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// pythonToolCheck defines a Python tool category check. Categories
+// with multiple alternatives (e.g., formatter: black or ruff) pass
+// if any alternative is found.
+type pythonToolCheck struct {
+	name        string   // Display name for the check result
+	binaries    []string // Binaries to look for (pass if any found)
+	required    bool     // Fail severity if none found
+	recommended bool     // Warn severity if none found
+	installHint string   // Hint when none found
+}
+
+// pythonToolChecks defines the 9 Python tool category checks per
+// design D5. Tool-agnostic categories list alternatives per D3.
+var pythonToolChecks = []pythonToolCheck{
+	{
+		name:        "python3",
+		binaries:    []string{"python3"},
+		required:    true,
+		installHint: "Install Python 3: https://www.python.org/downloads/",
+	},
+	{
+		name:        "pip/uv",
+		binaries:    []string{"pip", "uv"},
+		recommended: true,
+		installHint: "Install pip or uv: https://docs.astral.sh/uv/",
+	},
+	{
+		name:        "pytest",
+		binaries:    []string{"pytest"},
+		required:    true,
+		installHint: "pip install pytest",
+	},
+	{
+		name:        "formatter",
+		binaries:    []string{"black", "ruff"},
+		recommended: true,
+		installHint: "pip install black  (or: pip install ruff)",
+	},
+	{
+		name:        "linter",
+		binaries:    []string{"flake8", "ruff"},
+		recommended: true,
+		installHint: "pip install flake8  (or: pip install ruff)",
+	},
+	{
+		name:        "import sorter",
+		binaries:    []string{"isort", "ruff"},
+		recommended: true,
+		installHint: "pip install isort  (or: pip install ruff)",
+	},
+	{
+		name:        "security scanner",
+		binaries:    []string{"bandit", "ruff"},
+		recommended: true,
+		installHint: "pip install bandit  (or: pip install ruff)",
+	},
+	{
+		name:        "mypy",
+		binaries:    []string{"mypy"},
+		installHint: "pip install mypy",
+	},
+	{
+		name:        "tox",
+		binaries:    []string{"tox"},
+		installHint: "pip install tox",
+	},
+}
+
+// checkPythonTools checks Python toolchain prerequisites.
+// Returns a CheckGroup named "Python Tools" with results for
+// each tool category. Tool-agnostic categories pass if any
+// alternative binary is found.
+func checkPythonTools(opts *Options) CheckGroup {
+	group := CheckGroup{
+		Name:    "Python Tools",
+		Results: []CheckResult{},
+	}
+
+	for _, tc := range pythonToolChecks {
+		result := checkAnyTool(tc, opts)
+		group.Results = append(group.Results, result)
+	}
+
+	return group
+}
+
+// checkAnyTool checks whether any of the binaries in a
+// pythonToolCheck are available. Returns Pass if any binary
+// is found, with the found binary name in the message. Returns
+// Fail/Warn/Pass (informational) based on severity when none found.
+func checkAnyTool(tc pythonToolCheck, opts *Options) CheckResult {
+	for _, bin := range tc.binaries {
+		path, err := opts.LookPath(bin)
+		if err == nil {
+			return CheckResult{
+				Name:     tc.name,
+				Severity: Pass,
+				Message:  bin + " installed",
+				Detail:   path,
+			}
+		}
+	}
+
+	sev := Pass
+	if tc.required {
+		sev = Fail
+	} else if tc.recommended {
+		sev = Warn
+	}
+
+	return CheckResult{
+		Name:        tc.name,
+		Severity:    sev,
+		Message:     "not found",
+		InstallHint: tc.installHint,
+	}
+}

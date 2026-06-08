@@ -4068,3 +4068,158 @@ func TestCheckEmbeddingCapability_GenericError(t *testing.T) {
 		t.Errorf("install hint = %q, want combined hint with 'ollama pull'", result.InstallHint)
 	}
 }
+
+// --- Python Tools tests ---
+
+func TestIsPythonProject(t *testing.T) {
+	markers := []string{
+		"pyproject.toml",
+		"setup.py",
+		"setup.cfg",
+		"requirements.txt",
+		"tox.ini",
+		"Pipfile",
+	}
+
+	for _, marker := range markers {
+		t.Run(marker, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, marker), []byte{}, 0o644); err != nil {
+				t.Fatalf("create marker %s: %v", marker, err)
+			}
+			if !isPythonProject(dir) {
+				t.Errorf("isPythonProject() = false for %s, want true", marker)
+			}
+		})
+	}
+
+	t.Run("no markers", func(t *testing.T) {
+		dir := t.TempDir()
+		if isPythonProject(dir) {
+			t.Error("isPythonProject() = true for empty dir, want false")
+		}
+	})
+
+	t.Run("go project not python", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test"), 0o644); err != nil {
+			t.Fatalf("create go.mod: %v", err)
+		}
+		if isPythonProject(dir) {
+			t.Error("isPythonProject() = true for Go project, want false")
+		}
+	})
+}
+
+func TestCheckPythonTools_AllPresent(t *testing.T) {
+	opts := &Options{
+		LookPath: stubLookPathSimple(map[string]bool{
+			"python3": true,
+			"pip":     true,
+			"pytest":  true,
+			"black":   true,
+			"flake8":  true,
+			"isort":   true,
+			"bandit":  true,
+			"mypy":    true,
+			"tox":     true,
+		}),
+	}
+	opts.defaults()
+
+	group := checkPythonTools(opts)
+
+	if group.Name != "Python Tools" {
+		t.Errorf("group name = %q, want %q", group.Name, "Python Tools")
+	}
+
+	for _, r := range group.Results {
+		if r.Severity != Pass {
+			t.Errorf("check %q: severity = %v, want Pass", r.Name, r.Severity)
+		}
+	}
+}
+
+func TestCheckPythonTools_NonePresent(t *testing.T) {
+	opts := &Options{
+		LookPath: stubLookPathSimple(map[string]bool{}),
+	}
+	opts.defaults()
+
+	group := checkPythonTools(opts)
+
+	expectedSeverity := map[string]Severity{
+		"python3":          Fail, // required
+		"pip/uv":           Warn, // recommended
+		"pytest":           Fail, // required
+		"formatter":        Warn, // recommended
+		"linter":           Warn, // recommended
+		"import sorter":    Warn, // recommended
+		"security scanner": Warn, // recommended
+		"mypy":             Pass, // optional
+		"tox":              Pass, // optional
+	}
+
+	for _, r := range group.Results {
+		want, ok := expectedSeverity[r.Name]
+		if !ok {
+			t.Errorf("unexpected check %q in results", r.Name)
+			continue
+		}
+		if r.Severity != want {
+			t.Errorf("check %q: severity = %v, want %v", r.Name, r.Severity, want)
+		}
+		if r.Message != "not found" {
+			t.Errorf("check %q: message = %q, want %q", r.Name, r.Message, "not found")
+		}
+	}
+}
+
+func TestCheckPythonTools_RuffSatisfiesMultiple(t *testing.T) {
+	// When only ruff is installed, it should satisfy formatter,
+	// linter, import sorter, and security scanner categories.
+	opts := &Options{
+		LookPath: stubLookPathSimple(map[string]bool{
+			"python3": true,
+			"pytest":  true,
+			"ruff":    true,
+		}),
+	}
+	opts.defaults()
+
+	group := checkPythonTools(opts)
+
+	// These categories should pass via ruff.
+	ruffCategories := map[string]bool{
+		"formatter":        true,
+		"linter":           true,
+		"import sorter":    true,
+		"security scanner": true,
+	}
+
+	for _, r := range group.Results {
+		if ruffCategories[r.Name] {
+			if r.Severity != Pass {
+				t.Errorf("check %q: severity = %v, want Pass (ruff should satisfy)", r.Name, r.Severity)
+			}
+			if !strings.Contains(r.Message, "ruff") {
+				t.Errorf("check %q: message = %q, want to contain 'ruff'", r.Name, r.Message)
+			}
+		}
+	}
+}
+
+func TestCheckPythonTools_NotIncludedForGoProject(t *testing.T) {
+	dir := t.TempDir()
+	// Create a Go project marker, no Python markers.
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test"), 0o644); err != nil {
+		t.Fatalf("create go.mod: %v", err)
+	}
+
+	if isPythonProject(dir) {
+		t.Error("isPythonProject() should be false for Go project")
+	}
+	// Verify the guard in Run() would exclude the group.
+	// We test the detection function directly since Run() has
+	// too many dependencies to isolate cleanly.
+}

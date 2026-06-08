@@ -167,6 +167,11 @@ func Run(opts Options) (*Report, error) {
 		allGroups = append(allGroups, *devpodGroup)
 	}
 
+	// Python tools: included when a Python project marker is detected.
+	if isPythonProject(opts.TargetDir) {
+		allGroups = append(allGroups, checkPythonTools(&opts))
+	}
+
 	// Apply SkipChecks filter: remove check groups or
 	// individual results whose name matches a skip entry.
 	groups := filterSkippedChecks(allGroups, opts.SkipChecks)

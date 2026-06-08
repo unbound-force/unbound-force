@@ -384,6 +384,11 @@ func detectLang(targetDir string) string {
 		{"tsconfig.json", "typescript"},
 		{"package.json", "typescript"},
 		{"pyproject.toml", "python"},
+		{"setup.py", "python"},
+		{"setup.cfg", "python"},
+		{"requirements.txt", "python"},
+		{"tox.ini", "python"},
+		{"Pipfile", "python"},
 		{"Cargo.toml", "rust"},
 	}
 	for _, m := range markers {

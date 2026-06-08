@@ -153,13 +153,15 @@ var expectedAssetPaths = []string{
 	"opencode/agents/divisor-scribe.md",
 	"opencode/agents/divisor-herald.md",
 	"opencode/agents/divisor-envoy.md",
-	// Convention packs — shared by all heroes (9)
+	// Convention packs — shared by all heroes (11)
 	"opencode/uf/packs/content-custom.md",
 	"opencode/uf/packs/content.md",
 	"opencode/uf/packs/default-custom.md",
 	"opencode/uf/packs/default.md",
 	"opencode/uf/packs/go-custom.md",
 	"opencode/uf/packs/go.md",
+	"opencode/uf/packs/python-custom.md",
+	"opencode/uf/packs/python.md",
 	"opencode/uf/packs/severity.md",
 	"opencode/uf/packs/typescript-custom.md",
 	"opencode/uf/packs/typescript.md",
@@ -577,10 +579,13 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/uf/packs/go.md", true},
 		{"opencode/uf/packs/default.md", true},
 		{"opencode/uf/packs/typescript.md", true},
+		// Tool-owned: convention packs (canonical) — Python
+		{"opencode/uf/packs/python.md", true},
 		// User-owned: convention packs (custom)
 		{"opencode/uf/packs/go-custom.md", false},
 		{"opencode/uf/packs/default-custom.md", false},
 		{"opencode/uf/packs/typescript-custom.md", false},
+		{"opencode/uf/packs/python-custom.md", false},
 		// User-owned: agents (including Divisor personas and Cobalt-Crush)
 		{"opencode/agents/divisor-guard.md", false},
 		{"opencode/agents/divisor-architect.md", false},
@@ -1149,6 +1154,8 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/uf/packs/default.md", true},
 		{"opencode/uf/packs/go-custom.md", true},
 		{"opencode/uf/packs/severity.md", true},
+		{"opencode/uf/packs/python.md", true},
+		{"opencode/uf/packs/python-custom.md", true},
 		// Non-Divisor assets
 		{"opencode/agents/constitution-check.md", false},
 		{"opencode/commands/speckit.specify.md", false},
@@ -1175,10 +1182,18 @@ func TestDetectLang(t *testing.T) {
 		{"go project", []string{"go.mod"}, "go"},
 		{"typescript tsconfig", []string{"tsconfig.json"}, "typescript"},
 		{"typescript package.json", []string{"package.json"}, "typescript"},
-		{"python project", []string{"pyproject.toml"}, "python"},
+		{"python pyproject.toml", []string{"pyproject.toml"}, "python"},
+		{"python setup.py", []string{"setup.py"}, "python"},
+		{"python setup.cfg", []string{"setup.cfg"}, "python"},
+		{"python requirements.txt", []string{"requirements.txt"}, "python"},
+		{"python tox.ini", []string{"tox.ini"}, "python"},
+		{"python Pipfile", []string{"Pipfile"}, "python"},
+		{"python pyproject takes priority", []string{"pyproject.toml", "setup.py", "requirements.txt"}, "python"},
 		{"rust project", []string{"Cargo.toml"}, "rust"},
 		{"no markers", []string{}, ""},
 		{"go takes priority over ts", []string{"go.mod", "package.json"}, "go"},
+		{"go takes priority over python", []string{"go.mod", "requirements.txt"}, "go"},
+		{"ts takes priority over python", []string{"tsconfig.json", "pyproject.toml"}, "typescript"},
 	}
 
 	for _, tt := range tests {
@@ -1218,13 +1233,21 @@ func TestShouldDeployPack(t *testing.T) {
 		{"opencode/uf/packs/go-custom.md", "go", true},
 		{"opencode/uf/packs/typescript.md", "typescript", true},
 		{"opencode/uf/packs/typescript-custom.md", "typescript", true},
+		// Python packs deploy for python lang
+		{"opencode/uf/packs/python.md", "python", true},
+		{"opencode/uf/packs/python-custom.md", "python", true},
 		// Non-matching language packs do NOT deploy
 		{"opencode/uf/packs/typescript.md", "go", false},
 		{"opencode/uf/packs/typescript-custom.md", "go", false},
 		{"opencode/uf/packs/go.md", "typescript", false},
 		{"opencode/uf/packs/go-custom.md", "typescript", false},
+		{"opencode/uf/packs/python.md", "go", false},
+		{"opencode/uf/packs/python-custom.md", "go", false},
+		{"opencode/uf/packs/go.md", "python", false},
+		{"opencode/uf/packs/go-custom.md", "python", false},
 		// Default lang gets only default packs
 		{"opencode/uf/packs/go.md", "default", false},
+		{"opencode/uf/packs/python.md", "default", false},
 		{"opencode/uf/packs/default.md", "default", true},
 	}
 
