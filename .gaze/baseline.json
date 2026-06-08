@@ -1309,8 +1309,8 @@
       "file": "internal/doctor/checks.go",
       "line": 216,
       "complexity": 4,
-      "line_coverage": 71.42857142857143,
-      "crap": 4.373177842565598
+      "line_coverage": 0,
+      "crap": 20
     },
     {
       "package": "doctor",
