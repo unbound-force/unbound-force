@@ -1941,10 +1941,29 @@ func checkPythonTools(opts *Options) CheckGroup {
 }
 
 // checkAnyTool checks whether any of the binaries in a
-// pythonToolCheck are available. Returns Pass if any binary
-// is found, with the found binary name in the message. Returns
-// Fail/Warn/Pass (informational) based on severity when none found.
+// pythonToolCheck are available. Returns Pass if the first
+// found binary matches, with its name in the message. Returns
+// Fail/Warn/Pass (informational) based on severity when none
+// found. Respects ToolSeverities config overrides, consistent
+// with checkOneTool.
 func checkAnyTool(tc pythonToolCheck, opts *Options) CheckResult {
+	// Apply ToolSeverities config override before checking.
+	if opts.ToolSeverities != nil {
+		if override, ok := opts.ToolSeverities[tc.name]; ok {
+			switch override {
+			case "required":
+				tc.required = true
+				tc.recommended = false
+			case "recommended":
+				tc.required = false
+				tc.recommended = true
+			case "optional":
+				tc.required = false
+				tc.recommended = false
+			}
+		}
+	}
+
 	for _, bin := range tc.binaries {
 		path, err := opts.LookPath(bin)
 		if err == nil {

@@ -4210,16 +4210,147 @@ func TestCheckPythonTools_RuffSatisfiesMultiple(t *testing.T) {
 }
 
 func TestCheckPythonTools_NotIncludedForGoProject(t *testing.T) {
+	// Verify the Python Tools group is excluded from Run()
+	// when no Python marker files exist in the target directory.
 	dir := t.TempDir()
-	// Create a Go project marker, no Python markers.
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test"), 0o644); err != nil {
-		t.Fatalf("create go.mod: %v", err)
+
+	// Create minimal scaffolded files (Go project, no Python).
+	createFile(t, dir, ".opencode/agents/test.md", "---\ndescription: test\n---\n# Agent")
+	createFile(t, dir, ".opencode/commands/test.md", "# Command")
+	createFile(t, dir, ".opencode/uf/packs/go.md", "# Go")
+	createFile(t, dir, "AGENTS.md", "# Agents")
+	createFile(t, dir, "opencode.json", `{"mcpServers":{}}`)
+
+	opts := Options{
+		TargetDir: dir,
+		Format:    "text",
+		Stdout:    &bytes.Buffer{},
+		LookPath:  stubLookPath(map[string]string{}),
+		ExecCmd:   stubExecCmd(nil, nil),
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:    stubGetenv(map[string]string{}),
+		ReadFile:  os.ReadFile,
 	}
 
-	if isPythonProject(dir) {
-		t.Error("isPythonProject() should be false for Go project")
+	report, _ := Run(opts)
+	if report == nil {
+		t.Fatal("Run returned nil report")
 	}
-	// Verify the guard in Run() would exclude the group.
-	// We test the detection function directly since Run() has
-	// too many dependencies to isolate cleanly.
+
+	for _, g := range report.Groups {
+		if g.Name == "Python Tools" {
+			t.Error("Python Tools group should not be included for non-Python project")
+		}
+	}
+}
+
+func TestCheckPythonTools_IncludedForPythonProject(t *testing.T) {
+	// Verify the Python Tools group IS included in Run()
+	// when a Python marker file exists.
+	dir := t.TempDir()
+
+	// Create minimal scaffolded files with a Python marker.
+	createFile(t, dir, ".opencode/agents/test.md", "---\ndescription: test\n---\n# Agent")
+	createFile(t, dir, ".opencode/commands/test.md", "# Command")
+	createFile(t, dir, ".opencode/uf/packs/go.md", "# Go")
+	createFile(t, dir, "AGENTS.md", "# Agents")
+	createFile(t, dir, "opencode.json", `{"mcpServers":{}}`)
+	createFile(t, dir, "pyproject.toml", "[project]\nname = \"test\"\n")
+
+	opts := Options{
+		TargetDir: dir,
+		Format:    "text",
+		Stdout:    &bytes.Buffer{},
+		LookPath: stubLookPath(map[string]string{
+			"python3": "/usr/bin/python3",
+			"pytest":  "/usr/bin/pytest",
+		}),
+		ExecCmd:      stubExecCmd(nil, nil),
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+		ReadFile:     os.ReadFile,
+	}
+
+	report, _ := Run(opts)
+	if report == nil {
+		t.Fatal("Run returned nil report")
+	}
+
+	found := false
+	for _, g := range report.Groups {
+		if g.Name == "Python Tools" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Python Tools group should be included for Python project")
+	}
+}
+
+func TestCheckAnyTool_ToolSeveritiesOverride(t *testing.T) {
+	// Verify ToolSeverities config overrides work for
+	// Python tool categories, consistent with checkOneTool.
+	opts := &Options{
+		LookPath: stubLookPathSimple(map[string]bool{}),
+		ToolSeverities: map[string]string{
+			"mypy": "required", // default: optional (Pass) -> required (Fail)
+		},
+	}
+	opts.defaults()
+
+	tc := pythonToolCheck{
+		name:        "mypy",
+		binaries:    []string{"mypy"},
+		installHint: "pip install mypy",
+		// no required/recommended set -> default optional (Pass)
+	}
+
+	result := checkAnyTool(tc, opts)
+	if result.Severity != Fail {
+		t.Errorf("severity = %v, want Fail (ToolSeverities override to required)", result.Severity)
+	}
+
+	// Also test downgrade: required -> optional.
+	opts.ToolSeverities = map[string]string{
+		"python3": "optional",
+	}
+	tc = pythonToolCheck{
+		name:        "python3",
+		binaries:    []string{"python3"},
+		required:    true, // normally Fail
+		installHint: "Install Python 3",
+	}
+
+	result = checkAnyTool(tc, opts)
+	if result.Severity != Pass {
+		t.Errorf("severity = %v, want Pass (ToolSeverities override to optional)", result.Severity)
+	}
+}
+
+func TestCheckAnyTool_FirstBinaryWins(t *testing.T) {
+	// When multiple binaries are available, checkAnyTool
+	// returns the first-listed binary in the message.
+	opts := &Options{
+		LookPath: stubLookPathSimple(map[string]bool{
+			"black": true,
+			"ruff":  true,
+		}),
+	}
+	opts.defaults()
+
+	tc := pythonToolCheck{
+		name:        "formatter",
+		binaries:    []string{"black", "ruff"},
+		recommended: true,
+		installHint: "pip install black  (or: pip install ruff)",
+	}
+
+	result := checkAnyTool(tc, opts)
+	if result.Severity != Pass {
+		t.Errorf("severity = %v, want Pass", result.Severity)
+	}
+	if result.Message != "black installed" {
+		t.Errorf("message = %q, want %q (first binary wins)", result.Message, "black installed")
+	}
 }
