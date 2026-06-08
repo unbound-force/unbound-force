@@ -8,9 +8,9 @@ exists to deploy. Running `uf init --lang python` or
 auto-detecting a Python project falls back to the default
 pack, losing all language-specific review criteria.
 
-This gap blocks onboarding Python projects (e.g., SDEngine,
-a 7-year-old Django monolith in Red Hat Product Security)
-to the UF toolchain. Divisor persona agents cannot enforce
+This gap blocks onboarding Python projects (e.g., Django
+monoliths, pydantic-ai services) to the UF toolchain.
+Divisor persona agents cannot enforce
 Python-specific coding standards, and `uf doctor` does not
 verify Python prerequisites.
 

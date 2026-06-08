@@ -47,8 +47,8 @@ See `proposal.md` for motivation and constitution alignment.
   pyproject.toml generation, virtualenv setup)
 - Rust convention pack (placeholder detection exists but
   pack creation is a separate change)
-- SDEngine-specific custom rules (those go in
-  `python-custom.md` in the SDEngine repo, not here)
+- Project-specific custom rules (those go in
+  `python-custom.md` in each adopting repo, not here)
 
 ## Decisions
 
@@ -86,9 +86,10 @@ rule identifiers.
 
 The Python ecosystem is undergoing a tooling consolidation.
 Ruff is rapidly replacing black + flake8 + isort as a
-unified formatter and linter. Projects like aegis-ai use
-ruff exclusively; projects like SDEngine use the traditional
-trio. A convention pack that mandates specific tools (e.g.,
+unified formatter and linter. Some projects use ruff
+exclusively; others use the traditional black + flake8 +
+isort trio. A convention pack that mandates specific
+tools (e.g.,
 "MUST use black") would create false negatives for projects
 using equivalent modern alternatives.
 
@@ -201,7 +202,7 @@ Python packs but `uf doctor` will not check Python tools
 The original draft of SC-008 said "Use `subprocess.run()`
 with `shell=False`. Never pass user input to `shell=True`
 subprocess calls." This is too absolute -- real-world
-codebases (e.g., SDEngine) have command execution utilities
+codebases have command execution utilities
 that use `shell=True` internally with controlled, non-user-
 supplied command strings. Requiring `shell=False` everywhere
 would force rewrites of foundational utilities with no
@@ -219,9 +220,8 @@ The revised rule narrows the prohibition:
 **Rationale**: The security risk is shell injection from
 untrusted input, not the `shell=True` flag itself. A blanket
 prohibition would create friction for onboarding without
-improving security posture. SDEngine's `Cmd.run(shell=True)`
-is used with fixed command strings -- the risk is low.
-Projects that need stricter enforcement can override via
+improving security posture. Projects that need stricter
+enforcement can override via
 `python-custom.md`.
 
 ### D8: python-custom.md is an empty template

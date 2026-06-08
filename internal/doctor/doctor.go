@@ -162,15 +162,8 @@ func Run(opts Options) (*Report, error) {
 	}
 
 	// Context-sensitive groups: only included when relevant
-	// tools are detected (per design D8).
-	if devpodGroup := checkDevPod(&opts); devpodGroup != nil {
-		allGroups = append(allGroups, *devpodGroup)
-	}
-
-	// Python tools: included when a Python project marker is detected.
-	if isPythonProject(opts.TargetDir) {
-		allGroups = append(allGroups, checkPythonTools(&opts))
-	}
+	// tools or project markers are detected.
+	allGroups = appendConditionalGroups(allGroups, &opts)
 
 	// Apply SkipChecks filter: remove check groups or
 	// individual results whose name matches a skip entry.
@@ -190,6 +183,23 @@ func Run(opts Options) (*Report, error) {
 	}
 
 	return report, nil
+}
+
+// appendConditionalGroups adds context-sensitive check groups
+// that are only relevant when specific tools or project markers
+// are detected. Extracted from Run() to keep its complexity low.
+func appendConditionalGroups(groups []CheckGroup, opts *Options) []CheckGroup {
+	// DevPod tools: included when DevPod is detected (per design D8).
+	if devpodGroup := checkDevPod(opts); devpodGroup != nil {
+		groups = append(groups, *devpodGroup)
+	}
+
+	// Python tools: included when a Python project marker is detected.
+	if isPythonProject(opts.TargetDir) {
+		groups = append(groups, checkPythonTools(opts))
+	}
+
+	return groups
 }
 
 // filterSkippedChecks removes check groups or individual results
