@@ -1,0 +1,155 @@
+---
+# SPDX-License-Identifier: Apache-2.0
+#
+# ----------------------------------------------------------------
+# Council Review Action — AI code review using OpenCode.
+# Auto-discovers Divisor personas from .opencode/agents/, pre-
+# fetches PR context (CI checks, reviews, linked issues), invokes
+# opencode run for review, and outputs structured JSON (summary +
+# inline comments). Falls back to single-agent mode for repos
+# without uf init.
+#
+# Authentication and PR comment posting are the caller's
+# responsibility. This action only runs the review.
+# ----------------------------------------------------------------
+name: "Council Review"
+description: >-
+  AI code review using OpenCode with native Divisor persona
+  discovery. Auto-discovers agents from .opencode/agents/,
+  pre-fetches PR context, runs review via opencode run, and
+  outputs structured JSON for inline review comments.
+
+inputs:
+  model:
+    description: "Model in provider/model format"
+    required: false
+    default: "vertex/claude-sonnet-4-6"
+  max-diff-lines:
+    description: "Maximum diff lines to include in review"
+    required: false
+    default: "2000"
+  diff-path:
+    description: "Path to the PR diff file"
+    required: true
+  meta-path:
+    description: "Path to the PR metadata JSON file"
+    required: true
+  github-token:
+    description: "GitHub token for gh CLI (pre-fetch)"
+    required: true
+  agents-pattern:
+    description: "Glob for Divisor agent definition files"
+    required: false
+    default: ".opencode/agents/divisor-*.md"
+
+outputs:
+  review-json:
+    description: "Path to the review output JSON file"
+    value: ${{ steps.parse.outputs.review_json }}
+  review-mode:
+    description: >-
+      Review output mode: inline (structured) or
+      comment (fallback)
+    value: ${{ steps.parse.outputs.review_mode }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install OpenCode
+      shell: bash
+      run: curl -fsSL https://opencode.ai/install | bash
+
+    - name: Prepare diff
+      id: diff
+      shell: bash
+      env:
+        MAX_LINES: ${{ inputs.max-diff-lines }}
+        DIFF_PATH: ${{ inputs.diff-path }}
+      run: |
+        TOTAL_LINES=$(wc -l < "${DIFF_PATH}")
+        if [[ "${TOTAL_LINES}" -gt "${MAX_LINES}" ]]; then
+          head -n "${MAX_LINES}" "${DIFF_PATH}" \
+            > pr-diff-truncated.patch
+          echo "truncated=true" >> "$GITHUB_OUTPUT"
+          echo "total_lines=${TOTAL_LINES}" >> "$GITHUB_OUTPUT"
+          echo "::warning::Diff truncated: ${TOTAL_LINES} to ${MAX_LINES}"
+        else
+          cp "${DIFF_PATH}" pr-diff-truncated.patch
+          echo "truncated=false" >> "$GITHUB_OUTPUT"
+          echo "total_lines=${TOTAL_LINES}" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Pre-fetch PR context
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        META_PATH: ${{ inputs.meta-path }}
+      run: |
+        SCRIPT="${{ github.action_path }}/scripts"
+        bash "${SCRIPT}/prefetch.sh"
+
+    - name: Detect Divisor agents
+      id: agents
+      shell: bash
+      env:
+        AGENTS_PATTERN: ${{ inputs.agents-pattern }}
+      run: |
+        COUNT=$(find . -path "${AGENTS_PATTERN}" 2>/dev/null \
+          | wc -l | tr -d ' ')
+        if [[ "${COUNT}" -eq 0 ]]; then
+          echo "::notice::No agents — single-agent fallback"
+          echo "mode=single" >> "$GITHUB_OUTPUT"
+        else
+          echo "::notice::Discovered ${COUNT} agent(s)"
+          echo "mode=multi" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Build review prompt
+      shell: bash
+      env:
+        META_PATH: ${{ inputs.meta-path }}
+        TRUNCATED: ${{ steps.diff.outputs.truncated }}
+        TOTAL_LINES: ${{ steps.diff.outputs.total_lines }}
+        MAX_LINES: ${{ inputs.max-diff-lines }}
+        AGENT_MODE: ${{ steps.agents.outputs.mode }}
+      run: |
+        SCRIPT="${{ github.action_path }}/scripts"
+        bash "${SCRIPT}/build-prompt.sh"
+
+    - name: Run council review
+      id: review
+      shell: bash
+      env:
+        MODEL: ${{ inputs.model }}
+        AGENT_MODE: ${{ steps.agents.outputs.mode }}
+      run: |
+        SCRIPT="${{ github.action_path }}/scripts"
+        bash "${SCRIPT}/run-review.sh"
+
+    - name: Parse review output
+      id: parse
+      shell: bash
+      run: |
+        KEYS='.summary and .inline_comments'
+        if jq -e "${KEYS}" review_raw.txt \
+          > /dev/null 2>&1; then
+          cp review_raw.txt review_output.json
+          echo "review_json=review_output.json" \
+            >> "$GITHUB_OUTPUT"
+          echo "review_mode=inline" >> "$GITHUB_OUTPUT"
+        else
+          echo '{}' > review_output.json
+          if [[ -s review_raw.txt ]]; then
+            SUMMARY=$(cat review_raw.txt)
+            jq -n --arg s "${SUMMARY}" \
+              '{summary: $s, inline_comments: []}' \
+              > review_output.json
+          else
+            jq -n '{summary: "No output.", inline_comments: []}' \
+              > review_output.json
+          fi
+          echo "review_json=review_output.json" \
+            >> "$GITHUB_OUTPUT"
+          echo "review_mode=comment" >> "$GITHUB_OUTPUT"
+          echo "::notice::Non-JSON output — comment fallback"
+        fi
