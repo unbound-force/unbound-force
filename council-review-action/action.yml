@@ -55,11 +55,22 @@ outputs:
 runs:
   using: "composite"
   steps:
+    # TODO: revert soft-fail install guard once OpenCode+Vertex
+    # integration is stable (see run-review.sh set -uo pipefail)
     - name: Install OpenCode
+      id: install
       shell: bash
-      run: curl -fsSL https://opencode.ai/install | bash
+      run: |
+        if ! curl -fsSL https://opencode.ai/install \
+          | bash; then
+          echo "::warning::OpenCode install failed"
+          echo "installed=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "installed=true" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Prepare diff
+      if: steps.install.outputs.installed == 'true'
       id: diff
       shell: bash
       env:
@@ -80,6 +91,7 @@ runs:
         fi
 
     - name: Pre-fetch PR context
+      if: steps.install.outputs.installed == 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
@@ -89,6 +101,7 @@ runs:
         bash "${SCRIPT}/prefetch.sh"
 
     - name: Detect Divisor agents
+      if: steps.install.outputs.installed == 'true'
       id: agents
       shell: bash
       env:
@@ -105,6 +118,7 @@ runs:
         fi
 
     - name: Build review prompt
+      if: steps.install.outputs.installed == 'true'
       shell: bash
       env:
         META_PATH: ${{ inputs.meta-path }}
@@ -117,6 +131,7 @@ runs:
         bash "${SCRIPT}/build-prompt.sh"
 
     - name: Run council review
+      if: steps.install.outputs.installed == 'true'
       id: review
       shell: bash
       env:
@@ -130,6 +145,15 @@ runs:
       id: parse
       shell: bash
       run: |
+        if [[ ! -f review_raw.txt ]]; then
+          jq -n '{summary: "Review skipped.", inline_comments: []}' \
+            > review_output.json
+          echo "review_json=review_output.json" \
+            >> "$GITHUB_OUTPUT"
+          echo "review_mode=comment" >> "$GITHUB_OUTPUT"
+          echo "::notice::Review skipped — no output file"
+          exit 0
+        fi
         KEYS='.summary and .inline_comments'
         if jq -e "${KEYS}" review_raw.txt \
           > /dev/null 2>&1; then
@@ -138,7 +162,6 @@ runs:
             >> "$GITHUB_OUTPUT"
           echo "review_mode=inline" >> "$GITHUB_OUTPUT"
         else
-          echo '{}' > review_output.json
           if [[ -s review_raw.txt ]]; then
             jq -n --rawfile s review_raw.txt \
               '{summary: $s, inline_comments: []}' \

@@ -10,7 +10,8 @@
 # Required env: MODEL, AGENT_MODE
 # Optional env: GOOGLE_CLOUD_PROJECT, VERTEX_LOCATION,
 #               GOOGLE_APPLICATION_CREDENTIALS
-set -euo pipefail
+# TODO: restore set -euo pipefail once OpenCode+Vertex is stable
+set -uo pipefail
 
 PROVIDER="${MODEL%%/*}"
 MODEL_NAME="${MODEL#*/}"
