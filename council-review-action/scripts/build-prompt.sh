@@ -83,8 +83,16 @@ definition from .opencode/agents/divisor-*.md. Review the
 diff from each persona's focus area, then synthesize into
 a unified set of findings.
 
-IMPORTANT: Respond with ONLY a valid JSON object. No
-markdown fences, no extra text. Use this exact schema:
+OUTPUT FORMAT — CRITICAL:
+Your ENTIRE response MUST be a single raw JSON object.
+Do NOT include any text before or after the JSON.
+Do NOT wrap it in markdown code fences.
+Do NOT explain your reasoning or analysis.
+The very first character of your response must be '{' and
+the very last character must be '}'. Any other format will
+cause a CI parse failure.
+
+Schema:
 {
   "summary": "2-3 sentence overall assessment",
   "inline_comments": [
@@ -103,8 +111,16 @@ Review the PR diff as a general code reviewer. Check for
 bugs, security issues, style problems, and alignment with
 linked issues.
 
-IMPORTANT: Respond with ONLY a valid JSON object. No
-markdown fences, no extra text. Use this exact schema:
+OUTPUT FORMAT — CRITICAL:
+Your ENTIRE response MUST be a single raw JSON object.
+Do NOT include any text before or after the JSON.
+Do NOT wrap it in markdown code fences.
+Do NOT explain your reasoning or analysis.
+The very first character of your response must be '{' and
+the very last character must be '}'. Any other format will
+cause a CI parse failure.
+
+Schema:
 {
   "summary": "2-3 sentence overall assessment",
   "inline_comments": [
