@@ -48,11 +48,10 @@ are the single source of truth for both interactive and CI reviews.
   approval prompts)
 
 **Risks:**
-- Vertex AI auth: Claude Code CLI uses `CLAUDE_CODE_USE_VERTEX=1`.
-  OpenCode uses `--model vertex/claude-sonnet-4-6` to route via
-  Vertex AI. WIF sets up GCP ADC; `ANTHROPIC_VERTEX_PROJECT_ID`
-  and `CLOUD_ML_REGION` env vars stay in the consumer workflow.
-  Needs validation during end-to-end testing.
+- Vertex AI auth: OpenCode uses `--model vertex/claude-sonnet-4-6`
+  to route via Vertex AI. WIF sets up GCP ADC; required env vars
+  are `ANTHROPIC_VERTEX_PROJECT_ID` and `VERTEX_LOCATION` (not
+  `CLOUD_ML_REGION`). Both are set in the consumer workflow.
 - OpenCode `run` in headless CI is less battle-tested than
   `claude -p` for this use case.
 
