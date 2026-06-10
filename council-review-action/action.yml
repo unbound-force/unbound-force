@@ -171,7 +171,7 @@ runs:
       id: parse
       shell: bash
       run: |
-        if [[ ! -f review_raw.txt ]]; then
+        if [[ ! -f review_raw.txt ]] || [[ ! -s review_raw.txt ]]; then
           jq -n '{summary: "Review skipped.", inline_comments: []}' \
             > review_output.json
           echo "review_json=review_output.json" \
@@ -180,24 +180,58 @@ runs:
           echo "::notice::Review skipped — no output file"
           exit 0
         fi
+
         KEYS='.summary and .inline_comments'
+
+        # Case 1: raw output is already structured JSON
         if jq -e "${KEYS}" review_raw.txt \
           > /dev/null 2>&1; then
           cp review_raw.txt review_output.json
           echo "review_json=review_output.json" \
             >> "$GITHUB_OUTPUT"
           echo "review_mode=inline" >> "$GITHUB_OUTPUT"
-        else
-          if [[ -s review_raw.txt ]]; then
-            jq -n --rawfile s review_raw.txt \
-              '{summary: $s, inline_comments: []}' \
-              > review_output.json
-          else
-            jq -n '{summary: "No output.", inline_comments: []}' \
-              > review_output.json
+          exit 0
+        fi
+
+        # Case 2: streaming JSONL from opencode run --format json.
+        # Extract .part.text from the last "type":"text" event, then
+        # look for embedded JSON with summary + inline_comments.
+        grep '"type":"text"' review_raw.txt \
+          | tail -1 \
+          | jq -r '.part.text // empty' \
+          > review_text.txt 2>/dev/null || true
+
+        if [[ -s review_text.txt ]]; then
+
+          SCRIPT="${{ github.action_path }}/scripts"
+          if python3 "${SCRIPT}/extract-review-json.py" \
+            > review_extracted.json 2>/dev/null && \
+            jq -e "${KEYS}" review_extracted.json \
+              > /dev/null 2>&1; then
+            mv review_extracted.json review_output.json
+            echo "review_json=review_output.json" \
+              >> "$GITHUB_OUTPUT"
+            echo "review_mode=inline" >> "$GITHUB_OUTPUT"
+            echo "::notice::Extracted structured JSON from JSONL"
+            exit 0
           fi
+
+          # Text exists but no structured JSON — use as summary
+          jq -n --rawfile s review_text.txt \
+            '{summary: $s, inline_comments: []}' \
+            > review_output.json
           echo "review_json=review_output.json" \
             >> "$GITHUB_OUTPUT"
           echo "review_mode=comment" >> "$GITHUB_OUTPUT"
-          echo "::notice::Non-JSON output — comment fallback"
+          echo "::notice::Text output — comment fallback"
+          exit 0
         fi
+
+        # Case 3: unrecognized format — dump raw as summary
+        jq -n --rawfile s review_raw.txt \
+          '{summary: $s, inline_comments: []}' \
+          > review_output.json
+        echo "review_json=review_output.json" \
+          >> "$GITHUB_OUTPUT"
+        echo "review_mode=comment" >> "$GITHUB_OUTPUT"
+        echo "::notice::Non-JSON output — comment fallback"
