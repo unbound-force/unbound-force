@@ -23,7 +23,7 @@ inputs:
   model:
     description: "Model in provider/model format"
     required: false
-    default: "vertex/claude-sonnet-4-6"
+    default: "google-vertex-anthropic/claude-sonnet-4-6"
   max-diff-lines:
     description: "Maximum diff lines to include in review"
     required: false

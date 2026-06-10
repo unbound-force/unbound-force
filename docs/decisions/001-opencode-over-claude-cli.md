@@ -19,7 +19,7 @@ convention packs, severity definitions) that the review depends on.
 |--------|----------|-----------------|
 | Context discovery | Auto-discovers `.opencode/` | Manual `--agents` JSON |
 | Agent definitions | Native (frontmatter) | Requires JSON blob |
-| Model routing | `--model vertex/claude-sonnet-4-6` | `--model` + `CLAUDE_CODE_USE_VERTEX` env var |
+| Model routing | `--model google-vertex-anthropic/claude-sonnet-4-6` | `--model` + `CLAUDE_CODE_USE_VERTEX` env var |
 | Team standard | Yes (`uf init`, all repos) | No (CI-only) |
 | Slash commands | `--command review-council` | Not available |
 | Install | `curl opencode.ai/install` | `npm install` |
@@ -48,10 +48,10 @@ are the single source of truth for both interactive and CI reviews.
   approval prompts)
 
 **Risks:**
-- Vertex AI auth: OpenCode uses `--model vertex/claude-sonnet-4-6`
-  to route via Vertex AI. WIF sets up GCP ADC; required env vars
-  are `ANTHROPIC_VERTEX_PROJECT_ID` and `VERTEX_LOCATION` (not
-  `CLOUD_ML_REGION`). Both are set in the consumer workflow.
+- Vertex AI auth: OpenCode uses `google-vertex-anthropic` provider
+  for Claude on Vertex AI. WIF sets up GCP ADC; `setup-gcloud`
+  sets `GOOGLE_CLOUD_PROJECT` automatically. `VERTEX_LOCATION` is
+  set in the consumer workflow (defaults to `global`).
 - OpenCode `run` in headless CI is less battle-tested than
   `claude -p` for this use case.
 
@@ -59,7 +59,7 @@ are the single source of truth for both interactive and CI reviews.
 
 | Item | Blocker | Action needed |
 |------|---------|---------------|
-| Vertex AI provider config for OpenCode | Needs testing | Validate WIF auth + `--model vertex/...` works with `opencode run` |
+| Vertex AI provider config for OpenCode | Validated | `--model google-vertex-anthropic/claude-sonnet-4-6` with WIF ADC + `GOOGLE_CLOUD_PROJECT` + `VERTEX_LOCATION` |
 | Cost/turn guardrails | OpenCode lacks flags | Investigate OpenCode config options or accept agent-level controls |
 | `--command review-council` in CI | CI constraints (no Shell) | Test if command respects CI constraints from prompt |
 
