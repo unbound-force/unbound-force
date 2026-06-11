@@ -4943,6 +4943,72 @@ func TestCollectDeployedPacks_WithRoot_EmptyRootFallback(t *testing.T) {
 	}
 }
 
+// --- filterEmptyCustomPacks tests ---
+
+func TestFilterEmptyCustomPacks_EmptyRoot(t *testing.T) {
+	candidates := []string{"default.md", "default-custom.md", "go.md"}
+	got := filterEmptyCustomPacks(candidates, "")
+
+	if len(got) != len(candidates) {
+		t.Errorf("expected %d packs with empty root, got %d", len(candidates), len(got))
+	}
+	for i, name := range candidates {
+		if got[i] != name {
+			t.Errorf("pack[%d] = %q, want %q", i, got[i], name)
+		}
+	}
+}
+
+func TestFilterEmptyCustomPacks_ExcludesEmptyStubs(t *testing.T) {
+	dir := t.TempDir()
+	packsDir := filepath.Join(dir, ".opencode", "uf", "packs")
+	if err := os.MkdirAll(packsDir, 0o755); err != nil {
+		t.Fatalf("mkdir packs: %v", err)
+	}
+
+	sentinel := "<!-- Add project-specific rules below this line -->"
+	if err := os.WriteFile(filepath.Join(packsDir, "default-custom.md"), []byte(sentinel), 0o644); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+
+	candidates := []string{"default.md", "default-custom.md", "severity.md"}
+	got := filterEmptyCustomPacks(candidates, dir)
+
+	gotSet := make(map[string]bool, len(got))
+	for _, p := range got {
+		gotSet[p] = true
+	}
+	if gotSet["default-custom.md"] {
+		t.Error("empty default-custom.md should be excluded")
+	}
+	if !gotSet["default.md"] {
+		t.Error("non-custom default.md should be included")
+	}
+	if !gotSet["severity.md"] {
+		t.Error("non-custom severity.md should be included")
+	}
+}
+
+func TestFilterEmptyCustomPacks_KeepsPopulated(t *testing.T) {
+	dir := t.TempDir()
+	packsDir := filepath.Join(dir, ".opencode", "uf", "packs")
+	if err := os.MkdirAll(packsDir, 0o755); err != nil {
+		t.Fatalf("mkdir packs: %v", err)
+	}
+
+	populated := "<!-- Add project-specific rules below this line -->\n\n## CR-001 Real rule\n"
+	if err := os.WriteFile(filepath.Join(packsDir, "go-custom.md"), []byte(populated), 0o644); err != nil {
+		t.Fatalf("write populated: %v", err)
+	}
+
+	candidates := []string{"go.md", "go-custom.md"}
+	got := filterEmptyCustomPacks(candidates, dir)
+
+	if len(got) != 2 {
+		t.Errorf("expected 2 packs (populated custom kept), got %d: %v", len(got), got)
+	}
+}
+
 // --- ensureCLAUDEmd with empty custom packs tests ---
 
 func TestEnsureCLAUDEmd_EmptyCustomPacksOmitted(t *testing.T) {

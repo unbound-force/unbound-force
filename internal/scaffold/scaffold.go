@@ -1300,6 +1300,14 @@ func collectDeployedPacks(lang, root string) []string {
 	if lang != "" && lang != "default" {
 		candidates = append(candidates, lang+".md", lang+"-custom.md")
 	}
+	return filterEmptyCustomPacks(candidates, root)
+}
+
+// filterEmptyCustomPacks removes *-custom.md entries whose on-disk
+// files are empty stubs (no rule content after the sentinel comment).
+// When root is empty, all candidates are returned unchanged (no
+// filesystem access).
+func filterEmptyCustomPacks(candidates []string, root string) []string {
 	if root == "" {
 		return candidates
 	}
