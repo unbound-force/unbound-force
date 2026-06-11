@@ -4085,7 +4085,7 @@ func TestEnsureGitignore_Idempotent(t *testing.T) {
 }
 
 // TestAgentBriefAsset_GovernanceBlockPresence verifies the
-// /agent-brief scaffold asset contains all 8 behavioral rule
+// /agent-brief scaffold asset contains all 7 behavioral rule
 // templates and the conditional governance sections. Governance
 // blocks moved from /uf-init Step 9 to /agent-brief verbatim
 // templates as part of agent-brief-consolidation. Added by
@@ -4110,7 +4110,6 @@ func TestAgentBriefAsset_GovernanceBlockPresence(t *testing.T) {
 		{"Review council", "**Review council**"},
 		{"Branch protection", "**Branch protection**"},
 		{"Documentation gate", "**Documentation gate**"},
-		{"Website gate", "**Website gate**"},
 		{"Zero-waste", "**Zero-waste**"},
 		{"Specification Workflow", "## Specification Workflow"},
 		{"Knowledge Retrieval", "## Knowledge Retrieval"},
