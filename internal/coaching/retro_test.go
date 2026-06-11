@@ -48,8 +48,12 @@ func TestRetroStore_ListRetros(t *testing.T) {
 
 	r1 := &RetroRecord{Date: "2026-03-13"}
 	r2 := &RetroRecord{Date: "2026-03-20"}
-	_ = store.SaveRetro(r1)
-	_ = store.SaveRetro(r2)
+	if err := store.SaveRetro(r1); err != nil {
+		t.Fatalf("SaveRetro r1: %v", err)
+	}
+	if err := store.SaveRetro(r2); err != nil {
+		t.Fatalf("SaveRetro r2: %v", err)
+	}
 
 	retros, err := store.ListRetros()
 	if err != nil {
@@ -60,6 +64,52 @@ func TestRetroStore_ListRetros(t *testing.T) {
 	}
 	if retros[0].Date != "2026-03-20" {
 		t.Errorf("first retro = %q, want 2026-03-20 (descending order)", retros[0].Date)
+	}
+}
+
+func TestRetroStore_StartRetro(t *testing.T) {
+	dir := t.TempDir()
+	store := NewRetroStore(dir)
+
+	metricsData := map[string]interface{}{
+		"velocity":   8.2,
+		"cycle_time": 3.5,
+	}
+
+	record, err := store.StartRetro("2026-04-01", metricsData)
+	if err != nil {
+		t.Fatalf("StartRetro: %v", err)
+	}
+	if record == nil {
+		t.Fatal("StartRetro returned nil record")
+	}
+	if record.Date != "2026-04-01" {
+		t.Errorf("Date = %q, want 2026-04-01", record.Date)
+	}
+	if record.DataPresented == nil {
+		t.Fatal("DataPresented is nil")
+	}
+	if v, ok := record.DataPresented["velocity"]; !ok || v != 8.2 {
+		t.Errorf("DataPresented[velocity] = %v, want 8.2", v)
+	}
+	if v, ok := record.DataPresented["cycle_time"]; !ok || v != 3.5 {
+		t.Errorf("DataPresented[cycle_time] = %v, want 3.5", v)
+	}
+}
+
+func TestRetroStore_StartRetro_NilMetrics(t *testing.T) {
+	dir := t.TempDir()
+	store := NewRetroStore(dir)
+
+	record, err := store.StartRetro("2026-04-02", nil)
+	if err != nil {
+		t.Fatalf("StartRetro with nil metrics: %v", err)
+	}
+	if record == nil {
+		t.Fatal("StartRetro returned nil record")
+	}
+	if record.Date != "2026-04-02" {
+		t.Errorf("Date = %q, want 2026-04-02", record.Date)
 	}
 }
 

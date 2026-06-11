@@ -5439,3 +5439,111 @@ func TestDevPodStart_TunnelErrorSuppressed(t *testing.T) {
 	}
 }
 
+func TestProjectNameFromDir(t *testing.T) {
+	tcs := []struct {
+		name string
+		dir  string
+		want string
+	}{
+		{
+			name: "simple directory name",
+			dir:  "/home/user/my-project",
+			want: "my-project",
+		},
+		{
+			name: "uppercase converted to lowercase",
+			dir:  "/home/user/MyProject",
+			want: "myproject",
+		},
+		{
+			name: "special characters replaced with hyphens",
+			dir:  "/home/user/my_project.v2",
+			want: "my-project-v2",
+		},
+		{
+			name: "trailing slash stripped",
+			dir:  "/home/user/project/",
+			want: "project",
+		},
+		{
+			name: "root path falls back to default",
+			dir:  "/",
+			want: "default",
+		},
+		{
+			name: "dot directory",
+			dir:  ".",
+			want: filepath.Base("."),
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ProjectNameFromDir(tc.dir)
+			// For the dot case, compute expected dynamically.
+			want := tc.want
+			if tc.dir == "." {
+				// filepath.Base(".") returns the cwd basename;
+				// projectName will lowercase and sanitize it.
+				// Just verify non-empty and no panic.
+				if got == "" {
+					t.Error("ProjectNameFromDir(\".\") returned empty string")
+				}
+				return
+			}
+			if got != want {
+				t.Errorf("ProjectNameFromDir(%q) = %q, want %q", tc.dir, got, want)
+			}
+		})
+	}
+}
+
+func TestFormatWorkspaceStatus_RunningWorkspace(t *testing.T) {
+	var buf bytes.Buffer
+	ws := WorkspaceStatus{
+		Exists:     true,
+		Running:    true,
+		Name:       "test-project",
+		Mode:       "podman",
+		Persistent: true,
+		Image:      "ghcr.io/test:latest",
+		ProjectDir: "/home/user/test-project",
+		ServerURL:  "http://localhost:8080",
+	}
+	FormatWorkspaceStatus(&buf, ws)
+	got := buf.String()
+
+	checks := []string{
+		"test-project",
+		"podman (persistent)",
+		"running",
+		"ghcr.io/test:latest",
+		"/home/user/test-project",
+		"http://localhost:8080",
+	}
+	for _, want := range checks {
+		if !strings.Contains(got, want) {
+			t.Errorf("FormatWorkspaceStatus output missing %q, got:\n%s", want, got)
+		}
+	}
+}
+
+func TestFormatWorkspaceStatus_StoppedWorkspace(t *testing.T) {
+	var buf bytes.Buffer
+	ws := WorkspaceStatus{
+		Exists:  true,
+		Running: false,
+		Name:    "test-stopped",
+		Mode:    "isolated",
+	}
+	FormatWorkspaceStatus(&buf, ws)
+	got := buf.String()
+
+	if !strings.Contains(got, "stopped") {
+		t.Errorf("FormatWorkspaceStatus(stopped) missing 'stopped', got:\n%s", got)
+	}
+	if strings.Contains(got, "running") {
+		t.Errorf("FormatWorkspaceStatus(stopped) should not contain 'running', got:\n%s", got)
+	}
+}
+

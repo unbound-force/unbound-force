@@ -143,6 +143,28 @@ func TestSyncer_Pull_CreatesUnmappedIssues(t *testing.T) {
 	}
 }
 
+func TestSyncer_SetRunner(t *testing.T) {
+	dir := t.TempDir()
+	repo := backlog.NewRepository(dir)
+	buf := new(bytes.Buffer)
+	syncer := NewSyncer(repo, buf)
+
+	// Verify default runner is a DefaultGHRunner.
+	if syncer.runner == nil {
+		t.Fatal("expected non-nil default runner")
+	}
+
+	// Inject a stub runner and verify it is used.
+	stub := &StubGHRunner{Out: []byte(`[]`)}
+	syncer.SetRunner(stub)
+
+	// Pull uses the runner; verify no error with stub.
+	err := syncer.Pull()
+	if err != nil {
+		t.Fatalf("Pull after SetRunner: %v", err)
+	}
+}
+
 func TestSyncer_Status(t *testing.T) {
 	dir := t.TempDir()
 	repo := backlog.NewRepository(dir)

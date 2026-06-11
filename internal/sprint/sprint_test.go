@@ -29,7 +29,9 @@ func TestSprintStore_PlanAndReview(t *testing.T) {
 
 	// Simulate completing items
 	state.CompletedItems = []string{"BI-001", "BI-002"}
-	_ = store.Save(state)
+	if err := store.Save(state); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 
 	reviewed, err := store.Review(state.SprintName)
 	if err != nil {
@@ -105,6 +107,65 @@ func TestSprintStore_Load_MissingFile(t *testing.T) {
 	_, err := store.Load("nonexistent")
 	if err == nil {
 		t.Error("expected error for missing sprint file")
+	}
+}
+
+func TestSprintState_DurationDays(t *testing.T) {
+	tcs := []struct {
+		name      string
+		startDate string
+		endDate   string
+		want      int
+	}{
+		{
+			name:      "standard two-week sprint",
+			startDate: "2026-03-01",
+			endDate:   "2026-03-15",
+			want:      14,
+		},
+		{
+			name:      "one-week sprint",
+			startDate: "2026-03-01",
+			endDate:   "2026-03-08",
+			want:      7,
+		},
+		{
+			name:      "same day",
+			startDate: "2026-03-01",
+			endDate:   "2026-03-01",
+			want:      0,
+		},
+		{
+			name:      "invalid start date falls back to default",
+			startDate: "not-a-date",
+			endDate:   "2026-03-15",
+			want:      14,
+		},
+		{
+			name:      "invalid end date falls back to default",
+			startDate: "2026-03-01",
+			endDate:   "bad",
+			want:      14,
+		},
+		{
+			name:      "both dates invalid falls back to default",
+			startDate: "",
+			endDate:   "",
+			want:      14,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			state := &SprintState{
+				StartDate: tc.startDate,
+				EndDate:   tc.endDate,
+			}
+			got := state.DurationDays()
+			if got != tc.want {
+				t.Errorf("DurationDays() = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
 
