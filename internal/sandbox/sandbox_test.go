@@ -5222,6 +5222,193 @@ func TestDevPodStart_SSHFallbackFails(t *testing.T) {
 
 // --- DevPod Start stderr suppression (Task 6.2) ---
 
+// ============================================================
+// PodmanBackend.Create coverage gap tests
+// ============================================================
+
+func TestPodmanCreate_PodmanNotFound(t *testing.T) {
+	opts := testOpts()
+	opts.LookPath = func(name string) (string, error) {
+		if name == "podman" {
+			return "", fmt.Errorf("not found")
+		}
+		return "/usr/bin/" + name, nil
+	}
+
+	b := &PodmanBackend{}
+	err := b.Create(opts)
+	if err == nil {
+		t.Fatal("expected error when podman is not in PATH")
+	}
+	if !strings.Contains(err.Error(), "podman not found") {
+		t.Errorf("expected 'podman not found' in error, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "brew install podman") {
+		t.Errorf("expected install hint in error, got: %s", err.Error())
+	}
+}
+
+func TestPodmanCreate_RunFails(t *testing.T) {
+	rmCalled := false
+	volumeRmCalled := false
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				if len(args) > 1 && args[1] == "inspect" {
+					return nil, fmt.Errorf("no such volume")
+				}
+				if len(args) > 1 && args[1] == "create" {
+					return []byte("volume-created"), nil
+				}
+				if len(args) > 1 && args[1] == "rm" {
+					volumeRmCalled = true
+					return []byte(""), nil
+				}
+				return []byte(""), nil
+			case "run":
+				return []byte("image pull error"), fmt.Errorf("exit 125")
+			case "rm":
+				rmCalled = true
+				return []byte(""), nil
+			case "inspect":
+				return nil, fmt.Errorf("no such container")
+			}
+		}
+		return []byte(""), nil
+	}
+
+	b := &PodmanBackend{}
+	err := b.Create(opts)
+	if err == nil {
+		t.Fatal("expected error when podman run fails")
+	}
+	if !strings.Contains(err.Error(), "failed to start container") {
+		t.Errorf("expected 'failed to start container' in error, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "image pull error") {
+		t.Errorf("expected podman output in error, got: %s", err.Error())
+	}
+	if !rmCalled {
+		t.Error("expected podman rm -f for partial cleanup after run failure")
+	}
+	if !volumeRmCalled {
+		t.Error("expected podman volume rm for partial cleanup after run failure")
+	}
+}
+
+func TestPodmanCreate_CopyFails(t *testing.T) {
+	rmCalled := false
+	volumeRmCalled := false
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				if len(args) > 1 && args[1] == "inspect" {
+					return nil, fmt.Errorf("no such volume")
+				}
+				if len(args) > 1 && args[1] == "create" {
+					return []byte("volume-created"), nil
+				}
+				if len(args) > 1 && args[1] == "rm" {
+					volumeRmCalled = true
+					return []byte(""), nil
+				}
+				return []byte(""), nil
+			case "run":
+				return []byte("container-id"), nil
+			case "cp":
+				return []byte("no such file or directory"), fmt.Errorf("exit 125")
+			case "rm":
+				rmCalled = true
+				return []byte(""), nil
+			case "inspect":
+				return nil, fmt.Errorf("no such container")
+			}
+		}
+		return []byte(""), nil
+	}
+
+	b := &PodmanBackend{}
+	err := b.Create(opts)
+	if err == nil {
+		t.Fatal("expected error when podman cp fails")
+	}
+	if !strings.Contains(err.Error(), "failed to copy source") {
+		t.Errorf("expected 'failed to copy source' in error, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "no such file or directory") {
+		t.Errorf("expected podman output in error, got: %s", err.Error())
+	}
+	if !rmCalled {
+		t.Error("expected podman rm -f for partial cleanup after cp failure")
+	}
+	if !volumeRmCalled {
+		t.Error("expected podman volume rm for partial cleanup after cp failure")
+	}
+}
+
+func TestPodmanCreate_HealthCheckFails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("PodmanBackend.Create uses hardcoded HealthTimeout (60s)")
+	}
+
+	rmCalled := false
+	volumeRmCalled := false
+	opts := testOpts()
+	opts.HTTPGet = func(url string) (int, error) {
+		return 0, fmt.Errorf("connection refused")
+	}
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		if name == "podman" && len(args) > 0 {
+			switch args[0] {
+			case "volume":
+				if len(args) > 1 && args[1] == "inspect" {
+					return nil, fmt.Errorf("no such volume")
+				}
+				if len(args) > 1 && args[1] == "create" {
+					return []byte("volume-created"), nil
+				}
+				if len(args) > 1 && args[1] == "rm" {
+					volumeRmCalled = true
+					return []byte(""), nil
+				}
+				return []byte(""), nil
+			case "run":
+				return []byte("container-id"), nil
+			case "cp":
+				return []byte(""), nil
+			case "exec":
+				// chown succeeds.
+				return []byte(""), nil
+			case "rm":
+				rmCalled = true
+				return []byte(""), nil
+			case "inspect":
+				return nil, fmt.Errorf("no such container")
+			}
+		}
+		return []byte(""), nil
+	}
+
+	b := &PodmanBackend{}
+	err := b.Create(opts)
+	if err == nil {
+		t.Fatal("expected error when health check times out")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("expected 'timed out' in error, got: %s", err.Error())
+	}
+	if !rmCalled {
+		t.Error("expected podman rm -f for partial cleanup after health timeout")
+	}
+	if !volumeRmCalled {
+		t.Error("expected podman volume rm for partial cleanup after health timeout")
+	}
+}
+
 func TestDevPodStart_TunnelErrorSuppressed(t *testing.T) {
 	opts := testOpts()
 	opts.IDE = "none"
