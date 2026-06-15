@@ -578,34 +578,43 @@ func installGH(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	case "homebrew":
 		return installViaBrew(opts, "GitHub CLI", "gh")
 	case "dnf":
-		if opts.DryRun {
-			return stepResult{name: "GitHub CLI", action: "dry-run", detail: "Would install: dnf install -y gh"}
-		}
-		if _, err := opts.ExecCmd("dnf", "install", "-y", "gh"); err != nil {
-			// Graceful degradation: dnf failure is "skipped", not "failed" (D4).
-			return stepResult{
-				name:   "GitHub CLI",
-				action: "skipped",
-				detail: "dnf install failed — configure the GitHub CLI repo: https://github.com/cli/cli/blob/trunk/docs/install_linux.md or download from https://cli.github.com",
-			}
-		}
-		return stepResult{name: "GitHub CLI", action: "installed", detail: "via dnf"}
+		return installGHViaDnf(opts)
 	default:
-		// In dry-run mode, report the download link as a dry-run
-		// action rather than a skip — the user asked to see what
-		// would happen, not to silently skip.
-		if opts.DryRun {
-			return stepResult{
-				name:   "GitHub CLI",
-				action: "dry-run",
-				detail: "Would install: download from https://cli.github.com",
-			}
-		}
+		return ghSkipResult(opts)
+	}
+}
+
+// installGHViaDnf installs GitHub CLI via dnf. On failure, returns a
+// graceful skip (not a hard failure) with an actionable repo setup
+// link (D4). GH CLI uses its own dnf repository, not GoReleaser RPMs.
+func installGHViaDnf(opts *Options) stepResult {
+	if opts.DryRun {
+		return stepResult{name: "GitHub CLI", action: "dry-run", detail: "Would install: dnf install -y gh"}
+	}
+	if _, err := opts.ExecCmd("dnf", "install", "-y", "gh"); err != nil {
 		return stepResult{
 			name:   "GitHub CLI",
 			action: "skipped",
-			detail: "Homebrew not available. Download from https://cli.github.com",
+			detail: "dnf install failed — configure the GitHub CLI repo: https://github.com/cli/cli/blob/trunk/docs/install_linux.md or download from https://cli.github.com",
 		}
+	}
+	return stepResult{name: "GitHub CLI", action: "installed", detail: "via dnf"}
+}
+
+// ghSkipResult returns the appropriate skip/dry-run result when no
+// package manager is available for GitHub CLI.
+func ghSkipResult(opts *Options) stepResult {
+	if opts.DryRun {
+		return stepResult{
+			name:   "GitHub CLI",
+			action: "dry-run",
+			detail: "Would install: download from https://cli.github.com",
+		}
+	}
+	return stepResult{
+		name:   "GitHub CLI",
+		action: "skipped",
+		detail: "Homebrew not available. Download from https://cli.github.com",
 	}
 }
 
