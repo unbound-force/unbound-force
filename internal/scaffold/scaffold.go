@@ -473,10 +473,15 @@ func insertMarkerAfterFrontmatter(content []byte, marker string) []byte {
 // Action values: "initialized", "completed", "failed", "skipped",
 // "created", "configured", "already configured", "overwritten",
 // "error", "dry-run".
+// The err field captures the underlying error from ExecCmd when a
+// command fails. The output field captures stdout+stderr from
+// CombinedOutput() for diagnostic reporting.
 type subToolResult struct {
 	name   string
 	action string
 	detail string
+	err    error  // underlying error from ExecCmd
+	output []byte // captured stdout+stderr from CombinedOutput()
 }
 
 // configureOpencodeJSON creates or updates opencode.json with the Dewey
@@ -1486,10 +1491,13 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 	if _, statErr := os.Stat(deweyDir); os.IsNotExist(statErr) {
 		// First run: initialize workspace and build index.
 		logf("  Initializing Dewey workspace...\n")
-		if _, initErr := opts.ExecCmd("dewey", "init"); initErr != nil {
+		if out, initErr := opts.ExecCmd("dewey", "init"); initErr != nil {
 			return []subToolResult{{
 				name: ".uf/dewey/", action: "failed",
-				detail: "dewey init failed"}}
+				detail:  fmt.Sprintf("dewey init: %s", initErr),
+				err:     initErr,
+				output:  out,
+			}}
 		}
 		results = append(results, subToolResult{
 			name: ".uf/dewey/", action: "initialized"})
@@ -1500,10 +1508,13 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 		}
 
 		logf("  Indexing Dewey sources (this may take a moment)...\n")
-		if _, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
+		if out, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
 			results = append(results, subToolResult{
 				name: "dewey index", action: "failed",
-				detail: "dewey index failed"})
+				detail:  fmt.Sprintf("dewey index: %s", idxErr),
+				err:     idxErr,
+				output:  out,
+			})
 		} else {
 			results = append(results, subToolResult{
 				name: "dewey index", action: "completed"})
@@ -1517,10 +1528,13 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 			results = append(results, *sr)
 		}
 		logf("  Re-indexing Dewey sources...\n")
-		if _, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
+		if out, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
 			results = append(results, subToolResult{
 				name: "dewey index", action: "failed",
-				detail: "dewey index failed"})
+				detail:  fmt.Sprintf("dewey index: %s", idxErr),
+				err:     idxErr,
+				output:  out,
+			})
 		} else {
 			results = append(results, subToolResult{
 				name: "dewey index", action: "re-indexed"})
@@ -1540,10 +1554,13 @@ func initSimpleTool(opts *Options, name, sentinel, resultName, label string, ext
 
 	logf("  Initializing %s...\n", label)
 	args := append([]string{"init"}, extraArgs...)
-	if _, initErr := opts.ExecCmd(name, args...); initErr != nil {
+	if out, initErr := opts.ExecCmd(name, args...); initErr != nil {
 		return &subToolResult{
 			name: resultName, action: "failed",
-			detail: name + " init failed"}
+			detail:  fmt.Sprintf("%s init: %s", name, initErr),
+			err:     initErr,
+			output:  out,
+		}
 	}
 	return &subToolResult{
 		name: resultName, action: "initialized"}
@@ -1563,6 +1580,23 @@ func subToolSymbol(action string) string {
 		// "already configured", "overwritten"
 		return "✓"
 	}
+}
+
+// truncateOutput returns a string representation of command output,
+// truncated to the last maxLines/2 lines if the output exceeds
+// maxLines lines. Empty output returns an empty string.
+func truncateOutput(output []byte, maxLines int) string {
+	s := strings.TrimSpace(string(output))
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s
+	}
+	tail := maxLines / 2
+	omitted := len(lines) - tail
+	return fmt.Sprintf("... (%d lines omitted)\n%s", omitted, strings.Join(lines[len(lines)-tail:], "\n"))
 }
 
 // Next-step hint commands shown after scaffold summary.
@@ -1621,6 +1655,17 @@ func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *
 				line += " (" + sr.detail + ")"
 			}
 			_, _ = fmt.Fprintln(w, line)
+			// Show error and captured output for failed/error results.
+			if sr.err != nil {
+				_, _ = fmt.Fprintf(w, "                     Error: %v\n", sr.err)
+			}
+			if len(sr.output) > 0 && (sr.action == "failed" || sr.action == "error") {
+				if trimmed := truncateOutput(sr.output, 20); trimmed != "" {
+					for _, line := range strings.Split(trimmed, "\n") {
+						_, _ = fmt.Fprintf(w, "                     %s\n", line)
+					}
+				}
+			}
 		}
 	}
 

@@ -1846,9 +1846,10 @@ func stubScaffoldLookPath(found map[string]string) func(string) (string, error) 
 
 // scaffoldCmdRecorder records ExecCmd calls for scaffold tests.
 type scaffoldCmdRecorder struct {
-	mu     sync.Mutex
-	calls  []string
-	errors map[string]error
+	mu      sync.Mutex
+	calls   []string
+	errors  map[string]error
+	outputs map[string]string
 }
 
 func (r *scaffoldCmdRecorder) execCmd(name string, args ...string) ([]byte, error) {
@@ -1860,10 +1861,19 @@ func (r *scaffoldCmdRecorder) execCmd(name string, args ...string) ([]byte, erro
 	r.mu.Lock()
 	r.calls = append(r.calls, key)
 	err, ok := r.errors[key]
+	var out []byte
+	if r.outputs != nil {
+		if s, has := r.outputs[key]; has {
+			out = []byte(s)
+		}
+	}
 	r.mu.Unlock()
 
 	if ok {
-		return nil, err
+		return out, err
+	}
+	if out != nil {
+		return out, nil
 	}
 	return []byte(""), nil
 }
@@ -6179,5 +6189,346 @@ func TestMigrateCommandDir_MergeComplex(t *testing.T) {
 	// Verify old copy of conflict.md was removed.
 	if _, err := os.Stat(filepath.Join(oldDir, "conflict.md")); !os.IsNotExist(err) {
 		t.Error("old copy of conflict.md should be removed")
+	}
+}
+
+// --- Sub-tool error reporting tests (Spec 036 Phase 2) ---
+
+func TestInitSubTools_DeweyInitFails_ShowsError(t *testing.T) {
+	t.Run("short_output", func(t *testing.T) {
+		dir := t.TempDir()
+		rec := &scaffoldCmdRecorder{
+			errors: map[string]error{
+				"dewey init": fmt.Errorf("exit status 1"),
+			},
+			outputs: map[string]string{
+				"dewey init": "Error: vault not found\nRun 'dewey init --vault .' to create one.\n",
+			},
+		}
+
+		var buf bytes.Buffer
+		opts := &Options{
+			TargetDir: dir,
+			LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+			ExecCmd:   rec.execCmd,
+			Stdout:    &buf,
+		}
+
+		results := initSubTools(opts)
+
+		// Find the dewey init failure result.
+		var deweyResult *subToolResult
+		for i := range results {
+			if results[i].name == ".uf/dewey/" && results[i].action == "failed" {
+				deweyResult = &results[i]
+				break
+			}
+		}
+		if deweyResult == nil {
+			t.Fatalf("expected .uf/dewey/ failed result, got %v", results)
+		}
+
+		// Verify err field is set.
+		if deweyResult.err == nil {
+			t.Error("expected err to be non-nil on failed dewey init")
+		}
+
+		// Verify output field contains the error text.
+		if !strings.Contains(string(deweyResult.output), "vault not found") {
+			t.Errorf("expected output to contain 'vault not found', got %q", string(deweyResult.output))
+		}
+
+		// Verify detail includes the error message.
+		if !strings.Contains(deweyResult.detail, "exit status 1") {
+			t.Errorf("expected detail to contain error text, got %q", deweyResult.detail)
+		}
+
+		// Verify printSummary shows the error output.
+		printSummary(&buf, false, false, true, &Result{Created: []string{"test.md"}}, results)
+		output := buf.String()
+
+		if !strings.Contains(output, "vault not found") {
+			t.Errorf("expected printSummary output to contain 'vault not found', got:\n%s", output)
+		}
+		if !strings.Contains(output, "Error:") {
+			t.Errorf("expected printSummary output to contain 'Error:', got:\n%s", output)
+		}
+	})
+
+	t.Run("long_output_truncated", func(t *testing.T) {
+		dir := t.TempDir()
+		// Generate 25 lines of output to trigger truncation (maxLines=20).
+		longOutput := generateLines(25)
+		rec := &scaffoldCmdRecorder{
+			errors: map[string]error{
+				"dewey init": fmt.Errorf("exit status 1"),
+			},
+			outputs: map[string]string{
+				"dewey init": longOutput,
+			},
+		}
+
+		var buf bytes.Buffer
+		opts := &Options{
+			TargetDir: dir,
+			LookPath:  stubScaffoldLookPath(map[string]string{"dewey": "/usr/local/bin/dewey"}),
+			ExecCmd:   rec.execCmd,
+			Stdout:    &buf,
+		}
+
+		results := initSubTools(opts)
+
+		// Find the dewey init failure result.
+		var deweyResult *subToolResult
+		for i := range results {
+			if results[i].name == ".uf/dewey/" && results[i].action == "failed" {
+				deweyResult = &results[i]
+				break
+			}
+		}
+		if deweyResult == nil {
+			t.Fatalf("expected .uf/dewey/ failed result, got %v", results)
+		}
+
+		// Verify printSummary renders truncated output.
+		printSummary(&buf, false, false, true, &Result{Created: []string{"test.md"}}, results)
+		output := buf.String()
+
+		// Should contain the truncation marker.
+		if !strings.Contains(output, "... (15 lines omitted)") {
+			t.Errorf("expected '... (15 lines omitted)' in printSummary output, got:\n%s", output)
+		}
+
+		// Should contain the last 10 lines (line 16 through line 25).
+		if !strings.Contains(output, "line 25") {
+			t.Errorf("expected last line 'line 25' in output, got:\n%s", output)
+		}
+		if !strings.Contains(output, "line 16") {
+			t.Errorf("expected 'line 16' (first of last 10) in output, got:\n%s", output)
+		}
+
+		// Should NOT contain early lines that were truncated.
+		// Use a specific match to avoid matching "line 1" as a
+		// substring of "line 10", "line 15", etc.
+		for _, earlyLine := range []string{"line 1\n", "line 2\n", "line 5\n"} {
+			// Check the rendered output (each line is indented).
+			// The truncation should have removed these lines.
+			truncated := truncateOutput(deweyResult.output, 20)
+			if strings.Contains(truncated, strings.TrimSuffix(earlyLine, "\n")+"\n") {
+				// Only flag if the early line appears as a full line
+				// in the truncated output (not as a substring).
+				lines := strings.Split(truncated, "\n")
+				for _, l := range lines {
+					if l == strings.TrimSuffix(earlyLine, "\n") {
+						t.Errorf("early line %q should be truncated from output", strings.TrimSuffix(earlyLine, "\n"))
+					}
+				}
+			}
+		}
+	})
+}
+
+func TestInitSubTools_SimpleToolFails_ShowsError(t *testing.T) {
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{
+		errors: map[string]error{
+			"specify init": fmt.Errorf("exit status 1"),
+		},
+		outputs: map[string]string{
+			"specify init": "Error: .specify already exists\nUse --force to overwrite.\n",
+		},
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"specify": "/usr/local/bin/specify"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Find the specify failure result.
+	var specifyResult *subToolResult
+	for i := range results {
+		if results[i].name == ".specify/" && results[i].action == "failed" {
+			specifyResult = &results[i]
+			break
+		}
+	}
+	if specifyResult == nil {
+		t.Fatalf("expected .specify/ failed result, got %v", results)
+	}
+
+	// Verify err field is set.
+	if specifyResult.err == nil {
+		t.Error("expected err to be non-nil on failed specify init")
+	}
+
+	// Verify output field contains the error text.
+	if !strings.Contains(string(specifyResult.output), ".specify already exists") {
+		t.Errorf("expected output to contain '.specify already exists', got %q", string(specifyResult.output))
+	}
+
+	// Verify detail includes the tool name and error.
+	if !strings.Contains(specifyResult.detail, "specify init:") {
+		t.Errorf("expected detail to contain 'specify init:', got %q", specifyResult.detail)
+	}
+}
+
+func TestTruncateOutput(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []byte
+		maxLines int
+		want     string
+	}{
+		{
+			name:     "empty input",
+			input:    []byte(""),
+			maxLines: 20,
+			want:     "",
+		},
+		{
+			name:     "short output 3 lines",
+			input:    []byte("line1\nline2\nline3\n"),
+			maxLines: 20,
+			want:     "line1\nline2\nline3",
+		},
+		{
+			name:     "exactly 20 lines",
+			input:    []byte(generateLines(20)),
+			maxLines: 20,
+			want:     strings.TrimSpace(generateLines(20)),
+		},
+		{
+			name:     "21 lines truncated to last 10",
+			input:    []byte(generateLines(21)),
+			maxLines: 20,
+			want:     "... (11 lines omitted)\n" + generateLastNLines(21, 10),
+		},
+		{
+			name:     "50 lines truncated to last 10",
+			input:    []byte(generateLines(50)),
+			maxLines: 20,
+			want:     "... (40 lines omitted)\n" + generateLastNLines(50, 10),
+		},
+		{
+			name:     "output with no trailing newline",
+			input:    []byte("line1\nline2\nline3"),
+			maxLines: 20,
+			want:     "line1\nline2\nline3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateOutput(tt.input, tt.maxLines)
+			if got != tt.want {
+				t.Errorf("truncateOutput() =\n%q\nwant:\n%q", got, tt.want)
+			}
+		})
+	}
+}
+
+// generateLines creates a string with n lines like "line 1\nline 2\n...".
+func generateLines(n int) string {
+	var b strings.Builder
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	return b.String()
+}
+
+// generateLastNLines returns the last n lines of a total-line string,
+// joined by newlines (no trailing newline).
+func generateLastNLines(total, n int) string {
+	var lines []string
+	for i := total - n + 1; i <= total; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func TestInitSubTools_ExitCodeOnly(t *testing.T) {
+	dir := t.TempDir()
+	rec := &scaffoldCmdRecorder{
+		errors: map[string]error{
+			"gaze init": fmt.Errorf("exit status 127"),
+		},
+		// No outputs entry — empty output bytes.
+	}
+
+	// Create .opencode/agents/ but no gaze-reporter.md so gaze init triggers.
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode", "agents"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{"gaze": "/usr/local/bin/gaze"}),
+		ExecCmd:   rec.execCmd,
+	}
+
+	results := initSubTools(opts)
+
+	// Find the gaze failure result.
+	var gazeResult *subToolResult
+	for i := range results {
+		if results[i].name == "gaze" && results[i].action == "failed" {
+			gazeResult = &results[i]
+			break
+		}
+	}
+	if gazeResult == nil {
+		t.Fatalf("expected gaze failed result, got %v", results)
+	}
+
+	// Verify err is set.
+	if gazeResult.err == nil {
+		t.Error("expected err to be non-nil")
+	}
+
+	// Verify detail includes the error text.
+	if !strings.Contains(gazeResult.detail, "exit status 127") {
+		t.Errorf("expected detail to contain 'exit status 127', got %q", gazeResult.detail)
+	}
+}
+
+func TestPrintSummary_SuccessUnchanged(t *testing.T) {
+	var buf bytes.Buffer
+
+	r := &Result{
+		Created: []string{"test.md"},
+	}
+	subResults := []subToolResult{
+		{name: ".uf/dewey/", action: "initialized"},
+		{name: "dewey index", action: "completed"},
+		{name: "opencode.json", action: "created"},
+	}
+
+	printSummary(&buf, false, false, true, r, subResults)
+	output := buf.String()
+
+	// Verify each sub-tool result appears on exactly one line
+	// (no "Output:" or "Error:" lines for successful results).
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Output:") {
+			t.Errorf("successful results should not have 'Output:' lines, got:\n%s", output)
+		}
+		if strings.Contains(line, "Error:") {
+			t.Errorf("successful results should not have 'Error:' lines, got:\n%s", output)
+		}
+	}
+
+	// Verify the sub-tool results are present.
+	if !strings.Contains(output, ".uf/dewey/ initialized") {
+		t.Errorf("expected '.uf/dewey/ initialized' in output")
+	}
+	if !strings.Contains(output, "dewey index completed") {
+		t.Errorf("expected 'dewey index completed' in output")
+	}
+	if !strings.Contains(output, "opencode.json created") {
+		t.Errorf("expected 'opencode.json created' in output")
 	}
 }

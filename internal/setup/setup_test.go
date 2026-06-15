@@ -4947,3 +4947,266 @@ func TestInstallGH_DryRunDnfFallback(t *testing.T) {
 		t.Errorf("detail = %q, want to contain 'dnf install -y gh'", result.detail)
 	}
 }
+
+// --- Error output reporting tests (Spec 036, Phase 3, US2) ---
+
+func TestInstallViaBrew_ShowsOutput(t *testing.T) {
+	t.Run("short_output", func(t *testing.T) {
+		brewOutput := "Error: No available formula with the name \"gaze\".\n"
+		rec := &cmdRecorder{
+			outputs: map[string]string{
+				"brew install gaze": brewOutput,
+			},
+			errors: map[string]error{
+				"brew install gaze": fmt.Errorf("exit status 1"),
+			},
+		}
+
+		opts := &Options{
+			LookPath: stubLookPath(map[string]string{}),
+			ExecCmd:  rec.execCmd,
+			Stdout:   &bytes.Buffer{},
+			Stderr:   &bytes.Buffer{},
+		}
+
+		result := installViaBrew(opts, "Gaze", "gaze")
+
+		// Verify stepResult captures the output.
+		if result.action != "failed" {
+			t.Fatalf("action = %q, want failed", result.action)
+		}
+		if !strings.Contains(string(result.output), "No available formula") {
+			t.Errorf("output = %q, want to contain 'No available formula'", result.output)
+		}
+
+		// Verify printStepResult renders the output.
+		var buf bytes.Buffer
+		printStepResult(&buf, result)
+		rendered := buf.String()
+		if !strings.Contains(rendered, "No available formula") {
+			t.Errorf("rendered output should contain 'No available formula', got:\n%s", rendered)
+		}
+	})
+
+	t.Run("long_output_truncated", func(t *testing.T) {
+		// Generate 25 lines of brew output to trigger truncation.
+		longOutput := setupGenerateLines(25)
+		rec := &cmdRecorder{
+			outputs: map[string]string{
+				"brew install gaze": longOutput,
+			},
+			errors: map[string]error{
+				"brew install gaze": fmt.Errorf("exit status 1"),
+			},
+		}
+
+		opts := &Options{
+			LookPath: stubLookPath(map[string]string{}),
+			ExecCmd:  rec.execCmd,
+			Stdout:   &bytes.Buffer{},
+			Stderr:   &bytes.Buffer{},
+		}
+
+		result := installViaBrew(opts, "Gaze", "gaze")
+
+		if result.action != "failed" {
+			t.Fatalf("action = %q, want failed", result.action)
+		}
+
+		// Verify printStepResult renders truncated output.
+		var buf bytes.Buffer
+		printStepResult(&buf, result)
+		rendered := buf.String()
+
+		// Should contain the truncation marker.
+		if !strings.Contains(rendered, "... (15 lines omitted)") {
+			t.Errorf("expected '... (15 lines omitted)' in rendered output, got:\n%s", rendered)
+		}
+
+		// Should contain the last 10 lines (line 16 through line 25).
+		if !strings.Contains(rendered, "line 25") {
+			t.Errorf("expected last line 'line 25' in rendered output, got:\n%s", rendered)
+		}
+		if !strings.Contains(rendered, "line 16") {
+			t.Errorf("expected 'line 16' (first of last 10) in rendered output, got:\n%s", rendered)
+		}
+
+		// Should NOT contain early lines that were truncated.
+		if strings.Contains(rendered, "line 1\n") {
+			t.Errorf("early lines should be truncated, but found 'line 1' in:\n%s", rendered)
+		}
+	})
+}
+
+func TestInstallViaGo_ShowsOutput(t *testing.T) {
+	goOutput := "# github.com/example/tool\n./main.go:10:5: undefined: nonexistent\n"
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"go install github.com/example/tool@latest": goOutput,
+		},
+		errors: map[string]error{
+			"go install github.com/example/tool@latest": fmt.Errorf("exit status 1"),
+		},
+	}
+
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{
+			"go": "/usr/local/bin/go",
+		}),
+		ExecCmd: rec.execCmd,
+		Stdout:  &bytes.Buffer{},
+		Stderr:  &bytes.Buffer{},
+	}
+
+	result := installViaGo(opts, "TestTool", "github.com/example/tool")
+
+	// Verify stepResult captures the output.
+	if result.action != "failed" {
+		t.Fatalf("action = %q, want failed", result.action)
+	}
+	if !strings.Contains(string(result.output), "undefined: nonexistent") {
+		t.Errorf("output = %q, want to contain 'undefined: nonexistent'", result.output)
+	}
+
+	// Verify printStepResult renders the output.
+	var buf bytes.Buffer
+	printStepResult(&buf, result)
+	rendered := buf.String()
+	if !strings.Contains(rendered, "undefined: nonexistent") {
+		t.Errorf("rendered output should contain compiler error, got:\n%s", rendered)
+	}
+}
+
+func TestPrintStepResult_WithOutput(t *testing.T) {
+	// Test 1: Failed result with output shows the output.
+	failedResult := stepResult{
+		name:   "TestTool",
+		action: "failed",
+		detail: "install failed",
+		output: []byte("Error: something went wrong\n"),
+		err:    fmt.Errorf("exit status 1"),
+	}
+
+	var buf bytes.Buffer
+	printStepResult(&buf, failedResult)
+	rendered := buf.String()
+
+	if !strings.Contains(rendered, "something went wrong") {
+		t.Errorf("failed result should show output text, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Error: exit status 1") {
+		t.Errorf("failed result should show error, got:\n%s", rendered)
+	}
+
+	// Test 2: Successful result with no output does NOT show "Output:" —
+	// FR-007 regression test.
+	successResult := stepResult{
+		name:   "TestTool",
+		action: "installed",
+		detail: "via Homebrew",
+	}
+
+	var buf2 bytes.Buffer
+	printStepResult(&buf2, successResult)
+	rendered2 := buf2.String()
+
+	if strings.Contains(rendered2, "Output:") {
+		t.Errorf("successful result should NOT contain 'Output:', got:\n%s", rendered2)
+	}
+	if strings.Contains(rendered2, "Error:") {
+		t.Errorf("successful result should NOT contain 'Error:', got:\n%s", rendered2)
+	}
+}
+
+func TestPrintStepResult_SuccessWithOutputNotShown(t *testing.T) {
+	// Even if a successful result somehow has output, it should NOT
+	// be displayed — output is only shown for failed results.
+	result := stepResult{
+		name:   "TestTool",
+		action: "installed",
+		detail: "via Homebrew",
+		output: []byte("some install log output\n"),
+	}
+
+	var buf bytes.Buffer
+	printStepResult(&buf, result)
+	rendered := buf.String()
+
+	if strings.Contains(rendered, "some install log output") {
+		t.Errorf("successful result should NOT show output, got:\n%s", rendered)
+	}
+}
+
+func TestTruncateOutput_Setup(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []byte
+		maxLines int
+		want     string
+	}{
+		{
+			name:     "empty input",
+			input:    []byte(""),
+			maxLines: 20,
+			want:     "",
+		},
+		{
+			name:     "whitespace only",
+			input:    []byte("  \n  \n  "),
+			maxLines: 20,
+			want:     "",
+		},
+		{
+			name:     "short output 3 lines",
+			input:    []byte("line1\nline2\nline3"),
+			maxLines: 20,
+			want:     "line1\nline2\nline3",
+		},
+		{
+			name:     "exactly 20 lines no truncation",
+			input:    []byte(setupGenerateLines(20)),
+			maxLines: 20,
+			want:     strings.TrimSpace(setupGenerateLines(20)),
+		},
+		{
+			name:     "21 lines truncated to last 10",
+			input:    []byte(setupGenerateLines(21)),
+			maxLines: 20,
+			want:     "... (11 lines omitted)\n" + setupGenerateLastNLines(21, 10),
+		},
+		{
+			name:     "50 lines truncated to last 10",
+			input:    []byte(setupGenerateLines(50)),
+			maxLines: 20,
+			want:     "... (40 lines omitted)\n" + setupGenerateLastNLines(50, 10),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateOutput(tt.input, tt.maxLines)
+			if got != tt.want {
+				t.Errorf("truncateOutput() =\n%q\nwant:\n%q", got, tt.want)
+			}
+		})
+	}
+}
+
+// setupGenerateLines creates a string with n lines like "line 1\nline 2\n...".
+func setupGenerateLines(n int) string {
+	var b strings.Builder
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	return b.String()
+}
+
+// setupGenerateLastNLines returns the last n lines of a total-line
+// string, joined by newlines (no trailing newline).
+func setupGenerateLastNLines(total, n int) string {
+	var lines []string
+	for i := total - n + 1; i <= total; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	return strings.Join(lines, "\n")
+}
