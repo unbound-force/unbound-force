@@ -130,11 +130,14 @@ func defaultExecCmd(name string, args ...string) ([]byte, error) {
 }
 
 // stepResult tracks the outcome of a setup step.
+// The output field captures stdout+stderr from CombinedOutput()
+// for diagnostic reporting when a step fails.
 type stepResult struct {
 	name   string
 	action string // "installed", "already installed", "skipped", "failed"
 	detail string
 	err    error
+	output []byte // captured stdout+stderr from CombinedOutput()
 }
 
 // Default embedding model constants — used when config does not
@@ -252,12 +255,13 @@ func installViaBrew(opts *Options, toolName string, brewFormula string) stepResu
 			detail: "Would install: brew install " + brewFormula,
 		}
 	}
-	if _, err := opts.ExecCmd("brew", "install", brewFormula); err != nil {
+	if out, err := opts.ExecCmd("brew", "install", brewFormula); err != nil {
 		return stepResult{
 			name:   toolName,
 			action: "failed",
 			detail: "brew install failed",
 			err:    fmt.Errorf("brew install %s: %w", brewFormula, err),
+			output: out,
 		}
 	}
 	return stepResult{name: toolName, action: "installed", detail: "via Homebrew"}
@@ -284,12 +288,13 @@ func installViaGo(opts *Options, toolName, goModule string) stepResult {
 		}
 	}
 
-	if _, err := opts.ExecCmd("go", "install", goModule+"@latest"); err != nil {
+	if out, err := opts.ExecCmd("go", "install", goModule+"@latest"); err != nil {
 		return stepResult{
 			name:   toolName,
 			action: "failed",
 			detail: "go install failed — try: go install " + goModule + "@latest",
 			err:    fmt.Errorf("go install %s: %w", goModule, err),
+			output: out,
 		}
 	}
 	return stepResult{name: toolName, action: "installed", detail: "via go install"}
@@ -542,8 +547,8 @@ func installOpenCode(opts *Options, env doctor.DetectedEnvironment) stepResult {
 
 	// Try Homebrew first.
 	if doctor.HasManager(env, doctor.ManagerHomebrew) {
-		if _, err := opts.ExecCmd("brew", "install", "anomalyco/tap/opencode"); err != nil {
-			return stepResult{name: "OpenCode", action: "failed", detail: "brew install failed", err: err}
+		if out, err := opts.ExecCmd("brew", "install", "anomalyco/tap/opencode"); err != nil {
+			return stepResult{name: "OpenCode", action: "failed", detail: "brew install failed", err: err, output: out}
 		}
 		return stepResult{name: "OpenCode", action: "installed", detail: "via Homebrew"}
 	}
@@ -557,8 +562,8 @@ func installOpenCode(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		}
 	}
 
-	if _, err := opts.ExecCmd("bash", "-c", "curl -fsSL https://opencode.ai/install | bash"); err != nil {
-		return stepResult{name: "OpenCode", action: "failed", detail: "curl install failed", err: err}
+	if out, err := opts.ExecCmd("bash", "-c", "curl -fsSL https://opencode.ai/install | bash"); err != nil {
+		return stepResult{name: "OpenCode", action: "failed", detail: "curl install failed", err: err, output: out}
 	}
 	return stepResult{name: "OpenCode", action: "installed", detail: "via curl"}
 }
@@ -591,7 +596,8 @@ func installGHViaDnf(opts *Options) stepResult {
 	if opts.DryRun {
 		return stepResult{name: "GitHub CLI", action: "dry-run", detail: "Would install: dnf install -y gh"}
 	}
-	if _, err := opts.ExecCmd("dnf", "install", "-y", "gh"); err != nil {
+	if out, err := opts.ExecCmd("dnf", "install", "-y", "gh"); err != nil {
+		_ = out // dnf gh failure is a graceful skip, not a hard failure
 		return stepResult{
 			name:   "GitHub CLI",
 			action: "skipped",
@@ -629,12 +635,13 @@ func installOpenSpec(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		return stepResult{name: "OpenSpec CLI", action: "dry-run", detail: "Would install: npm install -g @fission-ai/openspec@latest"}
 	}
 
-	if _, err := opts.ExecCmd("npm", "install", "-g", "@fission-ai/openspec@latest"); err != nil {
+	if out, err := opts.ExecCmd("npm", "install", "-g", "@fission-ai/openspec@latest"); err != nil {
 		return stepResult{
 			name:   "OpenSpec CLI",
 			action: "failed",
 			detail: "npm install failed — fix npm permissions (see https://docs.npmjs.com/resolving-eacces-permissions-errors)",
 			err:    err,
+			output: out,
 		}
 	}
 	return stepResult{name: "OpenSpec CLI", action: "installed", detail: "via npm"}
@@ -723,7 +730,8 @@ func installNodeJS(opts *Options, env doctor.DetectedEnvironment, reason string)
 	nvmDir := opts.Getenv("NVM_DIR")
 	if nvmDir != "" {
 		cmd := fmt.Sprintf("source %s/nvm.sh && nvm install 22", nvmDir)
-		if _, err := opts.ExecCmd("bash", "-c", cmd); err != nil {
+		if out, err := opts.ExecCmd("bash", "-c", cmd); err != nil {
+			_ = out // nvm failure falls through to next manager
 			fmt.Fprintf(opts.Stderr, "nvm install failed: %v\n", err)
 			fmt.Fprintf(opts.Stderr, "Manual install: source %s/nvm.sh && nvm install 22\n", nvmDir)
 		} else {
@@ -733,16 +741,16 @@ func installNodeJS(opts *Options, env doctor.DetectedEnvironment, reason string)
 
 	// Try fnm.
 	if doctor.HasManager(env, doctor.ManagerFnm) {
-		if _, err := opts.ExecCmd("fnm", "install", "22"); err != nil {
-			return stepResult{name: "Node.js", action: "failed", detail: "fnm install failed", err: err}
+		if out, err := opts.ExecCmd("fnm", "install", "22"); err != nil {
+			return stepResult{name: "Node.js", action: "failed", detail: "fnm install failed", err: err, output: out}
 		}
 		return stepResult{name: "Node.js", action: "installed", detail: "via fnm"}
 	}
 
 	// Try Homebrew.
 	if doctor.HasManager(env, doctor.ManagerHomebrew) {
-		if _, err := opts.ExecCmd("brew", "install", "node"); err != nil {
-			return stepResult{name: "Node.js", action: "failed", detail: "brew install failed", err: err}
+		if out, err := opts.ExecCmd("brew", "install", "node"); err != nil {
+			return stepResult{name: "Node.js", action: "failed", detail: "brew install failed", err: err, output: out}
 		}
 		return stepResult{name: "Node.js", action: "installed", detail: "via Homebrew"}
 	}
@@ -772,8 +780,8 @@ func installUV(opts *Options, env doctor.DetectedEnvironment) stepResult {
 
 	// Try Homebrew first.
 	if doctor.HasManager(env, doctor.ManagerHomebrew) {
-		if _, err := opts.ExecCmd("brew", "install", "uv"); err != nil {
-			return stepResult{name: "uv", action: "failed", detail: "brew install failed", err: err}
+		if out, err := opts.ExecCmd("brew", "install", "uv"); err != nil {
+			return stepResult{name: "uv", action: "failed", detail: "brew install failed", err: err, output: out}
 		}
 		return stepResult{name: "uv", action: "installed", detail: "via Homebrew"}
 	}
@@ -787,8 +795,8 @@ func installUV(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		}
 	}
 
-	if _, err := opts.ExecCmd("bash", "-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"); err != nil {
-		return stepResult{name: "uv", action: "failed", detail: "curl install failed", err: err}
+	if out, err := opts.ExecCmd("bash", "-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"); err != nil {
+		return stepResult{name: "uv", action: "failed", detail: "curl install failed", err: err, output: out}
 	}
 	return stepResult{name: "uv", action: "installed", detail: "via curl"}
 }
@@ -815,12 +823,13 @@ func installSpecify(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		}
 	}
 
-	if _, err := opts.ExecCmd("uv", "tool", "install", "specify-cli"); err != nil {
+	if out, err := opts.ExecCmd("uv", "tool", "install", "specify-cli"); err != nil {
 		return stepResult{
 			name:   "Specify CLI",
 			action: "failed",
 			detail: "uv tool install failed — try: uv tool install specify-cli",
 			err:    err,
+			output: out,
 		}
 	}
 	return stepResult{name: "Specify CLI", action: "installed", detail: "via uv"}
@@ -871,8 +880,8 @@ func runReplicatorSetup(opts *Options) stepResult {
 		}
 	}
 
-	if _, err := opts.ExecCmd("replicator", "setup"); err != nil {
-		return stepResult{name: "replicator setup", action: "failed", detail: "replicator setup failed", err: err}
+	if out, err := opts.ExecCmd("replicator", "setup"); err != nil {
+		return stepResult{name: "replicator setup", action: "failed", detail: "replicator setup failed", err: err, output: out}
 	}
 	return stepResult{name: "replicator setup", action: "completed"}
 }
@@ -895,8 +904,8 @@ func installGolangciLint(opts *Options, env doctor.DetectedEnvironment) stepResu
 
 	// Fallback to Homebrew.
 	if doctor.HasManager(env, doctor.ManagerHomebrew) {
-		if _, err := opts.ExecCmd("brew", "install", "golangci-lint"); err != nil {
-			return stepResult{name: "golangci-lint", action: "failed", detail: "brew install failed", err: err}
+		if out, err := opts.ExecCmd("brew", "install", "golangci-lint"); err != nil {
+			return stepResult{name: "golangci-lint", action: "failed", detail: "brew install failed", err: err, output: out}
 		}
 		return stepResult{name: "golangci-lint", action: "installed", detail: "via Homebrew"}
 	}
@@ -920,8 +929,8 @@ func installGovulncheck(opts *Options, env doctor.DetectedEnvironment) stepResul
 		return stepResult{name: "govulncheck", action: "dry-run", detail: "Would install: go install golang.org/x/vuln/cmd/govulncheck@latest"}
 	}
 
-	if _, err := opts.ExecCmd("go", "install", "golang.org/x/vuln/cmd/govulncheck@latest"); err != nil {
-		return stepResult{name: "govulncheck", action: "failed", detail: "go install failed", err: err}
+	if out, err := opts.ExecCmd("go", "install", "golang.org/x/vuln/cmd/govulncheck@latest"); err != nil {
+		return stepResult{name: "govulncheck", action: "failed", detail: "go install failed", err: err, output: out}
 	}
 	return stepResult{name: "govulncheck", action: "installed", detail: "via go install"}
 }
@@ -980,12 +989,13 @@ func installViaRpm(opts *Options, toolName, repo, version string) stepResult {
 		}
 	}
 
-	if _, err := opts.ExecCmd("dnf", "install", "-y", url); err != nil {
+	if out, err := opts.ExecCmd("dnf", "install", "-y", url); err != nil {
 		return stepResult{
 			name:   toolName,
 			action: "failed",
 			detail: "dnf install failed — try: dnf install " + url,
 			err:    err,
+			output: out,
 		}
 	}
 	return stepResult{name: toolName, action: "installed", detail: "via dnf (RPM)"}
@@ -1031,8 +1041,8 @@ func installOllama(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		}
 	}
 
-	if _, err := opts.ExecCmd(brewArgs[0], brewArgs[1:]...); err != nil {
-		return stepResult{name: "Ollama", action: "failed", detail: "brew install failed", err: err}
+	if out, err := opts.ExecCmd(brewArgs[0], brewArgs[1:]...); err != nil {
+		return stepResult{name: "Ollama", action: "failed", detail: "brew install failed", err: err, output: out}
 	}
 	return stepResult{name: "Ollama", action: "installed", detail: "via Homebrew"}
 }
@@ -1069,8 +1079,8 @@ func installPodman(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		}
 	}
 
-	if _, err := opts.ExecCmd("brew", "install", "podman"); err != nil {
-		return stepResult{name: "Podman", action: "failed", detail: "brew install failed", err: err}
+	if out, err := opts.ExecCmd("brew", "install", "podman"); err != nil {
+		return stepResult{name: "Podman", action: "failed", detail: "brew install failed", err: err, output: out}
 	}
 
 	// macOS post-install: initialize and start a Podman machine.
@@ -1158,8 +1168,8 @@ func installDevPod(opts *Options, env doctor.DetectedEnvironment) stepResult {
 		}
 	}
 
-	if _, err := opts.ExecCmd("brew", "install", "devpod"); err != nil {
-		return stepResult{name: "DevPod", action: "failed", detail: "brew install failed", err: err}
+	if out, err := opts.ExecCmd("brew", "install", "devpod"); err != nil {
+		return stepResult{name: "DevPod", action: "failed", detail: "brew install failed", err: err, output: out}
 	}
 	return stepResult{name: "DevPod", action: "installed", detail: "via Homebrew"}
 }
@@ -1205,12 +1215,13 @@ func configureDevPodProvider(opts *Options) stepResult {
 
 	// Provider missing — add the Docker provider aliased to Podman.
 	addCmd := "devpod provider add docker --name podman -o DOCKER_PATH=podman"
-	if _, err := opts.ExecCmd("devpod", "provider", "add", "docker", "--name", "podman", "-o", "DOCKER_PATH=podman"); err != nil {
+	if out, err := opts.ExecCmd("devpod", "provider", "add", "docker", "--name", "podman", "-o", "DOCKER_PATH=podman"); err != nil {
 		return stepResult{
 			name:   "DevPod provider",
 			action: "failed",
 			detail: "Run manually: " + addCmd,
 			err:    err,
+			output: out,
 		}
 	}
 	return stepResult{name: "DevPod provider", action: "installed", detail: "podman provider configured"}
@@ -1312,16 +1323,34 @@ func pullEmbeddingModel(opts *Options) stepResult {
 		return stepResult{name: "Dewey", action: "already installed", detail: "embedding model ready"}
 	}
 
-	if _, err := opts.ExecCmd("ollama", "pull", opts.embeddingModel()); err != nil {
+	if out, err := opts.ExecCmd("ollama", "pull", opts.embeddingModel()); err != nil {
 		return stepResult{
 			name:   "Dewey",
 			action: "failed",
 			detail: "ollama pull failed — ensure the Ollama server is running (ollama serve), then run: ollama pull " + opts.embeddingModel(),
 			err:    err,
+			output: out,
 		}
 	}
 
 	return stepResult{name: "Dewey", action: "installed", detail: "embedding model pulled"}
+}
+
+// truncateOutput returns a string representation of command output,
+// truncated to the last maxLines/2 lines if the output exceeds
+// maxLines lines. Empty output returns an empty string.
+func truncateOutput(output []byte, maxLines int) string {
+	s := strings.TrimSpace(string(output))
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s
+	}
+	tail := maxLines / 2
+	omitted := len(lines) - tail
+	return fmt.Sprintf("... (%d lines omitted)\n%s", omitted, strings.Join(lines[len(lines)-tail:], "\n"))
 }
 
 // printStepResult prints a formatted step result.
@@ -1344,6 +1373,14 @@ func printStepResult(w io.Writer, r stepResult) {
 
 	if r.err != nil {
 		fmt.Fprintf(w, "                     Error: %v\n", r.err)
+	}
+
+	if len(r.output) > 0 && r.action == "failed" {
+		if trimmed := truncateOutput(r.output, 20); trimmed != "" {
+			for _, line := range strings.Split(trimmed, "\n") {
+				fmt.Fprintf(w, "                     %s\n", line)
+			}
+		}
 	}
 }
 
