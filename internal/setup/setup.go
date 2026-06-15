@@ -196,6 +196,65 @@ func (o *Options) toolMethod(toolName string) string {
 	return "auto"
 }
 
+// resolveMethod resolves the effective install method for a tool by
+// applying the precedence chain: per-tool override > global
+// PackageManager preference > "auto" fallback. This is tool-agnostic
+// — it resolves the user's preference, not the tool's capability.
+// Each install function is responsible for handling unsupported
+// methods by falling through to the next tier (D1).
+func (o *Options) resolveMethod(toolName string, _ doctor.DetectedEnvironment) string {
+	// (1) Per-tool override takes precedence.
+	if method := o.toolMethod(toolName); method != "auto" {
+		return method
+	}
+
+	// (2) Global PackageManager preference.
+	switch o.PackageManager {
+	case "homebrew", "dnf":
+		return o.PackageManager
+	case "apt":
+		// apt support not yet implemented — inform the user and
+		// fall through to auto-mode (D1, D5).
+		fmt.Fprintf(o.Stderr, "apt support not yet implemented, using auto-mode fallback\n")
+		return "auto"
+	}
+
+	// (3) Default: auto-mode fallback chain.
+	return "auto"
+}
+
+// installViaGo installs a Go binary tool using `go install`. Returns
+// a stepResult with the outcome. Uses opts.LookPath and opts.ExecCmd
+// for testability per Constitution Principle IV (D3).
+func installViaGo(opts *Options, toolName, goModule string) stepResult {
+	// Check if Go is available in PATH.
+	if _, err := opts.LookPath("go"); err != nil {
+		return stepResult{
+			name:   toolName,
+			action: "skipped",
+			detail: "Go not available. Install Go or use Homebrew/dnf.",
+		}
+	}
+
+	if opts.DryRun {
+		return stepResult{
+			name:   toolName,
+			action: "dry-run",
+			detail: "Would install: go install " + goModule + "@latest",
+		}
+	}
+
+	if _, err := opts.ExecCmd("go", "install", goModule+"@latest"); err != nil {
+		return stepResult{
+			name:   toolName,
+			action: "failed",
+			detail: "go install failed — try: go install " + goModule + "@latest",
+			err:    fmt.Errorf("go install %s: %w", goModule, err),
+		}
+	}
+	return stepResult{name: toolName, action: "installed", detail: "via go install"}
+}
+
 // stepDef defines a single setup step for data-driven dispatch.
 // Each step has a display name, a skip-tool key, an install function,
 // and optional gate and effect callbacks. This struct replaces the
@@ -465,32 +524,78 @@ func installOpenCode(opts *Options, env doctor.DetectedEnvironment) stepResult {
 }
 
 // installGH installs the GitHub CLI if missing.
-// Follows the installGaze() pattern: Homebrew only, skip with
-// download link if no Homebrew.
+// Fallback chain (D2): Homebrew → dnf → skip (no go install — GH
+// CLI is not a simple Go binary). GH CLI has its own dnf repo,
+// so dnf install uses the package name directly, not installViaRpm (D4).
 func installGH(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	if _, err := opts.LookPath("gh"); err == nil {
 		return stepResult{name: "GitHub CLI", action: "already installed"}
 	}
 
+	// Method dispatch: resolveMethod centralizes per-tool override
+	// and global PackageManager precedence (D1).
+	method := opts.resolveMethod("gh", env)
+	switch method {
+	case "dnf":
+		if opts.DryRun {
+			return stepResult{name: "GitHub CLI", action: "dry-run", detail: "Would install: dnf install -y gh"}
+		}
+		if _, err := opts.ExecCmd("dnf", "install", "-y", "gh"); err != nil {
+			// Graceful degradation: dnf failure is "skipped", not "failed" (D4).
+			return stepResult{
+				name:   "GitHub CLI",
+				action: "skipped",
+				detail: "dnf install failed — configure the GitHub CLI repo: https://github.com/cli/cli/blob/trunk/docs/install_linux.md or download from https://cli.github.com",
+			}
+		}
+		return stepResult{name: "GitHub CLI", action: "installed", detail: "via dnf"}
+	case "homebrew":
+		if opts.DryRun {
+			return stepResult{name: "GitHub CLI", action: "dry-run", detail: "Would install: brew install gh"}
+		}
+		if _, err := opts.ExecCmd("brew", "install", "gh"); err != nil {
+			return stepResult{name: "GitHub CLI", action: "failed", detail: "brew install failed", err: err}
+		}
+		return stepResult{name: "GitHub CLI", action: "installed", detail: "via Homebrew"}
+	}
+
+	// Auto-mode fallback chain (D2): Homebrew → dnf → skip.
 	if opts.DryRun {
 		if doctor.HasManager(env, doctor.ManagerHomebrew) {
 			return stepResult{name: "GitHub CLI", action: "dry-run", detail: "Would install: brew install gh"}
 		}
+		if doctor.HasManager(env, doctor.ManagerDnf) {
+			return stepResult{name: "GitHub CLI", action: "dry-run", detail: "Would install: dnf install -y gh"}
+		}
 		return stepResult{name: "GitHub CLI", action: "dry-run", detail: "Would install: download from https://cli.github.com"}
 	}
 
-	if !doctor.HasManager(env, doctor.ManagerHomebrew) {
-		return stepResult{
-			name:   "GitHub CLI",
-			action: "skipped",
-			detail: "Homebrew not available. Download from https://cli.github.com",
+	// Try Homebrew first.
+	if doctor.HasManager(env, doctor.ManagerHomebrew) {
+		if _, err := opts.ExecCmd("brew", "install", "gh"); err != nil {
+			return stepResult{name: "GitHub CLI", action: "failed", detail: "brew install failed", err: err}
 		}
+		return stepResult{name: "GitHub CLI", action: "installed", detail: "via Homebrew"}
 	}
 
-	if _, err := opts.ExecCmd("brew", "install", "gh"); err != nil {
-		return stepResult{name: "GitHub CLI", action: "failed", detail: "brew install failed", err: err}
+	// Try dnf when available (D4).
+	if doctor.HasManager(env, doctor.ManagerDnf) {
+		if _, err := opts.ExecCmd("dnf", "install", "-y", "gh"); err != nil {
+			// Graceful degradation: dnf failure is "skipped", not "failed" (D4).
+			return stepResult{
+				name:   "GitHub CLI",
+				action: "skipped",
+				detail: "dnf install failed — configure the GitHub CLI repo: https://github.com/cli/cli/blob/trunk/docs/install_linux.md or download from https://cli.github.com",
+			}
+		}
+		return stepResult{name: "GitHub CLI", action: "installed", detail: "via dnf"}
 	}
-	return stepResult{name: "GitHub CLI", action: "installed", detail: "via Homebrew"}
+
+	return stepResult{
+		name:   "GitHub CLI",
+		action: "skipped",
+		detail: "Homebrew not available. Download from https://cli.github.com",
+	}
 }
 
 // installOpenSpec installs the OpenSpec CLI if missing.
@@ -516,18 +621,19 @@ func installOpenSpec(opts *Options, env doctor.DetectedEnvironment) stepResult {
 }
 
 // installGaze installs Gaze if missing per FR-023.
+// Fallback chain (D2): Homebrew → dnf (RPM) → go install → skip.
 func installGaze(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	if _, err := opts.LookPath("gaze"); err == nil {
 		return stepResult{name: "Gaze", action: "already installed"}
 	}
 
-	// Method dispatch: respect per-tool config override.
-	method := opts.toolMethod("gaze")
+	// Method dispatch: resolveMethod centralizes per-tool override
+	// and global PackageManager precedence (D1).
+	method := opts.resolveMethod("gaze", env)
 	switch method {
 	case "rpm", "dnf":
 		return installViaRpm(opts, "Gaze", "unbound-force/gaze", opts.Version)
 	case "homebrew":
-		// Force Homebrew regardless of detection.
 		if opts.DryRun {
 			return stepResult{name: "Gaze", action: "dry-run", detail: "Would install: brew install unbound-force/tap/gaze"}
 		}
@@ -535,28 +641,45 @@ func installGaze(opts *Options, env doctor.DetectedEnvironment) stepResult {
 			return stepResult{name: "Gaze", action: "failed", detail: "brew install failed", err: err}
 		}
 		return stepResult{name: "Gaze", action: "installed", detail: "via Homebrew"}
+	case "go":
+		return installViaGo(opts, "Gaze", "github.com/unbound-force/gaze/cmd/gaze")
 	}
 
-	// Auto: try Homebrew, fall back to skip with hint.
+	// Auto-mode fallback chain (D2): Homebrew → dnf → go install → skip.
 	if opts.DryRun {
 		if doctor.HasManager(env, doctor.ManagerHomebrew) {
 			return stepResult{name: "Gaze", action: "dry-run", detail: "Would install: brew install unbound-force/tap/gaze"}
 		}
-		return stepResult{name: "Gaze", action: "dry-run", detail: "Would install: download from GitHub releases"}
-	}
-
-	if !doctor.HasManager(env, doctor.ManagerHomebrew) {
-		return stepResult{
-			name:   "Gaze",
-			action: "skipped",
-			detail: "Homebrew not available. Download from https://github.com/unbound-force/gaze/releases",
+		if doctor.HasManager(env, doctor.ManagerDnf) {
+			return installViaRpm(opts, "Gaze", "unbound-force/gaze", opts.Version)
 		}
+		return installViaGo(opts, "Gaze", "github.com/unbound-force/gaze/cmd/gaze")
 	}
 
-	if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/gaze"); err != nil {
-		return stepResult{name: "Gaze", action: "failed", detail: "brew install failed", err: err}
+	// Try Homebrew first.
+	if doctor.HasManager(env, doctor.ManagerHomebrew) {
+		if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/gaze"); err != nil {
+			return stepResult{name: "Gaze", action: "failed", detail: "brew install failed", err: err}
+		}
+		return stepResult{name: "Gaze", action: "installed", detail: "via Homebrew"}
 	}
-	return stepResult{name: "Gaze", action: "installed", detail: "via Homebrew"}
+
+	// Try dnf (RPM) when available.
+	if doctor.HasManager(env, doctor.ManagerDnf) {
+		return installViaRpm(opts, "Gaze", "unbound-force/gaze", opts.Version)
+	}
+
+	// Try go install as final fallback.
+	goResult := installViaGo(opts, "Gaze", "github.com/unbound-force/gaze/cmd/gaze")
+	if goResult.action != "skipped" {
+		return goResult
+	}
+
+	return stepResult{
+		name:   "Gaze",
+		action: "skipped",
+		detail: "Homebrew not available. Download from https://github.com/unbound-force/gaze/releases",
+	}
 }
 
 // ensureNodeJS checks for Node.js >= 18 and installs if needed per FR-024.
@@ -716,32 +839,65 @@ func installSpecify(opts *Options, env doctor.DetectedEnvironment) stepResult {
 }
 
 // installReplicator installs Replicator if missing per FR-001.
-// Follows the installGaze() pattern: Homebrew only, skip with
-// GitHub releases link if no Homebrew.
+// Fallback chain (D2): Homebrew → dnf (RPM) → go install → skip.
 func installReplicator(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	if _, err := opts.LookPath("replicator"); err == nil {
 		return stepResult{name: "Replicator", action: "already installed"}
 	}
 
+	// Method dispatch: resolveMethod centralizes per-tool override
+	// and global PackageManager precedence (D1).
+	method := opts.resolveMethod("replicator", env)
+	switch method {
+	case "rpm", "dnf":
+		return installViaRpm(opts, "Replicator", "unbound-force/replicator", opts.Version)
+	case "homebrew":
+		if opts.DryRun {
+			return stepResult{name: "Replicator", action: "dry-run", detail: "Would install: brew install unbound-force/tap/replicator"}
+		}
+		if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/replicator"); err != nil {
+			return stepResult{name: "Replicator", action: "failed", detail: "brew install failed", err: err}
+		}
+		return stepResult{name: "Replicator", action: "installed", detail: "via Homebrew"}
+	case "go":
+		return installViaGo(opts, "Replicator", "github.com/unbound-force/replicator/cmd/replicator")
+	}
+
+	// Auto-mode fallback chain (D2): Homebrew → dnf → go install → skip.
 	if opts.DryRun {
 		if doctor.HasManager(env, doctor.ManagerHomebrew) {
 			return stepResult{name: "Replicator", action: "dry-run", detail: "Would install: brew install unbound-force/tap/replicator"}
 		}
-		return stepResult{name: "Replicator", action: "dry-run", detail: "Would install: download from GitHub releases"}
-	}
-
-	if !doctor.HasManager(env, doctor.ManagerHomebrew) {
-		return stepResult{
-			name:   "Replicator",
-			action: "skipped",
-			detail: "Homebrew not available. Download from https://github.com/unbound-force/replicator/releases",
+		if doctor.HasManager(env, doctor.ManagerDnf) {
+			return installViaRpm(opts, "Replicator", "unbound-force/replicator", opts.Version)
 		}
+		return installViaGo(opts, "Replicator", "github.com/unbound-force/replicator/cmd/replicator")
 	}
 
-	if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/replicator"); err != nil {
-		return stepResult{name: "Replicator", action: "failed", detail: "brew install failed", err: err}
+	// Try Homebrew first.
+	if doctor.HasManager(env, doctor.ManagerHomebrew) {
+		if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/replicator"); err != nil {
+			return stepResult{name: "Replicator", action: "failed", detail: "brew install failed", err: err}
+		}
+		return stepResult{name: "Replicator", action: "installed", detail: "via Homebrew"}
 	}
-	return stepResult{name: "Replicator", action: "installed", detail: "via Homebrew"}
+
+	// Try dnf (RPM) when available.
+	if doctor.HasManager(env, doctor.ManagerDnf) {
+		return installViaRpm(opts, "Replicator", "unbound-force/replicator", opts.Version)
+	}
+
+	// Try go install as final fallback.
+	goResult := installViaGo(opts, "Replicator", "github.com/unbound-force/replicator/cmd/replicator")
+	if goResult.action != "skipped" {
+		return goResult
+	}
+
+	return stepResult{
+		name:   "Replicator",
+		action: "skipped",
+		detail: "Homebrew not available. Download from https://github.com/unbound-force/replicator/releases",
+	}
 }
 
 // runReplicatorSetup runs `replicator setup` per FR-002.
@@ -1125,38 +1281,80 @@ func hasProvider(output, name string) bool {
 // rather than hard failures. Note: brew install and ollama pull are
 // non-interactive (no stdin prompts), so no interactive guard is
 // needed here (unlike swarm setup which may prompt for input).
+// Fallback chain (D2): Homebrew → go install → skip (no RPMs).
 func installDewey(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	if _, err := opts.LookPath("dewey"); err == nil {
 		// Dewey already installed — check embedding model.
 		return pullEmbeddingModel(opts)
 	}
 
+	// Method dispatch: resolveMethod centralizes per-tool override
+	// and global PackageManager precedence (D1). Dewey has no RPMs,
+	// so "dnf" falls through to the default case (D1).
+	method := opts.resolveMethod("dewey", env)
+	switch method {
+	case "homebrew":
+		if opts.DryRun {
+			return stepResult{name: "Dewey", action: "dry-run", detail: "Would install: brew install unbound-force/tap/dewey"}
+		}
+		if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/dewey"); err != nil {
+			return stepResult{name: "Dewey", action: "failed", detail: "brew install failed", err: err}
+		}
+		return deweyPostInstall(opts, "via Homebrew")
+	case "go":
+		goResult := installViaGo(opts, "Dewey", "github.com/unbound-force/dewey/cmd/dewey")
+		if goResult.action == "installed" {
+			return deweyPostInstall(opts, goResult.detail)
+		}
+		return goResult
+	}
+
+	// Auto-mode (or "dnf" which falls through since Dewey has no RPMs):
+	// Homebrew → go install → skip.
 	if opts.DryRun {
 		if doctor.HasManager(env, doctor.ManagerHomebrew) {
 			return stepResult{name: "Dewey", action: "dry-run", detail: "Would install: brew install unbound-force/tap/dewey"}
 		}
-		return stepResult{name: "Dewey", action: "skipped", detail: "Homebrew not available"}
+		return installViaGo(opts, "Dewey", "github.com/unbound-force/dewey/cmd/dewey")
 	}
 
-	if !doctor.HasManager(env, doctor.ManagerHomebrew) {
-		return stepResult{
-			name:   "Dewey",
-			action: "skipped",
-			detail: "Homebrew not available. Install from https://github.com/unbound-force/dewey",
+	// Try Homebrew first.
+	if doctor.HasManager(env, doctor.ManagerHomebrew) {
+		if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/dewey"); err != nil {
+			return stepResult{name: "Dewey", action: "failed", detail: "brew install failed", err: err}
 		}
+		return deweyPostInstall(opts, "via Homebrew")
 	}
 
-	if _, err := opts.ExecCmd("brew", "install", "unbound-force/tap/dewey"); err != nil {
-		return stepResult{name: "Dewey", action: "failed", detail: "brew install failed", err: err}
+	// Try go install as fallback (no dnf path — Dewey has no RPMs).
+	goResult := installViaGo(opts, "Dewey", "github.com/unbound-force/dewey/cmd/dewey")
+	if goResult.action == "installed" {
+		return deweyPostInstall(opts, goResult.detail)
+	}
+	if goResult.action != "skipped" {
+		return goResult
 	}
 
-	// After installing, pull the embedding model.
+	return stepResult{
+		name:   "Dewey",
+		action: "skipped",
+		detail: "Homebrew not available. Install from https://github.com/unbound-force/dewey",
+	}
+}
+
+// deweyPostInstall pulls the embedding model after a successful Dewey
+// install. Extracted to avoid duplicating the post-install logic
+// across multiple install paths (DRY per CS-004).
+func deweyPostInstall(opts *Options, installDetail string) stepResult {
 	modelResult := pullEmbeddingModel(opts)
 	if modelResult.action == "failed" {
-		return stepResult{name: "Dewey", action: "installed", detail: "via Homebrew (model pull failed — run 'ollama serve' then 'ollama pull " + opts.embeddingModel() + "')"}
+		return stepResult{
+			name:   "Dewey",
+			action: "installed",
+			detail: installDetail + " (model pull failed — run 'ollama serve' then 'ollama pull " + opts.embeddingModel() + "')",
+		}
 	}
-
-	return stepResult{name: "Dewey", action: "installed", detail: "via Homebrew"}
+	return stepResult{name: "Dewey", action: "installed", detail: installDetail}
 }
 
 // pullEmbeddingModel pulls the enterprise-grade embedding model

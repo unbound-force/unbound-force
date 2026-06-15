@@ -17,7 +17,7 @@
 
 ## 1. Add resolveMethod() and installViaGo() Helpers
 
-- [ ] 1.1 Add `resolveMethod(toolName string,
+- [x] 1.1 Add `resolveMethod(toolName string,
   env doctor.DetectedEnvironment) string` method on
   `*Options` in `internal/setup/setup.go`. Logic:
   (1) if `toolMethod(toolName)` returns non-`"auto"`,
@@ -30,7 +30,7 @@
   (4) otherwise return `"auto"` for fallback chain.
   `resolveMethod()` is tool-agnostic — it resolves the
   user's preference, not the tool's capability.
-- [ ] 1.2 Add `installViaGo(opts *Options, toolName,
+- [x] 1.2 Add `installViaGo(opts *Options, toolName,
   goModule string) stepResult` function in
   `internal/setup/setup.go`. Behavior by outcome:
   - Go not in PATH: return `action: "skipped"`,
@@ -45,7 +45,7 @@
     `detail: "Would install: go install <module>@latest"`.
   All errors in `stepResult.err` MUST be wrapped with
   operation context per CS-006.
-- [ ] 1.3 Add tests for `resolveMethod()` in
+- [x] 1.3 Add tests for `resolveMethod()` in
   `internal/setup/setup_test.go` (table-driven per
   TC-006): per-tool override takes precedence over
   global, global `PackageManager: "dnf"` returns `"dnf"`,
@@ -53,7 +53,7 @@
   `PackageManager: "apt"` maps to `"auto"`,
   `"auto"` passes through, `"manual"` is handled by
   `shouldSkipTool` (not `resolveMethod`).
-- [ ] 1.4 Add tests for `installViaGo()` in
+- [x] 1.4 Add tests for `installViaGo()` in
   `internal/setup/setup_test.go` (table-driven per
   TC-006): Go available and install succeeds (assert
   `action: "installed"`, `detail: "via go install"`);
@@ -67,7 +67,7 @@
 
 ## 2. Update installGaze() Auto-Mode Fallback
 
-- [ ] 2.1 Update `installGaze()` (setup.go:519) to call
+- [x] 2.1 Update `installGaze()` (setup.go:519) to call
   `resolveMethod("gaze", env)` instead of
   `opts.toolMethod("gaze")`. Add dispatch cases for
   `"go"` (calls `installViaGo` with module
@@ -77,7 +77,7 @@
   `HasManager(env, ManagerDnf)`, then try `installViaGo`
   as final fallback before skip. Update dry-run to
   reflect new fallback chain.
-- [ ] 2.2 Add tests for `installGaze()` fallback chain:
+- [x] 2.2 Add tests for `installGaze()` fallback chain:
   dnf available + no Homebrew -> installs via RPM;
   no Homebrew + no dnf + Go available -> installs via
   `go install`; no Homebrew + no dnf + no Go -> skips;
@@ -85,7 +85,7 @@
 
 ## 3. Update installReplicator() with Dispatch + Fallback
 
-- [ ] 3.1 Add `resolveMethod("replicator", env)` dispatch
+- [x] 3.1 Add `resolveMethod("replicator", env)` dispatch
   to `installReplicator()` (setup.go:721) with explicit
   `"rpm"`/`"dnf"` case (calls `installViaRpm` with repo
   `unbound-force/replicator`), `"homebrew"` case, and
@@ -93,11 +93,11 @@
   `github.com/unbound-force/replicator/cmd/replicator`).
   Follow the `installGaze()` dispatch pattern at
   setup.go:525-538.
-- [ ] 3.2 Add auto-mode fallback chain: Homebrew -> dnf
+- [x] 3.2 Add auto-mode fallback chain: Homebrew -> dnf
   (via `installViaRpm`) -> `go install` (via
   `installViaGo`) -> skip. Update dry-run to reflect
   new fallback chain.
-- [ ] 3.3 Add tests (table-driven per TC-006): same
+- [x] 3.3 Add tests (table-driven per TC-006): same
   fallback chain as Gaze (Homebrew -> dnf -> go install
   -> skip). Scenarios: dnf available + no Homebrew ->
   installs via RPM; no Homebrew + no dnf + Go available
@@ -107,18 +107,18 @@
 
 ## 4. Update installDewey() with Dispatch + Fallback
 
-- [ ] 4.1 Add `resolveMethod("dewey", env)` dispatch to
+- [x] 4.1 Add `resolveMethod("dewey", env)` dispatch to
   `installDewey()` (setup.go:1128) with explicit
   `"homebrew"` and `"go"` cases. No `"rpm"`/`"dnf"`
   case — Dewey does not publish RPMs. If
   `resolveMethod` returns `"dnf"`, fall through to
   `"go"` since dnf is not available for Dewey.
-- [ ] 4.2 Add auto-mode fallback chain: Homebrew ->
+- [x] 4.2 Add auto-mode fallback chain: Homebrew ->
   `go install` (via `installViaGo` with module
   `github.com/unbound-force/dewey/cmd/dewey`) -> skip.
   Preserve the `pullEmbeddingModel()` call after any
   successful install path.
-- [ ] 4.3 Add tests (table-driven per TC-006):
+- [x] 4.3 Add tests (table-driven per TC-006):
   no Homebrew + Go available -> installs via `go install`
   + pulls embedding model (assert `action: "installed"`,
   `detail: "via go install"`);
@@ -131,19 +131,19 @@
 
 ## 5. Update installGH() with Dispatch + Fallback
 
-- [ ] 5.1 Add `resolveMethod("gh", env)` dispatch to
+- [x] 5.1 Add `resolveMethod("gh", env)` dispatch to
   `installGH()` (setup.go:470) with explicit `"dnf"`
   case (calls `ExecCmd("dnf", "install", "-y", "gh")`
   directly — GH CLI has its own dnf repo, not
   GoReleaser RPMs) and `"homebrew"` case.
-- [ ] 5.2 Add auto-mode fallback chain: Homebrew -> dnf
+- [x] 5.2 Add auto-mode fallback chain: Homebrew -> dnf
   (`dnf install -y gh`) -> skip. On `dnf install gh`
   failure, return `action: "skipped"` (graceful
   degradation, not hard failure), `detail` with
   actionable message including GitHub CLI repo setup
   link, `err: nil`. Update dry-run to reflect new
   fallback chain.
-- [ ] 5.3 Add tests (table-driven per TC-006):
+- [x] 5.3 Add tests (table-driven per TC-006):
   dnf available + no Homebrew -> attempts
   `dnf install gh` (assert `action: "installed"`);
   dnf install fails -> skips with actionable download
@@ -154,44 +154,45 @@
 
 ## 6. Dry-Run Path Updates
 
-- [ ] 6.1 Verify dry-run output in all four updated
+- [x] 6.1 Verify dry-run output in all four updated
   install functions reflects the new fallback chain.
   When Homebrew is absent, dry-run should show the
   next available method (dnf or `go install`) instead
   of "Would install: download from...".
-- [ ] 6.2 Add dry-run tests: verify each fallback tier
+- [x] 6.2 Add dry-run tests: verify each fallback tier
   produces the correct dry-run detail string for all
   four tools.
 
 ## 7. Verification
 
-- [ ] 7.1 Run `make check` — all tests pass, lint clean,
+- [x] 7.1 Run `make check` — all tests pass, lint clean,
   build succeeds.
-- [ ] 7.2 Run `go test -race -count=1 ./internal/setup/`
+- [x] 7.2 Run `go test -race -count=1 ./internal/setup/`
   — verify new tests pass in isolation. Confirm existing
   `TestInstallViaRpm_*` tests (Success, NoVersion,
   DnfFails, DryRun) pass unchanged — no modifications
   to `installViaRpm()` signature or behavior.
-- [ ] 7.3 Manual smoke test: `uf setup --dry-run` on a
+- [x] 7.3 Manual smoke test: `uf setup --dry-run` on a
   system without Homebrew — verify tools show dnf or
   `go install` intent instead of "skipped".
 
 ## 8. Documentation
 
-- [ ] 8.1 Add CHANGELOG.md entry documenting the fix
+- [x] 8.1 Add CHANGELOG.md entry documenting the fix
   for issue #214: `uf setup` auto mode now falls back
   to dnf and `go install` when Homebrew is absent.
 
 ## 9. Constitution Alignment Verification
 
-- [ ] 9.1 Verify Composability First: each tool's
+- [x] 9.1 Verify Composability First: each tool's
   fallback chain degrades gracefully — no tool requires
   a specific package manager. Standalone installation
   is preserved via `go install` as the universal
   fallback for Go-based tools.
-- [ ] 9.2 Verify Testability: all new code uses
+- [x] 9.2 Verify Testability: all new code uses
   injectable dependencies (`LookPath`, `ExecCmd` on
   the Options struct). No tests require network access,
   external services, or shared mutable state. All tests
   verify observable side effects (returned `stepResult`
   values).
+<!-- spec-review: passed -->

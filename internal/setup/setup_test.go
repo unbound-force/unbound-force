@@ -1067,6 +1067,7 @@ func TestInstallReplicator_NoHomebrew(t *testing.T) {
 		Getenv:       opts.Getenv,
 	})
 
+	// No Homebrew, no dnf, no Go → skips with download link.
 	result := installReplicator(&opts, env)
 	if result.action != "skipped" {
 		t.Errorf("expected 'skipped', got %q", result.action)
@@ -3443,9 +3444,15 @@ func TestInstallGaze_DryRunWithHomebrew(t *testing.T) {
 }
 
 func TestInstallGaze_DryRunNoHomebrew(t *testing.T) {
+	// With no Homebrew and no dnf, dry-run falls through to go install
+	// (or skipped if Go is not available).
 	opts := &Options{
-		DryRun:   true,
-		LookPath: stubLookPath(map[string]string{}),
+		DryRun: true,
+		LookPath: stubLookPath(map[string]string{
+			"go": "/usr/local/bin/go",
+		}),
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
 	}
 	env := doctor.DetectedEnvironment{}
 
@@ -3453,14 +3460,17 @@ func TestInstallGaze_DryRunNoHomebrew(t *testing.T) {
 	if result.action != "dry-run" {
 		t.Errorf("action = %q, want %q", result.action, "dry-run")
 	}
-	if !strings.Contains(result.detail, "GitHub releases") {
-		t.Errorf("detail = %q, want to contain 'GitHub releases'", result.detail)
+	if !strings.Contains(result.detail, "go install") {
+		t.Errorf("detail = %q, want to contain 'go install'", result.detail)
 	}
 }
 
 func TestInstallGaze_NoHomebrewSkip(t *testing.T) {
+	// No Homebrew, no dnf, no Go → skips with download link.
 	opts := &Options{
 		LookPath: stubLookPath(map[string]string{}),
+		Stdout:   &bytes.Buffer{},
+		Stderr:   &bytes.Buffer{},
 	}
 	env := doctor.DetectedEnvironment{}
 
@@ -3560,5 +3570,765 @@ func TestInstallGaze_ExplicitHomebrewDryRun(t *testing.T) {
 	}
 	if !strings.Contains(result.detail, "brew install") {
 		t.Errorf("detail = %q, want to contain 'brew install'", result.detail)
+	}
+}
+
+// --- resolveMethod tests (Task 1.3) ---
+
+func TestResolveMethod(t *testing.T) {
+	env := doctor.DetectedEnvironment{}
+
+	tests := []struct {
+		name           string
+		toolName       string
+		packageManager string
+		toolMethods    map[string]config.ToolConfig
+		want           string
+		wantStderr     string // substring expected in stderr output
+	}{
+		{
+			name:     "per-tool override wins over global",
+			toolName: "gaze",
+			packageManager: "dnf",
+			toolMethods: map[string]config.ToolConfig{
+				"gaze": {Method: "homebrew"},
+			},
+			want: "homebrew",
+		},
+		{
+			name:           "global dnf returns dnf",
+			toolName:       "gaze",
+			packageManager: "dnf",
+			want:           "dnf",
+		},
+		{
+			name:           "global homebrew returns homebrew",
+			toolName:       "gaze",
+			packageManager: "homebrew",
+			want:           "homebrew",
+		},
+		{
+			name:           "apt maps to auto with info message",
+			toolName:       "gaze",
+			packageManager: "apt",
+			want:           "auto",
+			wantStderr:     "apt support not yet implemented",
+		},
+		{
+			name:           "auto passes through",
+			toolName:       "gaze",
+			packageManager: "auto",
+			want:           "auto",
+		},
+		{
+			name:           "empty PackageManager defaults to auto",
+			toolName:       "gaze",
+			packageManager: "",
+			want:           "auto",
+		},
+		{
+			name:     "per-tool rpm override",
+			toolName: "gaze",
+			toolMethods: map[string]config.ToolConfig{
+				"gaze": {Method: "rpm"},
+			},
+			want: "rpm",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			opts := &Options{
+				PackageManager: tt.packageManager,
+				ToolMethods:    tt.toolMethods,
+				Stderr:         &stderr,
+			}
+			opts.defaults()
+
+			got := opts.resolveMethod(tt.toolName, env)
+			if got != tt.want {
+				t.Errorf("resolveMethod(%q) = %q, want %q", tt.toolName, got, tt.want)
+			}
+			if tt.wantStderr != "" {
+				if !strings.Contains(stderr.String(), tt.wantStderr) {
+					t.Errorf("stderr = %q, want to contain %q", stderr.String(), tt.wantStderr)
+				}
+			}
+		})
+	}
+}
+
+// --- installViaGo tests (Task 1.4) ---
+
+func TestInstallViaGo(t *testing.T) {
+	const testModule = "github.com/example/tool/cmd/tool"
+
+	tests := []struct {
+		name       string
+		lookPath   map[string]string
+		execErrors map[string]error
+		dryRun     bool
+		wantAction string
+		wantDetail string
+		wantErr    bool
+	}{
+		{
+			name:       "success",
+			lookPath:   map[string]string{"go": "/usr/local/bin/go"},
+			wantAction: "installed",
+			wantDetail: "via go install",
+		},
+		{
+			name:     "go install fails",
+			lookPath: map[string]string{"go": "/usr/local/bin/go"},
+			execErrors: map[string]error{
+				"go install " + testModule + "@latest": fmt.Errorf("compilation error"),
+			},
+			wantAction: "failed",
+			wantDetail: testModule,
+			wantErr:    true,
+		},
+		{
+			name:       "go not available",
+			lookPath:   map[string]string{},
+			wantAction: "skipped",
+			wantDetail: "Go not available",
+			wantErr:    false,
+		},
+		{
+			name:       "dry-run",
+			lookPath:   map[string]string{"go": "/usr/local/bin/go"},
+			dryRun:     true,
+			wantAction: "dry-run",
+			wantDetail: "Would install: go install " + testModule + "@latest",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := &cmdRecorder{
+				errors: tt.execErrors,
+			}
+			if rec.errors == nil {
+				rec.errors = map[string]error{}
+			}
+
+			opts := &Options{
+				DryRun:   tt.dryRun,
+				LookPath: stubLookPath(tt.lookPath),
+				ExecCmd:  rec.execCmd,
+				Stdout:   &bytes.Buffer{},
+				Stderr:   &bytes.Buffer{},
+			}
+
+			result := installViaGo(opts, "TestTool", testModule)
+
+			if result.action != tt.wantAction {
+				t.Errorf("action = %q, want %q", result.action, tt.wantAction)
+			}
+			if !strings.Contains(result.detail, tt.wantDetail) {
+				t.Errorf("detail = %q, want to contain %q", result.detail, tt.wantDetail)
+			}
+			if tt.wantErr && result.err == nil {
+				t.Error("expected non-nil error")
+			}
+			if !tt.wantErr && result.err != nil {
+				t.Errorf("unexpected error: %v", result.err)
+			}
+		})
+	}
+}
+
+// --- installGaze fallback chain tests (Task 2.2) ---
+
+func TestInstallGaze_DnfFallback(t *testing.T) {
+	// No Homebrew, dnf available → installs via RPM.
+	rec := &cmdRecorder{}
+	opts := &Options{
+		Version:  "1.0.0",
+		LookPath: stubLookPath(map[string]string{}),
+		ExecCmd:  rec.execCmd,
+		Stdout:   &bytes.Buffer{},
+		Stderr:   &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerDnf, Path: "/usr/bin/dnf"},
+		},
+	}
+
+	result := installGaze(opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if !strings.Contains(result.detail, "dnf") {
+		t.Errorf("detail = %q, want to contain 'dnf'", result.detail)
+	}
+}
+
+func TestInstallGaze_GoInstallFallback(t *testing.T) {
+	// No Homebrew, no dnf, Go available → installs via go install.
+	rec := &cmdRecorder{}
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{
+			"go": "/usr/local/bin/go",
+		}),
+		ExecCmd: rec.execCmd,
+		Stdout:  &bytes.Buffer{},
+		Stderr:  &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{}
+
+	result := installGaze(opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if !strings.Contains(result.detail, "go install") {
+		t.Errorf("detail = %q, want to contain 'go install'", result.detail)
+	}
+}
+
+func TestInstallGaze_NoManagersNoGo(t *testing.T) {
+	// No Homebrew, no dnf, no Go → skips.
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{}),
+		Stdout:   &bytes.Buffer{},
+		Stderr:   &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{}
+
+	result := installGaze(opts, env)
+	if result.action != "skipped" {
+		t.Errorf("action = %q, want skipped", result.action)
+	}
+}
+
+func TestInstallGaze_PackageManagerDnf(t *testing.T) {
+	// PackageManager: "dnf" → skips Homebrew, uses dnf directly.
+	rec := &cmdRecorder{}
+	opts := &Options{
+		PackageManager: "dnf",
+		Version:        "1.0.0",
+		LookPath:       stubLookPath(map[string]string{}),
+		ExecCmd:        rec.execCmd,
+		Stdout:         &bytes.Buffer{},
+		Stderr:         &bytes.Buffer{},
+	}
+	opts.defaults()
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerHomebrew, Path: "/opt/homebrew/bin/brew"},
+			{Kind: doctor.ManagerDnf, Path: "/usr/bin/dnf"},
+		},
+	}
+
+	result := installGaze(opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if !strings.Contains(result.detail, "dnf") {
+		t.Errorf("detail = %q, want to contain 'dnf'", result.detail)
+	}
+	// Verify no brew install was called.
+	for _, call := range rec.calls {
+		if strings.Contains(call, "brew") {
+			t.Errorf("unexpected brew call when PackageManager=dnf: %s", call)
+		}
+	}
+}
+
+func TestInstallGaze_ExplicitGoMethod(t *testing.T) {
+	rec := &cmdRecorder{}
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{
+			"go": "/usr/local/bin/go",
+		}),
+		ExecCmd: rec.execCmd,
+		ToolMethods: map[string]config.ToolConfig{
+			"gaze": {Method: "go"},
+		},
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerHomebrew, Path: "/opt/homebrew/bin/brew"},
+		},
+	}
+
+	result := installGaze(opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if !strings.Contains(result.detail, "go install") {
+		t.Errorf("detail = %q, want to contain 'go install'", result.detail)
+	}
+}
+
+// --- installReplicator fallback chain tests (Task 3.3) ---
+
+func TestInstallReplicator_DnfFallback(t *testing.T) {
+	rec := &cmdRecorder{}
+	opts := Options{
+		Version:  "1.0.0",
+		LookPath: stubLookPath(map[string]string{}),
+		ExecCmd:  rec.execCmd,
+		Stdout:   &bytes.Buffer{},
+		Stderr:   &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerDnf, Path: "/usr/bin/dnf"},
+		},
+	}
+
+	result := installReplicator(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if !strings.Contains(result.detail, "dnf") {
+		t.Errorf("detail = %q, want to contain 'dnf'", result.detail)
+	}
+}
+
+func TestInstallReplicator_GoInstallFallback(t *testing.T) {
+	rec := &cmdRecorder{}
+	opts := Options{
+		LookPath: stubLookPath(map[string]string{
+			"go": "/usr/local/bin/go",
+		}),
+		ExecCmd: rec.execCmd,
+		Stdout:  &bytes.Buffer{},
+		Stderr:  &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{}
+
+	result := installReplicator(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if !strings.Contains(result.detail, "go install") {
+		t.Errorf("detail = %q, want to contain 'go install'", result.detail)
+	}
+}
+
+func TestInstallReplicator_NoManagersNoGo(t *testing.T) {
+	opts := Options{
+		LookPath: stubLookPath(map[string]string{}),
+		Stdout:   &bytes.Buffer{},
+		Stderr:   &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{}
+
+	result := installReplicator(&opts, env)
+	if result.action != "skipped" {
+		t.Errorf("action = %q, want skipped", result.action)
+	}
+}
+
+func TestInstallReplicator_PackageManagerDnf(t *testing.T) {
+	rec := &cmdRecorder{}
+	opts := Options{
+		PackageManager: "dnf",
+		Version:        "1.0.0",
+		LookPath:       stubLookPath(map[string]string{}),
+		ExecCmd:        rec.execCmd,
+		Stdout:         &bytes.Buffer{},
+		Stderr:         &bytes.Buffer{},
+	}
+	opts.defaults()
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerHomebrew, Path: "/opt/homebrew/bin/brew"},
+			{Kind: doctor.ManagerDnf, Path: "/usr/bin/dnf"},
+		},
+	}
+
+	result := installReplicator(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if !strings.Contains(result.detail, "dnf") {
+		t.Errorf("detail = %q, want to contain 'dnf'", result.detail)
+	}
+	for _, call := range rec.calls {
+		if strings.Contains(call, "brew") {
+			t.Errorf("unexpected brew call when PackageManager=dnf: %s", call)
+		}
+	}
+}
+
+func TestInstallReplicator_ExplicitGoMethod(t *testing.T) {
+	rec := &cmdRecorder{}
+	opts := Options{
+		LookPath: stubLookPath(map[string]string{
+			"go": "/usr/local/bin/go",
+		}),
+		ExecCmd: rec.execCmd,
+		ToolMethods: map[string]config.ToolConfig{
+			"replicator": {Method: "go"},
+		},
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{}
+
+	result := installReplicator(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if !strings.Contains(result.detail, "go install") {
+		t.Errorf("detail = %q, want to contain 'go install'", result.detail)
+	}
+}
+
+// --- installDewey fallback chain tests (Task 4.3) ---
+
+func TestInstallDewey_GoInstallFallback(t *testing.T) {
+	// No Homebrew, Go available → installs via go install + pulls model.
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"ollama list": "NAME\ngranite-embedding:30m   abc123   63 MB\n",
+		},
+	}
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{
+			"go":     "/usr/local/bin/go",
+			"ollama": "/usr/local/bin/ollama",
+		}),
+		ExecCmd: rec.execCmd,
+		Stdout:  &bytes.Buffer{},
+		Stderr:  &bytes.Buffer{},
+	}
+	opts.defaults()
+	env := doctor.DetectedEnvironment{}
+
+	result := installDewey(opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if !strings.Contains(result.detail, "go install") {
+		t.Errorf("detail = %q, want to contain 'go install'", result.detail)
+	}
+}
+
+func TestInstallDewey_NoHomebrewNoGo(t *testing.T) {
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{}),
+		Stdout:   &bytes.Buffer{},
+		Stderr:   &bytes.Buffer{},
+	}
+	opts.defaults()
+	env := doctor.DetectedEnvironment{}
+
+	result := installDewey(opts, env)
+	if result.action != "skipped" {
+		t.Errorf("action = %q, want skipped", result.action)
+	}
+}
+
+func TestInstallDewey_PackageManagerDnfFallsToGo(t *testing.T) {
+	// PackageManager: "dnf" → resolveMethod returns "dnf", but Dewey
+	// has no dnf case, so it falls through to go install.
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"ollama list": "NAME\ngranite-embedding:30m   abc123   63 MB\n",
+		},
+	}
+	opts := &Options{
+		PackageManager: "dnf",
+		LookPath: stubLookPath(map[string]string{
+			"go":     "/usr/local/bin/go",
+			"ollama": "/usr/local/bin/ollama",
+		}),
+		ExecCmd: rec.execCmd,
+		Stdout:  &bytes.Buffer{},
+		Stderr:  &bytes.Buffer{},
+	}
+	opts.defaults()
+	env := doctor.DetectedEnvironment{}
+
+	result := installDewey(opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if !strings.Contains(result.detail, "go install") {
+		t.Errorf("detail = %q, want to contain 'go install'", result.detail)
+	}
+}
+
+func TestInstallDewey_ExplicitGoMethod(t *testing.T) {
+	rec := &cmdRecorder{
+		outputs: map[string]string{
+			"ollama list": "NAME\ngranite-embedding:30m   abc123   63 MB\n",
+		},
+	}
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{
+			"go":     "/usr/local/bin/go",
+			"ollama": "/usr/local/bin/ollama",
+		}),
+		ExecCmd: rec.execCmd,
+		ToolMethods: map[string]config.ToolConfig{
+			"dewey": {Method: "go"},
+		},
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	}
+	opts.defaults()
+	env := doctor.DetectedEnvironment{}
+
+	result := installDewey(opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if !strings.Contains(result.detail, "go install") {
+		t.Errorf("detail = %q, want to contain 'go install'", result.detail)
+	}
+}
+
+// --- installGH fallback chain tests (Task 5.3) ---
+
+func TestInstallGH_DnfFallback(t *testing.T) {
+	// No Homebrew, dnf available → attempts dnf install gh.
+	rec := &cmdRecorder{}
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{}),
+		ExecCmd:  rec.execCmd,
+		Stdout:   &bytes.Buffer{},
+		Stderr:   &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerDnf, Path: "/usr/bin/dnf"},
+		},
+	}
+
+	result := installGH(opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if !strings.Contains(result.detail, "dnf") {
+		t.Errorf("detail = %q, want to contain 'dnf'", result.detail)
+	}
+}
+
+func TestInstallGH_DnfFails_SkipsGracefully(t *testing.T) {
+	// dnf install gh fails → skipped (NOT failed), with actionable link.
+	rec := &cmdRecorder{
+		errors: map[string]error{
+			"dnf install -y gh": fmt.Errorf("No match for argument: gh"),
+		},
+	}
+	opts := &Options{
+		LookPath: stubLookPath(map[string]string{}),
+		ExecCmd:  rec.execCmd,
+		Stdout:   &bytes.Buffer{},
+		Stderr:   &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerDnf, Path: "/usr/bin/dnf"},
+		},
+	}
+
+	result := installGH(opts, env)
+	if result.action != "skipped" {
+		t.Errorf("action = %q, want skipped (graceful degradation)", result.action)
+	}
+	if result.err != nil {
+		t.Errorf("err should be nil for graceful degradation, got: %v", result.err)
+	}
+	if !strings.Contains(result.detail, "install_linux.md") {
+		t.Errorf("detail = %q, want to contain repo setup URL", result.detail)
+	}
+}
+
+func TestInstallGH_PackageManagerDnf(t *testing.T) {
+	// PackageManager: "dnf" → skips Homebrew, uses dnf directly.
+	rec := &cmdRecorder{}
+	opts := &Options{
+		PackageManager: "dnf",
+		LookPath:       stubLookPath(map[string]string{}),
+		ExecCmd:        rec.execCmd,
+		Stdout:         &bytes.Buffer{},
+		Stderr:         &bytes.Buffer{},
+	}
+	opts.defaults()
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerHomebrew, Path: "/opt/homebrew/bin/brew"},
+			{Kind: doctor.ManagerDnf, Path: "/usr/bin/dnf"},
+		},
+	}
+
+	result := installGH(opts, env)
+	if result.action != "installed" {
+		t.Errorf("action = %q, want installed", result.action)
+	}
+	if !strings.Contains(result.detail, "dnf") {
+		t.Errorf("detail = %q, want to contain 'dnf'", result.detail)
+	}
+	for _, call := range rec.calls {
+		if strings.Contains(call, "brew") {
+			t.Errorf("unexpected brew call when PackageManager=dnf: %s", call)
+		}
+	}
+}
+
+func TestInstallGH_ExplicitDnfDryRun(t *testing.T) {
+	opts := &Options{
+		DryRun:         true,
+		PackageManager: "dnf",
+		LookPath:       stubLookPath(map[string]string{}),
+		Stdout:         &bytes.Buffer{},
+		Stderr:         &bytes.Buffer{},
+	}
+	opts.defaults()
+	env := doctor.DetectedEnvironment{}
+
+	result := installGH(opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("action = %q, want dry-run", result.action)
+	}
+	if !strings.Contains(result.detail, "dnf install -y gh") {
+		t.Errorf("detail = %q, want to contain 'dnf install -y gh'", result.detail)
+	}
+}
+
+// --- Dry-run fallback chain tests (Task 6.1 + 6.2) ---
+
+func TestInstallGaze_DryRunDnfFallback(t *testing.T) {
+	opts := &Options{
+		DryRun:   true,
+		Version:  "1.0.0",
+		LookPath: stubLookPath(map[string]string{}),
+		ExecCmd:  (&cmdRecorder{}).execCmd,
+		Stdout:   &bytes.Buffer{},
+		Stderr:   &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerDnf, Path: "/usr/bin/dnf"},
+		},
+	}
+
+	result := installGaze(opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("action = %q, want dry-run", result.action)
+	}
+	if !strings.Contains(result.detail, "dnf install") {
+		t.Errorf("detail = %q, want to contain 'dnf install'", result.detail)
+	}
+}
+
+func TestInstallGaze_DryRunGoFallback(t *testing.T) {
+	opts := &Options{
+		DryRun: true,
+		LookPath: stubLookPath(map[string]string{
+			"go": "/usr/local/bin/go",
+		}),
+		ExecCmd: (&cmdRecorder{}).execCmd,
+		Stdout:  &bytes.Buffer{},
+		Stderr:  &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{}
+
+	result := installGaze(opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("action = %q, want dry-run", result.action)
+	}
+	if !strings.Contains(result.detail, "go install") {
+		t.Errorf("detail = %q, want to contain 'go install'", result.detail)
+	}
+}
+
+func TestInstallReplicator_DryRunDnfFallback(t *testing.T) {
+	opts := Options{
+		DryRun:   true,
+		Version:  "1.0.0",
+		LookPath: stubLookPath(map[string]string{}),
+		ExecCmd:  (&cmdRecorder{}).execCmd,
+		Stdout:   &bytes.Buffer{},
+		Stderr:   &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerDnf, Path: "/usr/bin/dnf"},
+		},
+	}
+
+	result := installReplicator(&opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("action = %q, want dry-run", result.action)
+	}
+	if !strings.Contains(result.detail, "dnf install") {
+		t.Errorf("detail = %q, want to contain 'dnf install'", result.detail)
+	}
+}
+
+func TestInstallReplicator_DryRunGoFallback(t *testing.T) {
+	opts := Options{
+		DryRun: true,
+		LookPath: stubLookPath(map[string]string{
+			"go": "/usr/local/bin/go",
+		}),
+		ExecCmd: (&cmdRecorder{}).execCmd,
+		Stdout:  &bytes.Buffer{},
+		Stderr:  &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{}
+
+	result := installReplicator(&opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("action = %q, want dry-run", result.action)
+	}
+	if !strings.Contains(result.detail, "go install") {
+		t.Errorf("detail = %q, want to contain 'go install'", result.detail)
+	}
+}
+
+func TestInstallDewey_DryRunGoFallback(t *testing.T) {
+	opts := &Options{
+		DryRun: true,
+		LookPath: stubLookPath(map[string]string{
+			"go": "/usr/local/bin/go",
+		}),
+		ExecCmd: (&cmdRecorder{}).execCmd,
+		Stdout:  &bytes.Buffer{},
+		Stderr:  &bytes.Buffer{},
+	}
+	opts.defaults()
+	env := doctor.DetectedEnvironment{}
+
+	result := installDewey(opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("action = %q, want dry-run", result.action)
+	}
+	if !strings.Contains(result.detail, "go install") {
+		t.Errorf("detail = %q, want to contain 'go install'", result.detail)
+	}
+}
+
+func TestInstallGH_DryRunDnfFallback(t *testing.T) {
+	opts := &Options{
+		DryRun:   true,
+		LookPath: stubLookPath(map[string]string{}),
+		Stdout:   &bytes.Buffer{},
+		Stderr:   &bytes.Buffer{},
+	}
+	env := doctor.DetectedEnvironment{
+		Managers: []doctor.ManagerInfo{
+			{Kind: doctor.ManagerDnf, Path: "/usr/bin/dnf"},
+		},
+	}
+
+	result := installGH(opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("action = %q, want dry-run", result.action)
+	}
+	if !strings.Contains(result.detail, "dnf install -y gh") {
+		t.Errorf("detail = %q, want to contain 'dnf install -y gh'", result.detail)
 	}
 }
