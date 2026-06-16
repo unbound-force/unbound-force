@@ -1353,7 +1353,24 @@ func truncateOutput(output []byte, maxLines int) string {
 	return fmt.Sprintf("... (%d lines omitted)\n%s", omitted, strings.Join(lines[len(lines)-tail:], "\n"))
 }
 
-// printStepResult prints a formatted step result.
+// printStepError writes error details and truncated command output
+// for failed steps. Only renders output when the action is "failed".
+func printStepError(w io.Writer, r stepResult) {
+	if r.err != nil {
+		fmt.Fprintf(w, "                     Error: %v\n", r.err)
+	}
+	if len(r.output) > 0 && r.action == "failed" {
+		if trimmed := truncateOutput(r.output, 20); trimmed != "" {
+			for _, line := range strings.Split(trimmed, "\n") {
+				fmt.Fprintf(w, "                     %s\n", line)
+			}
+		}
+	}
+}
+
+// printStepResult prints a formatted step result with symbol,
+// name, action, and optional detail. Delegates error/output
+// rendering to printStepError.
 func printStepResult(w io.Writer, r stepResult) {
 	symbol := "✓"
 	switch r.action {
@@ -1371,17 +1388,7 @@ func printStepResult(w io.Writer, r stepResult) {
 	}
 	fmt.Fprintln(w, line)
 
-	if r.err != nil {
-		fmt.Fprintf(w, "                     Error: %v\n", r.err)
-	}
-
-	if len(r.output) > 0 && r.action == "failed" {
-		if trimmed := truncateOutput(r.output, 20); trimmed != "" {
-			for _, line := range strings.Split(trimmed, "\n") {
-				fmt.Fprintf(w, "                     %s\n", line)
-			}
-		}
-	}
+	printStepError(w, r)
 }
 
 // FormatSetupText renders setup output with symbols per US4/T069.
