@@ -1604,21 +1604,9 @@ const (
 	hintDivisor = "Run /review-council to start a code review."
 )
 
-// printSummary writes a human-readable summary of the scaffold
-// result to the given writer. When divisorOnly is true, shows
-// Divisor-specific hints instead of the standard hints.
-// langExplicit indicates --lang was set; langDetected indicates
-// auto-detection found a language. subResults reports sub-tool
-// initialization outcomes (may be nil).
-func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *Result, subResults []subToolResult) {
-	total := len(r.Created) + len(r.Skipped) + len(r.Overwritten) + len(r.Updated)
-
-	label := "uf init"
-	if divisorOnly {
-		label = "uf init (divisor)"
-	}
-	_, _ = fmt.Fprintf(w, "\n%s: %d files processed\n\n", label, total)
-
+// printFileCategories writes per-category file lists (created,
+// updated, overwritten, skipped) to w.
+func printFileCategories(w io.Writer, r *Result) {
 	if len(r.Created) > 0 {
 		_, _ = fmt.Fprintf(w, "  created:     %d\n", len(r.Created))
 		for _, f := range r.Created {
@@ -1643,32 +1631,40 @@ func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *
 			_, _ = fmt.Fprintf(w, "    - %s\n", f)
 		}
 	}
+}
 
-	// Sub-tool initialization results.
-	if len(subResults) > 0 {
-		_, _ = fmt.Fprintln(w)
-		_, _ = fmt.Fprintln(w, "Sub-tool initialization:")
-		for _, sr := range subResults {
-			symbol := subToolSymbol(sr.action)
-			line := fmt.Sprintf("  %s %s %s", symbol, sr.name, sr.action)
-			if sr.detail != "" {
-				line += " (" + sr.detail + ")"
-			}
-			_, _ = fmt.Fprintln(w, line)
-			// Show error and captured output for failed/error results.
-			if sr.err != nil {
-				_, _ = fmt.Fprintf(w, "                     Error: %v\n", sr.err)
-			}
-			if len(sr.output) > 0 && (sr.action == "failed" || sr.action == "error") {
-				if trimmed := truncateOutput(sr.output, 20); trimmed != "" {
-					for _, line := range strings.Split(trimmed, "\n") {
-						_, _ = fmt.Fprintf(w, "                     %s\n", line)
-					}
+// printSubToolResults writes the sub-tool initialization section,
+// including error messages and truncated output for failures.
+func printSubToolResults(w io.Writer, subResults []subToolResult) {
+	if len(subResults) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "Sub-tool initialization:")
+	for _, sr := range subResults {
+		symbol := subToolSymbol(sr.action)
+		line := fmt.Sprintf("  %s %s %s", symbol, sr.name, sr.action)
+		if sr.detail != "" {
+			line += " (" + sr.detail + ")"
+		}
+		_, _ = fmt.Fprintln(w, line)
+		// Show error and captured output for failed/error results.
+		if sr.err != nil {
+			_, _ = fmt.Fprintf(w, "                     Error: %v\n", sr.err)
+		}
+		if len(sr.output) > 0 && (sr.action == "failed" || sr.action == "error") {
+			if trimmed := truncateOutput(sr.output, 20); trimmed != "" {
+				for _, line := range strings.Split(trimmed, "\n") {
+					_, _ = fmt.Fprintf(w, "                     %s\n", line)
 				}
 			}
 		}
 	}
+}
 
+// printNextSteps writes context-aware footer guidance: language
+// detection warnings, divisor hints, or numbered next steps.
+func printNextSteps(w io.Writer, divisorOnly, langExplicit, langDetected bool, subResults []subToolResult) {
 	_, _ = fmt.Fprintln(w)
 	if divisorOnly && !langExplicit && !langDetected {
 		_, _ = fmt.Fprintln(w, "  note: language not detected; deployed default convention pack only. Use --lang to specify.")
@@ -1676,42 +1672,47 @@ func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *
 	}
 	if divisorOnly {
 		_, _ = fmt.Fprintln(w, hintDivisor)
-	} else {
-		// Show context-aware next steps.
-		_, _ = fmt.Fprintln(w, "Next steps:")
-		// Check if key tools are available to determine guidance.
-		hasDewey := false
-		if r != nil {
-			// Use the opts passed to Run() — we check via the
-			// presence of sub-tool results and file creation.
-			// Since printSummary doesn't have direct access to
-			// LookPath, we infer from subResults and created files.
-			for _, sr := range subResults {
-				if sr.name == ".uf/dewey/" && (sr.action == "initialized" || sr.action == "completed") {
-					hasDewey = true
-				}
-			}
-			// If no sub-tool results but .uf/dewey/ wasn't created,
-			// tools may still be available — check if dewey was
-			// already initialized (subResults would be empty).
-			if len(subResults) == 0 {
-				// No sub-tool actions means either DivisorOnly (handled above)
-				// or dewey was already initialized or not available.
-				// Default to showing uf setup as first step.
-				hasDewey = false
-			}
-		}
-		if !hasDewey && len(subResults) == 0 {
-			_, _ = fmt.Fprintln(w, "  1. Run uf setup to install the full toolchain")
-			_, _ = fmt.Fprintln(w, "  2. Run /speckit.constitution to create your project constitution")
-			_, _ = fmt.Fprintln(w, "  3. Run uf doctor to verify your environment")
-		} else {
-			_, _ = fmt.Fprintln(w, "  1. Run /speckit.constitution to create your project constitution")
-			_, _ = fmt.Fprintln(w, "  2. Run uf doctor to verify your environment")
-			_, _ = fmt.Fprintln(w, "  3. Run /speckit.specify to start a strategic spec")
-			_, _ = fmt.Fprintln(w, "  4. Run /opsx:propose to start a tactical change")
+		return
+	}
+	// Show context-aware next steps.
+	_, _ = fmt.Fprintln(w, "Next steps:")
+	// Check if key tools are available to determine guidance.
+	hasDewey := false
+	for _, sr := range subResults {
+		if sr.name == ".uf/dewey/" && (sr.action == "initialized" || sr.action == "completed") {
+			hasDewey = true
 		}
 	}
+	if !hasDewey && len(subResults) == 0 {
+		_, _ = fmt.Fprintln(w, "  1. Run uf setup to install the full toolchain")
+		_, _ = fmt.Fprintln(w, "  2. Run /speckit.constitution to create your project constitution")
+		_, _ = fmt.Fprintln(w, "  3. Run uf doctor to verify your environment")
+	} else {
+		_, _ = fmt.Fprintln(w, "  1. Run /speckit.constitution to create your project constitution")
+		_, _ = fmt.Fprintln(w, "  2. Run uf doctor to verify your environment")
+		_, _ = fmt.Fprintln(w, "  3. Run /speckit.specify to start a strategic spec")
+		_, _ = fmt.Fprintln(w, "  4. Run /opsx:propose to start a tactical change")
+	}
+}
+
+// printSummary writes a human-readable summary of the scaffold
+// result to the given writer. When divisorOnly is true, shows
+// Divisor-specific hints instead of the standard hints.
+// langExplicit indicates --lang was set; langDetected indicates
+// auto-detection found a language. subResults reports sub-tool
+// initialization outcomes (may be nil).
+func printSummary(w io.Writer, divisorOnly, langExplicit, langDetected bool, r *Result, subResults []subToolResult) {
+	total := len(r.Created) + len(r.Skipped) + len(r.Overwritten) + len(r.Updated)
+
+	label := "uf init"
+	if divisorOnly {
+		label = "uf init (divisor)"
+	}
+	_, _ = fmt.Fprintf(w, "\n%s: %d files processed\n\n", label, total)
+
+	printFileCategories(w, r)
+	printSubToolResults(w, subResults)
+	printNextSteps(w, divisorOnly, langExplicit, langDetected, subResults)
 }
 
 // assetPaths returns all relative paths of embedded assets.
