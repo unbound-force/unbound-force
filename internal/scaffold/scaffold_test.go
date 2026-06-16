@@ -130,7 +130,7 @@ func mapAssetToSource(relPath string) string {
 // expectedAssetPaths is the canonical list of embedded assets.
 // Update this list when adding or removing assets.
 var expectedAssetPaths = []string{
-	// OpenCode commands (9) — UF-custom only; speckit.*.md externalized to specify init + /uf-init
+	// OpenCode commands (10) — UF-custom only; speckit.*.md externalized to specify init + /uf-init
 	"opencode/commands/address-feedback.md",
 	"opencode/commands/agent-brief.md",
 	"opencode/commands/cobalt-crush.md",
@@ -138,6 +138,7 @@ var expectedAssetPaths = []string{
 	"opencode/commands/finale.md",
 	"opencode/commands/review-council.md",
 	"opencode/commands/review-pr.md",
+	"opencode/commands/triage-issue.md",
 	"opencode/commands/uf-init.md",
 	"opencode/commands/unleash.md",
 	// OpenCode agents — Divisor personas (6) + Cobalt-Crush (1) + Mx F coach (1) + constitution-check (1)

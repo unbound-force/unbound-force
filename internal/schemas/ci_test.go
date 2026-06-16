@@ -173,6 +173,7 @@ func TestSchemaRegistry_NoDrift(t *testing.T) {
 // tests since they are not covered by the registry-based tests.
 var handAuthoredSchemas = []string{
 	"feedback-triage",
+	"issue-triage",
 }
 
 // TestHandAuthoredSchemas_SampleValidates validates the positive

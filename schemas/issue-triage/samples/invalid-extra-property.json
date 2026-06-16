@@ -1,0 +1,35 @@
+{
+  "issue_number": 99,
+  "issue_url": "https://github.com/unbound-force/unbound-force/issues/99",
+  "repo": "unbound-force/unbound-force",
+  "title": "Add dark mode support",
+  "author": "user-bob",
+  "category": "feature",
+  "validity": "valid",
+  "objectivity": "subjective",
+  "duplicate_of": null,
+  "split_issues": [],
+  "assessments": [
+    {
+      "agent": "divisor-architect",
+      "verdict": "valid",
+      "category": "feature",
+      "objectivity": "subjective",
+      "reasoning": "Valid feature request for dark mode.",
+      "split_recommendation": null,
+      "priority": "high"
+    }
+  ],
+  "actions_taken": {
+    "labels_applied": ["enhancement"],
+    "comment_posted": true,
+    "child_issues_created": [],
+    "label_creation_failed": false
+  },
+  "summary": {
+    "agents_consulted": 1,
+    "agents_available": 5,
+    "consensus": "1/1 valid",
+    "dissenting_agents": []
+  }
+}

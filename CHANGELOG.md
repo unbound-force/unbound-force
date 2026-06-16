@@ -6,6 +6,16 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- `/triage-issue` slash command for multi-agent GitHub issue
+  triage using the Divisor review panel. Classifies issues
+  (bug, feature, enhancement, question, opinion, duplicate,
+  needs-clarification), determines validity via majority
+  consensus, checks for duplicates, recommends splitting
+  compound issues, and posts tone-appropriate comments.
+  (Spec: openspec/changes/triage-issue/)
+- `issue-triage` JSON schema (v1.0.0) for capturing triage
+  decisions as artifacts with per-agent assessment provenance
+  (Spec: openspec/changes/triage-issue/)
 - `python-convention-pack`: Added Python convention pack
   (`python.md`, `python-custom.md`) with 46 rules across 7
   sections (Coding Style, Architectural Patterns, Security

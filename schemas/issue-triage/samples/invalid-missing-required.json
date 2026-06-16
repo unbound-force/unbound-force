@@ -1,0 +1,24 @@
+{
+  "issue_number": 77,
+  "issue_url": "https://github.com/unbound-force/unbound-force/issues/77",
+  "repo": "unbound-force/unbound-force",
+  "title": "Improve error messages",
+  "author": "user-charlie",
+  "category": "enhancement",
+  "validity": "valid",
+  "objectivity": "objective",
+  "duplicate_of": null,
+  "split_issues": [],
+  "actions_taken": {
+    "labels_applied": ["enhancement"],
+    "comment_posted": false,
+    "child_issues_created": [],
+    "label_creation_failed": false
+  },
+  "summary": {
+    "agents_consulted": 3,
+    "agents_available": 5,
+    "consensus": "3/3 valid",
+    "dissenting_agents": []
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "issue_number": 55,
+  "issue_url": "https://github.com/unbound-force/unbound-force/issues/55",
+  "repo": "unbound-force/unbound-force",
+  "title": "Something urgent",
+  "author": "user-dave",
+  "category": "urgent",
+  "validity": "valid",
+  "objectivity": "objective",
+  "duplicate_of": null,
+  "split_issues": [],
+  "assessments": [
+    {
+      "agent": "divisor-adversary",
+      "verdict": "valid",
+      "category": "urgent",
+      "objectivity": "objective",
+      "reasoning": "Urgent matter.",
+      "split_recommendation": null
+    }
+  ],
+  "actions_taken": {
+    "labels_applied": [],
+    "comment_posted": false,
+    "child_issues_created": [],
+    "label_creation_failed": false
+  },
+  "summary": {
+    "agents_consulted": 1,
+    "agents_available": 5,
+    "consensus": "1/1 valid",
+    "dissenting_agents": []
+  }
+}

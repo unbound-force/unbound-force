@@ -65,7 +65,7 @@ unbound-force/
 ├── .specify/                         # Speckit framework (templates, scripts, memory)
 ├── .opencode/
 │   ├── agents/                       # Hero persona agents (18 active)
-│   ├── commands/                     # Slash commands (47 files)
+│   ├── commands/                     # Slash commands (48 files)
 │   ├── skill/                        # Swarm skills packages
 │   ├── skills/                       # Additional skills packages
 │   └── uf/packs/                     # Convention packs
@@ -93,7 +93,8 @@ unbound-force/
 ├── specs/                            # Architectural specs (001-035)
 ├── openspec/                         # OpenSpec tactical workflow
 ├── schemas/                          # JSON Schema registry
-│   └── feedback-triage/              # Feedback triage schemas
+│   ├── feedback-triage/              # Feedback triage schemas
+│   └── issue-triage/                 # Issue triage schemas
 ├── go.mod                            # Go module (1.25+)
 ├── opencode.json                     # MCP server configuration
 ├── .goreleaser.yaml                  # Release configuration
@@ -186,6 +187,12 @@ These rules are non-negotiable. Violations are CRITICAL severity.
 | `/review-council` | Pre-PR (local) | 5+ Divisor agents |
 | `/review-pr [N]` | Post-PR (GitHub) | Single agent, CI analysis |
 | `/address-feedback [N]` | Post-PR (GitHub) | Triage + address reviewer feedback |
+
+### Issue Triage Commands
+
+| Command | When | Scope |
+|---------|------|-------|
+| `/triage-issue <N>` | Issue triage | 5 Divisor agents, classify + comment |
 
 `/review-pr` key capabilities: PR walkthrough, issue
 linking (`Fixes #N`), suggestion blocks, verdict-aligned

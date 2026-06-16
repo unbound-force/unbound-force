@@ -1,0 +1,287 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/unbound-force/unbound-force/internal/schemas/issue-triage-payload",
+  "properties": {
+    "issue_number": {
+      "type": "integer",
+      "description": "GitHub issue number"
+    },
+    "issue_url": {
+      "type": "string",
+      "description": "Full GitHub URL for the issue"
+    },
+    "repo": {
+      "type": "string",
+      "description": "Repository in owner/repo format"
+    },
+    "title": {
+      "type": "string",
+      "description": "Issue title"
+    },
+    "author": {
+      "type": "string",
+      "description": "Issue author GitHub login"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "bug",
+        "feature",
+        "enhancement",
+        "question",
+        "opinion",
+        "duplicate",
+        "needs-clarification"
+      ],
+      "description": "Triage category for the issue"
+    },
+    "validity": {
+      "type": "string",
+      "enum": [
+        "valid",
+        "invalid",
+        "needs-clarification"
+      ],
+      "description": "Whether the issue is valid"
+    },
+    "objectivity": {
+      "type": "string",
+      "enum": [
+        "objective",
+        "subjective"
+      ],
+      "description": "Whether the issue is objective or subjective"
+    },
+    "duplicate_of": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Issue number of the duplicate"
+    },
+    "assessments": {
+      "items": {
+        "properties": {
+          "agent": {
+            "type": "string",
+            "description": "Agent identifier, e.g. divisor-adversary"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "valid",
+              "invalid",
+              "needs-clarification"
+            ],
+            "description": "Agent verdict on issue validity"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "bug",
+              "feature",
+              "enhancement",
+              "question",
+              "opinion",
+              "duplicate",
+              "needs-clarification"
+            ],
+            "description": "Agent category assessment"
+          },
+          "objectivity": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "subjective"
+            ],
+            "description": "Agent objectivity assessment"
+          },
+          "reasoning": {
+            "type": "string",
+            "description": "Evidence-based explanation for the assessment"
+          },
+          "split_recommendation": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "Recommended split issue title"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Recommended split issue description"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "title",
+                "description"
+              ]
+            },
+            "description": "Recommended issues to split into"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "agent",
+          "verdict",
+          "category",
+          "objectivity",
+          "reasoning"
+        ]
+      },
+      "type": "array",
+      "description": "Individual agent assessments"
+    },
+    "split_issues": {
+      "items": {
+        "properties": {
+          "number": {
+            "type": "integer",
+            "description": "Created issue number"
+          },
+          "title": {
+            "type": "string",
+            "description": "Created issue title"
+          },
+          "url": {
+            "type": "string",
+            "description": "Created issue URL"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "number",
+          "title",
+          "url"
+        ]
+      },
+      "type": "array",
+      "default": [],
+      "description": "Issues created from splitting this issue"
+    },
+    "actions_taken": {
+      "properties": {
+        "labels_applied": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Labels applied to the issue"
+        },
+        "comment_posted": {
+          "type": "boolean",
+          "description": "Whether a triage comment was posted"
+        },
+        "child_issues_created": {
+          "items": {
+            "properties": {
+              "number": {
+                "type": "integer",
+                "description": "Created issue number"
+              },
+              "title": {
+                "type": "string",
+                "description": "Created issue title"
+              },
+              "url": {
+                "type": "string",
+                "description": "Created issue URL"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "number",
+              "title",
+              "url"
+            ]
+          },
+          "type": "array",
+          "description": "Child issues created during triage"
+        },
+        "label_creation_failed": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether label creation failed due to permissions"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "labels_applied",
+        "comment_posted",
+        "child_issues_created",
+        "label_creation_failed"
+      ]
+    },
+    "summary": {
+      "properties": {
+        "agents_consulted": {
+          "type": "integer",
+          "description": "Number of agents consulted"
+        },
+        "agents_available": {
+          "type": "integer",
+          "description": "Number of agents available"
+        },
+        "consensus": {
+          "type": "string",
+          "description": "Consensus summary, e.g. 4/5 valid"
+        },
+        "dissenting_agents": {
+          "items": {
+            "properties": {
+              "agent": {
+                "type": "string",
+                "description": "Dissenting agent identifier"
+              },
+              "reasoning": {
+                "type": "string",
+                "description": "Reasoning for dissent"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "agent",
+              "reasoning"
+            ]
+          },
+          "type": "array",
+          "description": "Agents that dissented from the consensus"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "agents_consulted",
+        "agents_available",
+        "consensus",
+        "dissenting_agents"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "issue_number",
+    "issue_url",
+    "repo",
+    "title",
+    "author",
+    "category",
+    "validity",
+    "objectivity",
+    "assessments",
+    "actions_taken",
+    "summary"
+  ]
+}
