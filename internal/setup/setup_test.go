@@ -5145,13 +5145,3 @@ func setupGenerateLines(n int) string {
 	}
 	return b.String()
 }
-
-// setupGenerateLastNLines returns the last n lines of a total-line
-// string, joined by newlines (no trailing newline).
-func setupGenerateLastNLines(total, n int) string {
-	var lines []string
-	for i := total - n + 1; i <= total; i++ {
-		lines = append(lines, fmt.Sprintf("line %d", i))
-	}
-	return strings.Join(lines, "\n")
-}

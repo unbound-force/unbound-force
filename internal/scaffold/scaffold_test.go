@@ -6386,16 +6386,6 @@ func generateLines(n int) string {
 	return b.String()
 }
 
-// generateLastNLines returns the last n lines of a total-line string,
-// joined by newlines (no trailing newline).
-func generateLastNLines(total, n int) string {
-	var lines []string
-	for i := total - n + 1; i <= total; i++ {
-		lines = append(lines, fmt.Sprintf("line %d", i))
-	}
-	return strings.Join(lines, "\n")
-}
-
 func TestInitSubTools_ExitCodeOnly(t *testing.T) {
 	dir := t.TempDir()
 	rec := &scaffoldCmdRecorder{
