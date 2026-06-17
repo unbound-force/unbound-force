@@ -88,7 +88,8 @@ unbound-force/
 │   ├── schemas/                      # JSON Schema generation/validation
 │   ├── setup/                        # Automated tool installation
 │   ├── sprint/                       # Sprint lifecycle management
-│   └── sync/                         # GitHub issue sync
+│   ├── sync/                         # GitHub issue sync
+│   └── textutil/                     # Shared text formatting helpers
 ├── docs/                             # User-facing documentation
 ├── specs/                            # Architectural specs (001-035)
 ├── openspec/                         # OpenSpec tactical workflow

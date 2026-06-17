@@ -5137,61 +5137,6 @@ func TestPrintStepResult_SuccessWithOutputNotShown(t *testing.T) {
 	}
 }
 
-func TestTruncateOutput_Setup(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    []byte
-		maxLines int
-		want     string
-	}{
-		{
-			name:     "empty input",
-			input:    []byte(""),
-			maxLines: 20,
-			want:     "",
-		},
-		{
-			name:     "whitespace only",
-			input:    []byte("  \n  \n  "),
-			maxLines: 20,
-			want:     "",
-		},
-		{
-			name:     "short output 3 lines",
-			input:    []byte("line1\nline2\nline3"),
-			maxLines: 20,
-			want:     "line1\nline2\nline3",
-		},
-		{
-			name:     "exactly 20 lines no truncation",
-			input:    []byte(setupGenerateLines(20)),
-			maxLines: 20,
-			want:     strings.TrimSpace(setupGenerateLines(20)),
-		},
-		{
-			name:     "21 lines truncated to last 10",
-			input:    []byte(setupGenerateLines(21)),
-			maxLines: 20,
-			want:     "... (11 lines omitted)\n" + setupGenerateLastNLines(21, 10),
-		},
-		{
-			name:     "50 lines truncated to last 10",
-			input:    []byte(setupGenerateLines(50)),
-			maxLines: 20,
-			want:     "... (40 lines omitted)\n" + setupGenerateLastNLines(50, 10),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := truncateOutput(tt.input, tt.maxLines)
-			if got != tt.want {
-				t.Errorf("truncateOutput() =\n%q\nwant:\n%q", got, tt.want)
-			}
-		})
-	}
-}
-
 // setupGenerateLines creates a string with n lines like "line 1\nline 2\n...".
 func setupGenerateLines(n int) string {
 	var b strings.Builder
