@@ -141,7 +141,7 @@ Each agent MUST return a **structured assessment** with these fields:
 | **category** | `bug`, `feature`, `enhancement`, `question`, `opinion`, `duplicate`, or `needs-clarification` |
 | **objectivity** | `objective` (verifiable evidence exists) or `subjective` (preference-based) |
 | **reasoning** | Evidence-based explanation for the verdict and category |
-| **split_recommendation** | `null` or an object with `reason` and `proposed_children` (array of `{title, body}`) |
+| **split_recommendation** | `null` or an array of `{title, description}` — each item is a proposed child issue |
 
 Use the following focus areas when prompting each agent:
 

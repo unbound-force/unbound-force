@@ -1,0 +1,111 @@
+{
+  "issue_number": 85,
+  "issue_url": "https://github.com/unbound-force/unbound-force/issues/85",
+  "repo": "unbound-force/unbound-force",
+  "title": "Gateway timeout handling and retry configuration",
+  "author": "contributor-eve",
+  "category": "feature",
+  "validity": "valid",
+  "objectivity": "objective",
+  "duplicate_of": null,
+  "split_issues": [
+    {
+      "number": 86,
+      "title": "Fix gateway timeout handling for large payloads",
+      "url": "https://github.com/unbound-force/unbound-force/issues/86"
+    },
+    {
+      "number": 87,
+      "title": "Add configurable retry policy for gateway proxy",
+      "url": "https://github.com/unbound-force/unbound-force/issues/87"
+    }
+  ],
+  "assessments": [
+    {
+      "agent": "divisor-adversary",
+      "verdict": "valid",
+      "category": "bug",
+      "objectivity": "objective",
+      "reasoning": "The timeout issue is a reliability defect. Large payloads exceed the default timeout, causing silent failures.",
+      "split_recommendation": [
+        {
+          "title": "Fix gateway timeout handling for large payloads",
+          "description": "The proxy uses a hardcoded 30s timeout that is insufficient for large payloads. Add size-aware timeout scaling."
+        }
+      ]
+    },
+    {
+      "agent": "divisor-architect",
+      "verdict": "valid",
+      "category": "feature",
+      "objectivity": "objective",
+      "reasoning": "The issue conflates two distinct concerns: timeout handling (bug) and retry configuration (feature). These should be separate issues.",
+      "split_recommendation": [
+        {
+          "title": "Fix gateway timeout handling for large payloads",
+          "description": "Address the timeout defect with size-aware scaling."
+        },
+        {
+          "title": "Add configurable retry policy for gateway proxy",
+          "description": "New feature: expose retry count, backoff, and jitter as configuration options."
+        }
+      ]
+    },
+    {
+      "agent": "divisor-guard",
+      "verdict": "valid",
+      "category": "feature",
+      "objectivity": "objective",
+      "reasoning": "Both concerns are valid. The timeout is a defect; the retry config is a feature request. Splitting improves traceability.",
+      "split_recommendation": [
+        {
+          "title": "Fix gateway timeout handling for large payloads",
+          "description": "Bug fix for the hardcoded timeout."
+        },
+        {
+          "title": "Add configurable retry policy for gateway proxy",
+          "description": "Feature request for retry configuration."
+        }
+      ]
+    },
+    {
+      "agent": "divisor-sre",
+      "verdict": "valid",
+      "category": "feature",
+      "objectivity": "objective",
+      "reasoning": "Both concerns affect operational reliability. The timeout fix is urgent; the retry config is important but can follow.",
+      "split_recommendation": null
+    },
+    {
+      "agent": "divisor-testing",
+      "verdict": "valid",
+      "category": "feature",
+      "objectivity": "objective",
+      "reasoning": "Splitting allows independent test strategies. Timeout fix needs regression tests; retry config needs integration tests.",
+      "split_recommendation": null
+    }
+  ],
+  "actions_taken": {
+    "labels_applied": ["enhancement"],
+    "comment_posted": true,
+    "child_issues_created": [
+      {
+        "number": 86,
+        "title": "Fix gateway timeout handling for large payloads",
+        "url": "https://github.com/unbound-force/unbound-force/issues/86"
+      },
+      {
+        "number": 87,
+        "title": "Add configurable retry policy for gateway proxy",
+        "url": "https://github.com/unbound-force/unbound-force/issues/87"
+      }
+    ],
+    "label_creation_failed": false
+  },
+  "summary": {
+    "agents_consulted": 5,
+    "agents_available": 5,
+    "consensus": "5/5 valid",
+    "dissenting_agents": []
+  }
+}
