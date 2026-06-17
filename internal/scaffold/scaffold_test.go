@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/unbound-force/unbound-force/internal/textutil"
 )
 
 // findProjectRoot walks up from the current directory looking
@@ -6313,7 +6315,7 @@ func TestInitSubTools_DeweyInitFails_ShowsError(t *testing.T) {
 		for _, earlyLine := range []string{"line 1\n", "line 2\n", "line 5\n"} {
 			// Check the rendered output (each line is indented).
 			// The truncation should have removed these lines.
-			truncated := truncateOutput(deweyResult.output, 20)
+			truncated := textutil.TruncateOutput(deweyResult.output, 20)
 			if strings.Contains(truncated, strings.TrimSuffix(earlyLine, "\n")+"\n") {
 				// Only flag if the early line appears as a full line
 				// in the truncated output (not as a substring).
@@ -6372,61 +6374,6 @@ func TestInitSubTools_SimpleToolFails_ShowsError(t *testing.T) {
 	// Verify detail includes the tool name and error.
 	if !strings.Contains(specifyResult.detail, "specify init:") {
 		t.Errorf("expected detail to contain 'specify init:', got %q", specifyResult.detail)
-	}
-}
-
-func TestTruncateOutput(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    []byte
-		maxLines int
-		want     string
-	}{
-		{
-			name:     "empty input",
-			input:    []byte(""),
-			maxLines: 20,
-			want:     "",
-		},
-		{
-			name:     "short output 3 lines",
-			input:    []byte("line1\nline2\nline3\n"),
-			maxLines: 20,
-			want:     "line1\nline2\nline3",
-		},
-		{
-			name:     "exactly 20 lines",
-			input:    []byte(generateLines(20)),
-			maxLines: 20,
-			want:     strings.TrimSpace(generateLines(20)),
-		},
-		{
-			name:     "21 lines truncated to last 10",
-			input:    []byte(generateLines(21)),
-			maxLines: 20,
-			want:     "... (11 lines omitted)\n" + generateLastNLines(21, 10),
-		},
-		{
-			name:     "50 lines truncated to last 10",
-			input:    []byte(generateLines(50)),
-			maxLines: 20,
-			want:     "... (40 lines omitted)\n" + generateLastNLines(50, 10),
-		},
-		{
-			name:     "output with no trailing newline",
-			input:    []byte("line1\nline2\nline3"),
-			maxLines: 20,
-			want:     "line1\nline2\nline3",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := truncateOutput(tt.input, tt.maxLines)
-			if got != tt.want {
-				t.Errorf("truncateOutput() =\n%q\nwant:\n%q", got, tt.want)
-			}
-		})
 	}
 }
 

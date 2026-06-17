@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/unbound-force/unbound-force/internal/config"
+	"github.com/unbound-force/unbound-force/internal/textutil"
 )
 
 // markerFileExtensions defines which file types receive version markers.
@@ -1582,23 +1583,6 @@ func subToolSymbol(action string) string {
 	}
 }
 
-// truncateOutput returns a string representation of command output,
-// truncated to the last maxLines/2 lines if the output exceeds
-// maxLines lines. Empty output returns an empty string.
-func truncateOutput(output []byte, maxLines int) string {
-	s := strings.TrimSpace(string(output))
-	if s == "" {
-		return ""
-	}
-	lines := strings.Split(s, "\n")
-	if len(lines) <= maxLines {
-		return s
-	}
-	tail := maxLines / 2
-	omitted := len(lines) - tail
-	return fmt.Sprintf("... (%d lines omitted)\n%s", omitted, strings.Join(lines[len(lines)-tail:], "\n"))
-}
-
 // Next-step hint commands shown after scaffold summary.
 const (
 	hintDivisor = "Run /review-council to start a code review."
@@ -1653,7 +1637,7 @@ func printSubToolResults(w io.Writer, subResults []subToolResult) {
 			_, _ = fmt.Fprintf(w, "                     Error: %v\n", sr.err)
 		}
 		if len(sr.output) > 0 && (sr.action == "failed" || sr.action == "error") {
-			if trimmed := truncateOutput(sr.output, 20); trimmed != "" {
+			if trimmed := textutil.TruncateOutput(sr.output, 20); trimmed != "" {
 				for _, line := range strings.Split(trimmed, "\n") {
 					_, _ = fmt.Fprintf(w, "                     %s\n", line)
 				}

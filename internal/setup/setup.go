@@ -18,6 +18,7 @@ import (
 
 	"github.com/unbound-force/unbound-force/internal/config"
 	"github.com/unbound-force/unbound-force/internal/doctor"
+	"github.com/unbound-force/unbound-force/internal/textutil"
 )
 
 // Options configures a setup run. All external dependencies are
@@ -1336,23 +1337,6 @@ func pullEmbeddingModel(opts *Options) stepResult {
 	return stepResult{name: "Dewey", action: "installed", detail: "embedding model pulled"}
 }
 
-// truncateOutput returns a string representation of command output,
-// truncated to the last maxLines/2 lines if the output exceeds
-// maxLines lines. Empty output returns an empty string.
-func truncateOutput(output []byte, maxLines int) string {
-	s := strings.TrimSpace(string(output))
-	if s == "" {
-		return ""
-	}
-	lines := strings.Split(s, "\n")
-	if len(lines) <= maxLines {
-		return s
-	}
-	tail := maxLines / 2
-	omitted := len(lines) - tail
-	return fmt.Sprintf("... (%d lines omitted)\n%s", omitted, strings.Join(lines[len(lines)-tail:], "\n"))
-}
-
 // printStepError writes error details and truncated command output
 // for failed steps. Only renders output when the action is "failed".
 func printStepError(w io.Writer, r stepResult) {
@@ -1360,7 +1344,7 @@ func printStepError(w io.Writer, r stepResult) {
 		fmt.Fprintf(w, "                     Error: %v\n", r.err)
 	}
 	if len(r.output) > 0 && r.action == "failed" {
-		if trimmed := truncateOutput(r.output, 20); trimmed != "" {
+		if trimmed := textutil.TruncateOutput(r.output, 20); trimmed != "" {
 			for _, line := range strings.Split(trimmed, "\n") {
 				fmt.Fprintf(w, "                     %s\n", line)
 			}
