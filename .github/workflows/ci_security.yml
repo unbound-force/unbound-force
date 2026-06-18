@@ -37,7 +37,7 @@ jobs:
       security-events: write
       packages: write   # Required by reusable_vuln_scan trivy_image job (even when skipped)
       id-token: write   # Required by reusable_vuln_scan trivy_image job (even when skipped)
-    uses: complytime/org-infra/.github/workflows/reusable_vuln_scan.yml@2c193416adbc621a64021ace52bf57114d703888 # v0.3.1
+    uses: complytime/org-infra/.github/workflows/reusable_vuln_scan.yml@bbd7194995388f96dd28c0c0792d406c8a249140 # v0.4.0
     with:
       enable_trivy_source: true
 
