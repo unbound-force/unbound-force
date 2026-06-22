@@ -5,6 +5,18 @@ Each entry follows the format: `- <change-name>: <summary>`.
 
 ## Unreleased
 
+### Changed
+- `/finale` PR body generation: structured sections (Summary,
+  How to Test, How to Demo, Key Files Changed) replacing
+  minimal bullet-point summary; PR template detection and
+  respect for `.github/PULL_REQUEST_TEMPLATE.md`; unresolved
+  `/review-council` findings surfaced in Known Issues section;
+  AI attribution footer on PR descriptions; AI attribution on
+  commit messages (git trailer + human-readable footer); shell
+  injection fix switching from inline `--body` to `--body-file`
+  (Spec: openspec/changes/improve-finale-pr-description/,
+  Closes: #142)
+
 ### Added
 - `/triage-issue` slash command for multi-agent GitHub issue
   triage using the Divisor review panel. Classifies issues
