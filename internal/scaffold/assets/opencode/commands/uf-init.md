@@ -830,26 +830,28 @@ steps to catch any duplicates introduced by earlier steps.
 Clean up legacy directory artifacts from older versions
 of `uf init`.
 
-#### Sub-task A: `unbound/packs/` Removal
+Set `LEGACY_PACKS = .opencode/` + `unbound/packs/`
+(the pre-Spec-025 convention pack location).
 
-1. Check if `.opencode/unbound/packs/` exists
+#### Sub-task A: Legacy Packs Removal
+
+1. Check if `LEGACY_PACKS` exists
 2. **If it does NOT exist**: Report
-   `⊘ unbound/packs/: not present`
+   `⊘ legacy packs: not present`
 3. **If it exists**: Verify pre-conditions:
    - `.opencode/uf/packs/default.md` MUST exist
    - `.opencode/uf/packs/severity.md` MUST exist
-4. **If pre-conditions met**: Remove
-   `.opencode/unbound/packs/` recursively (NOT the
-   parent `unbound/` directory). Then check if
-   `.opencode/unbound/` is empty -- if so, remove it
-   too. If `.opencode/unbound/` still contains other
-   files or directories, leave it and report a warning:
-   `⚠️ unbound/: packs/ removed but directory contains
-   other content -- leaving in place`.
-   Report `✅ unbound/packs/: removed (migrated to
+4. **If pre-conditions met**: Remove `LEGACY_PACKS`
+   recursively (NOT its parent directory). Then check
+   if the parent directory is empty -- if so, remove it
+   too. If the parent still contains other files or
+   directories, leave it and report a warning:
+   `⚠️ legacy parent dir: packs/ removed but directory
+   contains other content -- leaving in place`.
+   Report `✅ legacy packs: removed (migrated to
    uf/packs/)`
 5. **If pre-conditions NOT met**: Report
-   `❌ unbound/packs/: uf/packs/ missing core files,
+   `❌ legacy packs: uf/packs/ missing core files,
    skipped`
 
 #### Sub-task B: `command/` Migration Hardening
