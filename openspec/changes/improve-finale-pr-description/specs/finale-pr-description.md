@@ -76,9 +76,13 @@ remove it during the approval step.
 The `/finale` command Step 3 MUST append AI attribution
 to generated commit messages in two forms:
 
-1. A git trailer: `AI-assisted-by: /finale`
+1. A git trailer: `Assisted-by: <model>`
 2. A human-readable footer: `Generated with AI
-   assistance (/finale)`
+   assistance (<model>)`
+
+Where `<model>` is the model family name the agent is
+running as (see Requirement: Model Identification
+below).
 
 Both MUST appear after the commit body, separated from
 the body by a blank line. The trailer MUST follow git's
@@ -91,11 +95,14 @@ edit or remove it during the approval step.
 #### Scenario: Commit message with attribution
 
 - **GIVEN** `/finale` generates a commit message
+- **GIVEN** the agent is running as model
+  `claude-sonnet-4-20250514`
 - **WHEN** the message is presented to the user for
   approval
 - **THEN** the message MUST include both the
-  `AI-assisted-by: /finale` trailer and the human-
-  readable footer line
+  `Assisted-by: claude-sonnet` trailer and the
+  human-readable footer
+  `Generated with AI assistance (claude-sonnet)`
 
 #### Scenario: User removes attribution
 
@@ -105,6 +112,154 @@ edit or remove it during the approval step.
   attribution
 - **THEN** `/finale` MUST use the user's edited
   message without re-adding attribution
+
+### Requirement: Model Identification
+
+All commands that generate commit messages with AI
+attribution (`/finale`, `/address-feedback`,
+`/review-pr`) MUST resolve the `<model>` value to the
+model family name the agent is currently running as.
+
+The agent MUST extract the model family name by:
+1. Reading the model identifier from the system prompt
+   (e.g., "You are powered by the model named X. The
+   exact model ID is Y.") or the runtime environment.
+   If multiple sources provide a model identifier, the
+   system prompt takes precedence.
+2. Removing everything before and including the last
+   `/` character (strips provider prefixes).
+3. Removing everything after and including the first
+   `@` character (strips routing suffixes).
+4. Removing any trailing date suffix matching
+   `-YYYYMMDD` — a hyphen followed by exactly 8 digits
+   (strips version date identifiers).
+5. Repeatedly removing any trailing version segment
+   matching `-N` — a hyphen followed by a single digit
+   at the end of the string — until no more remain
+   (strips generation and sub-version numbers, e.g.,
+   `claude-opus-4-6` → `claude-opus`).
+6. If the result is empty or whitespace-only, using the
+   literal string `unknown-model`.
+
+The resolved model name MUST be validated against the
+pattern `[a-zA-Z0-9._-]+` before insertion into the
+trailer. If the resolved name contains characters
+outside this set (including whitespace, newlines, or
+shell metacharacters), the agent MUST fall back to
+`unknown-model`.
+
+The model name MUST NOT include:
+- Provider prefixes (e.g., `google-vertex-anthropic/`)
+- Routing suffixes (e.g., `@default`)
+- Version date suffixes (e.g., `-20250514`)
+- Generation number suffixes (e.g., `-4`)
+- Tool or product names (e.g., `OpenCode`)
+
+Examples:
+- `google-vertex-anthropic/claude-sonnet-4-20250514@default` → `claude-sonnet`
+- `claude-opus-4-20250514` → `claude-opus`
+- `gpt-4o` → `gpt-4o`
+- `gemini-2.5-pro` → `gemini-2.5-pro`
+
+If the agent cannot determine its model name, it MUST
+use the literal string `unknown-model`. When the
+`unknown-model` fallback is used, the command SHOULD
+warn the user during the approval step (e.g., "Could
+not determine AI model name — using 'unknown-model'
+in attribution").
+
+#### Scenario: Model family name resolution
+
+- **GIVEN** an agent powered by model
+  `google-vertex-anthropic/claude-opus-4-20250514@default`
+- **WHEN** generating the `Assisted-by` trailer
+- **THEN** the trailer value MUST be `claude-opus`
+  (model family only — no provider prefix, routing
+  suffix, date version, or generation number)
+
+#### Scenario: Model name without date or generation
+
+- **GIVEN** an agent powered by model `gpt-4o`
+- **WHEN** generating the `Assisted-by` trailer
+- **THEN** the trailer value MUST be `gpt-4o`
+  (no stripping needed — `4o` does not match
+  a single-digit trailing pattern)
+
+#### Scenario: Unknown model fallback
+
+- **GIVEN** an agent that cannot determine its model
+  name from system configuration
+- **WHEN** generating the `Assisted-by` trailer
+- **THEN** the trailer value MUST be `unknown-model`
+- **AND** the command SHOULD warn the user during the
+  approval step
+
+#### Scenario: Model name with invalid characters
+
+- **GIVEN** an agent whose system configuration reports
+  a model name containing newline characters, colons,
+  or shell metacharacters
+- **WHEN** generating the `Assisted-by` trailer
+- **THEN** the trailer value MUST be `unknown-model`
+
+#### Scenario: Model name resolves to empty after
+stripping
+
+- **GIVEN** an agent whose full model identifier is
+  `google-vertex-anthropic/` (no base name after the
+  provider prefix)
+- **WHEN** generating the `Assisted-by` trailer
+- **THEN** the trailer value MUST be `unknown-model`
+
+### Requirement: Cross-Command Attribution Consistency
+
+All commands that generate commit messages with AI
+attribution MUST use the same trailer format:
+
+```
+Assisted-by: <model>
+```
+
+This applies to:
+- `/finale` (Step 3, sub-step b)
+- `/address-feedback` (Step 4.2)
+- `/review-pr` (CI fix commit, Step 10, sub-step 6)
+
+The trailer key MUST be `Assisted-by`. The trailer
+value MUST be the base model name per the Model
+Identification requirement.
+
+Commands MUST NOT use alternative trailer keys
+(`AI-assisted-by`, `AI-Generated-By`, etc.) or
+wrap the model name in product names
+(`OpenCode (<model>)`).
+
+The human-readable footer line (`Generated with AI
+assistance (<model>)`) is scoped to `/finale` only.
+The `/address-feedback` and `/review-pr` commands
+use the `Assisted-by` trailer without a separate
+human-readable footer.
+
+#### Scenario: /finale attribution format
+
+- **GIVEN** `/finale` generates a commit message
+- **WHEN** appending attribution
+- **THEN** the trailer MUST be `Assisted-by: <model>`
+
+#### Scenario: /address-feedback attribution format
+
+- **GIVEN** `/address-feedback` generates a commit
+  message for a review fix
+- **WHEN** appending attribution
+- **THEN** the trailer MUST be `Assisted-by: <model>`
+  (not `Assisted-by: OpenCode (<model>)`)
+
+#### Scenario: /review-pr CI fix attribution format
+
+- **GIVEN** `/review-pr` generates a CI fix commit
+- **WHEN** appending attribution
+- **THEN** the trailer MUST be `Assisted-by: <model>`
+  (not `Assisted-by: OpenCode (<model>)`)
 
 ### Requirement: Review-Council Findings Section
 

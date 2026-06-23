@@ -7,10 +7,11 @@
   Do NOT add [P] when tasks modify the same file —
   parallel workers will cause merge conflicts.
 
-  NOTE: All tasks in groups 1-5 modify the same file
+  NOTE: All tasks in groups 1-6 modify the same file
   (.opencode/commands/finale.md) so none are parallel-
-  eligible. Group 6 (scaffold sync) depends on all
-  prior groups completing.
+  eligible. Group 8 (scaffold sync) depends on all
+  prior groups completing — source files must be in
+  their final state before copying.
 -->
 
 ## 1. Shell Injection Fix (Prerequisite)
@@ -77,36 +78,111 @@
   shown to the user for approval (Step 5d).
 - [x] 5.2 In `.opencode/commands/finale.md` Step 3b,
   add instructions to append AI attribution to
-  generated commit messages: (1) a git trailer
-  `AI-assisted-by: /finale` and (2) a human-readable
-  footer `Generated with AI assistance (/finale)`.
-  Both appear after the commit body, separated by a
-  blank line. Include attribution in the proposed
-  message shown to the user (Step 3c) — the user MAY
-  edit or remove it.
+  generated commit messages: (1) a git trailer and
+  (2) a human-readable footer. Both appear after the
+  commit body, separated by a blank line. Include
+  attribution in the proposed message shown to the
+  user (Step 3c) — the user MAY edit or remove it.
+  *(Initial format `AI-assisted-by: /finale` —
+  superseded by tasks 6.1-6.2 for standardized
+  `Assisted-by: <model>` format.)*
 
-## 6. Scaffold Sync and Verification
+## 6. Model Attribution in /finale
 
-- [x] 6.1 Copy the updated `.opencode/commands/finale.md`
+- [x] 6.1 In `.opencode/commands/finale.md` Step 3b,
+  replace the git trailer `AI-assisted-by: /finale`
+  with `Assisted-by: <model>` where `<model>` is the
+  model family name the agent is running as (e.g.,
+  `claude-sonnet`). The agent MUST derive
+  the model name from its system configuration. If
+  the model name cannot be determined, use the literal
+  string `unknown-model`. The model name MUST NOT
+  include provider prefixes (e.g.,
+  `google-vertex-anthropic/`) or routing suffixes
+  (e.g., `@default`).
+- [x] 6.2 In `.opencode/commands/finale.md` Step 3b,
+  replace the human-readable footer
+  `Generated with AI assistance (/finale)` with
+  `Generated with AI assistance (<model>)` using the
+  same model name as the trailer.
+- [x] 6.3 Update the example commit message in
+  `.opencode/commands/finale.md` Step 3c to reflect
+  the new format:
+  ```
+  feat: add /finale slash command for branch finalization
+
+  - Create finale.md command definition
+  - Add scaffold asset and update file count test
+
+  Assisted-by: claude-sonnet
+  Generated with AI assistance (claude-sonnet)
+  ```
+
+## 7. Cross-Command Attribution Standardization
+
+- [x] 7.1 [P] In `.opencode/commands/address-feedback.md`
+  Step 4.2, replace the commit message template trailer
+  `Assisted-by: OpenCode (<model>)` with
+  `Assisted-by: <model>`. Remove the `OpenCode` wrapper.
+  Add an instruction that `<model>` is the base model
+  name the agent is running as. If the model name
+  cannot be determined, use `unknown-model`.
+- [x] 7.2 [P] In `.opencode/commands/review-pr.md`
+  CI fix commit section (Step 10, sub-step 6), replace
+  the trailer `Assisted-by: OpenCode (<model>)` with
+  `Assisted-by: <model>`. Remove the `OpenCode` wrapper.
+  Add an instruction that `<model>` is the base model
+  name the agent is running as. If the model name
+  cannot be determined, use `unknown-model`.
+
+- [x] 7.3 Verify cross-command consistency: grep all
+  three command files for `Assisted-by:` and confirm
+  the instruction format is identical. Verify no
+  occurrences of `AI-assisted-by`, `AI-Generated-By`,
+  or `OpenCode (<model>)` remain in any command file.
+
+## 8. Scaffold Sync and Verification
+
+- [x] 8.1 Copy the updated `.opencode/commands/finale.md`
   to `internal/scaffold/assets/opencode/commands/finale.md`
   to maintain byte-identity required by
   `TestEmbeddedAssets_MatchSource`.
-- [x] 6.2 Run `make test` to verify drift detection
-  passes and no regressions are introduced.
+  *(Re-opened: tasks 6.x modify finale.md after the
+  prior sync.)*
+- [x] 8.2 Copy the updated
+  `.opencode/commands/address-feedback.md` to
+  `internal/scaffold/assets/opencode/commands/address-feedback.md`.
+- [x] 8.3 Copy the updated
+  `.opencode/commands/review-pr.md` to
+  `internal/scaffold/assets/opencode/commands/review-pr.md`.
+- [x] 8.4 Run targeted drift detection:
+  `go test -race -count=1 -run TestEmbeddedAssets_MatchSource ./internal/scaffold/`
+  Then verify content correctness: grep all three
+  command files for old format patterns
+  (`AI-assisted-by`, `OpenCode (<model>)`) and confirm
+  zero matches remain.
+- [x] 8.5 Run full `make test` as a final regression
+  check. *(Scaffold integration tests timeout due to
+  Dewey/Ollama external dependencies — expected per
+  learning finale-20260622T190430. Unit tests and
+  drift detection pass.)*
 
-## 7. Documentation and Compliance
+## 9. Documentation and Compliance
 
-- [x] 7.1 Add a CHANGELOG.md entry under `## Unreleased`
+- [x] 9.1 Add a CHANGELOG.md entry under `## Unreleased`
   documenting the `/finale` enhancements (structured
   PR body, AI attribution in PRs and commits, review-
   council findings, PR template detection, shell
   injection fix).
-- [x] 7.2 Verify constitution alignment: confirm the
+- [x] 9.2 Update CHANGELOG.md entry to include
+  cross-command attribution standardization and model
+  identification.
+- [x] 9.3 Verify constitution alignment: confirm the
   implementation satisfies Principles I (self-describing
   artifacts), III (provenance metadata), and V (input
   validation before shell execution) as assessed in
   proposal.md.
-- [x] 7.3 [P] File a documentation issue in
+- [x] 9.4 [P] File a documentation issue in
   `unbound-force/website` for the `/finale` command
   changes (per constitution Cross-Repo Documentation
   requirement).

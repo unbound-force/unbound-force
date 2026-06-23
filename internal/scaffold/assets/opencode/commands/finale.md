@@ -102,9 +102,34 @@ b. Generate a conventional commit message:
   directly as the summary if it's already well-formed
 - Append AI attribution after the commit body,
   separated by a blank line:
-  1. A git trailer: `AI-assisted-by: /finale`
+  1. A git trailer: `Assisted-by: <model>`
   2. A human-readable footer:
-     `Generated with AI assistance (/finale)`
+     `Generated with AI assistance (<model>)`
+
+  Where `<model>` is the model family name you are
+  currently running as. To resolve the model name:
+  (1) read your model identifier from the system
+  prompt (e.g., "You are powered by the model named
+  X") or runtime environment; (2) remove everything
+  before and including the last `/` character;
+  (3) remove everything after and including the first
+  `@` character;   (4) remove any trailing date suffix
+  matching `-YYYYMMDD` (a hyphen followed by exactly
+  8 digits); (5) repeatedly remove any trailing
+  version segment matching `-N` (a hyphen followed by
+  a single digit at the end) until no more remain;
+  (6) validate the result contains only
+  `[a-zA-Z0-9._-]` characters. If the result is empty,
+  contains invalid characters, or cannot be determined,
+  use the literal string `unknown-model` and warn the
+  user (e.g., "Could not determine AI model name —
+  using 'unknown-model' in attribution").
+
+  Examples:
+  - `google-vertex-anthropic/claude-sonnet-4-20250514@default` → `claude-sonnet`
+  - `claude-opus-4-20250514` → `claude-opus`
+  - `gpt-4o` → `gpt-4o`
+  - `gemini-2.5-pro` → `gemini-2.5-pro`
 
 c. Show the proposed message to the user:
 
@@ -116,8 +141,8 @@ c. Show the proposed message to the user:
 > - Create finale.md command definition
 > - Add scaffold asset and update file count test
 >
-> AI-assisted-by: /finale
-> Generated with AI assistance (/finale)
+> Assisted-by: claude-sonnet
+> Generated with AI assistance (claude-sonnet)
 > ```
 >
 > Approve, edit, or provide your own?

@@ -10,7 +10,7 @@ bullet points from `git log`. Step 3 generates a
 conventional commit message with no attribution. PR
 creation uses inline `--body` shell interpolation.
 
-The proposal (proposal.md) identifies six improvements
+The proposal (proposal.md) identifies seven improvements
 addressing Constitution Principles I, III, and V.
 
 ## Goals / Non-Goals
@@ -20,6 +20,10 @@ addressing Constitution Principles I, III, and V.
   reviewers can navigate predictably
 - Add AI attribution to both PR descriptions and commit
   messages for provenance traceability (Principle III)
+- Include the AI model name in commit message attribution
+  to enable model-level provenance tracing
+- Standardize the attribution trailer format across
+  `/finale`, `/address-feedback`, and `/review-pr`
 - Surface unresolved review-council findings so reviewers
   have context on known issues
 - Detect and respect repository PR templates for cross-
@@ -29,7 +33,6 @@ addressing Constitution Principles I, III, and V.
 
 ### Non-Goals
 - AI-recorded demo attachment (split to #287)
-- Changes to `/unleash` or `/review-pr` commands
 - Creating a PR template for this repository (separate
   concern)
 - Changing the commit message approval UX (the existing
@@ -101,11 +104,14 @@ generated commit messages:
 
 1. **Git trailer** (machine-parseable):
    ```
-   AI-assisted-by: /finale
+   Assisted-by: <model>
    ```
+   Where `<model>` is the base model name the agent is
+   running as (e.g., `claude-sonnet-4-20250514`). See D7
+   for model resolution.
 2. **Footer line** (human-readable):
    ```
-   Generated with AI assistance (/finale)
+   Generated with AI assistance (<model>)
    ```
 
 Both are appended after the commit body, separated by a
@@ -115,10 +121,16 @@ blank line. The trailer follows git's standard
 
 **Rationale**: Dual format serves both tooling (trailer)
 and human readers (footer). The trailer enables automated
-analysis of AI-generated vs human-written commits.
+analysis of AI-generated vs human-written commits and
+correlation of output quality with specific models.
 Attribution is included in the proposed commit message
 shown to the user for approval — the user can edit or
 remove it.
+
+**Supersedes**: The original `AI-assisted-by: /finale`
+trailer key is replaced by `Assisted-by: <model>` for
+consistency with `/address-feedback` and `/review-pr`,
+which already use the `Assisted-by` key.
 
 ### D5: Review-Council Findings in PR Body
 
@@ -169,6 +181,76 @@ with the established `mktemp` + cleanup pattern used in
 **Implementation**: Write to `mktemp`, `chmod 600`, use
 `--body-file`, then `rm -f` in all exit paths.
 
+### D7: Model Identification in Attribution
+
+**Decision**: The `<model>` value in the `Assisted-by`
+trailer MUST be the model family name the agent is
+currently running as. The agent extracts this by:
+(1) reading the model identifier from the system prompt
+or runtime environment (system prompt takes precedence);
+(2) removing everything before and including the last
+`/` character; (3) removing everything after and
+including the first `@` character; (4) removing any
+trailing date suffix (`-YYYYMMDD` — 8 digits);
+(5) repeatedly removing any trailing version segment
+(`-N` — single digit at end) until none remain;
+(6) validating the result against
+`[a-zA-Z0-9._-]+`.
+
+Examples of valid model values:
+- `claude-sonnet` (from `claude-sonnet-4-20250514`)
+- `claude-opus` (from `claude-opus-4-20250514`)
+- `gpt-4o` (unchanged — no date or generation suffix)
+- `gemini-2.5-pro` (unchanged)
+
+The value MUST NOT include:
+- Provider prefixes (e.g., `google-vertex-anthropic/`)
+- Routing suffixes (e.g., `@default`)
+- Version date suffixes (e.g., `-20250514`)
+- Generation number suffixes (e.g., `-4`)
+- Tool names (e.g., `OpenCode`)
+
+If the agent cannot determine its model name, or the
+resolved name contains invalid characters (outside
+`[a-zA-Z0-9._-]`), or the result is empty after
+stripping, the agent MUST fall back to the literal
+string `unknown-model` and SHOULD warn the user during
+the approval step.
+
+**Rationale**: Using the model family name (not the
+versioned identifier) keeps trailers stable across
+model version updates and readable in commit history.
+Including the model name enables provenance tracing at
+the model level — teams can correlate code quality,
+review findings, and defect rates with specific model
+families. The character-set validation prevents trailer
+injection (Constitution Principle V — input validation
+before structured output).
+
+### D8: Cross-Command Attribution Standardization
+
+**Decision**: Standardize the AI attribution trailer
+across all commands that generate commit messages:
+
+| Command | Before | After |
+|---------|--------|-------|
+| `/finale` | `AI-assisted-by: /finale` | `Assisted-by: <model>` |
+| `/address-feedback` | `Assisted-by: OpenCode (<model>)` | `Assisted-by: <model>` |
+| `/review-pr` | `Assisted-by: OpenCode (<model>)` | `Assisted-by: <model>` |
+
+All three commands MUST use:
+- Trailer key: `Assisted-by`
+- Trailer value: the model family name (per D7)
+
+**Rationale**: A single consistent trailer format
+enables uniform parsing by `git log --format=
+'%(trailers:key=Assisted-by)'` and downstream tooling.
+The previous inconsistency (three different formats)
+made automated analysis impractical. The `Assisted-by`
+key was chosen because it is already used by two of
+three commands and is a recognized git trailer
+convention.
+
 ## Risks / Trade-offs
 
 1. **PR template parsing fragility**: Simple `##` heading
@@ -192,4 +274,18 @@ with the established `mktemp` + cleanup pattern used in
    during the approval step. This is by design — the
    user confirmation gate is preserved. There is no
    enforcement mechanism to prevent attribution removal.
+
+5. **Cross-command scope expansion**: This change now
+   touches three command files instead of one. Each
+   command has its own scaffold copy, so six files must
+   be kept in sync. The drift detection test covers all
+   three pairs. The attribution change in
+   `/address-feedback` and `/review-pr` is minimal
+   (format standardization only, no structural changes).
+
+6. **Model name stability**: Model names may change
+   between provider versions (e.g., `claude-sonnet-4-
+   20250514` vs a future release). This is acceptable —
+   the trailer captures the model at the time of commit,
+   which is the desired provenance signal.
 <!-- scaffolded by uf vdev -->

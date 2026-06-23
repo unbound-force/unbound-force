@@ -16,6 +16,13 @@ Each entry follows the format: `- <change-name>: <summary>`.
   injection fix switching from inline `--body` to `--body-file`
   (Spec: openspec/changes/improve-finale-pr-description/,
   Closes: #142)
+- Cross-command AI attribution standardization: unified
+  `Assisted-by: <model>` trailer format across `/finale`,
+  `/address-feedback`, and `/review-pr`; model name included
+  in attribution (derived from agent system configuration);
+  character-set validation prevents trailer injection;
+  `unknown-model` fallback with user warning
+  (Spec: openspec/changes/improve-finale-pr-description/)
 
 ### Added
 - `/triage-issue` slash command for multi-agent GitHub issue

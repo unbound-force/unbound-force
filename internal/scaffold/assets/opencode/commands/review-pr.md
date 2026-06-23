@@ -764,8 +764,27 @@ I will create the branch and commit locally — you can review the changes and f
 
    This failure was pre-existing on <BASE_BRANCH> and unrelated to PR #<PR_NUMBER>.
 
-   Assisted-by: OpenCode (<model>)
+   Assisted-by: <model>
    ```
+
+   Where `<model>` is the model family name you are
+   currently running as. To resolve the model name:
+   (1) read your model identifier from the system
+   prompt or runtime environment; (2) remove everything
+   before and including the last `/`; (3) remove
+   everything after and including the first `@`;
+   (4) remove any trailing date suffix matching
+   `-YYYYMMDD` (a hyphen followed by exactly 8 digits);
+   (5) repeatedly remove any trailing version segment
+   matching `-N` (a hyphen followed by a single digit
+   at the end) until no more remain; (6) validate the
+   result contains only
+   `[a-zA-Z0-9._-]` characters. If the result is
+   empty, contains invalid characters, or cannot be
+   determined, use the literal string `unknown-model`
+   and warn the user (e.g., "Could not determine AI
+   model name — using 'unknown-model' in
+   attribution").
    Remove the temp file after committing.
 
 7. **Report to the user**:
