@@ -888,34 +888,34 @@ func runReplicatorSetup(opts *Options) stepResult {
 }
 
 // installGolangciLint installs golangci-lint if missing per Spec 019
-// FR-012. Uses go install as primary method with Homebrew fallback.
+// FR-012. Fallback chain: go install → Homebrew → skip.
 func installGolangciLint(opts *Options, env doctor.DetectedEnvironment) stepResult {
 	if _, err := opts.LookPath("golangci-lint"); err == nil {
 		return stepResult{name: "golangci-lint", action: "already installed"}
 	}
 
-	if opts.DryRun {
-		return stepResult{name: "golangci-lint", action: "dry-run", detail: "Would install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"}
-	}
-
-	// Try go install first (Go is already a prerequisite).
-	if _, err := opts.ExecCmd("go", "install", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"); err == nil {
-		return stepResult{name: "golangci-lint", action: "installed", detail: "via go install"}
-	}
-
-	// Fallback to Homebrew.
-	if doctor.HasManager(env, doctor.ManagerHomebrew) {
-		if out, err := opts.ExecCmd("brew", "install", "golangci-lint"); err != nil {
-			return stepResult{name: "golangci-lint", action: "failed", detail: "brew install failed", err: err, output: out}
-		}
-		return stepResult{name: "golangci-lint", action: "installed", detail: "via Homebrew"}
-	}
-
-	return stepResult{
+	// Fallback chain: go install → Homebrew → skip.
+	skipResult := stepResult{
 		name:   "golangci-lint",
-		action: "failed",
-		detail: "Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest",
-		err:    fmt.Errorf("golangci-lint not available"),
+		action: "skipped",
+		detail: "Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest or brew install golangci-lint",
+	}
+	method := opts.resolveMethod("golangci-lint", env, "go", "homebrew")
+	switch method {
+	case "go":
+		result := installViaGo(opts, "golangci-lint", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint")
+		if result.action != "skipped" && result.action != "failed" {
+			return result
+		}
+		// Go not available or failed — fall through to Homebrew.
+		if doctor.HasManager(env, doctor.ManagerHomebrew) {
+			return installViaBrew(opts, "golangci-lint", "golangci-lint")
+		}
+		return skipResult
+	case "homebrew":
+		return installViaBrew(opts, "golangci-lint", "golangci-lint")
+	default:
+		return skipResult
 	}
 }
 

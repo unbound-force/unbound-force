@@ -5548,3 +5548,224 @@ func setupGenerateLines(n int) string {
 	}
 	return b.String()
 }
+
+// --- golangci-lint installation tests (issue #279) ---
+
+func TestInstallGolangciLint_AlreadyInstalled(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"golangci-lint": "/usr/local/bin/golangci-lint",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installGolangciLint(&opts, env)
+	if result.action != "already installed" {
+		t.Errorf("expected 'already installed', got %q", result.action)
+	}
+}
+
+func TestInstallGolangciLint_GoInstallSuccess(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"go": "/usr/local/bin/go",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installGolangciLint(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "via go install") {
+		t.Errorf("expected 'via go install' in detail, got %q", result.detail)
+	}
+}
+
+func TestInstallGolangciLint_GoFailsBrewFallback(t *testing.T) {
+	rec := &cmdRecorder{
+		errors: map[string]error{
+			"go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest": fmt.Errorf("go install failed"),
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"go":   "/usr/local/bin/go",
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installGolangciLint(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "via Homebrew") {
+		t.Errorf("expected 'via Homebrew' in detail, got %q", result.detail)
+	}
+}
+
+func TestInstallGolangciLint_NoGoBrewFallback(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installGolangciLint(&opts, env)
+	if result.action != "installed" {
+		t.Errorf("expected 'installed', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "via Homebrew") {
+		t.Errorf("expected 'via Homebrew' in detail, got %q", result.detail)
+	}
+}
+
+func TestInstallGolangciLint_NoManagers(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		Stdout:       &buf,
+		Stderr:       &buf,
+		LookPath:     stubLookPath(map[string]string{}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installGolangciLint(&opts, env)
+	if result.action != "skipped" {
+		t.Errorf("expected 'skipped', got %q", result.action)
+	}
+	if result.err != nil {
+		t.Errorf("expected nil error, got: %v", result.err)
+	}
+}
+
+func TestInstallGolangciLint_DryRunGoAvailable(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		DryRun: true,
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"go": "/usr/local/bin/go",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installGolangciLint(&opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("expected 'dry-run', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "go install") {
+		t.Errorf("expected 'go install' in detail, got %q", result.detail)
+	}
+}
+
+func TestInstallGolangciLint_DryRunBrewFallback(t *testing.T) {
+	rec := &cmdRecorder{}
+
+	var buf bytes.Buffer
+	opts := Options{
+		DryRun: true,
+		Stdout: &buf,
+		Stderr: &buf,
+		LookPath: stubLookPath(map[string]string{
+			"brew": "/opt/homebrew/bin/brew",
+		}),
+		ExecCmd:      rec.execCmd,
+		EvalSymlinks: stubEvalSymlinks(nil),
+		Getenv:       stubGetenv(map[string]string{}),
+	}
+	opts.defaults()
+
+	env := doctor.DetectEnvironment(&doctor.Options{
+		LookPath:     opts.LookPath,
+		EvalSymlinks: opts.EvalSymlinks,
+		Getenv:       opts.Getenv,
+	})
+
+	result := installGolangciLint(&opts, env)
+	if result.action != "dry-run" {
+		t.Errorf("expected 'dry-run', got %q", result.action)
+	}
+	if !strings.Contains(result.detail, "brew install") {
+		t.Errorf("expected 'brew install' in detail, got %q", result.detail)
+	}
+}
