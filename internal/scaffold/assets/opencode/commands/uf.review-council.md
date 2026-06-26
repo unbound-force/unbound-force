@@ -2,7 +2,7 @@
 description: Run the reviewer governance council to audit codebase or spec compliance.
 ---
 <!-- scaffolded by uf vdev -->
-# Command: /review-council
+# Command: /uf.review-council
 
 ## User Input
 
@@ -80,7 +80,7 @@ examining the current branch and workspace:
    > spec artifacts changed on branch
    > `opsx/documentation-accuracy`."
    >
-   > Use `/review-council code` or `/review-council specs`
+   > Use `/uf.review-council code` or `/uf.review-council specs`
    > to override.
 
 ---

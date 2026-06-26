@@ -132,17 +132,17 @@ func mapAssetToSource(relPath string) string {
 // expectedAssetPaths is the canonical list of embedded assets.
 // Update this list when adding or removing assets.
 var expectedAssetPaths = []string{
-	// OpenCode commands (10) — UF-custom only; speckit.*.md externalized to specify init + /uf-init
-	"opencode/commands/address-feedback.md",
-	"opencode/commands/agent-brief.md",
-	"opencode/commands/cobalt-crush.md",
-	"opencode/commands/constitution-check.md",
-	"opencode/commands/finale.md",
-	"opencode/commands/review-council.md",
-	"opencode/commands/review-pr.md",
-	"opencode/commands/triage-issue.md",
-	"opencode/commands/uf-init.md",
-	"opencode/commands/unleash.md",
+	// OpenCode commands (10) — UF-custom only; speckit.*.md externalized to specify init + /uf.init
+	"opencode/commands/uf.address-feedback.md",
+	"opencode/commands/uf.agent-brief.md",
+	"opencode/commands/uf.cobalt-crush.md",
+	"opencode/commands/uf.constitution-check.md",
+	"opencode/commands/uf.finale.md",
+	"opencode/commands/uf.init.md",
+	"opencode/commands/uf.review-council.md",
+	"opencode/commands/uf.review-pr.md",
+	"opencode/commands/uf.triage-issue.md",
+	"opencode/commands/uf.unleash.md",
 	// OpenCode agents — Divisor personas (6) + Cobalt-Crush (1) + Mx F coach (1) + constitution-check (1)
 	"opencode/agents/cobalt-crush-dev.md",
 	"opencode/agents/constitution-check.md",
@@ -315,13 +315,13 @@ func TestRun_SkipsExisting(t *testing.T) {
 	// Verify a known tool-owned file is in Skipped
 	foundToolSkip := false
 	for _, f := range result.Skipped {
-		if strings.Contains(f, "review-council.md") {
+		if strings.Contains(f, "uf.review-council.md") {
 			foundToolSkip = true
 			break
 		}
 	}
 	if !foundToolSkip {
-		t.Error("expected tool-owned review-council.md to be in Skipped list")
+		t.Error("expected tool-owned uf.review-council.md to be in Skipped list")
 	}
 
 	// Verify a known user-owned file is in Skipped
@@ -459,7 +459,7 @@ func TestRun_OverwriteOnDiff_ToolOwned(t *testing.T) {
 	}
 
 	// Modify a tool-owned file on disk
-	toolFile := filepath.Join(dir, ".opencode", "commands", "review-council.md")
+	toolFile := filepath.Join(dir, ".opencode", "commands", "uf.review-council.md")
 	if err := os.WriteFile(toolFile, []byte("modified content"), 0o644); err != nil {
 		t.Fatalf("modify tool-owned file: %v", err)
 	}
@@ -488,13 +488,13 @@ func TestRun_OverwriteOnDiff_ToolOwned(t *testing.T) {
 
 	foundToolUpdate := false
 	for _, f := range result.Updated {
-		if strings.Contains(f, "review-council.md") {
+		if strings.Contains(f, "uf.review-council.md") {
 			foundToolUpdate = true
 			break
 		}
 	}
 	if !foundToolUpdate {
-		t.Error("expected review-council.md to be in Updated list")
+		t.Error("expected uf.review-council.md to be in Updated list")
 	}
 
 	// User-owned file should be skipped
@@ -575,7 +575,7 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/commands/speckit.implement.md", true},
 		{"opencode/commands/speckit.constitution.md", true},
 		{"opencode/commands/speckit.taskstoissues.md", true},
-		{"opencode/commands/constitution-check.md", true},
+		{"opencode/commands/uf.constitution-check.md", true},
 		// Tool-owned: hypothetical future command (M1 fix)
 		{"opencode/commands/opsx.propose.md", true},
 		// Tool-owned: OpenSpec schema
@@ -842,8 +842,8 @@ func TestPrintSummary_Output(t *testing.T) {
 		var buf bytes.Buffer
 
 		r := &Result{
-			Created:     []string{".opencode/agents/cobalt-crush-dev.md", ".opencode/commands/review-council.md"},
-			Updated:     []string{".opencode/commands/unleash.md"},
+			Created:     []string{".opencode/agents/cobalt-crush-dev.md", ".opencode/commands/uf.review-council.md"},
+			Updated:     []string{".opencode/commands/uf.unleash.md"},
 			Overwritten: []string{},
 			Skipped:     []string{".opencode/uf/packs/go-custom.md"},
 		}
@@ -868,10 +868,10 @@ func TestPrintSummary_Output(t *testing.T) {
 		}
 
 		// Verify file prefix characters
-		if !strings.Contains(output, "+ .opencode/agents/cobalt-crush-dev.md") || !strings.Contains(output, "+ .opencode/commands/review-council.md") {
+		if !strings.Contains(output, "+ .opencode/agents/cobalt-crush-dev.md") || !strings.Contains(output, "+ .opencode/commands/uf.review-council.md") {
 			t.Errorf("expected '+' prefix for created files")
 		}
-		if !strings.Contains(output, "~ .opencode/commands/unleash.md") {
+		if !strings.Contains(output, "~ .opencode/commands/uf.unleash.md") {
 			t.Errorf("expected '~' prefix for updated files")
 		}
 		if !strings.Contains(output, "- .opencode/uf/packs/go-custom.md") {
@@ -891,7 +891,7 @@ func TestPrintSummary_Output(t *testing.T) {
 		var buf bytes.Buffer
 
 		r := &Result{
-			Created: []string{".opencode/agents/divisor-guard.md", ".opencode/commands/review-council.md"},
+			Created: []string{".opencode/agents/divisor-guard.md", ".opencode/commands/uf.review-council.md"},
 		}
 
 		printSummary(&buf, true, false, true, r, nil)
@@ -900,8 +900,8 @@ func TestPrintSummary_Output(t *testing.T) {
 		if !strings.Contains(output, "uf init (divisor): 2 files processed") {
 			t.Errorf("expected divisor label, got output:\n%s", output)
 		}
-		if !strings.Contains(output, "Run /review-council") {
-			t.Error("expected review-council hint in divisor mode")
+		if !strings.Contains(output, "Run /uf.review-council") {
+			t.Error("expected uf.review-council hint in divisor mode")
 		}
 		if strings.Contains(output, "Run /speckit.specify") {
 			t.Error("speckit hint should not appear in divisor mode")
@@ -932,7 +932,7 @@ func TestPrintSummary_Output(t *testing.T) {
 		r := &Result{
 			Created:     []string{},
 			Updated:     []string{},
-			Overwritten: []string{".opencode/agents/cobalt-crush-dev.md", ".opencode/commands/review-council.md"},
+			Overwritten: []string{".opencode/agents/cobalt-crush-dev.md", ".opencode/commands/uf.review-council.md"},
 			Skipped:     []string{},
 		}
 
@@ -948,7 +948,7 @@ func TestPrintSummary_Output(t *testing.T) {
 		if !strings.Contains(output, "! .opencode/agents/cobalt-crush-dev.md") {
 			t.Errorf("expected '!' prefix for overwritten files")
 		}
-		if !strings.Contains(output, "! .opencode/commands/review-council.md") {
+		if !strings.Contains(output, "! .opencode/commands/uf.review-council.md") {
 			t.Errorf("expected '!' prefix for second overwritten file")
 		}
 	})
@@ -986,7 +986,7 @@ func TestRun_PrintSummaryIntegration(t *testing.T) {
 // binary. These are local-only tooling files (e.g., installed by
 // the Gaze scaffold) that are specific to this repository.
 var knownNonEmbeddedFiles = map[string]bool{
-	// Speckit commands — created by specify init + /uf-init, not scaffolded by uf init
+	// Speckit commands — created by specify init + /uf.init, not scaffolded by uf init
 	".opencode/commands/speckit.specify.md":       true,
 	".opencode/commands/speckit.clarify.md":       true,
 	".opencode/commands/speckit.plan.md":          true,
@@ -1022,7 +1022,6 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".opencode/agents/reviewer-sre.md":       true,
 	".opencode/agents/reviewer-testing.md":   true,
 	// Commands — local-only tooling
-	".opencode/commands/cobalt-crush.md":               true,
 	".opencode/commands/gaze.md":                       true,
 	".opencode/commands/gaze-fix.md":                   true,
 	".opencode/commands/speckit.testreview.md":         true,
@@ -1154,7 +1153,7 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/agents/divisor-sre.md", true},
 		{"opencode/agents/divisor-testing.md", true},
 		// Divisor command
-		{"opencode/commands/review-council.md", true},
+		{"opencode/commands/uf.review-council.md", true},
 		// Divisor convention packs
 		{"opencode/uf/packs/go.md", true},
 		{"opencode/uf/packs/default.md", true},
@@ -1228,7 +1227,7 @@ func TestShouldDeployPack(t *testing.T) {
 	}{
 		// Non-pack files always pass
 		{"opencode/agents/divisor-guard.md", "go", true},
-		{"opencode/commands/review-council.md", "go", true},
+		{"opencode/commands/uf.review-council.md", "go", true},
 		// Default and severity packs always deploy (language-agnostic)
 		{"opencode/uf/packs/default.md", "go", true},
 		{"opencode/uf/packs/default-custom.md", "go", true},
@@ -2057,7 +2056,7 @@ func TestPrintSummary_NextSteps(t *testing.T) {
 		var buf bytes.Buffer
 
 		r := &Result{
-			Created: []string{".opencode/commands/review-council.md"},
+			Created: []string{".opencode/commands/uf.review-council.md"},
 		}
 		subResults := []subToolResult{
 			{name: ".uf/dewey/", action: "initialized"},
@@ -2094,7 +2093,7 @@ func TestPrintSummary_NextSteps(t *testing.T) {
 		var buf bytes.Buffer
 
 		r := &Result{
-			Created: []string{".opencode/commands/review-council.md"},
+			Created: []string{".opencode/commands/uf.review-council.md"},
 		}
 
 		printSummary(&buf, false, false, true, r, nil)
@@ -2110,7 +2109,7 @@ func TestPrintSummary_NextSteps(t *testing.T) {
 		var buf bytes.Buffer
 
 		r := &Result{
-			Created: []string{".opencode/commands/review-council.md"},
+			Created: []string{".opencode/commands/uf.review-council.md"},
 		}
 		subResults := []subToolResult{
 			{name: ".uf/dewey/", action: "failed", detail: "dewey init failed"},
@@ -4534,20 +4533,20 @@ func TestEnsureGitignore_Idempotent(t *testing.T) {
 }
 
 // TestAgentBriefAsset_GovernanceBlockPresence verifies the
-// /agent-brief scaffold asset contains all 7 behavioral rule
+// /uf.agent-brief scaffold asset contains all 7 behavioral rule
 // templates and the conditional governance sections. Governance
-// blocks moved from /uf-init Step 9 to /agent-brief verbatim
+// blocks moved from /uf.init Step 9 to /uf.agent-brief verbatim
 // templates as part of agent-brief-consolidation. Added by
 // Spec 030, updated by agent-brief-consolidation.
 func TestAgentBriefAsset_GovernanceBlockPresence(t *testing.T) {
-	content, err := assetContent("opencode/commands/agent-brief.md")
+	content, err := assetContent("opencode/commands/uf.agent-brief.md")
 	if err != nil {
-		t.Fatalf("read agent-brief.md asset: %v", err)
+		t.Fatalf("read uf.agent-brief.md asset: %v", err)
 	}
 	text := string(content)
 
 	// Each entry is a detection phrase that must appear in the
-	// agent-brief.md asset to confirm the governance block is
+	// uf.agent-brief.md asset to confirm the governance block is
 	// defined in the verbatim template.
 	requiredPhrases := []struct {
 		block  string
@@ -4566,7 +4565,7 @@ func TestAgentBriefAsset_GovernanceBlockPresence(t *testing.T) {
 
 	for _, rp := range requiredPhrases {
 		if !strings.Contains(text, rp.phrase) {
-			t.Errorf("agent-brief.md asset missing governance block %q (detection phrase %q not found)",
+			t.Errorf("uf.agent-brief.md asset missing governance block %q (detection phrase %q not found)",
 				rp.block, rp.phrase)
 		}
 	}
@@ -5566,7 +5565,7 @@ func createFile(t *testing.T, dir, relPath, content string) {
 func TestMigrateCommandDir_NoOldDir(t *testing.T) {
 	dir := t.TempDir()
 	// Only .opencode/commands/ exists — no old dir to migrate.
-	createFile(t, dir, ".opencode/commands/review-council.md", "new")
+	createFile(t, dir, ".opencode/commands/uf.review-council.md", "new")
 
 	var buf bytes.Buffer
 	opts := &Options{
@@ -5771,13 +5770,13 @@ func TestMigrateCommandDir_MergeDupDifferent(t *testing.T) {
 		t.Errorf("commands/x.md content = %q, want %q", string(content), "new")
 	}
 
-	// Warning should contain "conflict" and "/uf-init".
+	// Warning should contain "conflict" and "/uf.init".
 	output := buf.String()
 	if !strings.Contains(output, "conflict") {
 		t.Errorf("expected 'conflict' in warning output, got:\n%s", output)
 	}
-	if !strings.Contains(output, "/uf-init") {
-		t.Errorf("expected '/uf-init' in warning output, got:\n%s", output)
+	if !strings.Contains(output, "/uf.init") {
+		t.Errorf("expected '/uf.init' in warning output, got:\n%s", output)
 	}
 }
 

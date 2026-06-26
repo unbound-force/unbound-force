@@ -7,7 +7,7 @@ description: >
 ---
 <!-- scaffolded by uf vdev -->
 
-# Command: /uf-init
+# Command: /uf.init
 
 ## Description
 
@@ -86,7 +86,7 @@ For each missing file, report an error:
 > `❌ <path>: file not found`
 > This file should have been created by `openspec init` which
 > runs as part of `uf init`. Run `uf setup` to install OpenSpec,
-> then `uf init` to scaffold files, then re-run `/uf-init`.
+> then `uf init` to scaffold files, then re-run `/uf.init`.
 
 Continue checking remaining files even if some are missing.
 **Track which files are missing** -- in Steps 2-4, skip any
@@ -95,7 +95,7 @@ file that was reported missing here. Report
 
 **Recovery note**: All target files are git-tracked. If any
 insertion looks wrong after running this command, restore with
-`git checkout -- <path>`. Run `git diff` after `/uf-init`
+`git checkout -- <path>`. Run `git diff` after `/uf.init`
 completes to review all changes before committing.
 
 ### Step 2: Apply Branch Enforcement
@@ -613,7 +613,7 @@ review-rationale):
 
 - **NEVER modify source code** — this command updates
   spec artifacts ONLY. Implementation changes belong in
-  `/speckit.implement`, `/unleash`, or `/cobalt-crush`.
+  `/speckit.implement`, `/uf.unleash`, or `/uf.cobalt-crush`.
 - **NEVER modify test files, Go source, Markdown agents,
   convention packs, or config files** outside the
   `specs/NNN-*/` feature directory.
@@ -648,7 +648,7 @@ commands (`speckit.specify.md`, `speckit.plan.md`,
      `.specify/memory/constitution.md` or the
      Constitution Check gate?
    - Review council: does `speckit.implement.md`
-     reference `/review-council` or the Divisor review
+     reference `/uf.review-council` or the Divisor review
      system?
 3. **If all references present**: Report
    `⊘ <filename>: UF customizations present (skipped)`
@@ -684,11 +684,11 @@ The guardrails block to append:
   creates artifacts ONLY (proposal, design, specs,
   tasks)
 - **NEVER commit, push, or create PRs** — those are
-  /finale's responsibility
-- **NEVER run /unleash, /opsx-apply, or /cobalt-crush**
+  /uf.finale's responsibility
+- **NEVER run /uf.unleash, /opsx-apply, or /uf.cobalt-crush**
   — the user decides when to implement
 - After artifacts are complete, STOP and prompt the
-  user to run /unleash, /opsx-apply, or /cobalt-crush
+  user to run /uf.unleash, /opsx-apply, or /uf.cobalt-crush
 ```
 
 ### Step 9: Report Results
@@ -696,7 +696,7 @@ The guardrails block to append:
 After processing all customizations, display a summary:
 
 ```
-## /uf-init: Project Customizations
+## /uf.init: Project Customizations
 
 ### Prerequisites
   ✅ .opencode/ exists
@@ -887,9 +887,9 @@ Finally, remind the user:
 
 After customizations are applied:
 
-- Run `/unleash` for autonomous pipeline execution
+- Run `/uf.unleash` for autonomous pipeline execution
   (parallel swarm, recommended for multi-task changes)
-- Run `/cobalt-crush` to start implementing — it
+- Run `/uf.cobalt-crush` to start implementing — it
   auto-detects your active workflow (Speckit or OpenSpec)
   and delegates to the correct implementation command.
   Preferred over calling `/opsx-apply` directly.
@@ -923,7 +923,7 @@ Principle II — Composability First).
 
 ### When to Re-run
 
-Re-run `/uf-init` after:
+Re-run `/uf.init` after:
 - Running `uf init` or `uf setup` (new tool versions
   may reset third-party files)
 - Updating the OpenSpec CLI (`npm update`)

@@ -139,10 +139,10 @@ skills_use({ name: "speckit-workflow" })
 
 ## Entry Point
 
-The `/unleash` command is the primary way to trigger
+The `/uf.unleash` command is the primary way to trigger
 autonomous pipeline execution using this skill. It
 orchestrates the full Speckit pipeline (clarify, plan,
 tasks, spec review, implement, code review,
 retrospective, demo) and uses the task format described
-above for the implementation phase. `/unleash` also
+above for the implementation phase. `/uf.unleash` also
 supports OpenSpec (`opsx/*`) branches.

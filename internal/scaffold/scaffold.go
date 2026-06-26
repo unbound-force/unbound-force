@@ -51,6 +51,7 @@ type Result struct {
 	Skipped     []string // Files that existed and were not overwritten
 	Overwritten []string // Files that existed and were replaced (Force=true)
 	Updated     []string // Tool-owned files overwritten via overwrite-on-diff
+	Migrated    []string // Old-name files removed by rename migration
 }
 
 // defaultExecCmd is the production implementation of ExecCmd.
@@ -243,6 +244,11 @@ func Run(opts Options) (*Result, error) {
 		subResults = append(subResults, *migResult)
 	}
 
+	// Remove orphaned old-name command files left behind
+	// after the uf. namespace prefix rename.
+	migrated := cleanupRenamedCommands(opts.TargetDir)
+	result.Migrated = append(result.Migrated, migrated...)
+
 	printSummary(opts.Stdout, opts.DivisorOnly, langExplicit, langDetected, result, subResults)
 	return result, nil
 }
@@ -299,6 +305,39 @@ func mapAssetPath(relPath string) string {
 	}
 }
 
+// renamedCommands maps old embedded command file paths to
+// their new uf.-prefixed paths. Used by Run() to remove
+// orphaned old-name files after the main scaffold walk.
+var renamedCommands = map[string]string{
+	"opencode/commands/address-feedback.md":  "opencode/commands/uf.address-feedback.md",
+	"opencode/commands/agent-brief.md":       "opencode/commands/uf.agent-brief.md",
+	"opencode/commands/cobalt-crush.md":      "opencode/commands/uf.cobalt-crush.md",
+	"opencode/commands/constitution-check.md": "opencode/commands/uf.constitution-check.md",
+	"opencode/commands/finale.md":            "opencode/commands/uf.finale.md",
+	"opencode/commands/review-council.md":    "opencode/commands/uf.review-council.md",
+	"opencode/commands/review-pr.md":         "opencode/commands/uf.review-pr.md",
+	"opencode/commands/triage-issue.md":      "opencode/commands/uf.triage-issue.md",
+	"opencode/commands/uf-init.md":           "opencode/commands/uf.init.md",
+	"opencode/commands/unleash.md":           "opencode/commands/uf.unleash.md",
+}
+
+// cleanupRenamedCommands removes old-name command files that
+// were replaced by the uf. namespace prefix rename. Returns
+// the list of removed file paths (relative to targetDir).
+func cleanupRenamedCommands(targetDir string) []string {
+	var removed []string
+	for oldRel := range renamedCommands {
+		oldOut := mapAssetPath(oldRel)
+		oldPath := filepath.Join(targetDir, oldOut)
+		if _, err := os.Stat(oldPath); err == nil {
+			if err := os.Remove(oldPath); err == nil {
+				removed = append(removed, oldOut)
+			}
+		}
+	}
+	return removed
+}
+
 // isToolOwned returns true if the file is maintained by the
 // unbound tool and should be overwritten when content differs.
 // Tool-owned files: all OpenCode commands, OpenSpec schema
@@ -335,7 +374,7 @@ func isDivisorAsset(relPath string) bool {
 	if strings.HasPrefix(relPath, "opencode/agents/divisor-") {
 		return true
 	}
-	if relPath == "opencode/commands/review-council.md" {
+	if relPath == "opencode/commands/uf.review-council.md" {
 		return true
 	}
 	if isConventionPack(relPath) {
@@ -920,7 +959,7 @@ func migrateCommandDir(opts *Options) *subToolResult {
 			if !bytes.Equal(oldContent, newContent) {
 				_, _ = fmt.Fprintf(opts.Stdout,
 					"  ⚠ %s: conflict — kept commands/ version"+
-						" (run /uf-init for AI-assisted resolution)\n", name)
+						" (run /uf.init for AI-assisted resolution)\n", name)
 				warned++
 			}
 			// Remove old copy (keep commands/ version).
@@ -1588,7 +1627,7 @@ func subToolSymbol(action string) string {
 
 // Next-step hint commands shown after scaffold summary.
 const (
-	hintDivisor = "Run /review-council to start a code review."
+	hintDivisor = "Run /uf.review-council to start a code review."
 )
 
 // printFileCategories writes per-category file lists (created,
@@ -1610,6 +1649,12 @@ func printFileCategories(w io.Writer, r *Result) {
 		_, _ = fmt.Fprintf(w, "  overwritten: %d\n", len(r.Overwritten))
 		for _, f := range r.Overwritten {
 			_, _ = fmt.Fprintf(w, "    ! %s\n", f)
+		}
+	}
+	if len(r.Migrated) > 0 {
+		_, _ = fmt.Fprintf(w, "  migrated:    %d (old names removed)\n", len(r.Migrated))
+		for _, f := range r.Migrated {
+			_, _ = fmt.Fprintf(w, "    ✕ %s\n", f)
 		}
 	}
 	if len(r.Skipped) > 0 {

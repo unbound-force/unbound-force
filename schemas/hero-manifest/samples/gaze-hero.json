@@ -63,7 +63,7 @@
       "agent": "doc-classifier"
     },
     {
-      "name": "/review-council",
+      "name": "/uf.review-council",
       "description": "Run The Divisor three-persona review council"
     }
   ],

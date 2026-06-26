@@ -200,7 +200,7 @@ opencode
 Inside OpenCode:
 
 ```
-/review-council
+/uf.review-council
 ```
 
 The council discovers available reviewer agents and runs
@@ -214,7 +214,7 @@ aspect of code quality. You receive an **APPROVE** or
   agents, and command reference for daily use
 - **Specification workflows** -- `/opsx-propose` for
   small changes, `/speckit.specify` for features
-- **Autonomous pipeline** -- `/unleash` runs the full
+- **Autonomous pipeline** -- `/uf.unleash` runs the full
   workflow from spec to code review in one command
 - **Full tool suite** -- `uf setup` installs all
   companion tools (Gaze, Dewey, Replicator)

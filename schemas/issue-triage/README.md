@@ -6,7 +6,7 @@ determination, objectivity analysis, and actions taken.
 
 ## Producer
 
-**The Divisor** (review panel) — executing the `/triage-issue` slash command.
+**The Divisor** (review panel) — executing the `/uf.triage-issue` slash command.
 
 ## Consumers
 

@@ -1659,7 +1659,7 @@ func checkBridgeFile(opts *Options, filename, verb string) CheckResult {
 			Name:        name,
 			Severity:    Warn,
 			Message:     "not found",
-			InstallHint: "Run: /agent-brief in OpenCode",
+			InstallHint: "Run: /uf.agent-brief in OpenCode",
 		}
 	}
 	if strings.Contains(string(content), "AGENTS.md") {
@@ -1673,7 +1673,7 @@ func checkBridgeFile(opts *Options, filename, verb string) CheckResult {
 		Name:        name,
 		Severity:    Warn,
 		Message:     "exists but does not reference AGENTS.md",
-		InstallHint: "Run: /agent-brief in OpenCode",
+		InstallHint: "Run: /uf.agent-brief in OpenCode",
 	}
 }
 
@@ -1696,7 +1696,7 @@ func checkAgentContext(opts *Options) CheckGroup {
 			Name:        "AGENTS.md",
 			Severity:    Fail,
 			Message:     "not found",
-			InstallHint: "Run: /agent-brief in OpenCode",
+			InstallHint: "Run: /uf.agent-brief in OpenCode",
 		})
 		return group
 	}
@@ -1722,7 +1722,7 @@ func checkAgentContext(opts *Options) CheckGroup {
 				Name:        "Tier 1: " + sec.name,
 				Severity:    Fail,
 				Message:     "not found",
-				InstallHint: "Run: /agent-brief in OpenCode",
+				InstallHint: "Run: /uf.agent-brief in OpenCode",
 			})
 		}
 	}
@@ -1751,7 +1751,7 @@ func checkAgentContext(opts *Options) CheckGroup {
 			Name:        "Line count",
 			Severity:    Warn,
 			Message:     fmt.Sprintf("%d lines (threshold: %d)", lineCount, agentContextLineCountThreshold),
-			InstallHint: "Run: /agent-brief in OpenCode for condensing suggestions",
+			InstallHint: "Run: /uf.agent-brief in OpenCode for condensing suggestions",
 		})
 	} else {
 		group.Results = append(group.Results, CheckResult{
@@ -1777,7 +1777,7 @@ func checkAgentContext(opts *Options) CheckGroup {
 				Name:        "Constitution reference",
 				Severity:    Warn,
 				Message:     "not referenced (.specify/ detected)",
-				InstallHint: "Run: /agent-brief in OpenCode",
+				InstallHint: "Run: /uf.agent-brief in OpenCode",
 			})
 		}
 	}
@@ -1801,7 +1801,7 @@ func checkAgentContext(opts *Options) CheckGroup {
 				Name:        "Spec framework described",
 				Severity:    Warn,
 				Message:     "not described (specs/ or openspec/ detected)",
-				InstallHint: "Run: /agent-brief in OpenCode",
+				InstallHint: "Run: /uf.agent-brief in OpenCode",
 			})
 		}
 	}

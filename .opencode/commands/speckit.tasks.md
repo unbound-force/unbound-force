@@ -71,7 +71,7 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 Your job is done. Report the results and prompt the
 user. The user will invoke a separate command
-(/unleash, /cobalt-crush, or /opsx-apply) when they
+(/uf.unleash, /uf.cobalt-crush, or /opsx-apply) when they
 are ready to implement.
 
 6. **Report**: Output path to generated tasks.md and summary:
@@ -162,7 +162,7 @@ Every task MUST strictly follow this format:
 
 - **NEVER modify source code** — this command updates
   spec artifacts ONLY. Implementation changes belong in
-  `/speckit.implement`, `/unleash`, or `/cobalt-crush`.
+  `/speckit.implement`, `/uf.unleash`, or `/uf.cobalt-crush`.
   The user needs to review the plan before
   implementation begins. Implementing without review
   defeats the purpose of the spec-first workflow.

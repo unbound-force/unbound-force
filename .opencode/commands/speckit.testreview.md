@@ -120,7 +120,7 @@ Ask the user: "Would you like me to suggest concrete remediation edits for the t
 
 Your job is done. Report the results and prompt the
 user. The user will invoke a separate command
-(/unleash, /cobalt-crush, or /opsx-apply) when they
+(/uf.unleash, /uf.cobalt-crush, or /opsx-apply) when they
 are ready to implement.
 
 ## Operating Principles
@@ -144,7 +144,7 @@ are ready to implement.
 
 - **NEVER modify source code** — this command updates
   spec artifacts ONLY. Implementation changes belong in
-  `/speckit.implement`, `/unleash`, or `/cobalt-crush`.
+  `/speckit.implement`, `/uf.unleash`, or `/uf.cobalt-crush`.
   The user needs to review the plan before
   implementation begins. Implementing without review
   defeats the purpose of the spec-first workflow.

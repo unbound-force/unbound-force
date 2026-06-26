@@ -156,7 +156,7 @@ These rules are non-negotiable. Violations are CRITICAL severity.
   Review: fixes only. Violation = process error, stop immediately.
 - **CI parity**: MUST replicate CI checks locally before marking
   tasks complete. Derive commands from `.github/workflows/`.
-- **Review council**: MUST run `/review-council` before PR
+- **Review council**: MUST run `/uf.review-council` before PR
   submission. Resolve all REQUEST CHANGES. No code changes
   between APPROVE and PR. Exempt: constitution amendments,
   docs-only, emergency hotfixes.
@@ -177,7 +177,7 @@ These rules are non-negotiable. Violations are CRITICAL severity.
   active spec or change. Tooling scaffolds (`uf init`,
   convention pack updates, command directory renames, schema
   template updates) MUST be committed on a separate branch
-  (e.g., `chore/uf-init-sync`), not mixed into feature
+  (e.g., `chore/uf.init-sync`), not mixed into feature
   branches. Never use `git add -A` or `git add .` on feature
   branches — stage files explicitly.
 
@@ -185,17 +185,17 @@ These rules are non-negotiable. Violations are CRITICAL severity.
 
 | Command | When | Scope |
 |---------|------|-------|
-| `/review-council` | Pre-PR (local) | 5+ Divisor agents |
-| `/review-pr [N]` | Post-PR (GitHub) | Single agent, CI analysis |
-| `/address-feedback [N]` | Post-PR (GitHub) | Triage + address reviewer feedback |
+| `/uf.review-council` | Pre-PR (local) | 5+ Divisor agents |
+| `/uf.review-pr [N]` | Post-PR (GitHub) | Single agent, CI analysis |
+| `/uf.address-feedback [N]` | Post-PR (GitHub) | Triage + address reviewer feedback |
 
 ### Issue Triage Commands
 
 | Command | When | Scope |
 |---------|------|-------|
-| `/triage-issue <N>` | Issue triage | 5 Divisor agents, classify + comment |
+| `/uf.triage-issue <N>` | Issue triage | 5 Divisor agents, classify + comment |
 
-`/review-pr` key capabilities: PR walkthrough, issue
+`/uf.review-pr` key capabilities: PR walkthrough, issue
 linking (`Fixes #N`), suggestion blocks, verdict-aligned
 posting (APPROVE/REQUEST_CHANGES/COMMENT), path-based
 focus heuristics, and review state awareness (fetches
@@ -209,13 +209,13 @@ requirements).
   `COMMENTED`, `DISMISSED`
 - **Stale dismissal**: When `dismiss_stale_reviews` is
   enabled, APPROVE is auto-invalidated on new commits.
-  `/review-pr` warns before posting APPROVE.
+  `/uf.review-pr` warns before posting APPROVE.
 - **Review requests**: A user can appear in
   `requestedReviewers` even with a prior APPROVE (it was
-  dismissed). `/review-pr` detects this.
-- **CODEOWNER checks**: `/review-pr` warns when APPROVE
+  dismissed). `/uf.review-pr` detects this.
+- **CODEOWNER checks**: `/uf.review-pr` warns when APPROVE
   may not satisfy `require_code_owner_reviews`.
-- **Duplicate detection**: `/review-pr` warns before
+- **Duplicate detection**: `/uf.review-pr` warns before
   posting a second review from the same account.
 - **Dependabot**: `ci_dependencies.yml` respects human
   `CHANGES_REQUESTED` before auto-approving.
