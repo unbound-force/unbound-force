@@ -6,6 +6,13 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Changed
+- `/review-council` Code Review Mode: added Phase 1c
+  (review-context skill) for spec artifact discovery,
+  path classification, and walkthrough generation;
+  restructured Step 2 context enrichment to pass review
+  context and quality context to Divisor agents; added
+  review context summary to Step 6 final report
+  (Fixes: #296)
 - `/finale` PR body generation: structured sections (Summary,
   How to Test, How to Demo, Key Files Changed) replacing
   minimal bullet-point summary; PR template detection and

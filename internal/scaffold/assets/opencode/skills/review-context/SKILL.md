@@ -16,7 +16,7 @@ walkthrough summaries are discovered and formatted.
 | Command | How it loads | Notes |
 |---------|-------------|-------|
 | `/review-pr` | Skill tool | Replaces inline Steps 6-8 logic |
-| `/review-council` | Skill tool | Gains context discovery it currently lacks |
+| `/review-council` | Skill tool | Phase 1c — Protocols 1, 3, 4 (skips Protocol 2: no PR body) |
 | `/address-feedback` | Skill tool | Replaces inline fallback (line 143) |
 
 The consuming command specifies which protocols to

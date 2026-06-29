@@ -123,9 +123,9 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
 ### Instructions
 
 1. **Run local quality gates before delegating to
-   council agents.** This step has two phases that
-   MUST execute in order. Both phases apply only to
-   Code Review Mode -- Spec Review Mode skips them.
+   council agents.** This step has three phases that
+   MUST execute in order. All three phases apply only
+   to Code Review Mode -- Spec Review Mode skips them.
 
    #### Phase 1a -- Pre-flight Checks (mandatory, hard gate)
 
