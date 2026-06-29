@@ -2958,6 +2958,50 @@ func TestBuildPersistentRunArgs_IncludesUserNS(t *testing.T) {
 	}
 }
 
+func TestBuildPersistentRunArgs_SetsWorkdir(t *testing.T) {
+	opts := testOpts()
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+
+	platform := PlatformConfig{OS: "linux", Arch: "amd64"}
+	args := buildPersistentRunArgs(opts, platform, "uf-sandbox-test", "uf-vol-test")
+	joined := strings.Join(args, " ")
+
+	// Verify --workdir is set to /workspace/<project-basename>.
+	expectedWorkdir := "/workspace/test-project"
+	if !strings.Contains(joined, "--workdir "+expectedWorkdir) {
+		t.Errorf("expected --workdir %s in args, got: %s", expectedWorkdir, joined)
+	}
+
+	// Verify WORKSPACE env var is set.
+	expectedEnv := "WORKSPACE=/workspace/test-project"
+	if !strings.Contains(joined, expectedEnv) {
+		t.Errorf("expected %s in args, got: %s", expectedEnv, joined)
+	}
+
+	// Verify --workdir appears before the image argument.
+	wdIdx := -1
+	imgIdx := -1
+	for i, a := range args {
+		if a == "--workdir" {
+			wdIdx = i
+		}
+		if a == DefaultImage {
+			imgIdx = i
+		}
+	}
+	if wdIdx < 0 {
+		t.Fatal("--workdir not found in args")
+	}
+	if imgIdx < 0 {
+		t.Fatal("image not found in args")
+	}
+	if wdIdx >= imgIdx {
+		t.Errorf("--workdir (idx %d) should appear before image (idx %d)", wdIdx, imgIdx)
+	}
+}
+
 // --- buildPersistentRunArgs gateway tests (Task Group 3) ---
 
 func TestBuildPersistentRunArgs_GatewayActive(t *testing.T) {
