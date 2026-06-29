@@ -181,6 +181,44 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
 
       Proceed to step 2 without Gaze data.
 
+   #### Phase 1c -- Discover Review Context (mandatory)
+
+   Load the `review-context` skill for spec artifact
+   discovery, path classification, and walkthrough
+   generation:
+
+   a. Invoke the `skill` tool with name `review-context`
+      to load the shared context discovery instructions.
+
+   b. Execute the skill's protocols in order:
+      1. Protocol 1 (Spec Artifact Discovery) — locate
+         the specification matching the current branch
+         using the branch name from auto-detection and
+         the changed file list.
+      2. Protocol 2 (Issue Linking) — **skip**. This
+         protocol requires a PR body;
+         `/review-council` is a local pre-PR command
+         with no PR body to parse.
+      3. Protocol 3 (Path-Based Focus Heuristics) —
+         classify each changed file from the
+         auto-detection step for review emphasis.
+      4. Protocol 4 (Walkthrough Generation) — generate
+         per-file change summaries from the branch
+         diff (`git diff main...HEAD`).
+
+   c. **Record results**: Use the skill's Review Context
+      output format (Specification, File Classification,
+      Walkthrough). This context is used in step 2
+      (Divisor agent delegation) and step 6 (final
+      report).
+
+   d. **If the skill fails to load**: **STOP
+      immediately.** Report the error as a CRITICAL
+      finding. Do NOT proceed to step 2. The
+      `review-context` skill is a hard dependency,
+      consistent with the `pre-flight` skill
+      consumption pattern — no inline fallback.
+
 2. Delegate the review to all **discovered** reviewer agents in parallel using the Task tool. For each discovered agent, use the focus area from the Known Reviewer Roles reference table to provide targeted context. For any discovered agent not in the table, use a generic prompt: "Review the current changes for quality, correctness, and compliance. Return your verdict (APPROVE or REQUEST CHANGES) along with all findings."
 
    **CRITICAL — Review Scope Rule**: The review scope is
@@ -195,19 +233,30 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
    produces incomplete reviews that miss findings in
    earlier commits on the branch.
 
-   **When Gaze data is available** (from Phase 1b):
-   append a "Quality Context" section to each Divisor
-   agent's review prompt containing the Gaze Report
-   summary. This gives agents -- particularly
-   `divisor-testing` -- access to concrete CRAP
-   scores, coverage percentages, quadrant
-   distributions, and prioritized recommendations.
-   Instruct agents to reference this data in their
-   findings where relevant.
+   **Review context enrichment**: Append the following
+   context sections to each Divisor agent's review
+   prompt:
 
-   **When Gaze data is NOT available**: use the
-   standard prompt without a "Quality Context"
-   section. Agents review based on file reading only.
+   - **Review Context** (from Phase 1c): Include the
+     spec artifact summary, file classifications, and
+     walkthrough from the `review-context` skill output.
+     This gives agents spec alignment context and
+     per-file focus heuristics. Instruct agents to
+     reference spec requirements and file
+     classifications in their findings where relevant.
+
+   - **Quality Context** (from Phase 1b, when Gaze data
+     is available): Include the Gaze Report summary.
+     This gives agents -- particularly
+     `divisor-testing` -- access to concrete CRAP
+     scores, coverage percentages, quadrant
+     distributions, and prioritized recommendations.
+     Instruct agents to reference this data in their
+     findings where relevant.
+
+   **When Gaze data is NOT available**: include only
+   the Review Context section. Agents review based on
+   file reading plus spec/classification context.
 
    For each agent, instruct it to review the full branch diff (all changed files vs `main`) and return its verdict (**APPROVE** or **REQUEST CHANGES**) along with all findings.
 
@@ -239,6 +288,10 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
 
 6. Provide a final report to the user:
    - **Discovery summary**: how many reviewer agents were discovered, which were invoked, and which known reviewer roles were absent (informational, non-blocking)
+   - **Review context summary**: specification found
+     (type, path) or "no spec found", and the
+     walkthrough table from Phase 1c (review-context
+     skill, Protocol 4)
    - What was found in each iteration
    - What was fixed
    - If stopped early, the current set of outstanding **REQUEST CHANGES**
