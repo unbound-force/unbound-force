@@ -1926,7 +1926,7 @@ func TestInitSubTools_DeweyAvailable(t *testing.T) {
 	}
 
 	// Verify commands were called.
-	expectedCalls := []string{"dewey init", "dewey index"}
+	expectedCalls := []string{"dewey init", "dewey index --no-embeddings"}
 	for _, expected := range expectedCalls {
 		found := false
 		for _, call := range rec.calls {
@@ -2034,7 +2034,7 @@ func TestInitSubTools_DeweyInitFails(t *testing.T) {
 
 	// dewey index should NOT have been called.
 	for _, call := range rec.calls {
-		if call == "dewey index" {
+		if strings.HasPrefix(call, "dewey index") {
 			t.Error("dewey index should NOT be called when dewey init fails")
 		}
 	}
@@ -3439,15 +3439,15 @@ func TestInitSubTools_DeweyForceReindex(t *testing.T) {
 		t.Errorf("expected dewey index re-indexed result, got %v", results)
 	}
 
-	// Verify dewey index was called.
+	// Verify dewey index --no-embeddings was called.
 	indexCalled := false
 	for _, call := range rec.calls {
-		if call == "dewey index" {
+		if call == "dewey index --no-embeddings" {
 			indexCalled = true
 		}
 	}
 	if !indexCalled {
-		t.Errorf("expected dewey index command, got calls: %v", rec.calls)
+		t.Errorf("expected 'dewey index --no-embeddings' command, got calls: %v", rec.calls)
 	}
 
 	// Verify dewey init was NOT called (.uf/dewey/ already exists).
@@ -3494,7 +3494,7 @@ func TestInitSubTools_DeweyExistsNoForce(t *testing.T) {
 
 	// Verify no dewey commands were called.
 	for _, call := range rec.calls {
-		if call == "dewey init" || call == "dewey index" {
+		if call == "dewey init" || strings.HasPrefix(call, "dewey index") {
 			t.Errorf("unexpected dewey command when Force=false: %s", call)
 		}
 	}
@@ -3525,7 +3525,7 @@ func TestInitSubTools_DeweySkippedByConfig(t *testing.T) {
 
 	// Dewey commands should NOT have been called.
 	for _, call := range rec.calls {
-		if call == "dewey init" || call == "dewey index" {
+		if call == "dewey init" || strings.HasPrefix(call, "dewey index") {
 			t.Errorf("dewey command should NOT be called when method is skip: %s", call)
 		}
 	}
@@ -3573,7 +3573,7 @@ func TestInitSubTools_DeweySkippedByConfig_ForceIgnored(t *testing.T) {
 
 	// Even with Force=true, skip config should prevent re-index.
 	for _, call := range rec.calls {
-		if call == "dewey init" || call == "dewey index" {
+		if call == "dewey init" || strings.HasPrefix(call, "dewey index") {
 			t.Errorf("dewey command should NOT be called when method is skip (even with Force): %s", call)
 		}
 	}
@@ -3717,7 +3717,7 @@ func TestInitSubTools_ConcurrentAllResults(t *testing.T) {
 	rec.mu.Unlock()
 
 	expectedCmds := []string{
-		"dewey init", "dewey index",
+		"dewey init", "dewey index --no-embeddings",
 		"replicator init", "specify init",
 		"openspec init --tools opencode", "gaze init",
 	}
@@ -3837,7 +3837,7 @@ func TestInitSubTools_ConcurrentOneFailureNoBlock(t *testing.T) {
 	// Verify dewey index was NOT called (init failed).
 	rec.mu.Lock()
 	for _, call := range rec.calls {
-		if call == "dewey index" {
+		if strings.HasPrefix(call, "dewey index") {
 			t.Error("dewey index should not run when dewey init fails")
 		}
 	}
