@@ -31,6 +31,12 @@ Each entry follows the format: `- <change-name>: <summary>`.
   `unknown-model` fallback with user warning
   (Spec: openspec/changes/improve-finale-pr-description/)
 
+### Fixed
+- `uf init --force` no longer hangs on Dewey re-indexing.
+  Dewey indexing now runs with `--no-embeddings` for a fast
+  metadata-only pass. Run `dewey index` separately to
+  generate embeddings for semantic search. (Fixes: #163)
+
 ### Added
 - `/triage-issue` slash command for multi-agent GitHub issue
   triage using the Divisor review panel. Classifies issues

@@ -1511,8 +1511,8 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 			results = append(results, *sr)
 		}
 
-		logf("  Indexing Dewey sources (this may take a moment)...\n")
-		if out, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
+		logf("  Indexing Dewey sources (without embeddings)...\n")
+		if out, idxErr := opts.ExecCmd("dewey", "index", "--no-embeddings"); idxErr != nil {
 			results = append(results, subToolResult{
 				name: "dewey index", action: "failed",
 				detail:  fmt.Sprintf("dewey index: %s", idxErr),
@@ -1523,6 +1523,7 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 			results = append(results, subToolResult{
 				name: "dewey index", action: "completed"})
 		}
+		logf("  Run 'dewey index' separately to generate embeddings for semantic search.\n")
 		return results
 	}
 
@@ -1531,8 +1532,9 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 		if sr := generateDeweySources(opts, true); sr != nil {
 			results = append(results, *sr)
 		}
-		logf("  Re-indexing Dewey sources...\n")
-		if out, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
+
+		logf("  Re-indexing Dewey sources (without embeddings)...\n")
+		if out, idxErr := opts.ExecCmd("dewey", "index", "--no-embeddings"); idxErr != nil {
 			results = append(results, subToolResult{
 				name: "dewey index", action: "failed",
 				detail:  fmt.Sprintf("dewey index: %s", idxErr),
@@ -1543,6 +1545,7 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 			results = append(results, subToolResult{
 				name: "dewey index", action: "re-indexed"})
 		}
+		logf("  Run 'dewey index' separately to generate embeddings for semantic search.\n")
 	}
 	return results
 }
