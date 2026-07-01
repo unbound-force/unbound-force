@@ -127,9 +127,9 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
    MUST execute in order. All three phases apply only
    to Code Review Mode -- Spec Review Mode skips them.
 
-   #### Phase 1a -- Pre-flight Checks (mandatory, hard gate)
+   #### Phase 1a -- Pre-flight Checks (mandatory, soft gate)
 
-   Load the `pre-flight` skill and run in `hard-gate`
+   Load the `pre-flight` skill and run in `soft-gate`
    mode:
 
    a. Invoke the `skill` tool with name `pre-flight` to
@@ -141,20 +141,32 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
       2. Local Tool Detection — check for config files
          and verify binary availability
       3. CI Coverage Matrix — display the matrix (in
-         hard-gate mode, all tools are marked "Run
+         soft-gate mode, all tools are marked "Run
          locally = Yes")
       4. Execution — run all detected and available
-         tools in hard-gate mode
+         tools in soft-gate mode (do NOT stop on first
+         failure; record all results)
+      5. Baseline Establishment (Phase 4a) — if any
+         tools failed, establish a baseline for `main`
+         using the two-tier strategy (CI API first,
+         worktree fallback)
+      6. Causality Classification (Phase 4b) — classify
+         each failure as branch-caused, pre-existing,
+         or unknown
 
-   c. **If the pre-flight verdict is FAIL**: **STOP
-      immediately.** Report each failure as a CRITICAL
-      finding with the full error output. Do NOT
-      proceed to Phase 1b or to step 2 (Divisor agent
-      delegation). The rationale: reviewing code that
-      doesn't compile or pass tests is wasted work.
+   c. **If the pre-flight verdict is FAIL
+      (branch-caused)**: **STOP immediately.** Report
+      each branch-caused failure as a CRITICAL finding
+      with the full error output. Do NOT proceed to
+      Phase 1b or to step 2 (Divisor agent delegation).
+      The rationale: reviewing code that doesn't compile
+      or pass tests is wasted work.
 
-   d. **If the pre-flight verdict is PASS**: report
-      success and proceed to Phase 1b.
+   d. **If the pre-flight verdict is PASS** (including
+      when pre-existing failures exist): report success.
+      If pre-existing failures were detected, record
+      them for inclusion in the final report (Step 6).
+      Proceed to Phase 1b.
 
    #### Phase 1b -- Gaze Quality Analysis (conditional)
 
@@ -288,6 +300,26 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
 
 6. Provide a final report to the user:
    - **Discovery summary**: how many reviewer agents were discovered, which were invoked, and which known reviewer roles were absent (informational, non-blocking)
+   - **Pre-existing CI Failures** (if any were detected
+     in Phase 1a): include an informational section
+     between the discovery summary and the review
+     context summary:
+
+     ```
+     ### Pre-existing CI Failures (informational)
+
+     The following failures exist on `main` and are
+     unrelated to the current branch:
+
+     | Tool | Exit code | Baseline method |
+     |------|-----------|-----------------|
+     | ...  | ...       | ...             |
+
+     These do not block the review verdict.
+     ```
+
+     Omit this section when no pre-existing failures
+     were detected in Phase 1a.
    - **Review context summary**: specification found
      (type, path) or "no spec found", and the
      walkthrough table from Phase 1c (review-context
