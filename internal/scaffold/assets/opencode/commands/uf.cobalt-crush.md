@@ -7,7 +7,7 @@ description: >
 ---
 <!-- scaffolded by uf vdev -->
 
-# Command: /cobalt-crush
+# Command: /uf.cobalt-crush
 
 ## Description
 
@@ -24,17 +24,17 @@ $ARGUMENTS
 ## Usage
 
 ```
-/cobalt-crush [task description or instructions]
-/cobalt-crush                    # auto-detect workflow and implement
+/uf.cobalt-crush [task description or instructions]
+/uf.cobalt-crush                    # auto-detect workflow and implement
 ```
 
 ### Examples
 
 ```
-/cobalt-crush implement T015 from tasks.md
-/cobalt-crush fix the failing test in internal/metrics/store_test.go
-/cobalt-crush refactor runMetrics to reduce complexity
-/cobalt-crush                    # detects speckit or openspec context
+/uf.cobalt-crush implement T015 from tasks.md
+/uf.cobalt-crush fix the failing test in internal/metrics/store_test.go
+/uf.cobalt-crush refactor runMetrics to reduce complexity
+/uf.cobalt-crush                    # detects speckit or openspec context
 ```
 
 ## Instructions
@@ -87,7 +87,7 @@ implementation command to the `cobalt-crush-dev` agent:
    > No active implementation context detected. Which workflow
    > should I execute?
    >
-   > - `/unleash` — Autonomous pipeline (parallel swarm,
+   > - `/uf.unleash` — Autonomous pipeline (parallel swarm,
    >   recommended for multi-task changes)
    > - `/speckit.implement` — Strategic spec implementation
    >   (requires a feature branch with `specs/NNN-*/tasks.md`)

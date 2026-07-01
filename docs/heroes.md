@@ -124,7 +124,7 @@ By being the "Engineering Core and Adaptive Implementation Engine," Cobalt-Crush
 - Speckit and OpenSpec implementation workflows
 - Gaze quality feedback integration
 - Convention pack adherence
-- Autonomous pipeline execution via /unleash
+- Autonomous pipeline execution via /uf.unleash
 
 **Planned**:
 - Advanced refactoring recommendations
@@ -160,7 +160,7 @@ The Divisor, as the Reviewer Council, serves as the definitive, single source of
 - Convention pack enforcement
 - Auto-detection of code vs spec review mode
 - Hybrid fix policy (auto-fix LOW/MEDIUM, report HIGH/CRITICAL)
-- GitHub PR review posting via /review-pr
+- GitHub PR review posting via /uf.review-pr
 
 **Planned**:
 - Learning from past review patterns

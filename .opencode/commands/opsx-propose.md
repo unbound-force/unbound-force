@@ -9,7 +9,7 @@ I'll create a change with artifacts:
 - design.md (how)
 - tasks.md (implementation steps)
 
-When ready to implement, run /unleash (autonomous) or /opsx-apply (sequential)
+When ready to implement, run /uf.unleash (autonomous) or /opsx-apply (sequential)
 
 ---
 
@@ -132,7 +132,7 @@ use direct file reads of local specs and backlog items instead.
 
 Your job is done. Report the results and prompt the
 user. The user will invoke a separate command
-(/unleash, /cobalt-crush, or /opsx-apply) when they
+(/uf.unleash, /uf.cobalt-crush, or /opsx-apply) when they
 are ready to implement.
 
 **Output**
@@ -141,7 +141,7 @@ After completing all artifacts, summarize:
 - Change name and location
 - List of artifacts created with brief descriptions
 - What's ready: "All artifacts created! Ready for implementation."
-- Prompt: "Run `/unleash` for autonomous pipeline execution, `/opsx-apply` for sequential implementation, or `/cobalt-crush` for direct coding. `/unleash` is recommended when the change has multiple independent task groups."
+- Prompt: "Run `/uf.unleash` for autonomous pipeline execution, `/opsx-apply` for sequential implementation, or `/uf.cobalt-crush` for direct coding. `/uf.unleash` is recommended when the change has multiple independent task groups."
 
 **Artifact Creation Guidelines**
 
@@ -168,8 +168,8 @@ After completing all artifacts, summarize:
   implementation begins. Implementing without review
   defeats the purpose of the spec-first workflow.
 - **NEVER commit, push, or create PRs** — those are
-  /finale's responsibility
-- **NEVER run /unleash, /opsx-apply, or /cobalt-crush**
+  /uf.finale's responsibility
+- **NEVER run /uf.unleash, /opsx-apply, or /uf.cobalt-crush**
   — the user decides when to implement
 - After artifacts are complete, STOP and prompt the
-  user to run /unleash, /opsx-apply, or /cobalt-crush
+  user to run /uf.unleash, /opsx-apply, or /uf.cobalt-crush

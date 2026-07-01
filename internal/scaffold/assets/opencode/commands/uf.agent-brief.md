@@ -8,7 +8,7 @@ description: >
 ---
 <!-- scaffolded by uf vdev -->
 
-# Command: /agent-brief
+# Command: /uf.agent-brief
 
 ## Description
 
@@ -23,8 +23,8 @@ a good AGENTS.md, every agent session starts from cold context.
 **Modes**:
 - No AGENTS.md → **Create mode** (analyze project, generate file)
 - AGENTS.md exists → **Audit mode** (score, report, suggest)
-- `/agent-brief create` → Force create mode (overwrite)
-- `/agent-brief audit` → Force audit mode (read-only)
+- `/uf.agent-brief create` → Force create mode (overwrite)
+- `/uf.agent-brief audit` → Force audit mode (read-only)
 
 ## Instructions
 
@@ -169,7 +169,7 @@ These rules are non-negotiable. Violations are CRITICAL severity.
   Review: fixes only. Violation = process error, stop immediately.
 - **CI parity**: MUST replicate CI checks locally before marking
   tasks complete. Derive commands from `.github/workflows/`.
-- **Review council**: MUST run `/review-council` before PR
+- **Review council**: MUST run `/uf.review-council` before PR
   submission. Resolve all REQUEST CHANGES. No code changes
   between APPROVE and PR. Exempt: constitution amendments,
   docs-only, emergency hotfixes.
@@ -191,8 +191,8 @@ These rules are non-negotiable. Violations are CRITICAL severity.
 
 | Command | When | Scope |
 |---------|------|-------|
-| `/review-council` | Pre-PR (local) | 5+ Divisor agents |
-| `/review-pr [N]` | Post-PR (GitHub) | Single agent, CI analysis |
+| `/uf.review-council` | Pre-PR (local) | 5+ Divisor agents |
+| `/uf.review-pr [N]` | Post-PR (GitHub) | Single agent, CI analysis |
 ```
 
 #### Section 7: Specification Workflow (verbatim template, conditional)
@@ -406,7 +406,7 @@ Packs) and 10 (Architecture) are recommended.
 Produce a structured report:
 
 ```
-## /agent-brief: Audit Report
+## /uf.agent-brief: Audit Report
 
 ### Section Coverage
 
@@ -496,7 +496,7 @@ Display a final summary:
 
 **Create mode**:
 ```
-## /agent-brief: Complete
+## /uf.agent-brief: Complete
 
 ### Created
   ✅ AGENTS.md: generated (N lines)
@@ -511,7 +511,7 @@ Display a final summary:
 
 **Audit mode**:
 ```
-## /agent-brief: Audit Complete
+## /uf.agent-brief: Audit Complete
 
 ### Score: [Label]
   [section coverage summary]

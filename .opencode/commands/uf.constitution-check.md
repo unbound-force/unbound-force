@@ -4,7 +4,7 @@ agent: constitution-check
 ---
 <!-- scaffolded by uf vdev -->
 
-# Command: /constitution-check
+# Command: /uf.constitution-check
 
 ## Description
 
@@ -17,7 +17,7 @@ parent constitution reference.
 ## Usage
 
 ```
-/constitution-check [hero-constitution-path] [org-constitution-path]
+/uf.constitution-check [hero-constitution-path] [org-constitution-path]
 ```
 
 ### Arguments
@@ -33,13 +33,13 @@ parent constitution reference.
 
 ```
 # Check the current repo's constitution against the org constitution
-/constitution-check
+/uf.constitution-check
 
 # Check a specific hero constitution
-/constitution-check /path/to/hero/.specify/memory/constitution.md
+/uf.constitution-check /path/to/hero/.specify/memory/constitution.md
 
 # Check with explicit org constitution path
-/constitution-check /path/to/hero/constitution.md /path/to/org/constitution.md
+/uf.constitution-check /path/to/hero/constitution.md /path/to/org/constitution.md
 ```
 
 ## Instructions

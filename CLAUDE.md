@@ -1,7 +1,7 @@
 # Unbound Force — managed by uf init
 
 @AGENTS.md
-@.opencode/agents/cobalt-crush-dev.md
+@.opencode/agents/uf.cobalt-crush-dev.md
 
 ## Convention Packs
 

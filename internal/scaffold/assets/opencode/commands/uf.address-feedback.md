@@ -54,7 +54,7 @@ gh pr view --json number --jq '.number'
 ```
 
 If no open PR: **STOP** with error:
-> "No open PR found for the current branch. Specify a PR number: `/address-feedback 42`"
+> "No open PR found for the current branch. Specify a PR number: `/uf.address-feedback 42`"
 
 ### 1.2 Fetch PR Metadata
 
@@ -324,10 +324,10 @@ The `<scope>` is the package or directory of the changed files. The description 
 
 ### 4.3 Review-Council Gate
 
-After all code changes are committed locally, run `/review-council` on the cumulative changes.
+After all code changes are committed locally, run `/uf.review-council` on the cumulative changes.
 
 - **If passes**: continue to push
-- **If fails**: enter fix loop (same behavior as `/unleash`). Fix findings and re-run council.
+- **If fails**: enter fix loop (same behavior as `/uf.unleash`). Fix findings and re-run council.
 - **If fix loop exhausts iterations**: **STOP** and report persistent findings. Do NOT push until council passes.
 
 ### 4.4 Push Changes
@@ -391,7 +391,7 @@ rm -f "$REPLY_FILE"
 ```
 
 **Crash recovery**: Track each comment's posting status in the cache (`comment-posted` flag). If posting fails partway (e.g., API rate limit after 3 of 6 comments), report partial progress:
-> "Posted 3 of 6 reply comments. Items 4-6 pending. Re-run `/address-feedback <PR_NUMBER>` to retry."
+> "Posted 3 of 6 reply comments. Items 4-6 pending. Re-run `/uf.address-feedback <PR_NUMBER>` to retry."
 
 Record progress in `.uf/feedback/pr-<PR_NUMBER>/state.json` for idempotent retry.
 
@@ -480,7 +480,7 @@ Fields `file`, `line`, `decision_reasoning`, and `commit_sha` may be `null` (gen
 
 3. **No comments without confirmation**: Every PR comment is shown to the author before posting. No autonomous PR communication.
 
-4. **No push without review-council**: Code changes MUST pass `/review-council` before pushing. No bypass.
+4. **No push without review-council**: Code changes MUST pass `/uf.review-council` before pushing. No bypass.
 
 5. **No partial data processing**: If GitHub API fails during ingestion, STOP. Do not assess or triage based on incomplete feedback.
 

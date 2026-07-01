@@ -6,7 +6,7 @@ author decisions, and execution outcomes.
 
 ## Producer
 
-**Cobalt-Crush** — executing the `/address-feedback` slash command.
+**Cobalt-Crush** — executing the `/uf.address-feedback` slash command.
 
 ## Consumers
 

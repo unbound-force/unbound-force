@@ -70,11 +70,11 @@ them, and how to use the system effectively.
                     v                      |
               +----------+     +-----------+-----------+
               |  uf CLI  |     |    Slash Commands      |
-              |----------|     |   /review-council      |
+              |----------|     |   /uf.review-council      |
               | init     |     |   /opsx-propose        |
               | doctor   |     |   /speckit.specify     |
               | setup    |     |   /gaze   /forge       |
-              | sandbox  |     |   /unleash  ...        |
+              | sandbox  |     |   /uf.unleash  ...        |
               | gateway  |     +-----------+-----------+
               | config   |                 |
               +----+-----+     +-----------+-----------+
@@ -411,10 +411,10 @@ Creates artifacts in `specs/NNN-feature-name/`.
 /speckit.implement  Execute the task list
        |
        v
-/review-council     Run the Divisor review council
+/uf.review-council     Run the Divisor review council
        |
        v
-/finale             Commit, push, create PR, merge
+/uf.finale             Commit, push, create PR, merge
 ```
 
 ### Tactical Pipeline (OpenSpec)
@@ -430,16 +430,16 @@ user stories. Creates artifacts in
 /opsx-apply      Implement tasks from the change
        |
        v
-/review-council  Run the Divisor review council
+/uf.review-council  Run the Divisor review council
        |
        v
-/finale          Commit, push, create PR, merge
+/uf.finale          Commit, push, create PR, merge
 ```
 
 ### Autonomous Mode
 
 ```
-/unleash
+/uf.unleash
 ```
 
 Runs the full pipeline autonomously -- clarify, plan,
@@ -540,15 +540,15 @@ enforce. Rules are tagged by severity:
 
 | Command | When | What Happens |
 |---------|------|--------------|
-| `/review-council` | Pre-PR (local) | Discovers available personas, runs them in parallel, produces APPROVE or REQUEST CHANGES |
-| `/review-pr [N]` | Post-PR (GitHub) | Single agent reviews a specific PR, analyzes CI results |
-| `/address-feedback [N]` | Post-PR (GitHub) | Triage + address reviewer feedback |
+| `/uf.review-council` | Pre-PR (local) | Discovers available personas, runs them in parallel, produces APPROVE or REQUEST CHANGES |
+| `/uf.review-pr [N]` | Post-PR (GitHub) | Single agent reviews a specific PR, analyzes CI results |
+| `/uf.address-feedback [N]` | Post-PR (GitHub) | Triage + address reviewer feedback |
 
 ### Addressing Feedback
 
-The `/address-feedback` command closes the gap between
+The `/uf.address-feedback` command closes the gap between
 PR creation and merge. After reviewers comment on a PR,
-the author runs `/address-feedback` to systematically
+the author runs `/uf.address-feedback` to systematically
 ingest, assess, triage, and respond to every piece of
 feedback.
 
@@ -563,7 +563,7 @@ feedback.
    recommendation. The author chooses one of four
    decisions: accept, modify, reject, or ask.
 4. **Execute** -- Commit code fixes (one per item), run
-   `/review-council` on the changes, push, and post
+   `/uf.review-council` on the changes, push, and post
    reply comments to each thread.
 
 **Tiered assessment architecture**:

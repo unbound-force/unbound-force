@@ -115,7 +115,7 @@ findings are causally linked.
 | HIGH | Report only | Requires human judgment on intent/scope |
 | CRITICAL | Report only | Requires human judgment; may indicate design issue |
 
-This policy is implemented in `/review-council` Spec
+This policy is implemented in `/uf.review-council` Spec
 Review Mode. The severity definitions above ensure all 5
 personas classify the same type of issue at the same
 level, making the auto-fix boundary predictable.

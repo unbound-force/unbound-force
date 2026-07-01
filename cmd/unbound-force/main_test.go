@@ -44,9 +44,9 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 
 	// Verify a tool-owned file was created
-	toolFile := filepath.Join(dir, ".opencode", "commands", "review-council.md")
+	toolFile := filepath.Join(dir, ".opencode", "commands", "uf.review-council.md")
 	if _, err := os.Stat(toolFile); os.IsNotExist(err) {
-		t.Error("expected tool-owned review-council.md to be created")
+		t.Error("expected tool-owned uf.review-council.md to be created")
 	}
 }
 
@@ -72,7 +72,7 @@ func TestRunInit_ForceFlag(t *testing.T) {
 	}
 
 	// Modify a tool-owned file
-	toolFile := filepath.Join(dir, ".opencode", "commands", "review-council.md")
+	toolFile := filepath.Join(dir, ".opencode", "commands", "uf.review-council.md")
 	if err := os.WriteFile(toolFile, []byte("tool content"), 0o644); err != nil {
 		t.Fatalf("modify tool file: %v", err)
 	}

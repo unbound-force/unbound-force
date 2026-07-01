@@ -3254,8 +3254,8 @@ func TestCheckAgentContext_NoFile(t *testing.T) {
 	if r.Severity != Fail {
 		t.Errorf("severity = %v, want Fail", r.Severity)
 	}
-	if r.InstallHint != "Run: /agent-brief in OpenCode" {
-		t.Errorf("install hint = %q, want 'Run: /agent-brief in OpenCode'", r.InstallHint)
+	if r.InstallHint != "Run: /uf.agent-brief in OpenCode" {
+		t.Errorf("install hint = %q, want 'Run: /uf.agent-brief in OpenCode'", r.InstallHint)
 	}
 }
 

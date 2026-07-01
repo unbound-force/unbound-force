@@ -6,6 +6,21 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Changed
+- All 10 uf-owned slash commands renamed to `uf.`
+  dot-notation namespace prefix: `/address-feedback`
+  → `/uf.address-feedback`, `/agent-brief` →
+  `/uf.agent-brief`, `/cobalt-crush` →
+  `/uf.cobalt-crush`, `/constitution-check` →
+  `/uf.constitution-check`, `/finale` → `/uf.finale`,
+  `/review-council` → `/uf.review-council`,
+  `/review-pr` → `/uf.review-pr`, `/triage-issue` →
+  `/uf.triage-issue`, `/uf-init` → `/uf.init`,
+  `/unleash` → `/uf.unleash`. Scaffold engine gains
+  migration map for automatic orphan cleanup on
+  `uf init` re-run. See issue #302 for migration
+  guide.
+  (Spec: openspec/changes/uf-command-namespace-prefix/,
+  Closes: #302)
 - `/review-council` Code Review Mode: added Phase 1c
   (review-context skill) for spec artifact discovery,
   path classification, and walkthrough generation;
