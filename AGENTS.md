@@ -185,7 +185,7 @@ These rules are non-negotiable. Violations are CRITICAL severity.
 
 | Command | When | Scope |
 |---------|------|-------|
-| `/review-council` | Pre-PR (local) | 5+ Divisor agents |
+| `/review-council [N]` | Pre-PR + optional PR posting | 5+ Divisor agents |
 | `/review-pr [N]` | Post-PR (GitHub) | Single agent, CI analysis |
 | `/address-feedback [N]` | Post-PR (GitHub) | Triage + address reviewer feedback |
 

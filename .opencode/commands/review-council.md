@@ -27,6 +27,25 @@ If `$ARGUMENTS` contains the word **"specs"**, use
 If `$ARGUMENTS` contains the word **"code"**, use
 **Code Review Mode** regardless of auto-detection.
 
+### PR Number Argument
+
+After removing mode keywords ("specs", "code") from
+`$ARGUMENTS`, check if the remaining text contains a
+positive integer. If so, validate it:
+
+- **Digits only** (no letters, punctuation, or signs)
+- **Range 1–999999**
+
+If valid, record it as the **explicit PR number** for
+use in Phase 1c (Protocol 2) and Step 7 (GitHub
+posting). If invalid (non-numeric, out of range, or
+negative), reject with an informational error:
+
+> "Invalid PR number: `<value>`. Expected a positive
+> integer (1–999999). Ignoring."
+
+And proceed without a PR number.
+
 ### Auto-Detection (when no explicit override)
 
 When no mode keyword is provided, detect the mode by
@@ -207,10 +226,18 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
          the specification matching the current branch
          using the branch name from auto-detection and
          the changed file list.
-      2. Protocol 2 (Issue Linking) — **skip**. This
-         protocol requires a PR body;
-         `/review-council` is a local pre-PR command
-         with no PR body to parse.
+      2. Protocol 2 (Issue Linking) — **conditional**.
+         - If an **explicit PR number** was provided
+           via `$ARGUMENTS` (see PR Number Argument
+           above): fetch the PR body via
+           `gh pr view <N> --json body --jq '.body'`
+           and run Protocol 2 to extract linked issues
+           and acceptance criteria. Pass the results
+           to the Guard persona in Step 2 for
+           concrete drift detection.
+         - If **no explicit PR number** was provided:
+           **skip**. Auto-detected PRs (from Step 7)
+           are not available at Phase 1c time.
       3. Protocol 3 (Path-Based Focus Heuristics) —
          classify each changed file from the
          auto-detection step for review emphasis.
@@ -328,6 +355,333 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
    - What was fixed
    - If stopped early, the current set of outstanding **REQUEST CHANGES**
    - If there were persistent circular **REQUEST CHANGES** (fixes for one reviewer cause failures in another), report those with additional detail so the user can make an informed decision
+
+7. **GitHub Review Posting (optional, Code Review Mode only)**
+
+   After the final report, offer to post the council's
+   consolidated findings as a GitHub PR review. This step
+   applies only to **Code Review Mode** — Spec Review
+   Mode is a local pre-commit activity and does not post
+   to GitHub. It is **opt-in** — it runs only when a PR
+   exists and the user confirms posting.
+
+   #### Step 7a -- PR Detection
+
+   Detect whether the current branch has an open PR:
+
+   a. If an **explicit PR number** was provided via
+      `$ARGUMENTS`, use it directly. Skip auto-detection.
+
+   b. Otherwise, attempt auto-detection:
+      ```bash
+      gh pr view --json number,headRefName,baseRefName
+      ```
+      If this succeeds, extract the PR number, head ref,
+      and base ref name.
+
+   c. **If `gh` is not installed**: skip Step 7 entirely
+      with an informational note:
+      > "GitHub CLI not available — skipping review
+      > posting. Install `gh` for PR integration."
+
+   c2. **If `gh` is installed but not authenticated**:
+       verify with `gh auth status`. If authentication
+       fails, skip Step 7 with:
+       > "gh is installed but not authenticated —
+       > skipping review posting. Run `gh auth login`
+       > to enable PR integration."
+
+   d. **If no PR exists** (auto-detection returns no PR
+      and no explicit number provided): skip Step 7 with
+      an informational note:
+      > "No open PR found for this branch — review
+      > remains local only."
+
+   #### Step 7b -- Review State Fetching
+
+   Fetch existing review state to prevent duplicate
+   findings and enable pre-posting checks. Each sub-step
+   is independent — if any fails, skip it and continue.
+
+   **7b-i. Fetch Reviews**:
+   ```bash
+   gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/reviews \
+     --jq '[.[] | {id: .id, user: .user.login, state: .state, body: .body, submitted_at: .submitted_at, commit_id: .commit_id}]'
+   ```
+
+   **7b-ii. Fetch Inline Comments**:
+   ```bash
+   gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments \
+     --jq '[.[] | {path: .path, line: .line, body: .body, user: .user.login, created_at: .created_at}]'
+   ```
+
+   **7b-iii. Identify Current User**:
+   ```bash
+   gh api user --jq '.login'
+   ```
+
+   **7b-iv. Token Budget**: Cap existing review comments
+   at 3000 characters total. When exceeded: filter to
+   files changed in the branch diff, sort by `created_at`
+   descending, include until budget exhausted, truncate
+   remainder with a note.
+
+   **7b-v. Error Handling**: If any `gh api` call returns
+   403, 404, 429 (rate limited), or times out: log the
+   error, skip the sub-step, proceed. All review state
+   data is additive context — its absence reduces only
+   deduplication accuracy.
+
+   #### Step 7c -- Pre-posting Checks
+
+   **Duplicate review detection**: Check if a review from
+   the current user (7b-iii) already exists in the review
+   list (7b-i):
+
+   - If a prior review with the **same verdict** exists:
+     Inform the user that a prior review exists and the
+     latest review takes precedence. Use the
+     **AskUserQuestion tool** with options
+     `["Yes -- post new review", "No -- skip posting"]`.
+
+   - If a prior review with a **different verdict** exists:
+     Inform the user of the prior verdict and that the new
+     review will override it. Use the
+     **AskUserQuestion tool** with options
+     `["Yes -- override with <new_verdict>",
+     "No -- keep existing <old_verdict>"]`.
+
+   - If no prior review exists: proceed silently.
+
+   **Stale review + CODEOWNER checks** (APPROVE verdicts
+   only): Fetch branch protection settings:
+
+   ```bash
+   gh api repos/{owner}/{repo}/branches/<baseRefName>/protection \
+     --jq '{dismiss_stale: .required_pull_request_reviews.dismiss_stale_reviews, require_codeowners: .required_pull_request_reviews.require_code_owner_reviews}'
+   ```
+
+   If 404 (no branch protection) or 403 (insufficient
+   permissions): skip both checks silently.
+
+   If `dismiss_stale` is true:
+   > "Warning: This repo dismisses stale reviews. If the
+   > author pushes any new commits after this APPROVE, it
+   > will be automatically invalidated and the PR will
+   > return to REVIEW_REQUIRED. You may need to re-run
+   > `/review-council` after final commits."
+
+   If `require_codeowners` is true, check for CODEOWNERS:
+   ```bash
+   gh api repos/{owner}/{repo}/contents/CODEOWNERS \
+     --jq '.name' 2>/dev/null || \
+   gh api repos/{owner}/{repo}/contents/.github/CODEOWNERS \
+     --jq '.name' 2>/dev/null
+   ```
+   If CODEOWNERS exists:
+   > "Warning: This repo requires code owner reviews.
+   > This APPROVE may not satisfy branch protection if
+   > this account is not listed in CODEOWNERS."
+
+   #### Step 7d -- Multi-Persona Finding Aggregation
+
+   Assemble a single review body from all Divisor persona
+   findings:
+
+   **Review body structure**:
+
+   ```
+   ## Council Verdict: <VERDICT>
+
+   **Reviewers**: <comma-separated persona names>
+   **Iterations**: <count>
+
+   ### <Persona Name> (<APPROVE | REQUEST CHANGES>)
+   - [<SEVERITY>] <Finding description>
+   - [<SEVERITY>] <Finding description>
+
+   ### <Persona Name> (<APPROVE>)
+   No findings.
+
+   ...
+
+   ---
+   _This review was generated by /review-council
+   (AI-assisted)._
+   ```
+
+   **Aggregation rules**:
+   - LOW-severity findings: summarize as count only
+     (e.g., "3 LOW findings omitted"). Do NOT enumerate
+     each LOW finding in the review body.
+   - MEDIUM+ findings: include full text with severity
+     tag.
+   - Consolidated cross-persona findings (from Step 3):
+     present under the primary persona with attribution
+     to contributing personas.
+   - If the council verdict is **APPROVE WITH
+     ADVISORIES**: include a note at the top:
+     > "Council approved with advisories — unresolved
+     > HIGH/CRITICAL findings require human judgment
+     > before merge."
+
+   **Body size limit**: If the assembled body exceeds
+   60,000 characters, truncate per-persona sections
+   starting from the persona with the most findings,
+   replacing detailed findings with a summary count.
+   Include: "Full findings available in the terminal
+   report."
+
+   #### Step 7e -- Inline Comment Preparation
+
+   For findings mapped to specific files and line ranges
+   in the diff, prepare inline comments:
+
+   1. Collect all file-specific findings from all personas
+   2. Sort by severity (CRITICAL > HIGH > MEDIUM > LOW)
+   3. Within the same severity tier, round-robin across
+      personas in **alphabetical order** by persona name.
+      When the slot count is odd, the first persona
+      alphabetically receives the extra slot.
+   4. Take the top 15
+   5. Overflow goes to the review body summary
+
+   **Suggestion block format**: When a finding has a
+   concrete single-file code fix (literal replacement):
+
+   ````
+   **[HIGH] Description of the issue**
+
+   ```suggestion
+   corrected code here
+   ```
+   ````
+
+   Use suggestion blocks ONLY for literal code
+   replacements. MUST NOT use them for architectural
+   recommendations, multi-file changes, or removal of
+   security controls.
+
+   **Show all comments for review**: Present each comment
+   to the user before posting:
+   ```
+   File: <path>
+   Line: <line_number>
+   Type: suggestion / plain-text
+   Body: <comment text>
+   ```
+
+   #### Step 7f -- Verdict Mapping and Human Confirmation
+
+   Map the council verdict to the GitHub API event type:
+
+   | Council Verdict | GitHub Event |
+   |-----------------|-------------|
+   | APPROVE | `APPROVE` |
+   | REQUEST CHANGES | `REQUEST_CHANGES` |
+   | APPROVE WITH ADVISORIES | `COMMENT` |
+
+   Display the verdict context, then use the
+   **AskUserQuestion tool** for confirmation:
+
+   For APPROVE verdicts:
+   > "This will post an APPROVE review, which may unblock
+   > merge in repos with branch protection. The review
+   > will be labeled as AI-generated."
+
+   Use options: `["Approve -- post review",
+   "No -- skip posting", "Edit comments first",
+   "Change verdict"]`.
+
+   For REQUEST CHANGES or COMMENT verdicts:
+   > "This will post a <verdict> review, which will
+   > block merge in repos with branch protection."
+
+   Use options: `["Yes -- post review",
+   "No -- skip posting", "Edit comments first",
+   "Change verdict"]`.
+
+   - **"No -- skip posting"**: Skip posting. The terminal
+     report is sufficient.
+   - **"Edit comments first"**: Let the user modify
+     comments, then re-confirm.
+   - **"Change verdict"**: Let the user override the
+     verdict (e.g., downgrade REQUEST CHANGES to
+     COMMENT).
+
+   **CRITICAL RULE**: NEVER post reviews without explicit
+   human confirmation via the **AskUserQuestion tool**.
+   Always show the exact content (verdict type + all
+   comments) that will be posted and wait for the user
+   to select a confirming option.
+
+   #### Step 7g -- Post Review
+
+   Construct a JSON payload containing:
+   - `event`: the mapped GitHub event type
+   - `body`: the assembled review body
+   - `comments`: array of inline comment objects, each
+     with `path` (file path relative to repo root),
+     `line` (line number in the diff, right side), and
+     `body` (comment text including severity tag)
+
+   Write the payload to a temporary file and post:
+
+   ```bash
+   gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/reviews \
+     --method POST \
+     --input <json-file>
+   ```
+
+   Always write the JSON payload to a temporary file
+   rather than interpolating into shell arguments, to
+   prevent shell injection. Create the temporary file
+   with restrictive permissions from the start — use
+   `mktemp` (which creates files with mode 0600 on
+   Linux) or set `umask 077` before creation to avoid
+   a race window between creation and `chmod`.
+
+   **Cleanup**: Remove the temporary file after posting,
+   on ALL exit paths — including success, user
+   cancellation, and posting failure.
+
+   **Graceful degradation**: If `gh api` returns HTTP
+   403, 404, or 422 (insufficient permissions, PR no
+   longer exists, non-collaborator, or self-review
+   prohibition):
+
+   a. Fall back to posting as `"event": "COMMENT"` with
+      a note:
+      > "Note: Could not post as <original verdict> due
+      > to insufficient permissions. Posted as COMMENT
+      > instead. Original verdict: <verdict>."
+
+   b. If the fallback also fails, inform the user that
+      their token lacks write permissions for PR reviews
+      and suggest re-authenticating with `gh auth login`.
+
+   c. If `gh api` returns HTTP 429 (rate limited), skip
+      posting with:
+      > "GitHub API rate limit reached — posting skipped.
+      > Retry later or post manually."
+
+   **Auto-detected PR linked issues**: If the PR was
+   auto-detected (not from explicit argument), parse the
+   PR body (fetched during Step 7a) for issue references
+   matching `Fixes #N`, `Closes #N`, or `Resolves #N`.
+   For each matched reference:
+   1. Validate the number is digits-only (1–999999)
+   2. Fetch the issue: `gh issue view <N> --json title,body`
+   3. Extract the title and any acceptance criteria
+      (checkboxes or `## Acceptance Criteria` heading)
+   4. Cap at 5 linked issues; truncate issue bodies at
+      2000 characters
+
+   Include the results as a "Linked Issues" section in
+   the posted review body. This provides Protocol 2
+   value for auto-detected PRs without requiring a
+   Phase 1c re-run. If any `gh issue view` call fails,
+   skip that issue silently.
 
 ---
 
