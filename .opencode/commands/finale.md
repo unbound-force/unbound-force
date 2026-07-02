@@ -364,6 +364,159 @@ gh pr checks <number> --watch
 
   Ask the user how to proceed.
 
+- **If no checks are reported** ("no checks reported"
+  or equivalent empty result): do NOT conclude that no
+  CI is configured. Investigate using the mergeability
+  gate below.
+
+#### 6a. Mergeability Gate
+
+When `gh pr checks` returns "no checks reported,"
+query the PR mergeability status:
+
+```bash
+gh pr view <number> --json mergeable,mergeStateStatus
+```
+
+If the `gh pr view` command itself fails (non-zero
+exit code), report the error and **STOP**:
+
+> "Could not query PR mergeability. Check network
+> connectivity and `gh` CLI authentication."
+
+Otherwise, interpret the `mergeable` field:
+
+- **`CONFLICTING`**: The PR has a merge conflict that
+  is blocking CI checks from running. Proceed to
+  step 6b (Conflict Recovery).
+
+- **`UNKNOWN`**: GitHub is still computing the merge
+  state. Warn the user:
+
+  > "GitHub is computing mergeability — retrying in
+  > 10 seconds..."
+
+  Wait approximately 10 seconds, then re-run:
+
+  ```bash
+  gh pr view <number> --json mergeable,mergeStateStatus
+  ```
+
+  If still `UNKNOWN` after one retry, warn and
+  proceed to step 6c (Workflow Cross-Reference) to
+  gather more information before concluding.
+
+- **`MERGEABLE`**: No merge conflict. Proceed to
+  step 6c (Workflow Cross-Reference).
+
+#### 6b. Conflict Recovery
+
+When `mergeable` is `CONFLICTING`, report the
+conflict to the user and present recovery options:
+
+> "PR #<number> has a merge conflict with the target
+> branch. CI checks cannot run until the conflict is
+> resolved.
+>
+> Options:
+> 1. Rebase onto target branch and re-push
+> 2. Stop and resolve manually
+> 3. Continue anyway (CI will not run)"
+
+Ask the user which option to take.
+
+**Option 1 — Rebase and re-push**:
+
+```bash
+git fetch origin main
+git rebase origin/main
+```
+
+- If the rebase succeeds without conflicts:
+
+  ```bash
+  git push --force-with-lease
+  ```
+
+  Then re-run CI checks:
+
+  ```bash
+  gh pr checks <number> --watch
+  ```
+
+  Continue with normal step 6 check-watching behavior
+  (checks pass → step 7, checks fail → report and
+  stop).
+
+- If the rebase encounters conflicts:
+
+  ```bash
+  git rebase --abort
+  ```
+
+  Report which files have conflicts and **STOP**:
+
+  > "Rebase failed — conflicts in the following
+  > files:
+  >
+  > - <file1>
+  > - <file2>
+  >
+  > Resolve the conflicts manually, then re-run
+  > /finale."
+
+The agent MUST NOT use `git push --force`. Always
+use `--force-with-lease` for safety. The agent MUST
+NOT automatically rebase without user confirmation.
+
+**Option 2 — Stop for manual resolution**:
+
+Report the conflict and **STOP**:
+
+> "Merge conflict detected. Resolve it manually,
+> then re-run /finale."
+
+**Option 3 — Continue anyway**:
+
+Proceed to step 7 (Return to Main). Set a flag so
+that step 8 (Summary) includes a warning that CI
+checks did not run. See step 8 for the warning
+format.
+
+#### 6c. Workflow Cross-Reference
+
+When `mergeable` is `MERGEABLE` (or `UNKNOWN` after
+retry) and no checks were reported, check whether CI
+workflows are configured for the repository:
+
+```bash
+ls .github/workflows/*.yml .github/workflows/*.yaml \
+  2>/dev/null
+```
+
+- **If workflow files exist**: warn the user:
+
+  > "CI workflow files exist in `.github/workflows/`
+  > but no checks were reported for PR #<number>.
+  > This may indicate disabled workflows, a workflow
+  > syntax error, or another configuration issue.
+  >
+  > Options:
+  > 1. Proceed without CI checks
+  > 2. Stop and investigate"
+
+  Ask the user which option to take. If proceed,
+  continue to step 7. If stop, **STOP** with the
+  warning.
+
+- **If no workflow files exist**: no CI is configured
+  for this repository. Report:
+
+  > "No CI workflows configured — proceeding without
+  > checks."
+
+  Proceed to step 7.
+
 ### 7. Return to Main
 
 Return to main so the developer can start other work:
@@ -396,6 +549,18 @@ Display a completion report:
 Next: Request reviewers on the PR, then merge after
 approval with: gh pr merge --rebase --delete-branch
 ```
+
+If CI checks were skipped because the user chose
+"Continue anyway" during a merge conflict (step 6b,
+option 3), include a warning in the summary:
+
+```
+**Checks:** CI checks did not run due to merge conflict
+```
+
+Replace the `**Checks:** passed` line with the warning
+above. This ensures the user is aware that CI
+verification is incomplete.
 
 ## Guardrails
 
