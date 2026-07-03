@@ -411,25 +411,122 @@ Otherwise, interpret the `mergeable` field:
 
 #### 6b. Conflict Recovery
 
+Determine the target remote and branch for conflict
+resolution. Use the PR's base ref (`baseRefName`
+from step 5) and the target remote:
+
+- If the PR targets an upstream fork parent (step 5a):
+  `<target-remote>` is the upstream remote name
+  (e.g., `upstream`)
+- Otherwise: `<target-remote>` is `origin`
+
 When `mergeable` is `CONFLICTING`, report the
 conflict to the user and present recovery options:
 
-> "PR #<number> has a merge conflict with the target
-> branch. CI checks cannot run until the conflict is
-> resolved.
+> "PR #<number> has a merge conflict with
+> `<target-remote>/<base-branch>`. CI checks cannot
+> run until the conflict is resolved.
 >
 > Options:
-> 1. Rebase onto target branch and re-push
-> 2. Stop and resolve manually
-> 3. Continue anyway (CI will not run)"
+> 1. Merge target branch (no force push needed)
+> 2. Rebase onto target branch (requires force push)
+> 3. Stop and resolve manually
+> 4. Continue anyway (CI will not run)"
 
 Ask the user which option to take.
 
-**Option 1 — Rebase and re-push**:
+**Option 1 — Merge target branch**:
+
+This option does not require force push and works in
+restricted environments with branch protection rules.
+
+Show the commands and ask for explicit confirmation
+before executing:
+
+> "I will run the following commands:
+>
+> ```
+> git fetch <target-remote> <base-branch>
+> git merge <target-remote>/<base-branch>
+> ```
+>
+> This creates a merge commit. Proceed?"
+
+If the user confirms, execute:
 
 ```bash
-git fetch origin main
-git rebase origin/main
+git fetch <target-remote> <base-branch>
+git merge <target-remote>/<base-branch>
+```
+
+- If the merge succeeds without conflicts:
+
+  ```bash
+  git push
+  ```
+
+  Then poll for CI checks using a bash loop to avoid
+  consuming LLM tokens:
+
+  ```bash
+  while true; do
+    STATUS=$(gh pr checks <number> 2>&1)
+    if echo "$STATUS" | grep -qE 'pass|fail'; then
+      echo "$STATUS"
+      break
+    fi
+    sleep 10
+  done
+  ```
+
+  Read the poll output and continue with normal
+  step 6 check-watching behavior (checks pass →
+  step 7, checks fail → report and stop).
+
+- If the merge encounters conflicts:
+
+  ```bash
+  git merge --abort
+  ```
+
+  Report which files have conflicts and **STOP**:
+
+  > "Merge failed — conflicts in the following
+  > files:
+  >
+  > - <file1>
+  > - <file2>
+  >
+  > Resolve the conflicts manually, then re-run
+  > /finale."
+
+**Option 2 — Rebase onto target branch**:
+
+**Warning**: This option requires `--force-with-lease`
+to push. Force push may be blocked in restricted work
+environments with branch protection rules. If force
+push is not available, use Option 1 (merge) instead.
+
+Show the commands and ask for explicit confirmation
+before executing:
+
+> "I will run the following commands:
+>
+> ```
+> git fetch <target-remote> <base-branch>
+> git rebase <target-remote>/<base-branch>
+> git push --force-with-lease
+> ```
+>
+> **Note**: Force push is required after rebase. This
+> may be blocked in restricted environments.
+> Proceed?"
+
+If the user confirms, execute:
+
+```bash
+git fetch <target-remote> <base-branch>
+git rebase <target-remote>/<base-branch>
 ```
 
 - If the rebase succeeds without conflicts:
@@ -438,15 +535,12 @@ git rebase origin/main
   git push --force-with-lease
   ```
 
-  Then re-run CI checks:
+  If push fails (e.g., force push blocked by branch
+  protection): report the error and suggest using
+  Option 1 (merge) instead. **STOP**.
 
-  ```bash
-  gh pr checks <number> --watch
-  ```
-
-  Continue with normal step 6 check-watching behavior
-  (checks pass → step 7, checks fail → report and
-  stop).
+  If push succeeds, poll for CI checks using a bash
+  loop (same as Option 1).
 
 - If the rebase encounters conflicts:
 
@@ -465,18 +559,14 @@ git rebase origin/main
   > Resolve the conflicts manually, then re-run
   > /finale."
 
-The agent MUST NOT use `git push --force`. Always
-use `--force-with-lease` for safety. The agent MUST
-NOT automatically rebase without user confirmation.
-
-**Option 2 — Stop for manual resolution**:
+**Option 3 — Stop for manual resolution**:
 
 Report the conflict and **STOP**:
 
 > "Merge conflict detected. Resolve it manually,
 > then re-run /finale."
 
-**Option 3 — Continue anyway**:
+**Option 4 — Continue anyway**:
 
 Proceed to step 7 (Return to Main). Set a flag so
 that step 8 (Summary) includes a warning that CI
@@ -578,6 +668,13 @@ verification is incomplete.
 - **If any step fails**, stop immediately with context
   and options — do not attempt to continue or recover
   silently
+- **NEVER use `git push --force`** — always use
+  `--force-with-lease` for safety when force push is
+  required (e.g., after rebase)
+- **NEVER rebase or force push without explicit user
+  confirmation** — show the exact commands and wait
+  for approval before executing any destructive
+  git operation
 
 ## Branch Safety
 

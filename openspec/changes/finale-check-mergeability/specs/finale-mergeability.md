@@ -68,30 +68,68 @@ existing `/finale` error handling pattern (e.g., step 4:
 When a merge conflict is detected (FR-001, `CONFLICTING`),
 the agent MUST present the user with recovery options:
 
-1. **Rebase onto target branch**: Run `git fetch origin
-   main && git rebase origin/main`. If rebase succeeds
-   cleanly, force-push with `git push --force-with-lease`
-   and re-run `gh pr checks --watch`. If rebase has
-   conflicts, report them and stop.
-2. **Stop and resolve manually**: Report the conflict and
+1. **Merge target branch**: Run `git fetch
+   <target-remote> <base-branch> && git merge
+   <target-remote>/<base-branch>`. No force push
+   required. If merge has conflicts, abort and stop.
+2. **Rebase onto target branch**: Run `git fetch
+   <target-remote> <base-branch> && git rebase
+   <target-remote>/<base-branch>`. Requires force push
+   with `--force-with-lease`. Warn that force push MAY
+   be blocked in restricted environments.
+3. **Stop and resolve manually**: Report the conflict and
    let the user handle it outside the agent session.
-3. **Continue anyway**: Proceed to the summary step with
+4. **Continue anyway**: Proceed to the summary step with
    an explicit warning that CI has not run.
 
-The agent MUST NOT automatically rebase without user
-confirmation. The agent MUST NOT use `git push --force`
-(MUST use `--force-with-lease` for safety).
+The target remote and base branch MUST be resolved
+dynamically from the PR metadata (`baseRefName`) and
+the fork detection result from step 5a. The agent MUST
+NOT hardcode `origin/main`.
+
+The agent MUST NOT automatically merge or rebase without
+explicit user confirmation. The agent MUST show the
+exact commands before executing. The agent MUST NOT use
+`git push --force` (MUST use `--force-with-lease` for
+safety).
+
+After a successful merge or rebase push, the agent MUST
+poll for CI checks using a non-blocking bash loop to
+avoid consuming LLM tokens. The agent MUST NOT re-run
+`gh pr checks --watch` inline.
+
+#### Scenario: Clean merge resolves conflict
+
+- **GIVEN** a PR has a merge conflict
+- **AND** the user selects "Merge target branch"
+- **WHEN** `git merge <target-remote>/<base-branch>`
+  succeeds without conflicts
+- **THEN** the agent runs `git push`
+- **AND** polls for CI checks via a bash loop
+- **AND** continues with normal step 6 check-watching
+  behavior
 
 #### Scenario: Clean rebase resolves conflict
 
 - **GIVEN** a PR has a merge conflict
 - **AND** the user selects "Rebase onto target branch"
-- **WHEN** `git rebase origin/main` succeeds without
-  conflicts
+- **WHEN** `git rebase <target-remote>/<base-branch>`
+  succeeds without conflicts
 - **THEN** the agent runs `git push --force-with-lease`
-- **AND** re-runs `gh pr checks <number> --watch`
+- **AND** polls for CI checks via a bash loop
 - **AND** continues with normal step 6 check-watching
   behavior
+
+#### Scenario: Force push blocked in restricted env
+
+- **GIVEN** a PR has a merge conflict
+- **AND** the user selects "Rebase onto target branch"
+- **AND** the rebase succeeds without conflicts
+- **WHEN** `git push --force-with-lease` fails due to
+  branch protection rules
+- **THEN** the agent reports the error
+- **AND** suggests using Option 1 (merge) instead
+- **AND** stops
 
 #### Scenario: Rebase has conflicts
 
