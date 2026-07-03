@@ -450,9 +450,11 @@ before executing:
 > ```
 > git fetch <target-remote> <base-branch>
 > git merge <target-remote>/<base-branch>
+> git push
 > ```
 >
-> This creates a merge commit. Proceed?"
+> This creates a merge commit and pushes to the
+> remote. Proceed?"
 
 If the user confirms, execute:
 
@@ -672,14 +674,15 @@ e. **User approval gate**:
    > the resolution diff above.
    >
    > Options:
-   > 1. Approve and commit
-   > 2. Abort (discard resolution)"
+   > 1. Approve, commit, and push
+   > 2. Request edits (modify resolution manually)
+   > 3. Abort (discard resolution)"
 
    Ask the user which option to take.
 
-   - **If the user approves**: complete the merge
-     commit (git will auto-create the merge commit
-     message) and push:
+   - **If the user approves** (option 1): complete the
+     merge commit (git will auto-create the merge
+     commit message) and push:
 
      ```bash
      git commit --no-edit
@@ -703,7 +706,23 @@ e. **User approval gate**:
      Read the poll output and continue with normal
      step 6 check-watching behavior.
 
-   - **If the user aborts**:
+   - **If the user requests edits** (option 2):
+
+     Inform the user that the conflicting files are
+     staged with the sub-agent's resolution. The user
+     can now edit the files manually, then stage the
+     changes:
+
+     > "Edit the resolved files as needed, then stage
+     > your changes with `git add <file>`. When done,
+     > tell me to continue."
+
+     When the user signals they are done, re-show the
+     staged diff (`git diff --cached`) and return to
+     the approval gate (present the 3-option menu
+     again).
+
+   - **If the user aborts** (option 3):
 
      ```bash
      git merge --abort
