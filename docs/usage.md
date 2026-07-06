@@ -46,7 +46,7 @@ the agent name in your message.
 ### Review Code
 
 ```
-/review-council
+/review-council [N]
 ```
 
 Runs 9 AI reviewer personas in parallel. Each focuses
@@ -54,7 +54,9 @@ on a different aspect (security, architecture, testing,
 operations, intent drift). You receive an **APPROVE** or
 **REQUEST CHANGES** verdict with specific findings. The
 council auto-detects whether to review code or specs
-based on what changed on your branch.
+based on what changed on your branch. When a PR number
+is provided (`[N]`), findings can optionally be posted
+as a GitHub review.
 
 ### Address Review Feedback
 
@@ -239,7 +241,7 @@ for details.
 
 | Command | Description |
 |---------|-------------|
-| `/review-council` | Run the 9-persona review council |
+| `/review-council [N]` | Run the 9-persona review council; optionally post to PR |
 | `/review-pr` | Review a GitHub PR (post-PR) |
 | `/address-feedback` | Triage and address PR review feedback |
 | `/opsx-propose` | Create a change proposal with plan and tasks |
