@@ -364,6 +364,407 @@ gh pr checks <number> --watch
 
   Ask the user how to proceed.
 
+- **If no checks are reported** ("no checks reported"
+  or equivalent empty result): do NOT conclude that no
+  CI is configured. Investigate using the mergeability
+  gate below.
+
+#### 6a. Mergeability Gate
+
+When `gh pr checks` returns "no checks reported,"
+query the PR mergeability status:
+
+```bash
+gh pr view <number> --json mergeable,mergeStateStatus
+```
+
+If the `gh pr view` command itself fails (non-zero
+exit code), report the error and **STOP**:
+
+> "Could not query PR mergeability. Check network
+> connectivity and `gh` CLI authentication."
+
+Otherwise, interpret the `mergeable` field:
+
+- **`CONFLICTING`**: The PR has a merge conflict that
+  is blocking CI checks from running. Proceed to
+  step 6b (Conflict Recovery).
+
+- **`UNKNOWN`**: GitHub is still computing the merge
+  state. Warn the user:
+
+  > "GitHub is computing mergeability — retrying in
+  > 10 seconds..."
+
+  Wait approximately 10 seconds, then re-run:
+
+  ```bash
+  gh pr view <number> --json mergeable,mergeStateStatus
+  ```
+
+  If still `UNKNOWN` after one retry, warn and
+  proceed to step 6c (Workflow Cross-Reference) to
+  gather more information before concluding.
+
+- **`MERGEABLE`**: No merge conflict. Proceed to
+  step 6c (Workflow Cross-Reference).
+
+#### 6b. Conflict Recovery
+
+Determine the target remote and branch for conflict
+resolution. Use the PR's base ref (`baseRefName`
+from step 5) and the target remote:
+
+- If the PR targets an upstream fork parent (step 5a):
+  `<target-remote>` is the upstream remote name
+  (e.g., `upstream`)
+- Otherwise: `<target-remote>` is `origin`
+
+When `mergeable` is `CONFLICTING`, report the
+conflict to the user and present recovery options:
+
+> "PR #<number> has a merge conflict with
+> `<target-remote>/<base-branch>`. CI checks cannot
+> run until the conflict is resolved.
+>
+> Options:
+> 1. Merge target branch (no force push needed)
+> 2. Rebase onto target branch (requires force push)
+> 3. Stop and resolve manually
+> 4. Continue anyway (CI will not run)
+> 5. Spawn sub-agent to resolve conflicts
+>    (AI-assisted)"
+
+Ask the user which option to take.
+
+**Option 1 — Merge target branch**:
+
+This option does not require force push and works in
+restricted environments with branch protection rules.
+
+Show the commands and ask for explicit confirmation
+before executing:
+
+> "I will run the following commands:
+>
+> ```
+> git fetch <target-remote> <base-branch>
+> git merge <target-remote>/<base-branch>
+> git push
+> ```
+>
+> This creates a merge commit and pushes to the
+> remote. Proceed?"
+
+If the user confirms, execute:
+
+```bash
+git fetch <target-remote> <base-branch>
+git merge <target-remote>/<base-branch>
+```
+
+- If the merge succeeds without conflicts:
+
+  ```bash
+  git push
+  ```
+
+  Then poll for CI checks using a bash loop to avoid
+  consuming LLM tokens:
+
+  ```bash
+  while true; do
+    STATUS=$(gh pr checks <number> 2>&1)
+    if echo "$STATUS" | grep -qE 'pass|fail'; then
+      echo "$STATUS"
+      break
+    fi
+    sleep 10
+  done
+  ```
+
+  Read the poll output and continue with normal
+  step 6 check-watching behavior (checks pass →
+  step 7, checks fail → report and stop).
+
+- If the merge encounters conflicts:
+
+  ```bash
+  git merge --abort
+  ```
+
+  Report which files have conflicts and **STOP**:
+
+  > "Merge failed — conflicts in the following
+  > files:
+  >
+  > - <file1>
+  > - <file2>
+  >
+  > Resolve the conflicts manually, then re-run
+  > /finale."
+
+**Option 2 — Rebase onto target branch**:
+
+**Warning**: This option requires `--force-with-lease`
+to push. Force push may be blocked in restricted work
+environments with branch protection rules. If force
+push is not available, use Option 1 (merge) instead.
+
+Show the commands and ask for explicit confirmation
+before executing:
+
+> "I will run the following commands:
+>
+> ```
+> git fetch <target-remote> <base-branch>
+> git rebase <target-remote>/<base-branch>
+> git push --force-with-lease
+> ```
+>
+> **Note**: Force push is required after rebase. This
+> may be blocked in restricted environments.
+> Proceed?"
+
+If the user confirms, execute:
+
+```bash
+git fetch <target-remote> <base-branch>
+git rebase <target-remote>/<base-branch>
+```
+
+- If the rebase succeeds without conflicts:
+
+  ```bash
+  git push --force-with-lease
+  ```
+
+  If push fails (e.g., force push blocked by branch
+  protection): report the error and suggest using
+  Option 1 (merge) instead. **STOP**.
+
+  If push succeeds, poll for CI checks using a bash
+  loop (same as Option 1).
+
+- If the rebase encounters conflicts:
+
+  ```bash
+  git rebase --abort
+  ```
+
+  Report which files have conflicts and **STOP**:
+
+  > "Rebase failed — conflicts in the following
+  > files:
+  >
+  > - <file1>
+  > - <file2>
+  >
+  > Resolve the conflicts manually, then re-run
+  > /finale."
+
+**Option 3 — Stop for manual resolution**:
+
+Report the conflict and **STOP**:
+
+> "Merge conflict detected. Resolve it manually,
+> then re-run /finale."
+
+**Option 4 — Continue anyway**:
+
+Proceed to step 7 (Return to Main). Set a flag so
+that step 8 (Summary) includes a warning that CI
+checks did not run. See step 8 for the warning
+format.
+
+**Option 5 — Spawn sub-agent to resolve conflicts**:
+
+This option uses the merge strategy to create
+conflict markers, then spawns a `cobalt-crush-dev`
+sub-agent to attempt automated conflict resolution.
+
+a. **Execute the merge to create conflict markers**:
+
+   Show the commands and ask for explicit confirmation
+   before executing:
+
+   > "I will merge `<target-remote>/<base-branch>` to
+   > create conflict markers, then spawn a sub-agent
+   > to resolve them. Proceed?"
+
+   If the user confirms, execute:
+
+   ```bash
+   git fetch <target-remote> <base-branch>
+   git merge <target-remote>/<base-branch>
+   ```
+
+b. **Identify conflicting files**:
+
+   ```bash
+   git diff --name-only --diff-filter=U
+   ```
+
+   Capture the list of files with unresolved conflicts.
+
+c. **Spawn the sub-agent**:
+
+   Call the Task tool with `subagent_type:
+   cobalt-crush-dev` and a prompt containing:
+
+   - The list of conflicting files from step (b)
+   - The target branch name
+     (`<target-remote>/<base-branch>`)
+   - Instructions: "Resolve the merge conflict markers
+     (`<<<<<<<`, `=======`, `>>>>>>>`) in each of the
+     following files. For each file: read the file,
+     understand the intent of both sides of the
+     conflict (the HEAD changes and the incoming
+     changes), write the resolved content that
+     preserves both intents, and stage the resolved
+     file with `git add <file>`. Report per-file
+     success or failure."
+   - A directive: "Do NOT resolve the conflicts by
+     simply choosing one side. Integrate both changes
+     where possible. If the conflict is too complex to
+     resolve confidently, report that file as
+     unresolved."
+
+   The sub-agent MUST NOT receive the full `/finale`
+   flow context. It receives only the information
+   needed for conflict resolution.
+
+d. **Evaluate the sub-agent result**:
+
+   After the sub-agent returns, check for remaining
+   conflict markers in all files:
+
+   ```bash
+   git diff --name-only --diff-filter=U
+   ```
+
+   - **If unresolved files remain** (sub-agent
+     partially failed): report which files were
+     resolved and which remain:
+
+     > "Sub-agent resolved N of M files.
+     > Unresolved: <file1>, <file2>
+     >
+     > Aborting merge to restore clean state."
+
+     ```bash
+     git merge --abort
+     ```
+
+     Return to the conflict recovery options menu
+     (options 1-5).
+
+   - **If no unresolved files remain** (sub-agent
+     succeeded): proceed to step (e).
+
+e. **User approval gate**:
+
+   Show the staged diff to the user:
+
+   ```bash
+   git diff --cached
+   ```
+
+   > "The sub-agent resolved all conflicts. Review
+   > the resolution diff above.
+   >
+   > Options:
+   > 1. Approve, commit, and push
+   > 2. Request edits (modify resolution manually)
+   > 3. Abort (discard resolution)"
+
+   Ask the user which option to take.
+
+   - **If the user approves** (option 1): complete the
+     merge commit (git will auto-create the merge
+     commit message) and push:
+
+     ```bash
+     git commit --no-edit
+     git push
+     ```
+
+     Then poll for CI checks using a bash loop (same
+     as Option 1):
+
+     ```bash
+     while true; do
+       STATUS=$(gh pr checks <number> 2>&1)
+       if echo "$STATUS" | grep -qE 'pass|fail'; then
+         echo "$STATUS"
+         break
+       fi
+       sleep 10
+     done
+     ```
+
+     Read the poll output and continue with normal
+     step 6 check-watching behavior.
+
+   - **If the user requests edits** (option 2):
+
+     Inform the user that the conflicting files are
+     staged with the sub-agent's resolution. The user
+     can now edit the files manually, then stage the
+     changes:
+
+     > "Edit the resolved files as needed, then stage
+     > your changes with `git add <file>`. When done,
+     > tell me to continue."
+
+     When the user signals they are done, re-show the
+     staged diff (`git diff --cached`) and return to
+     the approval gate (present the 3-option menu
+     again).
+
+   - **If the user aborts** (option 3):
+
+     ```bash
+     git merge --abort
+     ```
+
+     Return to the conflict recovery options menu
+     (options 1-5).
+
+#### 6c. Workflow Cross-Reference
+
+When `mergeable` is `MERGEABLE` (or `UNKNOWN` after
+retry) and no checks were reported, check whether CI
+workflows are configured for the repository:
+
+```bash
+ls .github/workflows/*.yml .github/workflows/*.yaml \
+  2>/dev/null
+```
+
+- **If workflow files exist**: warn the user:
+
+  > "CI workflow files exist in `.github/workflows/`
+  > but no checks were reported for PR #<number>.
+  > This may indicate disabled workflows, a workflow
+  > syntax error, or another configuration issue.
+  >
+  > Options:
+  > 1. Proceed without CI checks
+  > 2. Stop and investigate"
+
+  Ask the user which option to take. If proceed,
+  continue to step 7. If stop, **STOP** with the
+  warning.
+
+- **If no workflow files exist**: no CI is configured
+  for this repository. Report:
+
+  > "No CI workflows configured — proceeding without
+  > checks."
+
+  Proceed to step 7.
+
 ### 7. Return to Main
 
 Return to main so the developer can start other work:
@@ -397,6 +798,18 @@ Next: Request reviewers on the PR, then merge after
 approval with: gh pr merge --rebase --delete-branch
 ```
 
+If CI checks were skipped because the user chose
+"Continue anyway" during a merge conflict (step 6b,
+option 4), include a warning in the summary:
+
+```
+**Checks:** CI checks did not run due to merge conflict
+```
+
+Replace the `**Checks:** passed` line with the warning
+above. This ensures the user is aware that CI
+verification is incomplete.
+
 ## Guardrails
 
 - **NEVER run on `main`** — the command is for feature
@@ -413,6 +826,16 @@ approval with: gh pr merge --rebase --delete-branch
 - **If any step fails**, stop immediately with context
   and options — do not attempt to continue or recover
   silently
+- **NEVER use `git push --force`** — always use
+  `--force-with-lease` for safety when force push is
+  required (e.g., after rebase)
+- **NEVER rebase or force push without explicit user
+  confirmation** — show the exact commands and wait
+  for approval before executing any destructive
+  git operation
+- **NEVER commit sub-agent conflict resolutions without
+  user approval** — always show the resolution diff
+  and wait for explicit approval before committing
 
 ## Branch Safety
 
