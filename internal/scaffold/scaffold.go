@@ -353,6 +353,18 @@ func isConventionPack(relPath string) bool {
 	return strings.HasPrefix(relPath, "opencode/uf/packs/")
 }
 
+// alwaysDeployedPacks lists convention packs that are deployed
+// regardless of the detected project language.
+var alwaysDeployedPacks = map[string]bool{
+	"default":        true,
+	"default-custom": true,
+	"severity":       true,
+	"content":        true,
+	"content-custom": true,
+	"ci":             true,
+	"ci-custom":      true,
+}
+
 // shouldDeployPack returns true if the convention pack file
 // should be deployed for the given resolved language. Always
 // deploys default packs. For language-specific packs, only
@@ -365,9 +377,8 @@ func shouldDeployPack(relPath, lang string) bool {
 	base := filepath.Base(relPath)
 	name := strings.TrimSuffix(base, filepath.Ext(base))
 
-	// Always deploy default, severity, and content packs (language-agnostic)
-	if name == "default" || name == "default-custom" || name == "severity" ||
-		name == "content" || name == "content-custom" {
+	// Always deploy language-agnostic packs
+	if alwaysDeployedPacks[name] {
 		return true
 	}
 	// Deploy language-specific pack and its custom extension
@@ -1311,6 +1322,8 @@ func collectDeployedPacks(lang, root string) []string {
 		"severity.md",
 		"content.md",
 		"content-custom.md",
+		"ci.md",
+		"ci-custom.md",
 	}
 	if lang != "" && lang != "default" {
 		candidates = append(candidates, lang+".md", lang+"-custom.md")
@@ -1511,8 +1524,8 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 			results = append(results, *sr)
 		}
 
-		logf("  Indexing Dewey sources (this may take a moment)...\n")
-		if out, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
+		logf("  Indexing Dewey sources (without embeddings)...\n")
+		if out, idxErr := opts.ExecCmd("dewey", "index", "--no-embeddings"); idxErr != nil {
 			results = append(results, subToolResult{
 				name: "dewey index", action: "failed",
 				detail:  fmt.Sprintf("dewey index: %s", idxErr),
@@ -1523,6 +1536,7 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 			results = append(results, subToolResult{
 				name: "dewey index", action: "completed"})
 		}
+		logf("  Run 'dewey index' separately to generate embeddings for semantic search.\n")
 		return results
 	}
 
@@ -1531,8 +1545,9 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 		if sr := generateDeweySources(opts, true); sr != nil {
 			results = append(results, *sr)
 		}
-		logf("  Re-indexing Dewey sources...\n")
-		if out, idxErr := opts.ExecCmd("dewey", "index"); idxErr != nil {
+
+		logf("  Re-indexing Dewey sources (without embeddings)...\n")
+		if out, idxErr := opts.ExecCmd("dewey", "index", "--no-embeddings"); idxErr != nil {
 			results = append(results, subToolResult{
 				name: "dewey index", action: "failed",
 				detail:  fmt.Sprintf("dewey index: %s", idxErr),
@@ -1543,6 +1558,7 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 			results = append(results, subToolResult{
 				name: "dewey index", action: "re-indexed"})
 		}
+		logf("  Run 'dewey index' separately to generate embeddings for semantic search.\n")
 	}
 	return results
 }

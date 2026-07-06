@@ -431,7 +431,9 @@ conflict to the user and present recovery options:
 > 1. Merge target branch (no force push needed)
 > 2. Rebase onto target branch (requires force push)
 > 3. Stop and resolve manually
-> 4. Continue anyway (CI will not run)"
+> 4. Continue anyway (CI will not run)
+> 5. Spawn sub-agent to resolve conflicts
+>    (AI-assisted)"
 
 Ask the user which option to take.
 
@@ -448,9 +450,11 @@ before executing:
 > ```
 > git fetch <target-remote> <base-branch>
 > git merge <target-remote>/<base-branch>
+> git push
 > ```
 >
-> This creates a merge commit. Proceed?"
+> This creates a merge commit and pushes to the
+> remote. Proceed?"
 
 If the user confirms, execute:
 
@@ -573,6 +577,160 @@ that step 8 (Summary) includes a warning that CI
 checks did not run. See step 8 for the warning
 format.
 
+**Option 5 — Spawn sub-agent to resolve conflicts**:
+
+This option uses the merge strategy to create
+conflict markers, then spawns a `cobalt-crush-dev`
+sub-agent to attempt automated conflict resolution.
+
+a. **Execute the merge to create conflict markers**:
+
+   Show the commands and ask for explicit confirmation
+   before executing:
+
+   > "I will merge `<target-remote>/<base-branch>` to
+   > create conflict markers, then spawn a sub-agent
+   > to resolve them. Proceed?"
+
+   If the user confirms, execute:
+
+   ```bash
+   git fetch <target-remote> <base-branch>
+   git merge <target-remote>/<base-branch>
+   ```
+
+b. **Identify conflicting files**:
+
+   ```bash
+   git diff --name-only --diff-filter=U
+   ```
+
+   Capture the list of files with unresolved conflicts.
+
+c. **Spawn the sub-agent**:
+
+   Call the Task tool with `subagent_type:
+   cobalt-crush-dev` and a prompt containing:
+
+   - The list of conflicting files from step (b)
+   - The target branch name
+     (`<target-remote>/<base-branch>`)
+   - Instructions: "Resolve the merge conflict markers
+     (`<<<<<<<`, `=======`, `>>>>>>>`) in each of the
+     following files. For each file: read the file,
+     understand the intent of both sides of the
+     conflict (the HEAD changes and the incoming
+     changes), write the resolved content that
+     preserves both intents, and stage the resolved
+     file with `git add <file>`. Report per-file
+     success or failure."
+   - A directive: "Do NOT resolve the conflicts by
+     simply choosing one side. Integrate both changes
+     where possible. If the conflict is too complex to
+     resolve confidently, report that file as
+     unresolved."
+
+   The sub-agent MUST NOT receive the full `/finale`
+   flow context. It receives only the information
+   needed for conflict resolution.
+
+d. **Evaluate the sub-agent result**:
+
+   After the sub-agent returns, check for remaining
+   conflict markers in all files:
+
+   ```bash
+   git diff --name-only --diff-filter=U
+   ```
+
+   - **If unresolved files remain** (sub-agent
+     partially failed): report which files were
+     resolved and which remain:
+
+     > "Sub-agent resolved N of M files.
+     > Unresolved: <file1>, <file2>
+     >
+     > Aborting merge to restore clean state."
+
+     ```bash
+     git merge --abort
+     ```
+
+     Return to the conflict recovery options menu
+     (options 1-5).
+
+   - **If no unresolved files remain** (sub-agent
+     succeeded): proceed to step (e).
+
+e. **User approval gate**:
+
+   Show the staged diff to the user:
+
+   ```bash
+   git diff --cached
+   ```
+
+   > "The sub-agent resolved all conflicts. Review
+   > the resolution diff above.
+   >
+   > Options:
+   > 1. Approve, commit, and push
+   > 2. Request edits (modify resolution manually)
+   > 3. Abort (discard resolution)"
+
+   Ask the user which option to take.
+
+   - **If the user approves** (option 1): complete the
+     merge commit (git will auto-create the merge
+     commit message) and push:
+
+     ```bash
+     git commit --no-edit
+     git push
+     ```
+
+     Then poll for CI checks using a bash loop (same
+     as Option 1):
+
+     ```bash
+     while true; do
+       STATUS=$(gh pr checks <number> 2>&1)
+       if echo "$STATUS" | grep -qE 'pass|fail'; then
+         echo "$STATUS"
+         break
+       fi
+       sleep 10
+     done
+     ```
+
+     Read the poll output and continue with normal
+     step 6 check-watching behavior.
+
+   - **If the user requests edits** (option 2):
+
+     Inform the user that the conflicting files are
+     staged with the sub-agent's resolution. The user
+     can now edit the files manually, then stage the
+     changes:
+
+     > "Edit the resolved files as needed, then stage
+     > your changes with `git add <file>`. When done,
+     > tell me to continue."
+
+     When the user signals they are done, re-show the
+     staged diff (`git diff --cached`) and return to
+     the approval gate (present the 3-option menu
+     again).
+
+   - **If the user aborts** (option 3):
+
+     ```bash
+     git merge --abort
+     ```
+
+     Return to the conflict recovery options menu
+     (options 1-5).
+
 #### 6c. Workflow Cross-Reference
 
 When `mergeable` is `MERGEABLE` (or `UNKNOWN` after
@@ -642,7 +800,7 @@ approval with: gh pr merge --rebase --delete-branch
 
 If CI checks were skipped because the user chose
 "Continue anyway" during a merge conflict (step 6b,
-option 3), include a warning in the summary:
+option 4), include a warning in the summary:
 
 ```
 **Checks:** CI checks did not run due to merge conflict
@@ -675,6 +833,9 @@ verification is incomplete.
   confirmation** — show the exact commands and wait
   for approval before executing any destructive
   git operation
+- **NEVER commit sub-agent conflict resolutions without
+  user approval** — always show the resolution diff
+  and wait for explicit approval before committing
 
 ## Branch Safety
 

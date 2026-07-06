@@ -6,6 +6,23 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Changed
+- `/review-council` Code Review Mode: added optional
+  Step 7 (GitHub Review Posting) for posting consolidated
+  multi-persona council findings as a GitHub PR review;
+  PR detection via `gh pr view` or explicit PR number
+  argument with input validation; review state awareness
+  (duplicate detection, stale review warnings, CODEOWNER
+  warnings); multi-persona finding aggregation with
+  per-persona sections and severity-first round-robin
+  inline comment allocation (capped at 15); verdict
+  mapping (APPROVE, REQUEST_CHANGES, COMMENT); human
+  confirmation required before posting; graceful
+  degradation when `gh` unavailable or API errors;
+  Protocol 2 (Issue Linking) conditionally enabled when
+  explicit PR number provided; review body size cap at
+  60,000 characters with truncation
+  (Spec: openspec/changes/review-council-github-posting/,
+  Fixes: #314)
 - `/review-council` Code Review Mode: added Phase 1c
   (review-context skill) for spec artifact discovery,
   path classification, and walkthrough generation;
@@ -31,7 +48,25 @@ Each entry follows the format: `- <change-name>: <summary>`.
   `unknown-model` fallback with user warning
   (Spec: openspec/changes/improve-finale-pr-description/)
 
+### Fixed
+- `uf init --force` no longer hangs on Dewey re-indexing.
+  Dewey indexing now runs with `--no-embeddings` for a fast
+  metadata-only pass. Run `dewey index` separately to
+  generate embeddings for semantic search. (Fixes: #163)
+
 ### Added
+- `ci-convention-pack`: Added CI convention pack (`ci.md`,
+  `ci-custom.md`) with 12 rules across 5 sections (Action
+  Pinning & Supply Chain, Workflow Structure, Permissions &
+  Secrets, Reusable Workflow Design, Custom Rules). Fills
+  the Divisor SRE `[PACK]` CI/CD guidance gap. CI-002 rule
+  prevents SHA hallucination by requiring tag-first lookup
+  at authoring time. Always-deployed (language-agnostic),
+  following the `content.md`/`severity.md` pattern.
+  Centralizes CI rules from `coding-standards.md` into the
+  convention pack system. Related: complytime/org-infra#337
+  (CI guardrail).
+  (Spec: openspec/changes/ci-convention-pack/)
 - `/triage-issue` slash command for multi-agent GitHub issue
   triage using the Divisor review panel. Classifies issues
   (bug, feature, enhancement, question, opinion, duplicate,

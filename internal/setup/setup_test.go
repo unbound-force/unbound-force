@@ -2487,7 +2487,7 @@ func TestSetupRun_DryRunNewSteps(t *testing.T) {
 
 	// Verify no install/init commands were actually executed.
 	for _, call := range rec.calls {
-		if strings.Contains(call, "install") || strings.Contains(call, "setup") || call == "dewey init" || call == "dewey index" {
+		if strings.Contains(call, "install") || strings.Contains(call, "setup") || call == "dewey init" || strings.HasPrefix(call, "dewey index") {
 			t.Errorf("unexpected command in dry-run: %s", call)
 		}
 	}

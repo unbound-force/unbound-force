@@ -157,7 +157,9 @@ var expectedAssetPaths = []string{
 	"opencode/agents/divisor-scribe.md",
 	"opencode/agents/divisor-herald.md",
 	"opencode/agents/divisor-envoy.md",
-	// Convention packs — shared by all heroes (11)
+	// Convention packs — shared by all heroes (13)
+	"opencode/uf/packs/ci-custom.md",
+	"opencode/uf/packs/ci.md",
 	"opencode/uf/packs/content-custom.md",
 	"opencode/uf/packs/content.md",
 	"opencode/uf/packs/default-custom.md",
@@ -587,11 +589,14 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/uf/packs/typescript.md", true},
 		// Tool-owned: convention packs (canonical) — Python
 		{"opencode/uf/packs/python.md", true},
+		// Tool-owned: convention packs (canonical) — CI
+		{"opencode/uf/packs/ci.md", true},
 		// User-owned: convention packs (custom)
 		{"opencode/uf/packs/go-custom.md", false},
 		{"opencode/uf/packs/default-custom.md", false},
 		{"opencode/uf/packs/typescript-custom.md", false},
 		{"opencode/uf/packs/python-custom.md", false},
+		{"opencode/uf/packs/ci-custom.md", false},
 		// User-owned: agents (including Divisor personas and Cobalt-Crush)
 		{"opencode/agents/divisor-guard.md", false},
 		{"opencode/agents/divisor-architect.md", false},
@@ -1236,6 +1241,13 @@ func TestShouldDeployPack(t *testing.T) {
 		{"opencode/uf/packs/severity.md", "go", true},
 		{"opencode/uf/packs/severity.md", "typescript", true},
 		{"opencode/uf/packs/severity.md", "default", true},
+		// CI packs always deploy (language-agnostic)
+		{"opencode/uf/packs/ci.md", "go", true},
+		{"opencode/uf/packs/ci-custom.md", "go", true},
+		{"opencode/uf/packs/ci.md", "typescript", true},
+		{"opencode/uf/packs/ci-custom.md", "typescript", true},
+		{"opencode/uf/packs/ci.md", "", true},
+		{"opencode/uf/packs/ci-custom.md", "", true},
 		// Matching language packs deploy
 		{"opencode/uf/packs/go.md", "go", true},
 		{"opencode/uf/packs/go-custom.md", "go", true},
@@ -1411,13 +1423,13 @@ func TestRun_DivisorSubset_DefaultFallback(t *testing.T) {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	// Verify only always-deploy packs deployed (default, severity, content)
+	// Verify only always-deploy packs deployed (default, severity, content, ci)
 	for _, f := range result.Created {
 		if strings.Contains(f, "uf/packs") {
 			base := filepath.Base(f)
 			if !strings.HasPrefix(base, "default") && base != "severity.md" &&
-				!strings.HasPrefix(base, "content") {
-				t.Errorf("expected only default/severity/content packs, got %s", f)
+				!strings.HasPrefix(base, "content") && !strings.HasPrefix(base, "ci") {
+				t.Errorf("expected only default/severity/content/ci packs, got %s", f)
 			}
 		}
 	}
@@ -1914,7 +1926,7 @@ func TestInitSubTools_DeweyAvailable(t *testing.T) {
 	}
 
 	// Verify commands were called.
-	expectedCalls := []string{"dewey init", "dewey index"}
+	expectedCalls := []string{"dewey init", "dewey index --no-embeddings"}
 	for _, expected := range expectedCalls {
 		found := false
 		for _, call := range rec.calls {
@@ -2022,7 +2034,7 @@ func TestInitSubTools_DeweyInitFails(t *testing.T) {
 
 	// dewey index should NOT have been called.
 	for _, call := range rec.calls {
-		if call == "dewey index" {
+		if strings.HasPrefix(call, "dewey index") {
 			t.Error("dewey index should NOT be called when dewey init fails")
 		}
 	}
@@ -3427,15 +3439,15 @@ func TestInitSubTools_DeweyForceReindex(t *testing.T) {
 		t.Errorf("expected dewey index re-indexed result, got %v", results)
 	}
 
-	// Verify dewey index was called.
+	// Verify dewey index --no-embeddings was called.
 	indexCalled := false
 	for _, call := range rec.calls {
-		if call == "dewey index" {
+		if call == "dewey index --no-embeddings" {
 			indexCalled = true
 		}
 	}
 	if !indexCalled {
-		t.Errorf("expected dewey index command, got calls: %v", rec.calls)
+		t.Errorf("expected 'dewey index --no-embeddings' command, got calls: %v", rec.calls)
 	}
 
 	// Verify dewey init was NOT called (.uf/dewey/ already exists).
@@ -3482,7 +3494,7 @@ func TestInitSubTools_DeweyExistsNoForce(t *testing.T) {
 
 	// Verify no dewey commands were called.
 	for _, call := range rec.calls {
-		if call == "dewey init" || call == "dewey index" {
+		if call == "dewey init" || strings.HasPrefix(call, "dewey index") {
 			t.Errorf("unexpected dewey command when Force=false: %s", call)
 		}
 	}
@@ -3513,7 +3525,7 @@ func TestInitSubTools_DeweySkippedByConfig(t *testing.T) {
 
 	// Dewey commands should NOT have been called.
 	for _, call := range rec.calls {
-		if call == "dewey init" || call == "dewey index" {
+		if call == "dewey init" || strings.HasPrefix(call, "dewey index") {
 			t.Errorf("dewey command should NOT be called when method is skip: %s", call)
 		}
 	}
@@ -3561,7 +3573,7 @@ func TestInitSubTools_DeweySkippedByConfig_ForceIgnored(t *testing.T) {
 
 	// Even with Force=true, skip config should prevent re-index.
 	for _, call := range rec.calls {
-		if call == "dewey init" || call == "dewey index" {
+		if call == "dewey init" || strings.HasPrefix(call, "dewey index") {
 			t.Errorf("dewey command should NOT be called when method is skip (even with Force): %s", call)
 		}
 	}
@@ -3705,7 +3717,7 @@ func TestInitSubTools_ConcurrentAllResults(t *testing.T) {
 	rec.mu.Unlock()
 
 	expectedCmds := []string{
-		"dewey init", "dewey index",
+		"dewey init", "dewey index --no-embeddings",
 		"replicator init", "specify init",
 		"openspec init --tools opencode", "gaze init",
 	}
@@ -3825,7 +3837,7 @@ func TestInitSubTools_ConcurrentOneFailureNoBlock(t *testing.T) {
 	// Verify dewey index was NOT called (init failed).
 	rec.mu.Lock()
 	for _, call := range rec.calls {
-		if call == "dewey index" {
+		if strings.HasPrefix(call, "dewey index") {
 			t.Error("dewey index should not run when dewey init fails")
 		}
 	}
@@ -5170,6 +5182,8 @@ func TestCollectDeployedPacks_Go(t *testing.T) {
 		"severity.md":       true,
 		"content.md":        true,
 		"content-custom.md": true,
+		"ci.md":             true,
+		"ci-custom.md":      true,
 		"go.md":             true,
 		"go-custom.md":      true,
 	}
@@ -5204,13 +5218,14 @@ func TestCollectDeployedPacks_Default(t *testing.T) {
 	for _, p := range packs {
 		if p == "default.md" || p == "default-custom.md" ||
 			p == "severity.md" || p == "content.md" ||
-			p == "content-custom.md" {
+			p == "content-custom.md" || p == "ci.md" ||
+			p == "ci-custom.md" {
 			continue
 		}
 		t.Errorf("unexpected pack %q for default lang", p)
 	}
-	if len(packs) != 5 {
-		t.Errorf("expected 5 packs for default lang, got %d", len(packs))
+	if len(packs) != 7 {
+		t.Errorf("expected 7 packs for default lang, got %d", len(packs))
 	}
 }
 
@@ -5311,7 +5326,7 @@ func TestCollectDeployedPacks_WithRoot_AllEmpty(t *testing.T) {
 	}
 
 	sentinel := "<!-- Add project-specific rules below this line -->"
-	stubs := []string{"default-custom.md", "content-custom.md", "go-custom.md"}
+	stubs := []string{"default-custom.md", "content-custom.md", "ci-custom.md", "go-custom.md"}
 	for _, name := range stubs {
 		if err := os.WriteFile(filepath.Join(packsDir, name), []byte(sentinel), 0o644); err != nil {
 			t.Fatalf("write %s: %v", name, err)
@@ -5326,7 +5341,7 @@ func TestCollectDeployedPacks_WithRoot_AllEmpty(t *testing.T) {
 		}
 	}
 	// Non-custom packs must still be present.
-	required := []string{"default.md", "severity.md", "content.md", "go.md"}
+	required := []string{"default.md", "severity.md", "content.md", "ci.md", "go.md"}
 	packSet := make(map[string]bool, len(packs))
 	for _, p := range packs {
 		packSet[p] = true
@@ -5346,8 +5361,8 @@ func TestCollectDeployedPacks_WithRoot_OnePopulated(t *testing.T) {
 	}
 
 	sentinel := "<!-- Add project-specific rules below this line -->"
-	// default-custom and content-custom are empty stubs.
-	for _, name := range []string{"default-custom.md", "content-custom.md"} {
+	// default-custom, content-custom, and ci-custom are empty stubs.
+	for _, name := range []string{"default-custom.md", "content-custom.md", "ci-custom.md"} {
 		if err := os.WriteFile(filepath.Join(packsDir, name), []byte(sentinel), 0o644); err != nil {
 			t.Fatalf("write %s: %v", name, err)
 		}
@@ -5373,6 +5388,9 @@ func TestCollectDeployedPacks_WithRoot_OnePopulated(t *testing.T) {
 	if packSet["content-custom.md"] {
 		t.Error("content-custom.md should be excluded (empty)")
 	}
+	if packSet["ci-custom.md"] {
+		t.Error("ci-custom.md should be excluded (empty)")
+	}
 }
 
 func TestCollectDeployedPacks_WithRoot_EmptyRootFallback(t *testing.T) {
@@ -5384,7 +5402,7 @@ func TestCollectDeployedPacks_WithRoot_EmptyRootFallback(t *testing.T) {
 	for _, p := range packs {
 		packSet[p] = true
 	}
-	for _, name := range []string{"default-custom.md", "content-custom.md", "go-custom.md"} {
+	for _, name := range []string{"default-custom.md", "content-custom.md", "ci-custom.md", "go-custom.md"} {
 		if !packSet[name] {
 			t.Errorf("expected %q in packs when root is empty, got: %v", name, packs)
 		}

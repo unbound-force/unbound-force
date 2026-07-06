@@ -179,6 +179,12 @@ func TestValidateConventionPack_AllPacksValid(t *testing.T) {
 		if name == "content.md" {
 			continue
 		}
+		// Skip ci pack — it's a CI workflow convention pack with
+		// different required sections (CI-NNN rules) than coding
+		// packs (Coding Style, etc.)
+		if name == "ci.md" {
+			continue
+		}
 
 		t.Run(name, func(t *testing.T) {
 			packPath := filepath.Join(packsDir, name)
