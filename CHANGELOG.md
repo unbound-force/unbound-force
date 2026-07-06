@@ -6,6 +6,23 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Changed
+- `/review-council` Code Review Mode: added optional
+  Step 7 (GitHub Review Posting) for posting consolidated
+  multi-persona council findings as a GitHub PR review;
+  PR detection via `gh pr view` or explicit PR number
+  argument with input validation; review state awareness
+  (duplicate detection, stale review warnings, CODEOWNER
+  warnings); multi-persona finding aggregation with
+  per-persona sections and severity-first round-robin
+  inline comment allocation (capped at 15); verdict
+  mapping (APPROVE, REQUEST_CHANGES, COMMENT); human
+  confirmation required before posting; graceful
+  degradation when `gh` unavailable or API errors;
+  Protocol 2 (Issue Linking) conditionally enabled when
+  explicit PR number provided; review body size cap at
+  60,000 characters with truncation
+  (Spec: openspec/changes/review-council-github-posting/,
+  Fixes: #314)
 - `/review-council` Code Review Mode: added Phase 1c
   (review-context skill) for spec artifact discovery,
   path classification, and walkthrough generation;

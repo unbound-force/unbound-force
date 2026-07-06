@@ -540,7 +540,7 @@ enforce. Rules are tagged by severity:
 
 | Command | When | What Happens |
 |---------|------|--------------|
-| `/review-council` | Pre-PR (local) | Discovers available personas, runs them in parallel, produces APPROVE or REQUEST CHANGES |
+| `/review-council [N]` | Pre-PR + optional PR posting | Discovers available personas, runs them in parallel, produces APPROVE or REQUEST CHANGES. Optionally posts findings as a GitHub review. |
 | `/review-pr [N]` | Post-PR (GitHub) | Single agent reviews a specific PR, analyzes CI results |
 | `/address-feedback [N]` | Post-PR (GitHub) | Triage + address reviewer feedback |
 
