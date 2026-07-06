@@ -16,13 +16,17 @@ get_repo_root() {
 get_current_branch() {
     # First check if SPECIFY_FEATURE environment variable is set
     if [[ -n "${SPECIFY_FEATURE:-}" ]]; then
-        echo "$SPECIFY_FEATURE"
+        # Strip speckit/ prefix so downstream consumers get NNN-<name>
+        echo "${SPECIFY_FEATURE#speckit/}"
         return
     fi
 
     # Then check git if available
     if git rev-parse --abbrev-ref HEAD >/dev/null 2>&1; then
-        git rev-parse --abbrev-ref HEAD
+        local branch
+        branch=$(git rev-parse --abbrev-ref HEAD)
+        # Strip speckit/ prefix so downstream consumers get NNN-<name>
+        echo "${branch#speckit/}"
         return
     fi
 
@@ -72,9 +76,9 @@ check_feature_branch() {
         return 0
     fi
 
-    if [[ ! "$branch" =~ ^[0-9]{3}- ]]; then
+    if [[ ! "$branch" =~ ^(speckit/)?[0-9]{3}- ]]; then
         echo "ERROR: Not on a feature branch. Current branch: $branch" >&2
-        echo "Feature branches should be named like: 001-feature-name" >&2
+        echo "Feature branches should be named like: speckit/001-feature-name" >&2
         return 1
     fi
 
@@ -89,6 +93,9 @@ find_feature_dir_by_prefix() {
     local repo_root="$1"
     local branch_name="$2"
     local specs_dir="$repo_root/specs"
+
+    # Strip speckit/ prefix if present before matching
+    branch_name="${branch_name#speckit/}"
 
     # Extract numeric prefix from branch (e.g., "004" from "004-whatever")
     if [[ ! "$branch_name" =~ ^([0-9]{3})- ]]; then

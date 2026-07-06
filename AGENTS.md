@@ -236,7 +236,7 @@ analyze → checklist → implement`
 before tasks. Tasks before implementation. Spec artifacts MUST
 be committed/pushed before implementation begins.
 
-**Branches**: Speckit: `NNN-<name>`. OpenSpec: `opsx/<name>`.
+**Branches**: Speckit: `speckit/NNN-<name>`. OpenSpec: `opsx/<name>`.
 
 **Task bookkeeping**: Mark checkboxes `[x]` immediately on
 completion. `[P]` marks parallel-eligible tasks.

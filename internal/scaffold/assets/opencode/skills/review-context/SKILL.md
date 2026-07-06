@@ -38,7 +38,7 @@ or PR branch name:
 
 | Branch pattern | Spec location |
 |---------------|---------------|
-| `NNN-<name>` (digits then dash) | `specs/<branch-name>/spec.md` (Speckit) |
+| `speckit/NNN-<name>` or `NNN-<name>` (legacy) | `specs/<name>/spec.md` (Speckit; strip `speckit/` prefix) |
 | `opsx/<name>` | `openspec/changes/<name>/proposal.md` (OpenSpec changes) |
 | `opsx/<name>` | `openspec/specs/<name>/spec.md` (OpenSpec specs) |
 
@@ -46,7 +46,7 @@ or PR branch name:
 
 If no spec is found via branch name and a PR description
 is available, scan for explicit spec references (e.g.,
-"See spec 012" or "Implements specs/012-swarm/spec.md").
+"See spec 012" or "Implements specs/012-swarm/spec.md" or "branch speckit/012-swarm").
 
 ### Step 3: Changed-file detection
 

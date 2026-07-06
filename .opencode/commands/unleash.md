@@ -54,7 +54,7 @@ git rev-parse --abbrev-ref HEAD
 
 - If on `main`: **STOP** with error:
   > "Cannot run /unleash on main. Must be on a Speckit
-  > (`NNN-*`) or OpenSpec (`opsx/*`) feature branch."
+  > (`speckit/NNN-*`) or OpenSpec (`opsx/*`) feature branch."
 
 - If on `opsx/*`: **OpenSpec mode detected.**
   Extract the change name from the branch:
@@ -69,8 +69,8 @@ git rev-parse --abbrev-ref HEAD
 
   Announce: "Detected OpenSpec change: `<name>`"
 
-- If the branch matches `NNN-*` (digits followed by a
-  dash): **Speckit mode detected.**
+- If the branch matches `speckit/NNN-*` or `NNN-*` (legacy)
+  (digits followed by a dash): **Speckit mode detected.**
 
   Validate that spec.md exists by running from the repo
   root:
@@ -88,11 +88,11 @@ git rev-parse --abbrev-ref HEAD
   is the working directory for all subsequent steps.
   Set `WORKFLOW_TIER = speckit`.
 
-- If the branch does not match `NNN-*` or `opsx/*`:
-  **STOP** with error:
+- If the branch does not match `speckit/NNN-*`, `NNN-*`
+  (legacy), or `opsx/*`: **STOP** with error:
   > "Unrecognized branch pattern. /unleash requires a
-  > Speckit feature branch (`NNN-*`) or OpenSpec branch
-  > (`opsx/*`). Run `/speckit.specify` or
+  > Speckit feature branch (`speckit/NNN-*`) or OpenSpec
+  > branch (`opsx/*`). Run `/speckit.specify` or
   > `/opsx-propose` to create one."
 
 ### 2. Resumability Detection
@@ -284,7 +284,7 @@ analysis + quality validation) in a single pass.
    Mode** -- review the spec artifacts in `FEATURE_DIR`,
    not code." The review council auto-detects the
    workflow tier from the branch name (`opsx/*` vs
-   `NNN-*`).
+   `speckit/NNN-*` or `NNN-*`).
 3. Collect the review results.
 
 **Processing results**:
@@ -557,7 +557,7 @@ memory.
 3. **If Dewey is available** (`dewey_store_learning` tool
    exists): store each learning via `dewey_store_learning`
    with tags including:
-   - The branch name (e.g., `018-unleash-command`)
+   - The branch name (e.g., `speckit/018-unleash-command`)
    - The current date (e.g., `2026-03-29`)
    - The learning category (e.g., `pattern`, `gotcha`,
      `review-insight`, `file-specific`)
@@ -637,7 +637,8 @@ Format the output as:
 ## Guardrails
 
 - **NEVER run on `main`** -- the command is for Speckit
-  (`NNN-*`) and OpenSpec (`opsx/*`) feature branches
+  (`speckit/NNN-*` or `NNN-*` legacy) and OpenSpec
+  (`opsx/*`) feature branches
 - **NEVER skip spec review exit on HIGH/CRITICAL** --
   these findings block implementation to prevent wasted
   effort on a flawed spec
