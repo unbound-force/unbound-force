@@ -471,13 +471,42 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
    > return to REVIEW_REQUIRED. You may need to re-run
    > `/review-council` after final commits."
 
-   If `require_codeowners` is true, check for CODEOWNERS:
+   If `require_codeowners` is true, check for CODEOWNERS
+   file. Try each path in order, short-circuiting on the
+   first success:
+
+   ```bash
+   gh api repos/{owner}/{repo}/contents/.github/CODEOWNERS \
+     --jq '.name'
+   ```
+
+   If that returns 404, try the next path:
+
    ```bash
    gh api repos/{owner}/{repo}/contents/CODEOWNERS \
-     --jq '.name' 2>/dev/null || \
-   gh api repos/{owner}/{repo}/contents/.github/CODEOWNERS \
-     --jq '.name' 2>/dev/null
+     --jq '.name'
    ```
+
+   If that also returns 404, try the third path:
+
+   ```bash
+   gh api repos/{owner}/{repo}/contents/docs/CODEOWNERS \
+     --jq '.name'
+   ```
+
+   **Error handling**:
+   - **404 response**: treat as "file not found at this
+     path" and try the next path. This is expected and
+     silent.
+   - **Non-404 error** (network failure, 500, 429, etc.):
+     stop checking further paths and display:
+     ```
+     Note: CODEOWNERS check was inconclusive (API error).
+     Could not determine if this repo uses CODEOWNERS.
+     ```
+   - **Success** (any path returns the file name): stop
+     checking further paths. CODEOWNERS exists.
+
    If CODEOWNERS exists:
    > "Warning: This repo requires code owner reviews.
    > This APPROVE may not satisfy branch protection if
