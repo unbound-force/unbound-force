@@ -76,7 +76,7 @@ examining the current branch and workspace:
 
 4. **Detect the workflow tier** from the branch name:
    - Branch matches `opsx/*`: **OpenSpec** (tactical)
-   - Branch matches `NNN-*` (digits then dash): **Speckit** (strategic)
+   - Branch matches `speckit/NNN-*` or `NNN-*` (legacy) (digits then dash): **Speckit** (strategic)
    - Branch is `main` or other: no active workflow
 
 5. **Select mode based on classification**:
@@ -92,7 +92,7 @@ examining the current branch and workspace:
    which mode was selected and why, including the
    workflow tier:
    > "Detected **Code Review Mode** (Speckit) — found N
-   > code files changed on branch `012-swarm-delegation`
+   > code files changed on branch `speckit/012-swarm-delegation`
    > vs `main`."
    >
    > Or: "Detected **Spec Review Mode** (OpenSpec) — only
@@ -725,7 +725,7 @@ depends on the detected workflow tier.
 Based on the workflow tier detected in the auto-detection
 step, determine which artifacts to review:
 
-- **Speckit** (branch `NNN-*`): Review the active spec
+- **Speckit** (branch `speckit/NNN-*` or `NNN-*`): Review the active spec
   directory at `specs/NNN-<name>/` (spec.md, plan.md,
   tasks.md, contracts/, data-model.md, checklists/),
   plus `.specify/memory/constitution.md` and `AGENTS.md`.

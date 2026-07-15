@@ -138,6 +138,7 @@ Load context for evidence-based classification (D10, FR-010):
 3. `AGENTS.md` coding and testing conventions
 4. Spec artifacts for the PR branch:
    - Speckit: `specs/NNN-*/` matching branch pattern
+     (branch may be `speckit/NNN-*` or `NNN-*` legacy)
    - OpenSpec: `openspec/changes/*/` matching branch
 5. Linked issues from PR description (`Fixes #N`, `Closes #N`, `Resolves #N`) — load acceptance criteria
 6. Invoke the `skill` tool with name `review-context` to load standardized context discovery (spec artifacts, linked issues, path classification).

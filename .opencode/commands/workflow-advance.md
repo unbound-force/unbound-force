@@ -87,7 +87,7 @@ with spec review enabled:
 Specification drafted: wf-feat-csv-export-20260326T143000
 
 Muti-Mind has drafted the specification.
-Review at: specs/NNN-feature-name/spec.md
+Review at: specs/NNN-feature-name/spec.md  (branch: speckit/NNN-feature-name)
 
 Awaiting spec review. Run /workflow advance to approve.
 ```

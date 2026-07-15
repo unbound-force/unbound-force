@@ -79,7 +79,8 @@ Build & Test section in Audit mode):
 **Governance & Context Detection**:
 15. `.specify/memory/constitution.md` → constitution exists
     (triggers Behavioral Rules section)
-16. `specs/` → check for `NNN-*/` subdirectories (Speckit)
+16. `specs/` → check for `NNN-*/` subdirectories (Speckit;
+    branches use `speckit/NNN-*` or legacy `NNN-*`)
 17. `openspec/config.yaml` or `openspec/` → OpenSpec configured
     (triggers Specification Workflow section)
 18. `.opencode/uf/packs/` → convention packs deployed
@@ -198,7 +199,8 @@ These rules are non-negotiable. Violations are CRITICAL severity.
 #### Section 7: Specification Workflow (verbatim template, conditional)
 
 **Condition**: Insert ONLY when `specs/` directory has numbered
-subdirectories (`NNN-*/`) OR `openspec/` directory exists. If
+subdirectories (`NNN-*/`) OR `openspec/` directory exists
+(Speckit branches use `speckit/NNN-<name>`). If
 neither is detected, omit this section entirely.
 
 Insert this verbatim:
@@ -220,7 +222,7 @@ analyze → checklist → implement`
 before tasks. Tasks before implementation. Spec artifacts MUST
 be committed/pushed before implementation begins.
 
-**Branches**: Speckit: `NNN-<name>`. OpenSpec: `opsx/<name>`.
+**Branches**: Speckit: `speckit/NNN-<name>`. OpenSpec: `opsx/<name>`.
 
 **Task bookkeeping**: Mark checkboxes `[x]` immediately on
 completion. `[P]` marks parallel-eligible tasks.

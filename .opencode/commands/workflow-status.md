@@ -108,6 +108,6 @@ Stages:
   ○ accept      (muti-mind)     pending          [human]
   ○ reflect     (mx-f)          pending          [swarm]
 
-Spec review: specs/NNN-csv-export/spec.md
+Spec review: specs/NNN-csv-export/spec.md  (branch: speckit/NNN-csv-export)
 Run /workflow advance to approve the spec and continue.
 ```

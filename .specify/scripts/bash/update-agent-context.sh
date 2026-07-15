@@ -123,7 +123,7 @@ trap cleanup EXIT INT TERM
 
 validate_environment() {
     # Check if we have a current branch/feature (git or non-git)
-    if [[ -z "$CURRENT_BRANCH" ]]; then
+    if [[ -z "$CURRENT_FEATURE" ]]; then
         log_error "Unable to determine current feature"
         if [[ "$HAS_GIT" == "true" ]]; then
             log_info "Make sure you're on a feature branch"
@@ -305,7 +305,7 @@ create_new_agent_file() {
     # Escape special characters for sed by using a different delimiter or escaping
     local escaped_lang=$(printf '%s\n' "$NEW_LANG" | sed 's/[\[\.*^$()+{}|]/\\&/g')
     local escaped_framework=$(printf '%s\n' "$NEW_FRAMEWORK" | sed 's/[\[\.*^$()+{}|]/\\&/g')
-    local escaped_branch=$(printf '%s\n' "$CURRENT_BRANCH" | sed 's/[\[\.*^$()+{}|]/\\&/g')
+    local escaped_branch=$(printf '%s\n' "$CURRENT_FEATURE" | sed 's/[\[\.*^$()+{}|]/\\&/g')
     
     # Build technology stack and recent change strings conditionally
     local tech_stack
@@ -381,9 +381,9 @@ update_existing_agent_file() {
     
     # Prepare new change entry
     if [[ -n "$tech_stack" ]]; then
-        new_change_entry="- $CURRENT_BRANCH: Added $tech_stack"
+        new_change_entry="- $CURRENT_FEATURE: Added $tech_stack"
     elif [[ -n "$NEW_DB" ]] && [[ "$NEW_DB" != "N/A" ]] && [[ "$NEW_DB" != "NEEDS CLARIFICATION" ]]; then
-        new_change_entry="- $CURRENT_BRANCH: Added $NEW_DB"
+        new_change_entry="- $CURRENT_FEATURE: Added $NEW_DB"
     fi
     
     # Check if Recent Changes section exists in CHANGELOG.md
@@ -738,7 +738,7 @@ main() {
     # Validate environment before proceeding
     validate_environment
     
-    log_info "=== Updating agent context files for feature $CURRENT_BRANCH ==="
+    log_info "=== Updating agent context files for feature $CURRENT_FEATURE ==="
     
     # Parse the plan file to extract project information
     if ! parse_plan_data "$NEW_PLAN"; then

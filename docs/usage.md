@@ -138,7 +138,7 @@ the spec), `/speckit.analyze` (consistency check),
 
 Runs the full pipeline autonomously: clarify, plan,
 tasks, spec review, implement, code review, and
-retrospective. Works with both Speckit (`NNN-*` branches)
+retrospective. Works with both Speckit (`speckit/NNN-*` branches)
 and OpenSpec (`opsx/*` branches). Exits to human
 judgment only when it encounters ambiguity, review
 failures, or merge conflicts.
