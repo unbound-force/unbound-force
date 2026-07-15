@@ -12,8 +12,10 @@ get_repo_root() {
     fi
 }
 
-# Get current branch, with fallback for non-git repositories
-get_current_branch() {
+# Get current feature name (NNN-<name>), with fallback for non-git
+# repositories. Returns the spec feature name, not the git branch ref —
+# the speckit/ prefix is stripped so consumers can map to specs/NNN-<name>/.
+get_current_feature() {
     # First check if SPECIFY_FEATURE environment variable is set
     if [[ -n "${SPECIFY_FEATURE:-}" ]]; then
         # Strip speckit/ prefix so downstream consumers get NNN-<name>
@@ -76,9 +78,10 @@ check_feature_branch() {
         return 0
     fi
 
-    if [[ ! "$branch" =~ ^(speckit/)?[0-9]{3}- ]]; then
-        echo "ERROR: Not on a feature branch. Current branch: $branch" >&2
-        echo "Feature branches should be named like: speckit/001-feature-name" >&2
+    # Input is already stripped of speckit/ prefix by get_current_feature()
+    if [[ ! "$branch" =~ ^[0-9]{3}- ]]; then
+        echo "ERROR: Not on a feature branch. Current feature: $branch" >&2
+        echo "Feature names should match: 001-feature-name" >&2
         return 1
     fi
 
@@ -139,8 +142,8 @@ find_feature_dir_by_prefix() {
 get_feature_paths() {
     local repo_root
     repo_root=$(get_repo_root)
-    local current_branch
-    current_branch=$(get_current_branch)
+    local current_feature
+    current_feature=$(get_current_feature)
     local has_git_repo="false"
 
     if has_git; then
@@ -149,12 +152,12 @@ get_feature_paths() {
 
     # Use prefix-based lookup to support multiple branches per spec
     local feature_dir
-    feature_dir=$(find_feature_dir_by_prefix "$repo_root" "$current_branch")
+    feature_dir=$(find_feature_dir_by_prefix "$repo_root" "$current_feature")
 
     # Set variables directly in the caller's shell — no eval needed
     # shellcheck disable=SC2034
     REPO_ROOT="$repo_root"
-    CURRENT_BRANCH="$current_branch"
+    CURRENT_FEATURE="$current_feature"
     HAS_GIT="$has_git_repo"
     FEATURE_DIR="$feature_dir"
     FEATURE_SPEC="$feature_dir/spec.md"
