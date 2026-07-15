@@ -59,7 +59,7 @@ The first character must be '{' and the last must be '}'.
     {
       "path": "relative/path/to/file.ext",
       "line": 42,
-      "body": "**[SEVERITY] (Persona)** Comment"
+      "body": "**[SEVERITY] (Persona)**\n\nComment text here."
     }
   ]
 }
@@ -71,9 +71,10 @@ Rules for inline_comments:
   has been pre-annotated as [L42] +code... — use that
   number directly. Do NOT count lines yourself. Do NOT
   use positions within the patch file.
-- Prefix "body" with severity and persona name
+- Prefix "body" with **bold** severity and persona on its own line,
+  then a blank line (\n\n), then the comment text
 - Skip trivial style or formatting issues
 - Maximum 15 inline comments; fewer if code is clean
 - Empty array [] if no comments warranted
-- Each "body": concise (1-3 sentences) and actionable
+- Each comment text: concise (1-3 sentences) and actionable
 PROMPT_OUTPUT
