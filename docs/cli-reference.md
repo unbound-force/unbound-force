@@ -32,6 +32,11 @@ uf init [flags]
 | `--divisor` | bool | `false` | Deploy only Divisor review agents and convention packs |
 | `--lang` | string | `""` | Project language for convention pack (auto-detected from go.mod, package.json, etc. if omitted) |
 
+> **Note:** Dewey indexing during init uses `--no-embeddings` for
+> fast metadata-only indexing. Run `dewey index` separately to
+> generate embeddings for semantic search. To skip Dewey entirely,
+> set `setup.tools.dewey.method: skip` in `.uf/config.yaml`.
+
 **Example**
 
 ```bash

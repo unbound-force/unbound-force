@@ -218,6 +218,21 @@ Edit the `*-custom.md` files to add project-specific
 rules. Tool-owned files are auto-updated by `uf init`;
 custom files are never overwritten.
 
+## Dewey Knowledge Layer
+
+During `uf init`, Dewey performs a **metadata-only index**
+(`--no-embeddings`) for fast initialization. Semantic
+search embeddings are not generated automatically.
+
+To enable semantic search after scaffolding:
+
+```bash
+dewey index
+```
+
+To skip Dewey entirely during init, set
+`setup.tools.dewey.method: skip` in `.uf/config.yaml`.
+
 ## CLI Commands
 
 Unbound Force also provides terminal CLI commands
