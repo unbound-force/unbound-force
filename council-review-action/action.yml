@@ -1,0 +1,224 @@
+---
+# SPDX-License-Identifier: Apache-2.0
+#
+# ----------------------------------------------------------------
+# Council Review Action — AI code review using OpenCode.
+# Auto-discovers Divisor personas from .opencode/agents/, pre-
+# fetches PR context (CI checks, reviews, linked issues), invokes
+# opencode run for review, and outputs structured JSON (summary +
+# inline comments). Falls back to single-agent mode for repos
+# without uf init.
+#
+# Authentication and PR comment posting are the caller's
+# responsibility. This action only runs the review.
+# ----------------------------------------------------------------
+name: "Council Review"
+description: >-
+  AI code review using OpenCode with native Divisor persona
+  discovery. Auto-discovers agents from .opencode/agents/,
+  pre-fetches PR context, runs review via opencode run, and
+  outputs structured JSON for inline review comments.
+
+inputs:
+  model:
+    description: "Model in provider/model format"
+    required: false
+    default: "google-vertex-anthropic/claude-sonnet-4-6"
+  diff-path:
+    description: "Path to the PR diff file"
+    required: true
+  meta-path:
+    description: "Path to the PR metadata JSON file"
+    required: true
+  github-token:
+    description: "GitHub token for gh CLI (pre-fetch)"
+    required: true
+  agents-pattern:
+    description: "Glob for Divisor agent definition files"
+    required: false
+    default: ".opencode/agents/divisor-*.md"
+
+outputs:
+  review-json:
+    description: "Path to the review output JSON file"
+    value: ${{ steps.parse.outputs.review_json }}
+  review-mode:
+    description: >-
+      Review output mode: inline (structured) or comment (fallback)
+    value: ${{ steps.parse.outputs.review_mode || 'comment' }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install OpenCode
+      id: install
+      shell: bash
+      run: |
+        if ! npm install -g opencode-ai@1.2.26; then
+          echo "::warning::OpenCode install failed"
+          echo "installed=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "installed=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Filter diff noise
+      if: steps.install.outputs.installed == 'true'
+      shell: bash
+      env:
+        DIFF_PATH: ${{ inputs.diff-path }}
+      run: |
+        SCRIPT="${{ github.action_path }}/scripts"
+        bash "${SCRIPT}/prepare-diff.sh"
+
+    - name: Pre-fetch PR context
+      if: steps.install.outputs.installed == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        META_PATH: ${{ inputs.meta-path }}
+      run: |
+        SCRIPT="${{ github.action_path }}/scripts"
+        bash "${SCRIPT}/prefetch.sh"
+
+    - name: Detect Divisor agents
+      if: steps.install.outputs.installed == 'true'
+      id: agents
+      shell: bash
+      env:
+        AGENTS_PATTERN: ${{ inputs.agents-pattern }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        COUNT=$(find . -path "./${AGENTS_PATTERN}" \
+          2>/dev/null | wc -l | tr -d ' ')
+        if [[ "${COUNT}" -gt 0 ]]; then
+          echo "::notice::Discovered ${COUNT} repo agent(s)"
+          echo "mode=multi" >> "$GITHUB_OUTPUT"
+          echo "source=repo" >> "$GITHUB_OUTPUT"
+        else
+          BUNDLED="${ACTION_PATH}/../${AGENTS_PATTERN}"
+          BCOUNT=$(find "${ACTION_PATH}/.." \
+            -path "${BUNDLED}" 2>/dev/null \
+            | wc -l | tr -d ' ')
+          if [[ "${BCOUNT}" -gt 0 ]]; then
+            echo "::notice::Using ${BCOUNT} bundled agent(s)"
+            UF="${ACTION_PATH}/.."
+            mkdir -p .opencode/agents .opencode/commands \
+              .opencode/uf/packs
+            cp "${UF}"/.opencode/agents/divisor-*.md \
+              .opencode/agents/
+            for f in review-council.md review-pr.md; do
+              [[ -f "${UF}/.opencode/commands/${f}" ]] && \
+                cp "${UF}/.opencode/commands/${f}" \
+                  .opencode/commands/
+            done
+            [[ -f "${UF}/.opencode/uf/packs/severity.md" ]] && \
+              cp "${UF}/.opencode/uf/packs/severity.md" \
+                .opencode/uf/packs/
+            echo "mode=multi" >> "$GITHUB_OUTPUT"
+            echo "source=bundled" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No agents — single-agent fallback"
+            echo "mode=single" >> "$GITHUB_OUTPUT"
+            echo "source=none" >> "$GITHUB_OUTPUT"
+          fi
+        fi
+
+    - name: Build review prompt
+      if: steps.install.outputs.installed == 'true'
+      shell: bash
+      env:
+        META_PATH: ${{ inputs.meta-path }}
+      run: |
+        SCRIPT="${{ github.action_path }}/scripts"
+        bash "${SCRIPT}/build-prompt.sh"
+
+    - name: Run council review
+      if: steps.install.outputs.installed == 'true'
+      id: review
+      shell: bash
+      env:
+        MODEL: ${{ inputs.model }}
+      run: |
+        SCRIPT="${{ github.action_path }}/scripts"
+        bash "${SCRIPT}/run-review.sh"
+
+    - name: Parse review output
+      id: parse
+      shell: bash
+      env:
+        DIFF_PATH: pr-diff-filtered.patch
+      run: |
+        if [[ ! -f review_raw.txt ]] || [[ ! -s review_raw.txt ]]; then
+          jq -n '{summary: "Review skipped.", inline_comments: []}' \
+            > review_output.json
+          echo "review_json=review_output.json" \
+            >> "$GITHUB_OUTPUT"
+          echo "review_mode=comment" >> "$GITHUB_OUTPUT"
+          echo "::notice::Review skipped — no output file"
+          exit 0
+        fi
+
+        KEYS='.summary and .inline_comments'
+        SCRIPT="${{ github.action_path }}/scripts"
+
+        # Case 1: raw output is already structured JSON
+        if jq -e "${KEYS}" review_raw.txt \
+          > /dev/null 2>&1; then
+          cp review_raw.txt review_parsed.json
+        else
+          # Case 2: streaming JSONL from opencode run --format json.
+          grep '"type":"text"' review_raw.txt \
+            | tail -1 \
+            | jq -r '.part.text // empty' \
+            > review_text.txt 2>/dev/null || true
+
+          if [[ -s review_text.txt ]]; then
+            if python3 "${SCRIPT}/extract-review-json.py" \
+              > review_extracted.json 2>/dev/null && \
+              jq -e "${KEYS}" review_extracted.json \
+                > /dev/null 2>&1; then
+              mv review_extracted.json review_parsed.json
+              echo "::notice::Extracted structured JSON from JSONL"
+            else
+              jq -n --rawfile s review_text.txt \
+                '{summary: $s, inline_comments: []}' \
+                > review_output.json
+              echo "review_json=review_output.json" \
+                >> "$GITHUB_OUTPUT"
+              echo "review_mode=comment" >> "$GITHUB_OUTPUT"
+              echo "::notice::Text output — comment fallback"
+              exit 0
+            fi
+          else
+            # Case 3: unrecognized format — dump raw as summary
+            jq -n --rawfile s review_raw.txt \
+              '{summary: $s, inline_comments: []}' \
+              > review_output.json
+            echo "review_json=review_output.json" \
+              >> "$GITHUB_OUTPUT"
+            echo "review_mode=comment" >> "$GITHUB_OUTPUT"
+            echo "::notice::Non-JSON output — comment fallback"
+            exit 0
+          fi
+        fi
+
+        # Filter inline comments to only diff-visible lines
+        if python3 "${SCRIPT}/filter-diff-lines.py" \
+          "${DIFF_PATH}" review_parsed.json \
+          > review_output.json 2>filter_stderr.txt; then
+          cat filter_stderr.txt >&2
+          COUNT=$(jq '.inline_comments | length' \
+            review_output.json)
+          if [[ "${COUNT}" -gt 0 ]]; then
+            echo "review_mode=inline" >> "$GITHUB_OUTPUT"
+          else
+            echo "review_mode=comment" >> "$GITHUB_OUTPUT"
+            echo "::notice::All comments filtered (not in diff)"
+          fi
+        else
+          echo "::warning::Diff line filter failed, using unfiltered"
+          cp review_parsed.json review_output.json
+          echo "review_mode=inline" >> "$GITHUB_OUTPUT"
+        fi
+        echo "review_json=review_output.json" \
+          >> "$GITHUB_OUTPUT"
