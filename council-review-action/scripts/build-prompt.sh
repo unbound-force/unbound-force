@@ -32,9 +32,10 @@ CI constraints — this is a non-interactive CI run:
 - Read the diff from pr-diff-annotated.patch (line-annotated)
 PROMPT_STATIC
 
-printf '\nPR Title: %s\n' "${PR_TITLE}" >> review_prompt.txt
+{
+printf '\nPR Title: %s\n' "${PR_TITLE}"
 
-cat >> review_prompt.txt << 'PROMPT_CONTEXT'
+cat << 'PROMPT_CONTEXT'
 
 Pre-fetched context (read with Read tool):
 - pr-diff-annotated.patch — the PR diff with line annotations
@@ -44,7 +45,7 @@ Pre-fetched context (read with Read tool):
 - pr-linked-issues.json — linked issues from PR body
 PROMPT_CONTEXT
 
-cat >> review_prompt.txt << 'PROMPT_OUTPUT'
+cat << 'PROMPT_OUTPUT'
 
 OUTPUT FORMAT — CRITICAL:
 Your ENTIRE response MUST be a single raw JSON object.
@@ -78,3 +79,4 @@ Rules for inline_comments:
 - Empty array [] if no comments warranted
 - Each comment text: concise (1-3 sentences) and actionable
 PROMPT_OUTPUT
+} >> review_prompt.txt

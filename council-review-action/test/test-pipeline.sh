@@ -11,6 +11,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
+export SCRIPT_DIR
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
@@ -384,8 +385,7 @@ PARSE_DIR=$(mktemp -d)
   GITHUB_OUTPUT="${PARSE_DIR}/gh_output"
   touch "${GITHUB_OUTPUT}"
   DIFF_PATH=pr-diff-filtered.patch \
-    SCRIPT_DIR="${SCRIPT_DIR}" \
-    GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+        GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
     bash "${SCRIPT_DIR}/parse-output.sh"
 )
 MODE=$(grep "review_mode=" "${PARSE_DIR}/gh_output" | tail -1 | cut -d= -f2)
@@ -413,8 +413,7 @@ DIFF
   GITHUB_OUTPUT="${PARSE_DIR}/gh_output"
   touch "${GITHUB_OUTPUT}"
   DIFF_PATH=pr-diff-filtered.patch \
-    SCRIPT_DIR="${SCRIPT_DIR}" \
-    GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+        GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
     bash "${SCRIPT_DIR}/parse-output.sh"
 )
 MODE=$(grep "review_mode=" "${PARSE_DIR}/gh_output" | tail -1 | cut -d= -f2)
@@ -433,8 +432,7 @@ echo "Just some plain text review." > "${PARSE_DIR}/review_raw.txt"
   GITHUB_OUTPUT="${PARSE_DIR}/gh_output"
   touch "${GITHUB_OUTPUT}"
   DIFF_PATH=pr-diff-filtered.patch \
-    SCRIPT_DIR="${SCRIPT_DIR}" \
-    GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+        GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
     bash "${SCRIPT_DIR}/parse-output.sh"
 )
 MODE=$(grep "review_mode=" "${PARSE_DIR}/gh_output" | tail -1 | cut -d= -f2)
@@ -555,8 +553,7 @@ JSONL
   GITHUB_OUTPUT="${PARSE_DIR}/gh_output"
   touch "${GITHUB_OUTPUT}"
   DIFF_PATH=pr-diff-filtered.patch \
-    SCRIPT_DIR="${SCRIPT_DIR}" \
-    GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+        GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
     bash "${SCRIPT_DIR}/parse-output.sh" 2>/dev/null
 )
 MODE=$(grep "review_mode=" "${PARSE_DIR}/gh_output" | tail -1 | cut -d= -f2)
@@ -578,8 +575,7 @@ JSON
   GITHUB_OUTPUT="${PARSE_DIR}/gh_output"
   touch "${GITHUB_OUTPUT}"
   DIFF_PATH=nonexistent.patch \
-    SCRIPT_DIR="${SCRIPT_DIR}" \
-    GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+        GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
     bash "${SCRIPT_DIR}/parse-output.sh" 2>/dev/null
 )
 MODE=$(grep "review_mode=" "${PARSE_DIR}/gh_output" | tail -1 | cut -d= -f2)
@@ -608,8 +604,7 @@ DIFF
   GITHUB_OUTPUT="${PARSE_DIR}/gh_output"
   touch "${GITHUB_OUTPUT}"
   DIFF_PATH=pr-diff-filtered.patch \
-    SCRIPT_DIR="${SCRIPT_DIR}" \
-    GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+        GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
     bash "${SCRIPT_DIR}/parse-output.sh" 2>/dev/null
 )
 MODE=$(grep "review_mode=" "${PARSE_DIR}/gh_output" | tail -1 | cut -d= -f2)
