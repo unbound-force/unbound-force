@@ -36,7 +36,7 @@ decision.
 ### Goals
 
 - Composite GitHub Action consumable by any org with Claude access
-- Multi-agent review via `--agents` with dynamic persona discovery
+- Multi-agent review via OpenCode native agent discovery
 - Review criteria sourced from the repo's `.opencode/` files
 - Automatic adaptation when `uf init` updates agent definitions
 - Pre-fetched PR context for methodology compliance without Shell
@@ -86,25 +86,26 @@ is used directly without translation.
 
 ### D3: Diff in file, not in prompt string
 
-**Decision**: The diff stays in `pr-diff-truncated.patch` on disk.
-The prompt instructs Claude to `Read` the file. The diff is never
-interpolated into the prompt string or shell argument.
+**Decision**: The diff stays in `pr-diff-filtered.patch` and
+`pr-diff-annotated.patch` on disk. The prompt instructs OpenCode
+to `Read` the file. The diff is never interpolated into the prompt
+string or shell argument.
 
 **Alternative**: Pass diff content in the prompt via heredoc or
 shell variable expansion.
 
 **Why rejected**: Interpolating untrusted diff content into a prompt
 string is the primary prompt injection vector. File-based access
-creates a structural boundary — Claude's tool call to `Read` the
+creates a structural boundary — OpenCode's tool call to `Read` the
 diff is distinct from the system/user prompt instructions.
 
 ### D4: Pre-fetch PR context in action steps
 
 **Decision**: The action runs `gh` commands to pre-fetch CI check
 results, existing reviews, inline comments, and linked issues into
-JSON files. Claude reads these files via `Read` tool.
+JSON files. OpenCode reads these files via `Read` tool.
 
-**Alternative**: Give Claude Shell access to run `gh` directly.
+**Alternative**: Give OpenCode Shell access to run `gh` directly.
 
 **Why rejected**: The diff contains untrusted content. Shell access
 would allow prompt injection to escalate to command execution.
@@ -118,15 +119,15 @@ Pre-fetching in trusted bash steps eliminates this risk.
 **Alternative**: Scoped Shell access (e.g., `Bash(jq:*,wc:*)`).
 
 **Why rejected**: Even scoped Shell access creates injection surface.
-Claude can parse diff content and JSON files using text understanding
-without Shell tools.
+OpenCode can parse diff content and JSON files using text
+understanding without Shell tools.
 
 ### D6: Single-agent fallback
 
 **Decision**: When zero `divisor-*.md` files are found (repo has not
-run `uf init`), fall back to single-agent mode: skip `--agents`,
-use `--allowedTools "Read,Glob"`, and include a generic review
-prompt. Log a `::notice::` about the fallback.
+run `uf init`), fall back to single-agent mode: invoke `opencode run`
+without agent context, and include a generic review prompt. Log a
+`::notice::` about the fallback.
 
 **Alternative**: Skip review entirely.
 
@@ -149,18 +150,18 @@ generic by outputting structured data.
 
 ## Risks / Trade-offs
 
-**[R1] `--agents` flag stability** — The `--agents` CLI flag is
-part of Claude Code SDK. The CLI is pinned to a specific version
-(`@2.1.168`). Version upgrades are explicit and tested.
+**[R1] OpenCode CLI stability** — OpenCode is pinned to a specific
+version (`opencode-ai@1.2.26`). Version upgrades are explicit and
+tested.
 
 **[R2] Higher token cost** — Multi-agent uses more tokens than
 single-agent. Each subagent has its own context window. Mitigation:
-`max-budget-usd` input caps total spend per review.
+model and provider configuration in `opencode run` invocation.
 
-**[R3] Python dependency** — Agent discovery uses Python for safe
-JSON construction. GitHub-hosted runners include Python 3 by
-default. Self-hosted runners may not. Mitigation: the script is
-minimal (~15 lines) and could be rewritten in `jq` if needed.
+**[R3] Python dependency** — Output parsing uses Python for JSON
+extraction and diff-line filtering. GitHub-hosted runners include
+Python 3 by default. Self-hosted runners may not. Mitigation: the
+scripts are minimal and could be rewritten in `jq` if needed.
 
 **[R4] Action versioning** — Consumers pin to a SHA or tag. During
 development, consumers use `@branch-name`. For production, tag

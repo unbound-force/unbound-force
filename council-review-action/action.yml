@@ -66,8 +66,9 @@ runs:
       shell: bash
       env:
         DIFF_PATH: ${{ inputs.diff-path }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        SCRIPT="${{ github.action_path }}/scripts"
+        SCRIPT="${ACTION_PATH}/scripts"
         bash "${SCRIPT}/prepare-diff.sh"
 
     - name: Pre-fetch PR context
@@ -76,8 +77,9 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         META_PATH: ${{ inputs.meta-path }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        SCRIPT="${{ github.action_path }}/scripts"
+        SCRIPT="${ACTION_PATH}/scripts"
         bash "${SCRIPT}/prefetch.sh"
 
     - name: Detect Divisor agents
@@ -88,6 +90,18 @@ runs:
         AGENTS_PATTERN: ${{ inputs.agents-pattern }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
+        # Validate agents-pattern against path traversal
+        if [[ "${AGENTS_PATTERN}" == *..* ]] || \
+           [[ "${AGENTS_PATTERN}" == /* ]]; then
+          echo "::error::agents-pattern must not contain" \
+            "'..' or absolute paths"
+          exit 1
+        fi
+        if ! [[ "${AGENTS_PATTERN}" =~ ^[a-zA-Z0-9_./*-]+$ ]]; then
+          echo "::error::agents-pattern contains invalid characters"
+          exit 1
+        fi
+
         COUNT=$(find . -path "./${AGENTS_PATTERN}" \
           2>/dev/null | wc -l | tr -d ' ')
         if [[ "${COUNT}" -gt 0 ]]; then
@@ -128,8 +142,9 @@ runs:
       shell: bash
       env:
         META_PATH: ${{ inputs.meta-path }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        SCRIPT="${{ github.action_path }}/scripts"
+        SCRIPT="${ACTION_PATH}/scripts"
         bash "${SCRIPT}/build-prompt.sh"
 
     - name: Run council review
@@ -138,8 +153,9 @@ runs:
       shell: bash
       env:
         MODEL: ${{ inputs.model }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        SCRIPT="${{ github.action_path }}/scripts"
+        SCRIPT="${ACTION_PATH}/scripts"
         bash "${SCRIPT}/run-review.sh"
 
     - name: Parse review output
@@ -147,6 +163,7 @@ runs:
       shell: bash
       env:
         DIFF_PATH: pr-diff-filtered.patch
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         if [[ ! -f review_raw.txt ]] || [[ ! -s review_raw.txt ]]; then
           jq -n '{summary: "Review skipped.", inline_comments: []}' \
@@ -159,7 +176,7 @@ runs:
         fi
 
         KEYS='.summary and .inline_comments'
-        SCRIPT="${{ github.action_path }}/scripts"
+        SCRIPT="${ACTION_PATH}/scripts"
 
         # Case 1: raw output is already structured JSON
         if jq -e "${KEYS}" review_raw.txt \
@@ -167,7 +184,7 @@ runs:
           cp review_raw.txt review_parsed.json
         else
           # Case 2: streaming JSONL from opencode run --format json.
-          grep '"type":"text"' review_raw.txt \
+          grep '"type"\s*:\s*"text"' review_raw.txt \
             | tail -1 \
             | jq -r '.part.text // empty' \
             > review_text.txt 2>/dev/null || true

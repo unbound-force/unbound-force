@@ -13,29 +13,29 @@
 set -euo pipefail
 
 EXCLUDE_PATTERNS=(
-  # Lock files
-  'go\.sum'
-  'package-lock\.json'
-  'yarn\.lock'
-  'pnpm-lock\.yaml'
-  'Cargo\.lock'
-  'Gemfile\.lock'
-  'poetry\.lock'
-  'composer\.lock'
-  # Vendored / third-party
-  'vendor/'
-  'node_modules/'
-  'third_party/'
+  # Lock files (anchored to match only exact filenames)
+  '(^|/)go\.sum$'
+  '(^|/)package-lock\.json$'
+  '(^|/)yarn\.lock$'
+  '(^|/)pnpm-lock\.yaml$'
+  '(^|/)Cargo\.lock$'
+  '(^|/)Gemfile\.lock$'
+  '(^|/)poetry\.lock$'
+  '(^|/)composer\.lock$'
+  # Vendored / third-party (anchored to path segments)
+  '(^|/)vendor/'
+  '(^|/)node_modules/'
+  '(^|/)third_party/'
   # Generated code
-  '\.pb\.go'
-  '\.gen\.go'
+  '\.pb\.go$'
+  '\.gen\.go$'
   '_generated\.'
-  '\.min\.js'
-  '\.min\.css'
+  '\.min\.js$'
+  '\.min\.css$'
   '\.snap$'
-  # Test fixtures
-  'testdata/'
-  'fixtures/'
+  # Test fixtures (anchored to path segments)
+  '(^|/)testdata/'
+  '(^|/)fixtures/'
 )
 
 build_regex() {

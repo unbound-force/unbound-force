@@ -125,6 +125,7 @@ council-review-action/
 │   └── test-pipeline.sh    # Pipeline tests (39 assertions)
 └── docs/
     ├── decisions.md         # Key technical decisions
+    ├── security-risks.md    # Security risk register
     └── testing.md           # Test coverage and strategy
 ```
 

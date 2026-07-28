@@ -5,7 +5,7 @@
 The council review CI workflow validates PRs using Claude on Vertex AI
 via WIF authentication. The current prototype (complytime/org-infra
 PR #313) embeds the orchestration logic — agent discovery, prompt
-construction, Claude invocation, output parsing — directly in the
+construction, review invocation, output parsing — directly in the
 reusable workflow YAML. This creates three problems:
 
 1. **Wrong ownership**: The orchestration logic is generic. It reads
@@ -15,15 +15,15 @@ reusable workflow YAML. This creates three problems:
    belongs to unbound-force.
 
 2. **Single-agent limitation**: The prototype simulates all five
-   Divisor personas in a single Claude invocation. The interactive
+   Divisor personas in a single invocation. The interactive
    `/review-council` command spawns each persona as a parallel
-   subagent with its own context window. The `--agents` CLI flag
-   makes real multi-agent orchestration feasible in `claude -p`.
+   subagent with its own context window. OpenCode's native agent
+   discovery makes real multi-agent orchestration feasible.
 
 3. **Prompt injection risk**: The prototype interpolates diff content
    into the prompt string and uses a soft preamble as the only
    mitigation. A composite action can isolate the diff in a file
-   read by Claude's tools, reducing the injection surface.
+   read by OpenCode's tools, reducing the injection surface.
 
 Tracked as unbound-force/unbound-force#253.
 
@@ -32,7 +32,7 @@ Tracked as unbound-force/unbound-force#253.
 - **New**: `council-review-action/` directory at repo root containing
   a composite GitHub Action (`action.yml`) and supporting scripts
 - **New**: Scripts for pre-fetching PR context, discovering Divisor
-  agents, building the review prompt, running Claude, and parsing
+  agents, building the review prompt, running OpenCode, and parsing
   structured output
 - **Downstream**: org-infra's `reusable_council_review.yml` becomes a
   thin consumer — WIF auth, fork-safe chain, secret forwarding, and
@@ -52,9 +52,9 @@ Tracked as unbound-force/unbound-force#253.
 ### New Capabilities
 
 - `council-review-action`: Composite GitHub Action that discovers
-  Divisor personas from `.opencode/agents/divisor-*.md`, builds
-  `--agents` JSON dynamically, pre-fetches PR context (CI checks,
-  existing reviews, linked issues), invokes `claude -p --agents`
+  Divisor personas from `.opencode/agents/divisor-*.md` via
+  OpenCode's native agent discovery, pre-fetches PR context (CI
+  checks, existing reviews, linked issues), invokes `opencode run`
   with read-only tool restrictions, and outputs structured review
   JSON (summary + inline comments)
 

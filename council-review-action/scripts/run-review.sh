@@ -8,28 +8,33 @@
 # Required env: MODEL
 # Optional env: GOOGLE_CLOUD_PROJECT, VERTEX_LOCATION,
 #               GOOGLE_APPLICATION_CREDENTIALS
-# TODO: restore set -euo pipefail once OpenCode+Vertex is stable
-set -uo pipefail
+set -euo pipefail
 
 PROVIDER="${MODEL%%/*}"
 MODEL_NAME="${MODEL#*/}"
 
 if [[ "${PROVIDER}" == "google-vertex-anthropic" ]]; then
   export OPENCODE_CONFIG_CONTENT
-  OPENCODE_CONFIG_CONTENT=$(cat <<OCEOF
-{
-  "\$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "google-vertex-anthropic": {
-      "models": {
-        "${MODEL_NAME}": {}
+  OPENCODE_CONFIG_CONTENT=$(jq -n \
+    --arg model "${MODEL_NAME}" \
+    '{
+      "$schema": "https://opencode.ai/config.json",
+      "provider": {
+        "google-vertex-anthropic": {
+          "models": {
+            ($model): {}
+          }
+        }
       }
-    }
-  }
-}
-OCEOF
-)
+    }')
 fi
+
+# Unset sensitive credentials before invoking OpenCode to limit
+# the blast radius if prompt injection triggers tool execution.
+# WIF credentials for Vertex AI are inherited via the environment
+# automatically; GH_TOKEN and explicit credential paths are not
+# needed by the review invocation.
+unset GH_TOKEN GOOGLE_APPLICATION_CREDENTIALS 2>/dev/null || true
 
 OPENCODE_EXIT=0
 opencode run \

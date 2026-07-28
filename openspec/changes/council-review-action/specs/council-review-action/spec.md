@@ -5,25 +5,26 @@
 ### Requirement: Action discovers Divisor agents dynamically
 
 The action SHALL discover Divisor persona definitions by globbing
-`.opencode/agents/divisor-*.md` in the checked-out repository. It
-SHALL construct `--agents` JSON from the discovered files.
+`.opencode/agents/divisor-*.md` in the checked-out repository.
+OpenCode auto-discovers these agents via its native `.opencode/`
+context loading.
 
 #### Scenario: Multiple personas discovered
 
 - **WHEN** the repo contains 5+ `divisor-*.md` files
-- **THEN** the action builds an `--agents` JSON object with one
-  entry per persona and invokes `claude -p --agents`
+- **THEN** the action invokes `opencode run` which auto-discovers
+  the agents and applies each persona's review criteria
 
 #### Scenario: Zero personas discovered
 
 - **WHEN** the repo contains no `divisor-*.md` files
 - **THEN** the action falls back to single-agent mode, logs a
-  `::notice::`, and invokes `claude -p` without `--agents`
+  `::notice::`, and invokes `opencode run` without agent context
 
 ### Requirement: Action pre-fetches PR context
 
 The action SHALL pre-fetch CI check results, existing reviews,
-inline comments, and linked issues using `gh` commands. Claude
+inline comments, and linked issues using `gh` commands. OpenCode
 SHALL read these as JSON files via `Read` tool, not via Shell.
 
 #### Scenario: CI checks available
@@ -39,7 +40,7 @@ SHALL read these as JSON files via `Read` tool, not via Shell.
 ### Requirement: Diff content is file-based, not interpolated
 
 The action SHALL NOT interpolate diff content into the prompt
-string. The diff SHALL remain in a file that Claude reads via
+string. The diff SHALL remain in a file that OpenCode reads via
 its `Read` tool.
 
 #### Scenario: Large diff
@@ -55,21 +56,21 @@ The action SHALL output a JSON file with `summary` (string) and
 
 #### Scenario: Structured output
 
-- **WHEN** Claude produces valid JSON matching the schema
+- **WHEN** OpenCode produces valid JSON matching the schema
 - **THEN** `review-mode` output is `inline` and `review-json`
   points to the validated file
 
 #### Scenario: Unstructured output
 
-- **WHEN** Claude produces text that is not valid JSON
+- **WHEN** OpenCode produces text that is not valid JSON
 - **THEN** `review-mode` output is `comment` and `review-json`
   points to the raw output file
 
 ### Requirement: Tool access is read-only
 
-The action SHALL restrict Claude to `Read` and `Glob` tools for
-subagents, and `Read`, `Glob`, and `Agent` for the parent. No
-agent SHALL have `Shell`, `Write`, or `Edit` access.
+The action SHALL restrict OpenCode to `Read` and `Glob` tools
+for subagents, and `Read`, `Glob`, and `Agent` for the parent.
+No agent SHALL have `Shell`, `Write`, or `Edit` access.
 
 ### Requirement: Action does not handle authentication or posting
 

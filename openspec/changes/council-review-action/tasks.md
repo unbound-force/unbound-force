@@ -20,27 +20,28 @@
 
 ## 3. Agent Discovery and Prompt Construction
 
-- [x] 3.1 Create `discover-agents.py` — glob `divisor-*.md`, build
-  `--agents` JSON via `json.dumps()`, output to file
+- [x] 3.1 Implement agent discovery — detect `divisor-*.md` via
+  shell globbing in action step, with repo → bundled → single-agent
+  fallback chain
 - [x] 3.2 Create `build-prompt.sh` — construct review prompt from
   methodology file references (review-council.md, review-pr.md,
   severity.md, convention packs), CI constraints, JSON output schema
 - [x] 3.3 Implement fallback flag when zero agents discovered
 
-## 4. Claude Invocation and Output Parsing
+## 4. OpenCode Invocation and Output Parsing
 
-- [x] 4.1 Create `run-review.sh` — invoke `claude -p` with
-  `--agents` (multi-agent) or without (single-agent fallback),
-  `--allowedTools`, budget/turn caps
+- [x] 4.1 Create `run-review.sh` — invoke `opencode run` with
+  `--model` and `--format json`, OpenCode auto-discovers agents
+  from `.opencode/agents/`
 - [x] 4.2 Parse output: validate JSON schema (summary +
   inline_comments), set review-mode output
-- [x] 4.3 Handle Claude errors: separate stderr, log warnings,
+- [x] 4.3 Handle OpenCode errors: separate stderr, log warnings,
   produce empty review JSON on failure
 
 ## 5. Validation
 
-- [ ] 5.1 Verify `action.yml` is valid composite action syntax
-- [ ] 5.2 Test agent discovery with unbound-force's own
+- [x] 5.1 Verify `action.yml` is valid composite action syntax
+- [x] 5.2 Test agent discovery with unbound-force's own
   `.opencode/agents/divisor-*.md` files (9 personas)
-- [ ] 5.3 Test single-agent fallback with no `divisor-*.md` files
+- [x] 5.3 Test single-agent fallback with no `divisor-*.md` files
 - [ ] 5.4 End-to-end test via org-infra consuming the action
