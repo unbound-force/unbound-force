@@ -12,10 +12,10 @@ bash test/test-pipeline.sh
 
 | Script | Testable locally | Tests | Assertions |
 |---|---|---|---|
-| `prepare-diff.sh` | Yes | 6 | 20 |
+| `prepare-diff.sh` | Yes | 6 | 23 |
 | `filter-diff-lines.py` | Yes | 3 | 8 |
 | `extract-review-json.py` | Yes | 7 | 7 |
-| `build-prompt.sh` | Yes | 3 | 12 |
+| `build-prompt.sh` | Yes | 4 | 13 |
 | `parse-output.sh` | Yes | 6 | 9 |
 | `run-review.sh` | No (requires OpenCode + Vertex AI) | — | — |
 | `prefetch.sh` | No (requires `gh` CLI + repo access) | — | — |
