@@ -123,7 +123,7 @@ council-review-action/
 │   ├── extract-review-json.py  # JSON extraction from JSONL
 │   └── filter-diff-lines.py    # Line number validation
 ├── test/
-│   └── test-pipeline.sh    # Pipeline tests (39 assertions)
+│   └── test-pipeline.sh    # Pipeline tests (60 assertions)
 └── docs/
     ├── decisions.md         # Key technical decisions
     ├── security-risks.md    # Security risk register

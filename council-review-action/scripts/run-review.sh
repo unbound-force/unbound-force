@@ -10,6 +10,12 @@
 #               GOOGLE_APPLICATION_CREDENTIALS
 set -euo pipefail
 
+# Validate model input against shell metacharacters
+if ! [[ "${MODEL}" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+  echo "::error::model contains invalid characters"
+  exit 1
+fi
+
 PROVIDER="${MODEL%%/*}"
 MODEL_NAME="${MODEL#*/}"
 
@@ -37,14 +43,17 @@ fi
 unset GH_TOKEN GOOGLE_APPLICATION_CREDENTIALS 2>/dev/null || true
 
 OPENCODE_EXIT=0
-opencode run \
+timeout 300 opencode run \
   --model "${MODEL}" \
   --format json \
   --file review_prompt.txt \
   -- "Review this PR according to the attached prompt." \
   > review_raw.txt 2>review_err.txt || OPENCODE_EXIT=$?
 
-if [[ "${OPENCODE_EXIT}" -ne 0 ]]; then
+if [[ "${OPENCODE_EXIT}" -eq 124 ]]; then
+  echo "::warning::OpenCode timed out after 300s"
+  cat review_err.txt >&2
+elif [[ "${OPENCODE_EXIT}" -ne 0 ]]; then
   echo "::warning::OpenCode invocation failed (exit ${OPENCODE_EXIT})"
   cat review_err.txt >&2
 fi

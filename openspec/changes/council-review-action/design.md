@@ -2,7 +2,7 @@
 
 ## Context
 
-The council review CI pipeline authenticates to Vertex AI via ITPC
+The council review CI pipeline authenticates to Vertex AI via OIDC
 Workload Identity Federation (established in complytime/org-infra
 PR #313) and invokes the review via OpenCode. The orchestration
 logic — auto-discovering Divisor personas, constructing prompts

@@ -3,9 +3,11 @@
 ## 1. Action Packaging
 
 - [x] 1.1 Create `council-review-action/action.yml` composite action
-  with inputs (model, max-diff-lines, max-turns, max-budget-usd,
-  claude-version, diff-path, meta-path, github-token, agents-pattern)
-  and outputs (review-json, review-mode)
+  with inputs (model, diff-path, meta-path, github-token,
+  agents-pattern) and outputs (review-json, review-mode).
+  Descoped: `max-diff-lines` (noise filtering sufficient),
+  `max-turns`/`max-budget-usd` (OpenCode lacks these flags,
+  see ADR-001), `claude-version` (replaced by `model`)
 - [x] 1.2 Create `council-review-action/scripts/` directory for
   supporting scripts
 
@@ -45,3 +47,5 @@
   `.opencode/agents/divisor-*.md` files (9 personas)
 - [x] 5.3 Test single-agent fallback with no `divisor-*.md` files
 - [ ] 5.4 End-to-end test via org-infra consuming the action
+  (deferred to org-infra integration, tracked in
+  complytime/org-infra)

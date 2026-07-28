@@ -32,9 +32,9 @@ CI constraints — this is a non-interactive CI run:
 - Read the diff from pr-diff-annotated.patch (line-annotated)
 PROMPT_STATIC
 
-cat >> review_prompt.txt <<PROMPT_DYNAMIC
+printf '\nPR Title: %s\n' "${PR_TITLE}" >> review_prompt.txt
 
-PR Title: ${PR_TITLE}
+cat >> review_prompt.txt << 'PROMPT_CONTEXT'
 
 Pre-fetched context (read with Read tool):
 - pr-diff-annotated.patch — the PR diff with line annotations
@@ -42,7 +42,7 @@ Pre-fetched context (read with Read tool):
 - pr-reviews.json — existing PR reviews
 - pr-review-comments.json — existing inline comments
 - pr-linked-issues.json — linked issues from PR body
-PROMPT_DYNAMIC
+PROMPT_CONTEXT
 
 cat >> review_prompt.txt << 'PROMPT_OUTPUT'
 

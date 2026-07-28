@@ -4,7 +4,7 @@
 
 ### Requirement: Action discovers Divisor agents dynamically
 
-The action SHALL discover Divisor persona definitions by globbing
+The action MUST discover Divisor persona definitions by globbing
 `.opencode/agents/divisor-*.md` in the checked-out repository.
 OpenCode auto-discovers these agents via its native `.opencode/`
 context loading.
@@ -23,9 +23,9 @@ context loading.
 
 ### Requirement: Action pre-fetches PR context
 
-The action SHALL pre-fetch CI check results, existing reviews,
+The action MUST pre-fetch CI check results, existing reviews,
 inline comments, and linked issues using `gh` commands. OpenCode
-SHALL read these as JSON files via `Read` tool, not via Shell.
+MUST read these as JSON files via `Read` tool, not via Shell.
 
 #### Scenario: CI checks available
 
@@ -39,19 +39,21 @@ SHALL read these as JSON files via `Read` tool, not via Shell.
 
 ### Requirement: Diff content is file-based, not interpolated
 
-The action SHALL NOT interpolate diff content into the prompt
-string. The diff SHALL remain in a file that OpenCode reads via
+The action MUST NOT interpolate diff content into the prompt
+string. The diff MUST remain in a file that OpenCode reads via
 its `Read` tool.
 
-#### Scenario: Large diff
+#### Scenario: Large diff (deferred)
 
-- **WHEN** the diff exceeds `max-diff-lines`
-- **THEN** the diff file is truncated and a truncation note is
-  included in the prompt
+Diff truncation via `max-diff-lines` is not currently
+implemented. The noise filtering in `prepare-diff.sh`
+reduces diff size sufficiently for typical PRs. Truncation
+MAY be added in a future iteration if large diffs cause
+token budget issues.
 
 ### Requirement: Action outputs structured JSON
 
-The action SHALL output a JSON file with `summary` (string) and
+The action MUST output a JSON file with `summary` (string) and
 `inline_comments` (array of objects with `path`, `line`, `body`).
 
 #### Scenario: Structured output
@@ -68,12 +70,12 @@ The action SHALL output a JSON file with `summary` (string) and
 
 ### Requirement: Tool access is read-only
 
-The action SHALL restrict OpenCode to `Read` and `Glob` tools
+The action MUST restrict OpenCode to `Read` and `Glob` tools
 for subagents, and `Read`, `Glob`, and `Agent` for the parent.
-No agent SHALL have `Shell`, `Write`, or `Edit` access.
+No agent MUST have `Shell`, `Write`, or `Edit` access.
 
 ### Requirement: Action does not handle authentication or posting
 
-The action SHALL NOT perform WIF authentication, fork-safe workflow
+The action MUST NOT perform WIF authentication, fork-safe workflow
 orchestration, or PR comment posting. These are the consumer's
 responsibility.

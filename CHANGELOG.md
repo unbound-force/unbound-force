@@ -5,6 +5,20 @@ Each entry follows the format: `- <change-name>: <summary>`.
 
 ## Unreleased
 
+### Added
+- council-review-action: New composite GitHub Action for
+  AI code review using OpenCode with Divisor persona
+  discovery; auto-discovers agents from
+  `.opencode/agents/`, pre-fetches PR context (CI checks,
+  reviews, linked issues), invokes `opencode run`, and
+  outputs structured JSON for inline review comments;
+  three-tier persona fallback (repo, bundled,
+  single-agent); diff noise filtering and line annotation
+  for accurate inline comment placement; 60-assertion test
+  suite across 26 scenarios
+  (Spec: openspec/changes/council-review-action/,
+  Closes: #253)
+
 ### Changed
 - `/review-council` Code Review Mode: added optional
   Step 7 (GitHub Review Posting) for posting consolidated

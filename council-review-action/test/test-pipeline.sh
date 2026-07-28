@@ -530,6 +530,92 @@ assert_contains "schema has path field" '"path"' "${PROMPT}"
 assert_contains "schema has line field" '"line"' "${PROMPT}"
 assert_contains "schema has body field" '"body"' "${PROMPT}"
 
+# ── Test 24: parse-output.sh — JSONL streaming format ────────
+echo "Test 24: parse-output.sh — JSONL streaming (Case 2)"
+
+PARSE_DIR=$(mktemp -d)
+cat > "${PARSE_DIR}/pr-diff-filtered.patch" << 'DIFF'
+diff --git a/app.go b/app.go
+new file mode 100644
+--- /dev/null
++++ b/app.go
+@@ -0,0 +1,2 @@
++package main
++func main() {}
+DIFF
+# Simulate JSONL output from opencode run --format json
+cat > "${PARSE_DIR}/review_raw.txt" << 'JSONL'
+{"type":"start","session":"abc"}
+{"type":"text","part":{"text":"thinking about the review..."}}
+{"type":"text","part":{"text":"{\"summary\": \"JSONL review.\", \"inline_comments\": [{\"path\": \"app.go\", \"line\": 1, \"body\": \"ok\"}]}"}}
+{"type":"end","session":"abc"}
+JSONL
+(
+  cd "${PARSE_DIR}"
+  GITHUB_OUTPUT="${PARSE_DIR}/gh_output"
+  touch "${GITHUB_OUTPUT}"
+  DIFF_PATH=pr-diff-filtered.patch \
+    SCRIPT_DIR="${SCRIPT_DIR}" \
+    GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+    bash "${SCRIPT_DIR}/parse-output.sh" 2>/dev/null
+)
+MODE=$(grep "review_mode=" "${PARSE_DIR}/gh_output" | tail -1 | cut -d= -f2)
+SUMMARY=$(jq -r '.summary' "${PARSE_DIR}/review_output.json")
+assert_eq "JSONL streaming mode" "inline" "${MODE}"
+assert_eq "JSONL streaming summary" "JSONL review." "${SUMMARY}"
+rm -rf "${PARSE_DIR}"
+
+# ── Test 25: parse-output.sh — filter failure fallback ───────
+echo "Test 25: parse-output.sh — filter failure uses unfiltered"
+
+PARSE_DIR=$(mktemp -d)
+cat > "${PARSE_DIR}/review_raw.txt" << 'JSON'
+{"summary": "Filter fail test.", "inline_comments": [{"path": "x.go", "line": 1, "body": "finding"}]}
+JSON
+# Provide a non-existent diff path to trigger filter failure
+(
+  cd "${PARSE_DIR}"
+  GITHUB_OUTPUT="${PARSE_DIR}/gh_output"
+  touch "${GITHUB_OUTPUT}"
+  DIFF_PATH=nonexistent.patch \
+    SCRIPT_DIR="${SCRIPT_DIR}" \
+    GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+    bash "${SCRIPT_DIR}/parse-output.sh" 2>/dev/null
+)
+MODE=$(grep "review_mode=" "${PARSE_DIR}/gh_output" | tail -1 | cut -d= -f2)
+COUNT=$(jq '.inline_comments | length' "${PARSE_DIR}/review_output.json")
+assert_eq "filter failure mode" "inline" "${MODE}"
+assert_eq "filter failure keeps comments" "1" "${COUNT}"
+rm -rf "${PARSE_DIR}"
+
+# ── Test 26: parse-output.sh — all comments filtered ────────
+echo "Test 26: parse-output.sh — all comments filtered = comment mode"
+
+PARSE_DIR=$(mktemp -d)
+cat > "${PARSE_DIR}/review_raw.txt" << 'JSON'
+{"summary": "All filtered.", "inline_comments": [{"path": "x.go", "line": 999, "body": "bad line"}]}
+JSON
+cat > "${PARSE_DIR}/pr-diff-filtered.patch" << 'DIFF'
+diff --git a/x.go b/x.go
+new file mode 100644
+--- /dev/null
++++ b/x.go
+@@ -0,0 +1,1 @@
++package main
+DIFF
+(
+  cd "${PARSE_DIR}"
+  GITHUB_OUTPUT="${PARSE_DIR}/gh_output"
+  touch "${GITHUB_OUTPUT}"
+  DIFF_PATH=pr-diff-filtered.patch \
+    SCRIPT_DIR="${SCRIPT_DIR}" \
+    GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+    bash "${SCRIPT_DIR}/parse-output.sh" 2>/dev/null
+)
+MODE=$(grep "review_mode=" "${PARSE_DIR}/gh_output" | tail -1 | cut -d= -f2)
+assert_eq "all filtered = comment mode" "comment" "${MODE}"
+rm -rf "${PARSE_DIR}"
+
 # ── Summary ──────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

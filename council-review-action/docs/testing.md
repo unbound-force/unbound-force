@@ -12,14 +12,19 @@ bash test/test-pipeline.sh
 
 | Script | Testable locally | Tests | Assertions |
 |---|---|---|---|
-| `prepare-diff.sh` | Yes | 5 | 19 |
-| `filter-diff-lines.py` | Yes | 2 | 4 |
-| `extract-review-json.py` | Yes | 5 | 5 |
-| `build-prompt.sh` | Yes | 3 | 7 |
+| `prepare-diff.sh` | Yes | 6 | 20 |
+| `filter-diff-lines.py` | Yes | 3 | 8 |
+| `extract-review-json.py` | Yes | 7 | 7 |
+| `build-prompt.sh` | Yes | 3 | 12 |
+| `parse-output.sh` | Yes | 6 | 9 |
 | `run-review.sh` | No (requires OpenCode + Vertex AI) | — | — |
 | `prefetch.sh` | No (requires `gh` CLI + repo access) | — | — |
 
-**Total: 15 scenarios, 39 assertions**
+**Total: 26 scenarios, 60 assertions** (includes empty diff,
+size limit, multiple JSON objects, 6 parse-output scenarios
+covering direct JSON, JSONL streaming, plain text, filter
+failure, and all-comments-filtered paths, plus JSON schema
+field checks — added in review feedback round)
 
 ### Test details
 
