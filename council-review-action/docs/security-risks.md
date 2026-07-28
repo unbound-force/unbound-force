@@ -20,12 +20,13 @@ complytime/org-infra#430 (token consumption controls).
 
 ### T2: Network exfiltration via model tool use
 
-**Risk**: The model runs with full host network authority. A prompt
-injection could cause it to exfiltrate private repo data via shell
-commands, web fetches, or MCP servers.
+**Risk**: There is no runtime enforcement preventing the model from
+accessing the network. The model runs with full host network
+authority. A prompt injection could cause it to exfiltrate private
+repo data via shell commands, web fetches, or MCP servers.
 
 **Mitigations in place**: Prompt instructions prohibit shell/network
-use (defense-in-depth, not enforcement).
+use (defense-in-depth only, not enforcement).
 
 **Tracked in**: unbound-force/unbound-force#337 (OPENCODE_PERMISSION
 sandbox), complytime/org-infra#429 Phase 2 (harden-runner egress

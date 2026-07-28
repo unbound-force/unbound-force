@@ -96,6 +96,7 @@ unbound-force/
 │   ├── sync/                         # GitHub issue sync
 │   └── textutil/                     # Shared text formatting helpers
 ├── docs/                             # User-facing documentation
+│   └── decisions/                    # Architecture Decision Records (ADRs)
 ├── specs/                            # Architectural specs (001-035)
 ├── openspec/                         # OpenSpec tactical workflow
 ├── schemas/                          # JSON Schema registry

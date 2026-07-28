@@ -9,11 +9,25 @@ import json
 import re
 import sys
 
+# Size limit: reject inputs > 2 MB to prevent quadratic parsing
+# on adversarial input. Typical review output is < 100 KB.
+MAX_INPUT_BYTES = 2 * 1024 * 1024
+
+# Iteration limit: cap the number of parse attempts to prevent
+# unbounded CPU usage on inputs with many '{' or '}' characters.
+MAX_PARSE_ATTEMPTS = 500
+
 text = open("review_text.txt").read()
+
+if len(text) > MAX_INPUT_BYTES:
+    print(f"Input exceeds {MAX_INPUT_BYTES} bytes, skipping",
+          file=sys.stderr)
+    sys.exit(1)
 
 # Strip markdown code fences (```json ... ``` or ``` ... ```)
 text = re.sub(r"```(?:json)?\s*\n?", "", text)
 
+attempts = 0
 i = len(text)
 while i > 0:
     i = text.rfind("{", 0, i)
@@ -27,6 +41,11 @@ while i > 0:
         j = candidate.rfind("}", 0, j)
         if j < 0:
             break
+        attempts += 1
+        if attempts > MAX_PARSE_ATTEMPTS:
+            print(f"Exceeded {MAX_PARSE_ATTEMPTS} parse attempts",
+                  file=sys.stderr)
+            sys.exit(1)
         try:
             obj = json.loads(candidate[: j + 1])
             if "summary" in obj and "inline_comments" in obj:

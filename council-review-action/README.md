@@ -119,6 +119,7 @@ council-review-action/
 │   ├── build-prompt.sh     # Prompt construction
 │   ├── run-review.sh       # OpenCode invocation
 │   ├── prefetch.sh         # PR context pre-fetch (CI, reviews)
+│   ├── parse-output.sh     # Review output parsing + filtering
 │   ├── extract-review-json.py  # JSON extraction from JSONL
 │   └── filter-diff-lines.py    # Line number validation
 ├── test/

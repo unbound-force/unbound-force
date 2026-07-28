@@ -375,6 +375,161 @@ assert_contains "untrusted input warning" "untrusted input" "${PROMPT}"
 assert_contains "no shell commands" "Do NOT run shell commands" "${PROMPT}"
 assert_contains "no subagents" "Do NOT spawn subagents" "${PROMPT}"
 
+# ── Test 16: parse-output.sh — no input file ────────────────
+echo "Test 16: parse-output.sh — no input produces comment fallback"
+
+PARSE_DIR=$(mktemp -d)
+(
+  cd "${PARSE_DIR}"
+  GITHUB_OUTPUT="${PARSE_DIR}/gh_output"
+  touch "${GITHUB_OUTPUT}"
+  DIFF_PATH=pr-diff-filtered.patch \
+    SCRIPT_DIR="${SCRIPT_DIR}" \
+    GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+    bash "${SCRIPT_DIR}/parse-output.sh"
+)
+MODE=$(grep "review_mode=" "${PARSE_DIR}/gh_output" | tail -1 | cut -d= -f2)
+assert_eq "fallback mode on no input" "comment" "${MODE}"
+rm -rf "${PARSE_DIR}"
+
+# ── Test 17: parse-output.sh — direct JSON input ────────────
+echo "Test 17: parse-output.sh — direct JSON passes through"
+
+PARSE_DIR=$(mktemp -d)
+cat > "${PARSE_DIR}/review_raw.txt" << 'JSON'
+{"summary": "Direct JSON.", "inline_comments": [{"path": "a.go", "line": 1, "body": "ok"}]}
+JSON
+cat > "${PARSE_DIR}/pr-diff-filtered.patch" << 'DIFF'
+diff --git a/a.go b/a.go
+new file mode 100644
+--- /dev/null
++++ b/a.go
+@@ -0,0 +1,2 @@
++package main
++func main() {}
+DIFF
+(
+  cd "${PARSE_DIR}"
+  GITHUB_OUTPUT="${PARSE_DIR}/gh_output"
+  touch "${GITHUB_OUTPUT}"
+  DIFF_PATH=pr-diff-filtered.patch \
+    SCRIPT_DIR="${SCRIPT_DIR}" \
+    GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+    bash "${SCRIPT_DIR}/parse-output.sh"
+)
+MODE=$(grep "review_mode=" "${PARSE_DIR}/gh_output" | tail -1 | cut -d= -f2)
+SUMMARY=$(jq -r '.summary' "${PARSE_DIR}/review_output.json")
+assert_eq "direct JSON mode" "inline" "${MODE}"
+assert_eq "direct JSON summary" "Direct JSON." "${SUMMARY}"
+rm -rf "${PARSE_DIR}"
+
+# ── Test 18: parse-output.sh — plain text fallback ──────────
+echo "Test 18: parse-output.sh — plain text falls back to comment"
+
+PARSE_DIR=$(mktemp -d)
+echo "Just some plain text review." > "${PARSE_DIR}/review_raw.txt"
+(
+  cd "${PARSE_DIR}"
+  GITHUB_OUTPUT="${PARSE_DIR}/gh_output"
+  touch "${GITHUB_OUTPUT}"
+  DIFF_PATH=pr-diff-filtered.patch \
+    SCRIPT_DIR="${SCRIPT_DIR}" \
+    GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+    bash "${SCRIPT_DIR}/parse-output.sh"
+)
+MODE=$(grep "review_mode=" "${PARSE_DIR}/gh_output" | tail -1 | cut -d= -f2)
+assert_eq "plain text mode" "comment" "${MODE}"
+rm -rf "${PARSE_DIR}"
+
+# ── Test 19: empty diff produces empty filtered output ──────
+echo "Test 19: Empty diff — no crash"
+
+EMPTY_DIR=$(mktemp -d)
+touch "${EMPTY_DIR}/empty.patch"
+(cd "${EMPTY_DIR}" && DIFF_PATH=empty.patch bash "${SCRIPT_DIR}/prepare-diff.sh")
+FILTERED_SIZE=$(wc -c < "${EMPTY_DIR}/pr-diff-filtered.patch" | tr -d ' ')
+rm -rf "${EMPTY_DIR}"
+
+# Empty diff should produce a file (possibly with just a newline)
+if [[ "${FILTERED_SIZE}" -le 1 ]]; then
+  echo "  PASS: empty diff handled"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL: expected empty output, got ${FILTERED_SIZE} bytes"
+  FAIL=$((FAIL + 1))
+fi
+
+# ── Test 20: extract-review-json.py — multiple JSON objects ──
+echo "Test 20: extract-review-json.py — picks last valid JSON"
+
+cat > "${WORK_DIR}/review_text.txt" << 'TXT'
+{"status": "partial", "inline_comments": []}
+Some text in between.
+{"summary": "Final review.", "inline_comments": [{"path": "b.py", "line": 1, "body": "ok"}]}
+TXT
+
+RESULT=$(cd "${WORK_DIR}" && python3 "${SCRIPT_DIR}/extract-review-json.py")
+SUMMARY=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin)['summary'])")
+assert_eq "picks last valid JSON" "Final review." "${SUMMARY}"
+
+# ── Test 21: extract-review-json.py — size limit ────────────
+echo "Test 21: extract-review-json.py — rejects oversized input"
+
+python3 -c "print('{' * 3000000)" > "${WORK_DIR}/review_text.txt"
+
+if (cd "${WORK_DIR}" && python3 "${SCRIPT_DIR}/extract-review-json.py" > /dev/null 2>&1); then
+  echo "  FAIL: should reject oversized input"
+  FAIL=$((FAIL + 1))
+else
+  echo "  PASS: rejects oversized input"
+  PASS=$((PASS + 1))
+fi
+
+# ── Test 22: filter-diff-lines.py — deeper assertion ────────
+echo "Test 22: filter-diff-lines.py — rescued comments in summary"
+
+cat > "${WORK_DIR}/depth-test.patch" << 'DIFF'
+diff --git a/main.go b/main.go
+new file mode 100644
+--- /dev/null
++++ b/main.go
+@@ -0,0 +1,2 @@
++package main
++func main() {}
+DIFF
+
+cat > "${WORK_DIR}/depth-review.json" << 'JSON'
+{
+  "summary": "Base summary.",
+  "inline_comments": [
+    {"path": "main.go", "line": 1, "body": "valid"},
+    {"path": "main.go", "line": 99, "body": "out of range"},
+    {"path": "other.go", "line": 1, "body": "wrong file"}
+  ]
+}
+JSON
+
+RESULT=$(python3 "${SCRIPT_DIR}/filter-diff-lines.py" \
+  "${WORK_DIR}/depth-test.patch" "${WORK_DIR}/depth-review.json")
+
+KEPT=$(echo "${RESULT}" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['inline_comments']))")
+SUMMARY=$(echo "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin)['summary'])")
+
+assert_eq "1 valid comment kept" "1" "${KEPT}"
+assert_contains "rescued has out-of-range" "main.go:99" "${SUMMARY}"
+assert_contains "rescued has wrong-file" "other.go:1" "${SUMMARY}"
+assert_contains "base summary preserved" "Base summary." "${SUMMARY}"
+
+# ── Test 23: build-prompt.sh — JSON schema fields present ───
+echo "Test 23: build-prompt.sh — JSON schema fields in prompt"
+
+PROMPT=$(cat "${WORK_DIR}/prompt-test/review_prompt.txt")
+assert_contains "schema has summary field" '"summary"' "${PROMPT}"
+assert_contains "schema has inline_comments" '"inline_comments"' "${PROMPT}"
+assert_contains "schema has path field" '"path"' "${PROMPT}"
+assert_contains "schema has line field" '"line"' "${PROMPT}"
+assert_contains "schema has body field" '"body"' "${PROMPT}"
+
 # ── Summary ──────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

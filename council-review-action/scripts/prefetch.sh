@@ -18,7 +18,10 @@ REPO=$(jq -r '.repo' "${META_PATH}")
 # CI check results
 gh pr checks "${PR_NUMBER}" --repo "${REPO}" \
   --json name,state,description 2>/dev/null \
-  > pr-checks.json || echo '[]' > pr-checks.json
+  > pr-checks.json || {
+    echo "::warning::Failed to fetch CI checks — continuing without"
+    echo '[]' > pr-checks.json
+  }
 
 # Existing reviews — full bodies preserved
 gh api "repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
@@ -28,7 +31,10 @@ gh api "repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
     state,
     body,
     submitted_at
-  }]' 2>/dev/null > pr-reviews.json || echo '[]' > pr-reviews.json
+  }]' 2>/dev/null > pr-reviews.json || {
+    echo "::warning::Failed to fetch reviews — continuing without"
+    echo '[]' > pr-reviews.json
+  }
 
 # Existing inline comments — full bodies, cap count at 50
 gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
@@ -39,7 +45,10 @@ gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
     body,
     user: .user.login,
     created_at
-  }] | .[:50]' 2>/dev/null > pr-review-comments.json || echo '[]' > pr-review-comments.json
+  }] | .[:50]' 2>/dev/null > pr-review-comments.json || {
+    echo "::warning::Failed to fetch inline comments — continuing without"
+    echo '[]' > pr-review-comments.json
+  }
 
 # Linked issues from PR body — full bodies preserved
 PR_BODY=$(gh pr view "${PR_NUMBER}" --repo "${REPO}" \

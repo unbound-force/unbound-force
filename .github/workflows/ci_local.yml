@@ -59,3 +59,13 @@ jobs:
             echo "Error: internal/backlog coverage $BACKLOG_COV% is below the 90% threshold."
             exit 1
           fi
+
+  council-review-action-tests:
+    name: Council Review Pipeline Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Run pipeline tests
+        run: bash council-review-action/test/test-pipeline.sh

@@ -68,15 +68,14 @@ filtered_diff() {
   done < "${DIFF_PATH}"
 }
 
-FILTERED=$(filtered_diff)
-FILTERED_LINES=$(echo "${FILTERED}" | wc -l | tr -d ' ')
+filtered_diff > pr-diff-filtered.patch
+
+FILTERED_LINES=$(wc -l < pr-diff-filtered.patch | tr -d ' ')
 NOISE_LINES=$((RAW_LINES - FILTERED_LINES))
 
 if [[ "${NOISE_LINES}" -gt 0 ]]; then
   echo "::notice::Excluded ${NOISE_LINES} noise lines (lock, vendor, generated). Raw: ${RAW_LINES}, filtered: ${FILTERED_LINES}"
 fi
-
-echo "${FILTERED}" > pr-diff-filtered.patch
 
 # Produce a line-annotated version for the LLM prompt.
 # Each '+' or context line gets a [L<N>] prefix showing its
