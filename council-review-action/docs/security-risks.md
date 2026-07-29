@@ -84,21 +84,44 @@ execute commands (once OPENCODE_PERMISSION is enforced, #337).
 
 ### A3: Secrets in process environment
 
-**Risk**: The OpenCode process runs with `GH_TOKEN`, WIF credentials,
-and GCP project configuration in its environment. If the model finds
-a way to read process environment through a non-denied tool path,
-secrets could leak into the review output posted publicly.
+**Risk**: The OpenCode process runs with WIF credentials
+(`GOOGLE_APPLICATION_CREDENTIALS`) and GCP project configuration
+in its environment. If the model finds a way to read process
+environment through a non-denied tool path, secrets could leak
+into the review output posted publicly.
 
-**Mitigations**: OPENCODE_PERMISSION (#337) will deny `bash` (no
-`env`, `printenv`, `echo $VAR`), `edit`/`write` (no file exfil), and
-`mcp` (no tool-based env access). The `--pure` flag prevents external
-plugins. Vertex AI WIF tokens are short-lived (1 hour) and scoped to
-the specific project.
+**Current state**: `GH_TOKEN` is unset before the `opencode run`
+invocation (`run-review.sh`). `GOOGLE_APPLICATION_CREDENTIALS`
+**cannot** be unset — the Vertex AI SDK reads this env var to
+locate the WIF credential file for API authentication. Unsetting
+it breaks auth entirely (discovered via complytime/org-infra run
+#30445719456 where the review silently failed with "Non-JSON
+output — comment fallback" in ~3s).
 
-**Residual risk**: Low. With OPENCODE_PERMISSION enforced, the model
-has no tool path to read environment variables. A theoretical
-vulnerability in OpenCode's permission enforcement could bypass this,
-but that would be an OpenCode bug, not a workflow design flaw.
+**Defense-in-depth options evaluated**:
+
+| Approach | Security | Feasibility | Status |
+|----------|----------|-------------|--------|
+| Unset `GOOGLE_APPLICATION_CREDENTIALS` | Breaks auth | Not viable | Rejected |
+| `OPENCODE_PERMISSION` sandbox (#337) | Denies bash/shell/mcp tools, blocks `env`/`printenv` | Depends on OpenCode feature | Tracked |
+| Authenticated reverse proxy | Best — credentials never in OpenCode's process | Heavy to implement for CI | Deferred |
+| Move credential file outside workspace | Marginal — SDK reads file on behalf of process | Fragile, doesn't change threat model | Not pursued |
+| `--pure` flag (no external plugins) | Reduces tool surface | Depends on OpenCode feature | Tracked with #337 |
+
+**Mitigations in place**: Prompt instructions prohibit shell and
+environment access (defense-in-depth, not enforcement). Vertex AI
+WIF tokens are short-lived (1 hour) and scoped to the specific
+project. `GH_TOKEN` is unset so GitHub API access is removed.
+
+**Tracked in**: unbound-force/unbound-force#337
+(OPENCODE_PERMISSION sandbox).
+
+**Residual risk**: Low. Without OPENCODE_PERMISSION, the model
+theoretically has the credential in its process environment, but
+has no tool path to read it (no bash, no `env`, no `printenv`).
+A vulnerability in OpenCode's tool enforcement could bypass this,
+but that would be an OpenCode bug. Once #337 is implemented, the
+tool surface is formally denied rather than prompt-instructed.
 
 ### A4: Artifact integrity between workflows
 
