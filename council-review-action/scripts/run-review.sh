@@ -35,12 +35,13 @@ if [[ "${PROVIDER}" == "google-vertex-anthropic" ]]; then
     }')
 fi
 
-# Unset sensitive credentials before invoking OpenCode to limit
-# the blast radius if prompt injection triggers tool execution.
-# WIF credentials for Vertex AI are inherited via the environment
-# automatically; GH_TOKEN and explicit credential paths are not
-# needed by the review invocation.
-unset GH_TOKEN GOOGLE_APPLICATION_CREDENTIALS 2>/dev/null || true
+# Unset GH_TOKEN before invoking OpenCode to limit blast radius
+# if prompt injection triggers tool execution. GH_TOKEN is not
+# needed by the review invocation (no gh CLI calls).
+# NOTE: GOOGLE_APPLICATION_CREDENTIALS must NOT be unset — it
+# points to the WIF credential file that the Vertex AI SDK
+# reads for authentication. Unsetting it breaks auth.
+unset GH_TOKEN 2>/dev/null || true
 
 OPENCODE_EXIT=0
 timeout 300 opencode run \
