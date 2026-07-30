@@ -40,14 +40,31 @@ Given that feature description, do this:
 2. **Check for uncommitted work before creating a new branch**:
 
    a. Run `git status --short` to check for uncommitted changes.
-      - **If uncommitted changes exist**: **STOP** and ask the
-        user for confirmation before proceeding. Show the list
-        of uncommitted files and warn that switching branches
-        with a dirty working tree may cause changes to be
-        applied to the wrong branch or lost.
-      - If the user confirms, proceed. If not, abort.
-      - Exception: only skip this check if the user explicitly
-        said to create a new spec in the same message.
+
+      - **If uncommitted changes exist**: display the list of
+        uncommitted files to the user, then use the
+        **AskUserQuestion tool** with options:
+        - "Stash changes and continue"
+        - "Abort -- keep changes as-is"
+
+        **If the user selects "Stash changes and continue"**:
+        run `git stash`. If `git stash` exits with a non-zero
+        status, stop execution and report the stash failure to
+        the user — do NOT proceed to branch creation.
+        If `git stash` succeeds, proceed to step 3.
+
+        **If the user selects "Abort -- keep changes as-is"**:
+        stop execution and report that the operation was
+        aborted due to uncommitted changes.
+
+      - **If no uncommitted changes exist**: proceed to step 3.
+
+      - **Exception**: if the user explicitly said to create a
+        new spec in the same message, the agent need not
+        proactively warn about dirty trees. However, if
+        `git status --short` reports uncommitted changes, the
+        **AskUserQuestion tool** MUST still be invoked —
+        never silently switch branches with uncommitted work.
 
 3. **Check for existing branches before creating new one**:
 
