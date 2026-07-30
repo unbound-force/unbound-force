@@ -2,17 +2,20 @@ package sync
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/unbound-force/unbound-force/internal/backlog"
 )
 
 type StubGHRunner struct {
-	Out []byte
-	Err error
+	Out   []byte
+	Err   error
+	Calls int
 }
 
 func (m *StubGHRunner) Run(args ...string) ([]byte, error) {
+	m.Calls++
 	return m.Out, m.Err
 }
 
@@ -181,5 +184,149 @@ func TestSyncer_Status(t *testing.T) {
 
 	if !bytes.Contains(buf.Bytes(), []byte("synced")) {
 		t.Errorf("Expected 'synced' in output")
+	}
+}
+
+func TestSyncer_Push_DryRun(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(repo *backlog.Repository)
+		pushID    string
+		wantErr   bool
+		wantCalls int
+		check     func(t *testing.T, output string)
+	}{
+		{
+			name: "items to create",
+			setup: func(repo *backlog.Repository) {
+				_ = repo.Save(&backlog.Item{ID: "BI-001", Title: "New Item"})
+			},
+			pushID:    "",
+			wantCalls: 0,
+			check: func(t *testing.T, output string) {
+				if !strings.Contains(output, "CREATE") {
+					t.Errorf("expected CREATE in output, got: %s", output)
+				}
+				if !strings.Contains(output, "BI-001") {
+					t.Errorf("expected BI-001 in output, got: %s", output)
+				}
+				if !strings.Contains(output, "1 to create, 0 to update") {
+					t.Errorf("expected summary '1 to create, 0 to update', got: %s", output)
+				}
+			},
+		},
+		{
+			name: "items to update",
+			setup: func(repo *backlog.Repository) {
+				num := 42
+				_ = repo.Save(&backlog.Item{ID: "BI-001", Title: "Existing Item", GitHubIssueNumber: &num})
+			},
+			pushID:    "",
+			wantCalls: 0,
+			check: func(t *testing.T, output string) {
+				if !strings.Contains(output, "UPDATE") {
+					t.Errorf("expected UPDATE in output, got: %s", output)
+				}
+				if !strings.Contains(output, "Issue #42") {
+					t.Errorf("expected 'Issue #42' in output, got: %s", output)
+				}
+				if !strings.Contains(output, "0 to create, 1 to update") {
+					t.Errorf("expected summary '0 to create, 1 to update', got: %s", output)
+				}
+			},
+		},
+		{
+			name: "mixed create and update",
+			setup: func(repo *backlog.Repository) {
+				_ = repo.Save(&backlog.Item{ID: "BI-001", Title: "New Item"})
+				num := 42
+				_ = repo.Save(&backlog.Item{ID: "BI-002", Title: "Existing Item", GitHubIssueNumber: &num})
+			},
+			pushID:    "",
+			wantCalls: 0,
+			check: func(t *testing.T, output string) {
+				if !strings.Contains(output, "CREATE") {
+					t.Errorf("expected CREATE in output, got: %s", output)
+				}
+				if !strings.Contains(output, "UPDATE") {
+					t.Errorf("expected UPDATE in output, got: %s", output)
+				}
+				if !strings.Contains(output, "1 to create, 1 to update") {
+					t.Errorf("expected summary '1 to create, 1 to update', got: %s", output)
+				}
+			},
+		},
+		{
+			name: "single item filter",
+			setup: func(repo *backlog.Repository) {
+				_ = repo.Save(&backlog.Item{ID: "BI-001", Title: "Target Item"})
+				_ = repo.Save(&backlog.Item{ID: "BI-002", Title: "Other Item"})
+			},
+			pushID:    "BI-001",
+			wantCalls: 0,
+			check: func(t *testing.T, output string) {
+				if !strings.Contains(output, "BI-001") {
+					t.Errorf("expected BI-001 in output, got: %s", output)
+				}
+				if strings.Contains(output, "BI-002") {
+					t.Errorf("expected BI-002 NOT in output, got: %s", output)
+				}
+			},
+		},
+		{
+			name:      "empty backlog",
+			setup:     nil,
+			pushID:    "",
+			wantCalls: 0,
+			check: func(t *testing.T, output string) {
+				if !strings.Contains(output, "No items pending sync") {
+					t.Errorf("expected 'No items pending sync', got: %s", output)
+				}
+			},
+		},
+		{
+			name:      "non-existent item ID",
+			setup:     nil,
+			pushID:    "BI-999",
+			wantErr:   true,
+			wantCalls: 0,
+			check:     nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			repo := backlog.NewRepository(dir)
+			if tt.setup != nil {
+				tt.setup(repo)
+			}
+
+			buf := new(bytes.Buffer)
+			stub := &StubGHRunner{}
+			syncer := NewSyncer(repo, buf)
+			syncer.SetRunner(stub)
+			syncer.DryRun = true
+
+			err := syncer.Push(tt.pushID)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if stub.Calls != tt.wantCalls {
+					t.Errorf("expected %d GHRunner calls, got %d", tt.wantCalls, stub.Calls)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if stub.Calls != tt.wantCalls {
+				t.Errorf("expected %d GHRunner calls, got %d", tt.wantCalls, stub.Calls)
+			}
+			if tt.check != nil {
+				tt.check(t, buf.String())
+			}
+		})
 	}
 }

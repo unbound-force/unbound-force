@@ -13,11 +13,13 @@ import (
 
 // stubGHRunner satisfies sync.GHRunner for CLI-level tests.
 type stubGHRunner struct {
-	out []byte
-	err error
+	out   []byte
+	err   error
+	calls int
 }
 
 func (s *stubGHRunner) Run(args ...string) ([]byte, error) {
+	s.calls++
 	return s.out, s.err
 }
 
@@ -462,5 +464,73 @@ func TestCLI_GenerateArtifact_CreatesArtifact(t *testing.T) {
 	_ = json.Unmarshal(b, &env)
 	if env.ArtifactType != "backlog-item" {
 		t.Errorf("Expected artifact type 'backlog-item', got '%s'", env.ArtifactType)
+	}
+}
+
+func TestCLI_SyncPush_DryRun_WithItems(t *testing.T) {
+	tempDir := t.TempDir()
+	backlogDir := filepath.Join(tempDir, "backlog")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+
+	repo := backlog.NewRepository(backlogDir)
+	_ = repo.Save(&backlog.Item{ID: "BI-001", Title: "New Item"})
+	num := 42
+	_ = repo.Save(&backlog.Item{ID: "BI-002", Title: "Existing Item", GitHubIssueNumber: &num})
+
+	stub := &stubGHRunner{}
+	rootCmd := newRootCmdWithParams(&AppParams{GHRunner: stub})
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"sync-push", "--dry-run", "--backlog-dir", backlogDir, "--artifacts-dir", artifactsDir})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("sync-push --dry-run failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "CREATE") {
+		t.Errorf("expected CREATE in output, got: %s", out)
+	}
+	if !strings.Contains(out, "UPDATE") {
+		t.Errorf("expected UPDATE in output, got: %s", out)
+	}
+	if !strings.Contains(out, "1 to create, 1 to update") {
+		t.Errorf("expected summary '1 to create, 1 to update', got: %s", out)
+	}
+	if stub.calls != 0 {
+		t.Errorf("expected 0 GHRunner calls in dry-run, got %d", stub.calls)
+	}
+}
+
+func TestCLI_SyncPush_DryRun_SingleItem(t *testing.T) {
+	tempDir := t.TempDir()
+	backlogDir := filepath.Join(tempDir, "backlog")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+
+	repo := backlog.NewRepository(backlogDir)
+	_ = repo.Save(&backlog.Item{ID: "BI-001", Title: "Target Item"})
+	_ = repo.Save(&backlog.Item{ID: "BI-002", Title: "Other Item"})
+
+	stub := &stubGHRunner{}
+	rootCmd := newRootCmdWithParams(&AppParams{GHRunner: stub})
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"sync-push", "--dry-run", "BI-001", "--backlog-dir", backlogDir, "--artifacts-dir", artifactsDir})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("sync-push --dry-run BI-001 failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "BI-001") {
+		t.Errorf("expected BI-001 in output, got: %s", out)
+	}
+	if strings.Contains(out, "BI-002") {
+		t.Errorf("expected BI-002 NOT in output, got: %s", out)
+	}
+	if stub.calls != 0 {
+		t.Errorf("expected 0 GHRunner calls in dry-run, got %d", stub.calls)
 	}
 }

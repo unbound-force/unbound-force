@@ -36,6 +36,9 @@ type Syncer struct {
 	repo   *backlog.Repository
 	runner GHRunner
 	out    io.Writer
+	// DryRun, when true, causes Push to preview pending actions
+	// without executing any GitHub API calls.
+	DryRun bool
 }
 
 // NewSyncer creates a new Syncer
@@ -69,6 +72,28 @@ func (s *Syncer) Push(id string) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	// Dry-run path: preview pending actions without calling the GitHub CLI.
+	// Item resolution above is shared between dry-run and normal paths.
+	if s.DryRun {
+		if len(items) == 0 {
+			_, _ = fmt.Fprintln(s.out, "No items pending sync")
+			return nil
+		}
+
+		var creates, updates int
+		for _, item := range items {
+			if item.GitHubIssueNumber == nil {
+				_, _ = fmt.Fprintf(s.out, "CREATE\t%s\t%s\n", item.ID, item.Title)
+				creates++
+			} else {
+				_, _ = fmt.Fprintf(s.out, "UPDATE\t%s\t%s\tIssue #%d\n", item.ID, item.Title, *item.GitHubIssueNumber)
+				updates++
+			}
+		}
+		_, _ = fmt.Fprintf(s.out, "Total: %d item(s) (%d to create, %d to update)\n", len(items), creates, updates)
+		return nil
 	}
 
 	for _, item := range items {

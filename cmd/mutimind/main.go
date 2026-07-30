@@ -262,7 +262,7 @@ func newShowCmd(p *AppParams) *cobra.Command {
 }
 
 func newSyncPushCmd(p *AppParams) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "sync-push [id]",
 		Short: "Push local backlog items to GitHub Issues",
 		Args:  cobra.MaximumNArgs(1),
@@ -271,11 +271,15 @@ func newSyncPushCmd(p *AppParams) *cobra.Command {
 			if len(args) > 0 {
 				id = args[0]
 			}
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
 			repo := backlog.NewRepository(p.BacklogDir)
 			syncer := newSyncerFromParams(p, repo, cmd.OutOrStdout())
+			syncer.DryRun = dryRun
 			return syncer.Push(id)
 		},
 	}
+	cmd.Flags().Bool("dry-run", false, "Preview pending actions without executing")
+	return cmd
 }
 
 func newSyncPullCmd(p *AppParams) *cobra.Command {
