@@ -90,4 +90,16 @@ The scaffold drift detection tests
 (`TestEmbeddedAssets_MatchSource`) will verify that the
 command file and its scaffold asset remain synchronized.
 No new test infrastructure is needed.
+
+### V. Security by Default
+
+**Assessment**: PASS
+
+This change strengthens security posture by adding a
+mandatory confirmation gate before an irreversible
+external action (`git push`). No supply chain, input
+validation, or privilege changes are involved. The
+AskUserQuestion gate is a UX confirmation that prevents
+accidental irreversible actions, aligning with the
+principle's safety-by-design intent.
 <!-- scaffolded by uf vdev -->

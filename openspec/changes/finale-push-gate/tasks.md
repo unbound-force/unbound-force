@@ -15,7 +15,7 @@
 All edits target `.opencode/commands/finale.md`.
 No [P] markers -- single file, sequential edits.
 
-- [ ] 1.1 Add AskUserQuestion gate in Step 4
+- [x] 1.1 Add AskUserQuestion gate in Step 4
   (lines 156-165). After the upstream detection check
   (line 160) and before the push commands (lines 163-164),
   insert: Use the **AskUserQuestion tool** with options
@@ -29,10 +29,13 @@ No [P] markers -- single file, sequential edits.
 AskUserQuestion gate appears between the upstream
 detection and the `git push` commands. Verify both
 options are present with action-descriptive labels.
+Verify that no direct `git push` execution occurs
+without passing through the AskUserQuestion gate first.
+Verify the abort path includes a STOP instruction.
 
 ## 2. Sync scaffold asset
 
-- [ ] 2.1 Copy `.opencode/commands/finale.md` to
+- [x] 2.1 Copy `.opencode/commands/finale.md` to
   `internal/scaffold/assets/opencode/commands/finale.md`
   (byte-identical).
 
@@ -48,4 +51,11 @@ options are present with action-descriptive labels.
   artifact formats, hero interfaces, or machine-parseable
   outputs were modified. Only instruction text in
   markdown files was changed.
+
+- [ ] 3.3 Read the modified finale.md Step 4. Verify:
+  (a) The AskUserQuestion prompt includes remote/branch
+      context per the proposal
+  (b) The "Abort" path includes a STOP instruction
+  (c) No bare conversational push confirmation remains
+<!-- spec-review: passed -->
 <!-- scaffolded by uf vdev -->

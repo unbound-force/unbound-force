@@ -160,9 +160,19 @@ d. Commit with the approved message.
 git rev-parse --abbrev-ref @{upstream} 2>/dev/null
 ```
 
-- If no upstream: `git push -u origin <branch>`
-- If upstream exists: `git push`
-- If push fails: report error and **STOP**.
+Before pushing, use the **AskUserQuestion tool** to
+confirm the push. Present the target remote and branch
+in the question. Options:
+`["Push to remote", "Abort -- do not push"]`.
+
+- If the user selects **"Abort -- do not push"**: report
+  that the push was aborted and **STOP**. The local
+  commit is preserved.
+- If the user selects **"Push to remote"**: proceed with
+  the push:
+  - If no upstream: `git push -u origin <branch>`
+  - If upstream exists: `git push`
+  - If push fails: report error and **STOP**.
 
 ### 5. Create or Find PR
 
