@@ -6,6 +6,16 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Changed
+- Dirty-tree guard hardening: replaced prose-only
+  dirty-tree confirmation in `openspec-propose` skill
+  and command with explicit AskUserQuestion tool call;
+  two options: "Stash changes and continue" (runs
+  `git stash push` with recovery message) and "Abort --
+  keep changes as-is"; stash failure handling (stop on
+  non-zero exit); display ordering enforced (show
+  `git status --short` before prompting)
+  (Spec: openspec/changes/dirty-tree-guard-enforcement/,
+  Fixes: #350, #353)
 - `/review-council` Code Review Mode: added optional
   Step 7 (GitHub Review Posting) for posting consolidated
   multi-persona council findings as a GitHub PR review;

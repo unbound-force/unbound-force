@@ -49,17 +49,28 @@ When ready to implement, run /unleash (autonomous) or /opsx-apply (sequential)
    checks in order:
 
    a. **Dirty working tree check**: Run `git status --short`.
-      If there are uncommitted changes (staged, unstaged,
-      or untracked files that appear related to work):
-      - **STOP** and ask the user for confirmation before
-        switching branches. Show what uncommitted changes
-        exist and warn that switching branches with a
-        dirty working tree may cause changes to be
-        applied to the wrong branch.
-      - If the user confirms, proceed. If not, abort.
+      If there is any output (uncommitted changes exist):
+      - Display the `git status --short` output to the
+        user so they can see what uncommitted changes
+        exist.
+      - Use the **AskUserQuestion tool** with options:
+        `["Stash changes and continue",
+        "Abort -- keep changes as-is"]`
+      - On **"Stash changes and continue"**: run
+        `git stash push -m "openspec-propose: auto-stash
+        before branch switch"`. If the stash command
+        succeeds (exit code 0), print "Changes stashed.
+        Run `git stash pop` to restore them when ready."
+        and proceed to branch creation. If the stash
+        command fails (non-zero exit), **STOP**
+        immediately -- display the error output and do
+        NOT create the branch.
+      - On **"Abort -- keep changes as-is"**: **STOP**
+        immediately. Do not create the branch or any
+        artifacts.
       - Exception: if the user explicitly requested a
         new change in the same message (e.g.,
-        `/opsx:propose fix-typos`), this still requires
+        `/opsx-propose fix-typos`), this still requires
         confirmation -- never silently switch branches
         with uncommitted work.
 

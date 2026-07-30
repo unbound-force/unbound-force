@@ -12,7 +12,7 @@
 
 ## 1. Replace dirty-tree guard in both files
 
-- [ ] 1.1 [P] Update `.opencode/skills/openspec-propose/SKILL.md`
+- [x] 1.1 [P] Update `.opencode/skills/openspec-propose/SKILL.md`
   (the dirty-tree guard section under step 3, starting at
   `a. **Dirty working tree check**`): Replace the prose-only
   dirty-tree confirmation with an explicit AskUserQuestion tool
@@ -31,7 +31,7 @@
   - Preserve the existing exception clause about explicit
     change requests still requiring confirmation
 
-- [ ] 1.2 [P] Update `.opencode/commands/opsx-propose.md`
+- [x] 1.2 [P] Update `.opencode/commands/opsx-propose.md`
   (the dirty-tree guard section under step 3, starting at
   `a. **Dirty working tree check**`): Apply the identical
   replacement text as task 1.1. The guard logic MUST be
@@ -39,7 +39,7 @@
 
 ## 2. Verification
 
-- [ ] 2.1 Verify both files have identical dirty-tree guard
+- [x] 2.1 Verify both files have identical dirty-tree guard
   text by running `diff` on the extracted guard sections from
   both files and confirming zero differences. Specifically
   confirm:
@@ -54,7 +54,7 @@
   - Exception clause preserved (explicit change requests
     still require confirmation)
 
-- [ ] 2.2 Verify constitution alignment: confirm the change
+- [x] 2.2 Verify constitution alignment: confirm the change
   supports Principle V (Security by Default) by ensuring
   the guard is now a tool-enforced gate rather than
   prose-only instruction. No other principles are affected
@@ -62,7 +62,10 @@
 
 ## 3. Documentation
 
-- [ ] 3.1 Add a CHANGELOG entry under the Unreleased section
+- [x] 3.1 Add a CHANGELOG entry under the Unreleased section
   noting the dirty-tree guard hardening in the
   openspec-propose skill and command. Reference issues #350
   and #353.
+
+<!-- spec-review: passed -->
+<!-- code-review: passed -->
