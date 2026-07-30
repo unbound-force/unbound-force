@@ -419,6 +419,9 @@ approval with: gh pr merge --rebase --delete-branch
 - **NEVER commit without user approval** of the message
 - **NEVER create a PR without user approval** of the
   title and body
+- **NEVER push to remote without user confirmation** —
+  always present the AskUserQuestion gate before
+  `git push`
 - **ALWAYS report the PR URL** so the user can review it
 - **If any step fails**, stop immediately with context
   and options — do not attempt to continue or recover

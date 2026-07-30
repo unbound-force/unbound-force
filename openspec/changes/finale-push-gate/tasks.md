@@ -44,18 +44,19 @@ Verify the abort path includes a STOP instruction.
 
 ## 3. Verification
 
-- [ ] 3.1 Run `go test -race -count=1 ./...` to verify
+- [x] 3.1 Run `go test -race -count=1 ./...` to verify
   no test regressions.
 
-- [ ] 3.2 Verify constitution alignment: confirm no
+- [x] 3.2 Verify constitution alignment: confirm no
   artifact formats, hero interfaces, or machine-parseable
   outputs were modified. Only instruction text in
   markdown files was changed.
 
-- [ ] 3.3 Read the modified finale.md Step 4. Verify:
+- [x] 3.3 Read the modified finale.md Step 4. Verify:
   (a) The AskUserQuestion prompt includes remote/branch
       context per the proposal
   (b) The "Abort" path includes a STOP instruction
   (c) No bare conversational push confirmation remains
 <!-- spec-review: passed -->
+<!-- code-review: passed -->
 <!-- scaffolded by uf vdev -->

@@ -6,6 +6,11 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Changed
+- `/finale` Step 4: added AskUserQuestion confirmation
+  gate before `git push` execution; user must explicitly
+  select "Push to remote" or "Abort -- do not push"
+  before the irreversible push occurs
+  (Spec: openspec/changes/finale-push-gate/)
 - `/review-council` Code Review Mode: added Phase 1c
   (review-context skill) for spec artifact discovery,
   path classification, and walkthrough generation;
