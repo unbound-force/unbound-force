@@ -15,6 +15,8 @@ Implement tasks from an OpenSpec change.
 
 **Steps**
 
+**Pre-condition**: Before any step, verify: NEVER switch branches or suggest archiving with uncommitted changes. Run `git status --short` if branch state is uncertain.
+
 1. **Select the change**
 
    If a name is provided, use it. Otherwise:
