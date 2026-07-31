@@ -77,8 +77,11 @@ Run `git status --short` to inspect the working tree.
   > Proceed with staging all files? These files will be
   > included in the commit."
 
-  Ask for confirmation. If the user declines, stop and
-  let them handle it manually.
+  Use the **AskUserQuestion tool** with options:
+    ["Yes -- stage all files including flagged ones",
+     "No -- stop and let me handle it manually"]
+
+  If the user selects "No", STOP. Do not run `git add .`.
 
 - **Stage all changes**: `git add .`
 
