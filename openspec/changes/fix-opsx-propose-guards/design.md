@@ -109,9 +109,32 @@ that is out of scope here.
 
 ### R3: "Stash" option may surprise users
 
-The "Stash changes and continue" option performs `git stash`
-on the user's behalf, which may be unexpected.
+The "Stash changes and continue" option performs
+`git stash --include-untracked` on the user's behalf,
+which may be unexpected.
 
 **Mitigation**: The option text clearly states "stash" and
 the AskUserQuestion dialog requires explicit user selection.
-No action is taken without consent.
+No action is taken without consent. If the stash command
+fails, the agent stops and reports the error rather than
+proceeding.
+
+## Verification Protocol
+
+Since this change modifies Markdown instruction files (not
+executable source code), automated unit tests are not
+applicable. Manual acceptance verification:
+
+1. Run `/opsx-propose <name>` with a dirty working tree
+   (staged, unstaged, or untracked files present)
+2. Confirm AskUserQuestion appears with exactly two options
+3. Select "Stash changes and continue" — confirm
+   `git stash --include-untracked` runs and the branch
+   is created
+4. Select "Abort — keep changes as-is" — confirm execution
+   stops and the user is informed
+5. Verify the preamble appears before Step 1 in both files
+   by visual inspection
+6. Run `diff` on the guard and preamble sections of both
+   files to confirm parity (accounting for known
+   invocation syntax divergence)

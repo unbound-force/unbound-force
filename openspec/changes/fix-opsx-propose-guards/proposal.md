@@ -122,13 +122,19 @@ AskUserQuestion call creates an auditable interaction record.
 
 ### IV. Testability
 
-**Assessment**: N/A
+**Assessment**: PASS
 
 No source code is added or modified. The change affects
 Markdown instruction files that are not subject to automated
-testing. The behavioral improvement can be verified by
-running `/opsx-propose` with a dirty working tree and
-confirming the structured prompt appears.
+testing. Manual acceptance verification protocol:
+
+1. Run `/opsx-propose <name>` with a dirty working tree
+2. Confirm AskUserQuestion appears with exactly two options
+3. Select "Stash changes and continue" — confirm `git stash`
+   runs and branch is created
+4. Select "Abort" — confirm execution stops
+5. Verify the preamble appears before Step 1 in both files
+   by visual inspection
 
 ### V. Security by Default
 

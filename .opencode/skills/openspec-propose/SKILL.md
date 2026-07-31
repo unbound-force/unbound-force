@@ -24,6 +24,12 @@ When ready to implement, run /unleash (autonomous) or /opsx-apply (sequential)
 
 **Steps**
 
+**PREAMBLE — ARTIFACTS ONLY**: This command creates spec
+artifacts (proposal, design, specs, tasks). It MUST NOT
+implement code, commit, push, create PRs, or run /unleash,
+/opsx-apply, /cobalt-crush, or /finale. After artifacts
+are complete, STOP and prompt the user.
+
 1. **If no clear input provided, ask what they want to build**
 
    Use the **AskUserQuestion tool** (open-ended, no preset options) to ask:
@@ -51,17 +57,28 @@ When ready to implement, run /unleash (autonomous) or /opsx-apply (sequential)
    a. **Dirty working tree check**: Run `git status --short`.
       If there are uncommitted changes (staged, unstaged,
       or untracked files that appear related to work):
-      - **STOP** and ask the user for confirmation before
-        switching branches. Show what uncommitted changes
-        exist and warn that switching branches with a
-        dirty working tree may cause changes to be
-        applied to the wrong branch.
-      - If the user confirms, proceed. If not, abort.
+
+      Use the **AskUserQuestion tool** with options:
+      `["Stash changes and continue", "Abort — keep changes as-is"]`
+
+      Show the uncommitted changes and warn that switching
+      branches with a dirty working tree may cause changes
+      to be applied to the wrong branch.
+
+      - If the user selects **"Stash changes and continue"**:
+        run `git stash --include-untracked`. If the stash
+        command fails (non-zero exit code), **STOP** and
+        report the stash failure. Do NOT proceed to branch
+        creation after a failed stash. If stash succeeds,
+        proceed with branch creation.
+      - If the user selects **"Abort"**: **STOP** and report
+        that the user needs to handle uncommitted changes
+        first.
       - Exception: if the user explicitly requested a
         new change in the same message (e.g.,
         `/opsx:propose fix-typos`), this still requires
-        confirmation -- never silently switch branches
-        with uncommitted work.
+        the AskUserQuestion confirmation -- never silently
+        switch branches with uncommitted work.
 
    b. **Branch check**: Check the current branch:
       - If already on `opsx/<name>` (exact match): skip

@@ -2,16 +2,20 @@
 
 ### Requirement: Dirty-tree AskUserQuestion gate
 
-When a dirty working tree is detected during Step 3a,
-the agent MUST present the user with an `AskUserQuestion`
-call offering exactly two options:
+When a dirty working tree is detected during Step 3a
+(using `git status --short`; triggers on staged, unstaged,
+or untracked files), the agent MUST present the user with
+an `AskUserQuestion` call offering exactly two options:
 
 1. "Stash changes and continue"
 2. "Abort — keep changes as-is"
 
 If the user selects "Stash changes and continue", the
-agent MUST run `git stash` before proceeding with branch
-creation.
+agent MUST run `git stash --include-untracked` before
+proceeding with branch creation. If the stash command
+fails (non-zero exit code), the agent MUST stop execution
+and report the stash failure to the user; it MUST NOT
+proceed to branch creation after a failed stash.
 
 If the user selects "Abort", the agent MUST stop
 execution and report that the user needs to handle
@@ -20,9 +24,10 @@ uncommitted changes manually.
 The agent MUST NOT silently switch branches when
 uncommitted changes are present.
 
-#### Scenario: Dirty tree with staged changes
+#### Scenario: Dirty tree detected (staged, unstaged, or untracked)
 
-- **GIVEN** the working tree has staged changes
+- **GIVEN** the working tree has uncommitted changes
+  (staged, unstaged, or untracked files)
 - **WHEN** the agent reaches Step 3a (branch creation)
 - **THEN** the agent MUST present AskUserQuestion with
   the two options before proceeding
@@ -31,8 +36,17 @@ uncommitted changes are present.
 
 - **GIVEN** the working tree has uncommitted changes
 - **WHEN** the user selects "Stash changes and continue"
-- **THEN** the agent MUST run `git stash` and then
-  proceed to create the branch
+- **THEN** the agent MUST run `git stash --include-untracked`
+  and then proceed to create the branch
+
+#### Scenario: Stash command fails
+
+- **GIVEN** the user selects "Stash changes and continue"
+- **WHEN** `git stash --include-untracked` returns a
+  non-zero exit code
+- **THEN** the agent MUST stop execution and report the
+  stash failure to the user; it MUST NOT proceed to
+  branch creation
 
 #### Scenario: Dirty tree — user selects abort
 
