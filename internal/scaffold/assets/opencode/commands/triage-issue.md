@@ -232,7 +232,7 @@ Split:        <"recommended" with count, or "not recommended">
 <For each agent: name, verdict, category, brief reasoning>
 
 ── Proposed Actions ──
-• Label: <label> (auto-apply / requires confirmation)
+• Label: <label> (requires confirmation)
 • Comment: <tone tier> (requires confirmation)
 • Split: <N child issues> (requires confirmation, if applicable)
 ──────────────────────────────────────────
@@ -240,7 +240,7 @@ Split:        <"recommended" with count, or "not recommended">
 
 ### 4.2 Label Application
 
-Labels are applied **automatically without user confirmation**, with one exception: the `duplicate` label requires user confirmation because it carries implicit "close" semantics.
+All labels require user confirmation before application. The `duplicate` label includes an additional warning about implicit close semantics.
 
 **Label mapping**:
 
@@ -256,24 +256,46 @@ Labels are applied **automatically without user confirmation**, with one excepti
 
 **Re-run check**: If the target label is already applied (detected in Phase 1.2), skip label application and note "label already present."
 
-**Label existence check**: Before applying, verify the label exists in the repository. If it does not exist, create it:
+**Label existence check**: Before applying, verify the label exists in the repository. If it does not exist:
+
+Use the **AskUserQuestion tool** with options
+`["Yes -- create label", "No -- skip"]`. Include the
+label name and description in the prompt.
+
+If the user selects "No -- skip", skip both label
+creation and label application, and continue to
+Phase 4.3.
+
+If the user selects "Yes -- create label", create it:
 
 ```bash
 gh label create "<label>" --description "<description>" --color "<color>"
 ```
 
-If label creation fails due to insufficient permissions, report the specific label that could not be created, skip that label, and continue with remaining actions. Record the failure in `actions_taken`.
+If label creation fails due to insufficient permissions, report the specific label that could not be created, skip label application, record the failure in `actions_taken` (`label_creation_failed: true`), and continue to Phase 4.3.
 
 **Apply the label**:
+
+**For non-duplicate labels**: Use the **AskUserQuestion
+tool** with options
+`["Yes -- apply label", "No -- skip"]`. Include the
+label name in the prompt.
+
+**For the `duplicate` label**: Inform the user that the
+`duplicate` label signals the issue should be closed.
+Use the **AskUserQuestion tool** with options
+`["Yes -- apply duplicate label", "No -- skip"]`.
+
+If the user selects "No -- skip" at the application
+prompt, skip label application, record the skip in
+`actions_taken` (`labels_applied` MUST NOT include the
+skipped label), and continue to Phase 4.3.
+
+If the user selects a confirming option, apply the label:
 
 ```bash
 gh issue edit <ISSUE_NUMBER> --add-label "<label>"
 ```
-
-**For `duplicate` label only**: Inform the user that the
-`duplicate` label signals the issue should be closed.
-Use the **AskUserQuestion tool** with options
-`["Yes -- apply duplicate label", "No -- skip"]`.
 
 ### 4.3 Comment Composition and Posting
 
@@ -461,7 +483,7 @@ Fields may be `null` when not applicable (e.g., `duplicate_of` when the issue is
 
 ## Guardrails
 
-1. **No auto-close**: MUST NOT close or lock any issue under any circumstances. The parent issue remains open even after splitting. The `duplicate` label is applied only with user confirmation.
+1. **No auto-close**: MUST NOT close or lock any issue under any circumstances. The parent issue remains open even after splitting. All labels are applied only with user confirmation. The `duplicate` label includes an additional close-semantics warning.
 
 2. **No comments without confirmation**: Every issue comment is shown to the user before posting. No autonomous public communication.
 
