@@ -5220,6 +5220,61 @@ func TestDevPodStart_SSHFallbackFails(t *testing.T) {
 	}
 }
 
+func TestDevPodStartServerViaSSH_UnsafeName(t *testing.T) {
+	b := &DevPodBackend{}
+	opts := testOpts()
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		t.Fatal("ExecCmd must not be called with an unsafe workspace name")
+		return nil, nil
+	}
+
+	tests := []struct {
+		name   string
+		wsName string
+	}{
+		{"semicolon", "uf-sandbox-proj;evil"},
+		{"ampersand", "uf-sandbox-proj&&evil"},
+		{"backtick", "uf-sandbox-proj`id`"},
+		{"dollar_paren", "uf-sandbox-proj$(whoami)"},
+		{"pipe", "uf-sandbox-proj|cat"},
+		{"space", "uf-sandbox-proj evil"},
+		{"uppercase", "uf-sandbox-Proj"},
+		{"leading_hyphen", "-uf-sandbox-proj"},
+		{"trailing_hyphen", "uf-sandbox-proj-"},
+		{"empty", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := b.startServerViaSSH(opts, tt.wsName)
+			if err == nil {
+				t.Fatalf("expected error for wsName %q, got nil", tt.wsName)
+			}
+			if !strings.Contains(err.Error(), "unsafe workspace name") {
+				t.Errorf("expected 'unsafe workspace name' error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestDevPodStartServerViaSSH_SafeName(t *testing.T) {
+	b := &DevPodBackend{}
+	opts := testOpts()
+	sshCalled := false
+	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
+		sshCalled = true
+		return []byte(""), nil
+	}
+
+	err := b.startServerViaSSH(opts, "uf-sandbox-my-project-123")
+	if err != nil {
+		t.Fatalf("unexpected error for safe wsName: %v", err)
+	}
+	if !sshCalled {
+		t.Error("expected ExecCmd to be called for a safe workspace name")
+	}
+}
+
 // --- DevPod Start stderr suppression (Task 6.2) ---
 
 // ============================================================

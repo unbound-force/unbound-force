@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,14 @@ var validIDEs = []string{
 	"none", "vscode", "openvscode",
 	"fleet", "jupyternotebook", "cursor",
 }
+
+// safeWSNameRe validates that a workspace name contains only
+// characters safe for shell command interpolation. This is
+// the enforcement boundary for Principle V (Security by Default):
+// even though projectName() sanitizes upstream, this guard
+// ensures the invariant holds regardless of how wsName is
+// derived in the future.
+var safeWSNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
 
 // validateIDE checks that the IDE value is in the set of
 // DevPod-supported IDEs. Returns an error listing all valid
@@ -272,10 +281,16 @@ func (b *DevPodBackend) isWorkspaceRunning(opts Options, wsName string) bool {
 // (which would hang if DevPod already has a tunnel open on
 // port 4096) and --command for clean command execution.
 //
-// Injection safety: the workspace name is passed as a
-// separate exec.Command argument. The --command value is a
-// hardcoded literal with no user-controlled input.
+// Injection safety: wsName is derived from opts.ProjectDir
+// via projectName(), which sanitizes to [a-z0-9-]. The guard
+// below enforces this invariant at the shell-execution boundary
+// so that future changes to wsName derivation cannot silently
+// reintroduce an injection vector (Principle V).
 func (b *DevPodBackend) startServerViaSSH(opts Options, wsName string) error {
+	if !safeWSNameRe.MatchString(wsName) {
+		return fmt.Errorf("unsafe workspace name %q: "+
+			"must match [a-z0-9][a-z0-9-]*[a-z0-9]", wsName)
+	}
 	_, err := opts.ExecCmd("devpod", "ssh", wsName,
 		"--start-services=false",
 		"--workdir", "/",
