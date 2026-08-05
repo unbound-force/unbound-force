@@ -1,0 +1,7 @@
+# Unbound Force code ownership
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+* @unbound-force/overlords
+.github/ @unbound-force/overlords
+.specify/memory/constitution.md @unbound-force/overlords
+.opencode/ @unbound-force/overlords
