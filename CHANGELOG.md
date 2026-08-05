@@ -29,6 +29,14 @@ Each entry follows the format: `- <change-name>: <summary>`.
   always executes.
   (Spec: openspec/changes/fix-review-pr-step7-gate/,
   Fixes: #441)
+- fix-devpod-provider: Removed incorrect `LookPath("podman")`
+  pre-flight check from `DevPodBackend.Create()`. The docker
+  provider aliased as "podman" (configured by `uf setup`) does
+  not require the podman binary in PATH. Added diagnostic hint
+  ("run 'uf doctor' to diagnose or 'uf setup' to configure")
+  to `devpod up` error paths in both `Create()` and `Start()`.
+  (Spec: openspec/changes/fix-devpod-provider/,
+  Fixes: #431)
 - mutimind-acceptance-gate: Added AskUserQuestion
   confirmation gate before acceptance decision CLI
   (`go run cmd/mutimind/main.go decide`) in

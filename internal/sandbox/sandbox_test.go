@@ -3686,7 +3686,11 @@ func TestDevPodCreate_Success(t *testing.T) {
 	}
 }
 
-func TestDevPodCreate_NotInstalled(t *testing.T) {
+func TestDevPodCreate_NoPodmanInPath(t *testing.T) {
+	// Regression test: Create() must succeed when podman is absent
+	// from PATH. The docker provider (aliased as "podman" by uf
+	// setup) does not require the podman binary in PATH.
+	var capturedArgs []string
 	opts := testOpts()
 	opts.LookPath = func(name string) (string, error) {
 		if name == "podman" {
@@ -3695,19 +3699,33 @@ func TestDevPodCreate_NotInstalled(t *testing.T) {
 		return "/usr/bin/" + name, nil
 	}
 	opts.ExecCmd = func(name string, args ...string) ([]byte, error) {
-		if name == "devpod" && len(args) > 0 && args[0] == "version" {
-			return []byte("v0.5.18\n"), nil
+		if name == "devpod" {
+			if len(args) > 0 && args[0] == "version" {
+				return []byte("v0.5.18\n"), nil
+			}
+			if len(args) > 0 && args[0] == "up" {
+				capturedArgs = args
+				return []byte("workspace created"), nil
+			}
 		}
 		return []byte(""), nil
+	}
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{"image":"test"}`), nil
+		}
+		return nil, fmt.Errorf("not found")
 	}
 
 	b := &DevPodBackend{}
 	err := b.Create(opts)
-	if err == nil {
-		t.Fatal("expected error when podman not installed")
+	if err != nil {
+		t.Fatalf("expected success when podman absent from PATH, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "podman not found") {
-		t.Errorf("expected podman install hint, got: %s", err.Error())
+
+	joined := strings.Join(capturedArgs, " ")
+	if !strings.Contains(joined, "--provider podman") {
+		t.Errorf("expected --provider podman, got: %s", joined)
 	}
 }
 
@@ -3987,27 +4005,8 @@ func TestDevPodCreate_DevPodUpFails(t *testing.T) {
 	if !strings.Contains(err.Error(), "provider error") {
 		t.Errorf("expected devpod output in error, got: %s", err.Error())
 	}
-}
-
-func TestDevPodCreate_PodmanNotInstalled(t *testing.T) {
-	opts := testOpts()
-	opts.LookPath = func(name string) (string, error) {
-		if name == "podman" {
-			return "", fmt.Errorf("not found")
-		}
-		return "/usr/bin/" + name, nil
-	}
-
-	b := &DevPodBackend{}
-	err := b.Create(opts)
-	if err == nil {
-		t.Fatal("expected error when podman not installed")
-	}
-	if !strings.Contains(err.Error(), "podman not found") {
-		t.Errorf("expected podman not found error, got: %s", err.Error())
-	}
-	if !strings.Contains(err.Error(), "DevPod requires Podman") {
-		t.Errorf("expected DevPod-specific hint, got: %s", err.Error())
+	if !strings.Contains(err.Error(), "uf doctor") {
+		t.Errorf("expected diagnostic hint 'uf doctor', got: %s", err.Error())
 	}
 }
 
@@ -5133,6 +5132,9 @@ func TestDevPodCreate_RealFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "devpod up failed") {
 		t.Errorf("expected 'devpod up failed' in error, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "uf doctor") {
+		t.Errorf("expected diagnostic hint 'uf doctor', got: %s", err.Error())
 	}
 }
 
