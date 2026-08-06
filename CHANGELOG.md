@@ -20,6 +20,18 @@ Each entry follows the format: `- <change-name>: <summary>`.
   Closes: #253)
 
 ### Fixed
+- fix-incorrect-guardrails: Step 6 of `/uf.init` now
+  injects command-specific guardrails for
+  `speckit.implement.md`, `speckit.constitution.md`,
+  and `speckit.taskstoissues.md` instead of sharing
+  the spec-phase guardrails that contradicted each
+  command's operational model. Existing repos with
+  incorrect guardrails are automatically corrected
+  on next `/uf.init` run via replace-if-incorrect
+  idempotency. Added guardrail content regression
+  tests.
+  (Spec: openspec/changes/fix-incorrect-guardrails/,
+  Fixes: #256)
 - fix-review-pr-step7-gate: Step 7 verdict-posting offer
   in `/uf.review-pr` was gated behind a HIGH+ findings
   condition, causing the `AskUserQuestion` to be skipped

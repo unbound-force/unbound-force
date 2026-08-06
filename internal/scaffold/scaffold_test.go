@@ -6491,3 +6491,108 @@ func TestPrintSummary_SuccessUnchanged(t *testing.T) {
 		t.Errorf("expected 'opencode.json created' in output")
 	}
 }
+
+// TestGuardrailTemplates_CommandSpecificContent is a regression guard
+// for issue #256: the uf.init.md Step 6 guardrail templates must
+// contain command-specific content for implement, constitution, and
+// taskstoissues commands. Previously all 9 commands shared identical
+// guardrails that were factually wrong for these 3 commands.
+func TestGuardrailTemplates_CommandSpecificContent(t *testing.T) {
+	content, err := assetContent("opencode/commands/uf.init.md")
+	if err != nil {
+		t.Fatalf("read embedded uf.init.md: %v", err)
+	}
+	text := string(content)
+
+	// Extract each guardrail template block by its heading label.
+	// The blocks are fenced in ```markdown ... ``` and preceded by
+	// a bold label like **Implement guardrails block**.
+	type guardrailBlock struct {
+		label        string
+		mustContain  []string
+		mustNotContain []string
+	}
+
+	blocks := []guardrailBlock{
+		{
+			label: "Implement guardrails block",
+			mustContain: []string{
+				"writes source code",
+			},
+			mustNotContain: []string{
+				"NEVER modify source code",
+				"FEATURE_DIR",
+				"FEATURE_SPEC",
+			},
+		},
+		{
+			label: "Constitution guardrails block",
+			mustContain: []string{
+				".specify/memory/",
+				".specify/templates/",
+			},
+			mustNotContain: []string{
+				"NEVER modify source code",
+				"FEATURE_DIR",
+				"FEATURE_SPEC",
+			},
+		},
+		{
+			label: "Taskstoissues guardrails block",
+			mustContain: []string{
+				"GitHub issues via",
+				"the current Git remote",
+			},
+			mustNotContain: []string{
+				"NEVER modify source code",
+				"files this command may write",
+				"FEATURE_DIR",
+				"FEATURE_SPEC",
+			},
+		},
+		{
+			label: "Spec-phase guardrails block",
+			mustContain: []string{
+				"NEVER modify source code",
+				"FEATURE_DIR",
+				"defeats the purpose",
+			},
+			mustNotContain: nil, // spec-phase guardrails are the baseline
+		},
+	}
+
+	for _, b := range blocks {
+		t.Run(b.label, func(t *testing.T) {
+			// Find the block: look for the label, then extract the
+			// next ```markdown ... ``` fenced block after it.
+			idx := strings.Index(text, b.label)
+			if idx < 0 {
+				t.Fatalf("guardrail block label %q not found in uf.init.md", b.label)
+			}
+
+			remainder := text[idx:]
+			fenceStart := strings.Index(remainder, "```markdown")
+			if fenceStart < 0 {
+				t.Fatalf("no ```markdown fence found after %q", b.label)
+			}
+			fenceEnd := strings.Index(remainder[fenceStart+len("```markdown"):], "```")
+			if fenceEnd < 0 {
+				t.Fatalf("no closing ``` found for %q block", b.label)
+			}
+			blockContent := remainder[fenceStart : fenceStart+len("```markdown")+fenceEnd+len("```")]
+
+			for _, pattern := range b.mustContain {
+				if !strings.Contains(blockContent, pattern) {
+					t.Errorf("%s: MUST contain %q but does not\nBlock content:\n%s",
+						b.label, pattern, blockContent)
+				}
+			}
+			for _, pattern := range b.mustNotContain {
+				if strings.Contains(blockContent, pattern) {
+					t.Errorf("%s: MUST NOT contain %q but does\nBlock content:\n%s",
+						b.label, pattern, blockContent)
+				}
+			}
+		})
+	}
+}

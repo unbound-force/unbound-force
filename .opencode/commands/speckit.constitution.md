@@ -86,14 +86,11 @@ Do not create a new template; always operate on the existing `.specify/memory/co
 
 ## Guardrails
 
-- **NEVER modify source code** — this command updates
-  spec artifacts ONLY. Implementation changes belong in
-  `/speckit.implement`, `/uf.unleash`, or `/uf.cobalt-crush`.
-- **NEVER modify test files, Go source, Markdown agents,
-  convention packs, or config files** outside the
-  `specs/NNN-*/` feature directory.
+- This command updates the project constitution and
+  propagates changes to dependent templates.
 - The ONLY files this command may write are:
-  - `FEATURE_SPEC` (the spec.md file)
-  - Files within `FEATURE_DIR` (spec artifacts:
-    plan.md, tasks.md, research.md, data-model.md,
-    quickstart.md, contracts/, checklists/)
+  - `.specify/memory/constitution.md`
+  - `.specify/templates/*-template.md` (consistency
+    propagation)
+- Do NOT modify source code, test files, or any files
+  outside the `.specify/` directory.

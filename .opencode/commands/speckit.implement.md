@@ -175,14 +175,10 @@ Note: This command assumes a complete task breakdown exists in tasks.md. If task
 
 ## Guardrails
 
-- **NEVER modify source code** — this command updates
-  spec artifacts ONLY. Implementation changes belong in
-  `/speckit.implement`, `/uf.unleash`, or `/uf.cobalt-crush`.
-- **NEVER modify test files, Go source, Markdown agents,
-  convention packs, or config files** outside the
-  `specs/NNN-*/` feature directory.
-- The ONLY files this command may write are:
-  - `FEATURE_SPEC` (the spec.md file)
-  - Files within `FEATURE_DIR` (spec artifacts:
-    plan.md, tasks.md, research.md, data-model.md,
-    quickstart.md, contracts/, checklists/)
+- This command **writes source code** — implementation
+  is its primary purpose. It executes the tasks defined
+  in the active feature's `tasks.md`.
+- Scope modifications to the active feature's
+  implementation plan. Do not make changes unrelated to
+  the current task group.
+- Mark task checkboxes `[x]` as each task is completed.
