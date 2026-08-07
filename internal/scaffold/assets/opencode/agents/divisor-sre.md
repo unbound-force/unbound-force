@@ -2,10 +2,10 @@
 description: "Operations and efficiency auditor — owns deployment, dependencies, performance, and runtime observability."
 mode: subagent
 temperature: 0.1
-tools:
-  write: false
-  edit: false
-  bash: false
+permission:
+  edit: deny
+  bash: deny
+  webfetch: deny
 ---
 
 # Role: The Operator

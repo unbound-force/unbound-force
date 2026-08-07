@@ -50,7 +50,7 @@ Always run tests with `-race -count=1`. CI enforces this.
 
 | Workflow | File | Purpose |
 |---|---|---|
-| Local CI | `ci_local.yml` | Build, test, coverage ratchets |
+| Local CI | `ci_local.yml` | Build, test, coverage ratchets, pipeline tests |
 | CI Checks | `ci_checks.yml` | MegaLinter + commitlint |
 | Security | `ci_security.yml` | OSV-Scanner, Trivy, Scorecards |
 | Dependencies | `ci_dependencies.yml` | Dependency review + dependabot |
@@ -72,8 +72,8 @@ unbound-force/
 ├── council-review-action/             # AI code review composite GitHub Action
 │   ├── action.yml                    # Composite action definition
 │   ├── scripts/                      # Pipeline scripts (diff, prompt, review, parse)
-│   ├── test/                         # Pipeline tests (60 assertions)
-│   └── docs/                         # Decisions, security risks, testing strategy
+│   ├── test/                         # Pipeline tests (91 assertions)
+│   └── docs/                         # Architecture, decisions, security, testing
 ├── cmd/unbound-force/                # Cobra CLI entry point
 ├── cmd/mutimind/                     # Muti-Mind backend CLI
 ├── cmd/mxf/                          # Mx F backend CLI

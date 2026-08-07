@@ -54,7 +54,7 @@ runs:
       id: install
       shell: bash
       run: |
-        if ! npm install -g opencode-ai@1.2.26; then
+        if ! npm install -g opencode-ai@1.15.13; then
           echo "::warning::OpenCode install failed"
           echo "installed=false" >> "$GITHUB_OUTPUT"
         else

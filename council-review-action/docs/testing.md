@@ -12,19 +12,24 @@ bash test/test-pipeline.sh
 
 | Script | Testable locally | Tests | Assertions |
 |---|---|---|---|
-| `prepare-diff.sh` | Yes | 6 | 23 |
-| `filter-diff-lines.py` | Yes | 3 | 8 |
-| `extract-review-json.py` | Yes | 7 | 7 |
-| `build-prompt.sh` | Yes | 4 | 13 |
+| `prepare-diff.sh` | Yes | 8 | 31 |
+| `filter-diff-lines.py` | Yes | 4 | 10 |
+| `extract-review-json.py` | Yes | 8 | 8 |
+| `build-prompt.sh` | Yes | 5 | 15 |
 | `parse-output.sh` | Yes | 6 | 9 |
-| `run-review.sh` | No (requires OpenCode + Vertex AI) | — | — |
+| `run-review.sh` | Yes (config generation via stub) | 3 | 17 |
+| `divisor-*.md` | Yes (frontmatter syntax) | 1 | 1 |
 | `prefetch.sh` | No (requires `gh` CLI + repo access) | — | — |
 
-**Total: 26 scenarios, 60 assertions** (includes empty diff,
+**Total: 35 scenarios, 91 assertions** (includes empty diff,
 size limit, multiple JSON objects, 6 parse-output scenarios
 covering direct JSON, JSONL streaming, plain text, filter
-failure, and all-comments-filtered paths, plus JSON schema
-field checks — added in review feedback round)
+failure, and all-comments-filtered paths, JSON schema field
+checks, parse attempt limit, multi-category noise filtering,
+empty inline_comments, rename diff headers, special character
+PR title handling, sandbox config generation for Vertex and
+non-Vertex providers, MODEL metacharacter rejection, and
+agent frontmatter permission syntax)
 
 ### Test details
 
@@ -37,6 +42,8 @@ field checks — added in review feedback round)
 | 3 | Multi-file diff | Line numbers reset to 1 at each file boundary |
 | 4 | Noise filtering | Lock/vendor/generated files excluded, code files kept |
 | 5 | Deleted lines | `-` lines have no `[L]` prefix, line counter doesn't advance |
+| 28 | Multi-category noise | Lock file, vendored, generated, and test fixture patterns all excluded |
+| 30 | Rename headers | `similarity index`, `rename from/to` pass through without annotation |
 
 #### filter-diff-lines.py (line validation)
 
@@ -44,6 +51,7 @@ field checks — added in review feedback round)
 |---|---|---|
 | 6 | Valid vs invalid | Only lines within diff hunks accepted; invalid rescued to summary |
 | 7 | Partial hunks | Lines outside the `@@` range rejected even if within file length |
+| 29 | Empty comments | Empty `inline_comments` array passes through without summary modification |
 
 #### extract-review-json.py (JSON extraction)
 
@@ -54,6 +62,7 @@ field checks — added in review feedback round)
 | 10 | Surrounding text | JSON embedded in prose extracted |
 | 11 | Invalid input | Exit code 1 when no valid JSON found |
 | 12 | Missing keys | JSON without `summary` + `inline_comments` rejected |
+| 27 | Parse attempt limit | Input with many JSON fragments exceeding `MAX_PARSE_ATTEMPTS` rejected |
 
 #### build-prompt.sh (prompt generation)
 
@@ -61,7 +70,22 @@ field checks — added in review feedback round)
 |---|---|---|
 | 13 | PR title injection | Title appears in prompt, output format section present |
 | 14 | Title truncation | Titles >200 chars are truncated |
-| 15 | Security instructions | Untrusted input warning, no-shell/no-subagent constraints |
+| 15 | Security instructions | Untrusted input warning, no-shell/no-fix-loop constraints |
+| 31 | Special characters | Shell metacharacters and backticks in PR title preserved literally |
+
+#### run-review.sh (sandbox config)
+
+| # | Scenario | What it validates |
+|---|---|---|
+| 32 | Vertex provider config | Permission denials (7 keys), task NOT denied, provider key present, --pure flag, no skip flags |
+| 33 | Non-Vertex provider config | Permission denials present, no provider key |
+| 34 | MODEL metachar rejection | Exit 1 for MODEL containing shell metacharacters |
+
+#### divisor-*.md (agent frontmatter)
+
+| # | Scenario | What it validates |
+|---|---|---|
+| 35 | Permission syntax | All divisor agents use `permission:` not `tools:` |
 
 ## Integration tests (live CI)
 

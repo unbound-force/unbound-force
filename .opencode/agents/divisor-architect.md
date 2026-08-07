@@ -2,10 +2,10 @@
 description: "Structural and architectural reviewer — owns patterns, conventions, and DRY."
 mode: subagent
 temperature: 0.1
-tools:
-  write: false
-  edit: false
-  bash: false
+permission:
+  edit: deny
+  bash: deny
+  webfetch: deny
 ---
 
 # Role: The Architect

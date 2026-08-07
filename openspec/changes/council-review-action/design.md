@@ -151,8 +151,9 @@ generic by outputting structured data.
 ## Risks / Trade-offs
 
 **[R1] OpenCode CLI stability** — OpenCode is pinned to a specific
-version (`opencode-ai@1.2.26`). Version upgrades are explicit and
-tested.
+version (`opencode-ai@1.15.13`). Version upgrades are explicit and
+tested. (Updated from `1.2.26` — see `council-review-action/docs/decisions.md`
+"OpenCode version pinning" for the version bump rationale.)
 
 **[R2] Higher token cost** — Multi-agent uses more tokens than
 single-agent. Each subagent has its own context window. Mitigation:

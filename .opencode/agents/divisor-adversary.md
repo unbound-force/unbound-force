@@ -2,12 +2,10 @@
 description: "Security and resilience auditor — owns secrets, CVEs, error handling, and injection safety."
 mode: subagent
 temperature: 0.1
-tools:
-  read: true
-  write: false
-  edit: false
-  bash: false
-  webfetch: false
+permission:
+  edit: deny
+  bash: deny
+  webfetch: deny
 ---
 
 # Role: The Adversary

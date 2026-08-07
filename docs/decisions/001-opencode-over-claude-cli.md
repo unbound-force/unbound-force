@@ -44,8 +44,9 @@ are the single source of truth for both interactive and CI reviews.
   frontmatter permissions
 - No `--agents` multi-agent blob; OpenCode uses `--agent` (single)
   or relies on the orchestrator prompt to delegate via Agent tool
-- `--dangerously-skip-permissions` required in CI (no TTY for
-  approval prompts)
+- ~~`--dangerously-skip-permissions` required in CI~~ — superseded
+  by explicit permission denials via `OPENCODE_CONFIG_CONTENT`
+  (see `council-review-action/docs/decisions.md` "Runtime sandbox")
 
 **Risks:**
 - Vertex AI auth: OpenCode uses `google-vertex-anthropic` provider

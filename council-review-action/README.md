@@ -1,95 +1,12 @@
 # Council Review Action
 
-AI code review composite GitHub Action using [OpenCode](https://opencode.ai) with Divisor persona discovery. Runs structured reviews against PR diffs via Claude on Vertex AI and outputs JSON for inline GitHub comments.
+Automated multi-persona code review for GitHub PRs. Discovers
+reviewer personas from your repo's `.opencode/agents/` directory,
+pre-fetches PR context, and outputs structured JSON for inline
+review comments — no custom orchestration code needed.
 
-## Architecture
-
-### End-to-end flow
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Downstream Repo (e.g., org-infra, gaze)                │
-│                                                         │
-│  ci_council_review_collect.yml  (pull_request trigger)  │
-│  ├── Gate: skip bots, skip drafts                       │
-│  ├── Capture diff: gh pr diff → pr-diff.patch           │
-│  ├── Build metadata: pr-meta.json                       │
-│  └── Upload artifact: council-review-diff               │
-│                                                         │
-│  ci_council_review.yml  (workflow_dispatch / manual)     │
-│  └── calls → reusable_council_review.yml (org-infra)    │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│  org-infra: reusable_council_review.yml                 │
-│                                                         │
-│  ├── Download artifact (pr-diff.patch, pr-meta.json)    │
-│  ├── WIF auth → Google Cloud (Vertex AI)                │
-│  ├── Run council-review-action ─────────────────────┐   │
-│  │                                                  │   │
-│  │   ┌──────────────────────────────────────────┐   │   │
-│  │   │  council-review-action (this repo)       │   │   │
-│  │   │                                          │   │   │
-│  │   │  1. Install OpenCode                     │   │   │
-│  │   │  2. Filter noise → pr-diff-filtered.patch │   │   │
-│  │   │  3. Annotate     → pr-diff-annotated.patch│   │   │
-│  │   │  4. Pre-fetch PR context (CI, reviews)   │   │   │
-│  │   │  5. Discover Divisor personas            │   │   │
-│  │   │  6. Build prompt                         │   │   │
-│  │   │  7. opencode run → review_raw.txt        │   │   │
-│  │   │  8. Parse + filter → review_output.json  │   │   │
-│  │   └──────────────────────────────────────┘   │   │
-│  │                                              │   │
-│  ├── Clean up previous bot comments ◄───────────┘   │
-│  ├── Post review summary (issue comment)            │
-│  └── Post inline comments (PR review comments)      │
-└─────────────────────────────────────────────────────┘
-```
-
-### Three-workflow chain
-
-The council review uses a three-file pattern for fork PR support:
-
-| File | Location | Trigger | Purpose |
-|---|---|---|---|
-| `ci_council_review_collect.yml` | Synced to all repos | `pull_request` | Captures diff + metadata, no secrets needed |
-| `ci_council_review.yml` | Synced to all repos | `workflow_run` / `workflow_dispatch` | Thin consumer — calls the reusable workflow |
-| `reusable_council_review.yml` | org-infra only | `workflow_call` | Core logic — WIF auth, review, posting |
-
-Fork PRs trigger `pull_request` on the fork (no secrets). The consumer workflow runs on the base repo where secrets are available. The reusable workflow stays in org-infra and is never synced downstream.
-
-### Authentication
-
-```
-GitHub Actions runner
-    │
-    ▼  OIDC token exchange
-GCP Workload Identity Federation (WIF)
-    │
-    ▼  Short-lived credentials
-Vertex AI (Claude on Google Cloud)
-    │
-    ▼  opencode run --model google-vertex-anthropic/claude-sonnet-4-6
-Review JSON output
-```
-
-### Persona discovery
-
-The action auto-discovers Divisor reviewer personas in three tiers:
-
-1. **Repo agents** — `.opencode/agents/divisor-*.md` in the PR's repo
-2. **Bundled agents** — shipped with this action (fallback for repos without `uf init`)
-3. **Single-agent mode** — general reviewer if no personas found
-
-### Comment posting
-
-| Type | API | Deletable? |
-|---|---|---|
-| Review summary | Issue comment (`POST /issues/{n}/comments`) | Yes — deleted on re-review |
-| Inline findings | PR review comment (`POST /pulls/{n}/comments`) | Yes — deleted on re-review |
-| Stale reviews | GraphQL `minimizeComment` | Collapsed as "outdated" |
-
-All bot comments are tagged with `<!-- council-review-bot -->` for cleanup.
+**[Quick Start](docs/quickstart.md)** — add AI code review to
+your repo in three steps.
 
 ## Inputs
 
@@ -105,26 +22,67 @@ All bot comments are tagged with `<!-- council-review-bot -->` for cleanup.
 
 | Output | Description |
 |---|---|
-| `review-json` | Path to the review output JSON file |
-| `review-mode` | `inline` (structured) or `comment` (fallback) |
+| `review-json` | Path to the review JSON file (summary + inline comments) |
+| `review-mode` | `inline` (structured JSON) or `comment` (plain text fallback) |
+
+The action outputs structured data only. Comment posting is the
+consumer workflow's responsibility — see
+[docs/architecture.md](docs/architecture.md) for the full
+three-workflow chain.
+
+## How it works
+
+1. Installs [OpenCode](https://opencode.ai) CLI
+2. Filters noise from the diff (lock files, vendor, generated code)
+3. Annotates diff lines with `[L<N>]` prefixes for accurate
+   inline comment placement
+4. Pre-fetches PR context (CI checks, existing reviews, linked
+   issues) via `gh` CLI
+5. Discovers Divisor reviewer personas in three tiers:
+   repo agents, bundled agents, or single-agent fallback
+6. Builds a review prompt referencing the repo's methodology files
+7. Invokes `opencode run` with a runtime permission sandbox
+8. Parses structured JSON output
+
+## Security
+
+The action processes untrusted PR diff content through an LLM.
+Three layers of defense prevent tool misuse:
+
+1. **Runtime permissions** — `OPENCODE_CONFIG_CONTENT` denies
+   bash, edit, webfetch, websearch, and skill at the OpenCode
+   runtime level (hard enforcement, not prompt instruction)
+2. **Plugin isolation** — `--pure` flag prevents external MCP
+   plugins from loading
+3. **Agent frontmatter** — each Divisor agent's `permission:`
+   config denies dangerous tools as defense-in-depth
+
+The diff stays in a file read by OpenCode's Read tool — it is
+never interpolated into the prompt string.
+
+See [docs/security-risks.md](docs/security-risks.md) for the
+full risk register and
+[docs/decisions.md](docs/decisions.md) for design rationale.
 
 ## Directory structure
 
 ```
 council-review-action/
 ├── action.yml              # Composite action definition
-├── README.md               # This file
+├── README.md
 ├── scripts/
 │   ├── prepare-diff.sh     # Noise filter + line annotation
 │   ├── build-prompt.sh     # Prompt construction
-│   ├── run-review.sh       # OpenCode invocation
+│   ├── run-review.sh       # OpenCode invocation + sandbox
 │   ├── prefetch.sh         # PR context pre-fetch (CI, reviews)
 │   ├── parse-output.sh     # Review output parsing + filtering
 │   ├── extract-review-json.py  # JSON extraction from JSONL
 │   └── filter-diff-lines.py    # Line number validation
 ├── test/
-│   └── test-pipeline.sh    # Pipeline tests (60 assertions)
+│   └── test-pipeline.sh    # Pipeline tests (91 assertions)
 └── docs/
+    ├── quickstart.md        # Quick start guide
+    ├── architecture.md      # End-to-end flow, workflow chain
     ├── decisions.md         # Key technical decisions
     ├── security-risks.md    # Security risk register
     └── testing.md           # Test coverage and strategy
@@ -133,8 +91,11 @@ council-review-action/
 ## Testing
 
 ```bash
-cd council-review-action
-bash test/test-pipeline.sh
+bash council-review-action/test/test-pipeline.sh
 ```
 
-See [docs/testing.md](docs/testing.md) for coverage details and what requires live credentials.
+35 scenarios with 91 assertions covering diff processing, JSON
+extraction, prompt construction, output parsing, sandbox config
+generation, and agent frontmatter validation. See
+[docs/testing.md](docs/testing.md) for the coverage matrix and
+live integration testing instructions.

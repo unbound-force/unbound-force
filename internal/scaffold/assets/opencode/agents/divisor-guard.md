@@ -2,10 +2,10 @@
 description: "Intent drift detector — owns plan alignment, zero-waste, constitution, and cross-component value."
 mode: subagent
 temperature: 0.1
-tools:
-  write: false
-  edit: false
-  bash: false
+permission:
+  edit: deny
+  bash: deny
+  webfetch: deny
 ---
 
 # Role: The Guard

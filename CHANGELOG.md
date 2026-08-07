@@ -6,16 +6,14 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
-- council-review-action: New composite GitHub Action for
-  AI code review using OpenCode with Divisor persona
-  discovery; auto-discovers agents from
-  `.opencode/agents/`, pre-fetches PR context (CI checks,
-  reviews, linked issues), invokes `opencode run`, and
-  outputs structured JSON for inline review comments;
+- council-review-action: Reusable composite GitHub Action
+  for multi-persona AI code review on PRs; discovers
+  Divisor reviewer personas from the repo's
+  `.opencode/agents/` directory, pre-fetches PR context,
+  and outputs structured JSON for inline review comments;
   three-tier persona fallback (repo, bundled,
   single-agent); diff noise filtering and line annotation
-  for accurate inline comment placement; 60-assertion test
-  suite across 26 scenarios
+  for accurate inline comment placement
   (Spec: openspec/changes/council-review-action/,
   Closes: #253)
 
@@ -39,6 +37,15 @@ Each entry follows the format: `- <change-name>: <summary>`.
   Fixes: #351)
 
 ### Changed
+- council-review-sandbox: Runtime permission sandbox for
+  council review action; enforces tool restrictions via
+  `OPENCODE_CONFIG_CONTENT` permission config (denies
+  bash, edit, webfetch, websearch, skill); `--pure` flag
+  isolates external MCP plugins; explicit deny of
+  ask-default permissions for headless CI; migrated 9
+  Divisor agents from deprecated `tools:` to `permission:`
+  frontmatter syntax
+  (Spec: openspec/changes/council-review-sandbox/)
 - All 10 uf-owned slash commands renamed to `uf.`
   dot-notation namespace prefix: `/address-feedback`
   → `/uf.address-feedback`, `/agent-brief` →

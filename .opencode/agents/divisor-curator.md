@@ -2,12 +2,9 @@
 description: "Documentation & content pipeline triage — owns documentation gaps, blog/tutorial opportunities, and website issue filing."
 mode: subagent
 temperature: 0.2
-tools:
-  read: true
-  write: false
-  edit: false
-  bash: true
-  webfetch: false
+permission:
+  edit: deny
+  webfetch: deny
 ---
 
 # Role: The Curator

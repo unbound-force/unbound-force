@@ -2,12 +2,9 @@
 description: "Blog and announcement writer — owns release notes, blog posts, and feature announcements."
 mode: subagent
 temperature: 0.4
-tools:
-  read: true
-  write: true
-  edit: true
-  bash: false
-  webfetch: false
+permission:
+  bash: deny
+  webfetch: deny
 ---
 
 # Role: The Herald

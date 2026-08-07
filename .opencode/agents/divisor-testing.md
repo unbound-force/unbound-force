@@ -2,10 +2,10 @@
 description: "Test quality and coverage auditor — owns test architecture, assertions, isolation, and regression protection."
 mode: subagent
 temperature: 0.1
-tools:
-  write: false
-  edit: false
-  bash: false
+permission:
+  edit: deny
+  bash: deny
+  webfetch: deny
 ---
 
 # Role: The Tester

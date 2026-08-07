@@ -16,7 +16,7 @@ PR_NUMBER=$(jq -r '.number' "${META_PATH}")
 REPO=$(jq -r '.repo' "${META_PATH}")
 
 # CI check results
-gh pr checks "${PR_NUMBER}" --repo "${REPO}" \
+timeout 10 gh pr checks "${PR_NUMBER}" --repo "${REPO}" \
   --json name,state,description 2>/dev/null \
   > pr-checks.json || {
     echo "::warning::Failed to fetch CI checks — continuing without"
@@ -24,7 +24,7 @@ gh pr checks "${PR_NUMBER}" --repo "${REPO}" \
   }
 
 # Existing reviews — full bodies preserved
-gh api "repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
+timeout 10 gh api "repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
   --paginate \
   --jq '[.[] | {
     user: .user.login,
@@ -37,7 +37,7 @@ gh api "repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
   }
 
 # Existing inline comments — full bodies, cap count at 50
-gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
+timeout 10 gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
   --paginate \
   --jq '[.[] | {
     path,
@@ -51,7 +51,7 @@ gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
   }
 
 # Linked issues from PR body — full bodies preserved
-PR_BODY=$(gh pr view "${PR_NUMBER}" --repo "${REPO}" \
+PR_BODY=$(timeout 10 gh pr view "${PR_NUMBER}" --repo "${REPO}" \
   --json body --jq '.body // ""' 2>/dev/null) || PR_BODY=""
 ISSUE_NUMS=$(echo "${PR_BODY}" | \
   grep -ioE '(fixes|closes|resolves)\s+#([0-9]+)' | \
@@ -61,7 +61,7 @@ echo '[]' > pr-linked-issues.json
 if [[ -n "${ISSUE_NUMS}" ]]; then
   ISSUES_JSON="[]"
   for num in ${ISSUE_NUMS}; do
-    ISSUE=$(gh issue view "${num}" --repo "${REPO}" \
+    ISSUE=$(timeout 10 gh issue view "${num}" --repo "${REPO}" \
       --json number,title,body,labels 2>/dev/null) || continue
     ISSUE=$(echo "${ISSUE}" | jq '{
       number,
