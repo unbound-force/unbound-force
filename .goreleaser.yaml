@@ -46,6 +46,12 @@ signs:
       - "${artifact}"
       - --yes
 
+release:
+  extra_files:
+    - glob: dist/homebrew/Casks/unbound-force.rb
+    - glob: dist/homebrew/Formula/unbound-force.rb
+      name_template: unbound-force-formula.rb
+
 changelog:
   sort: asc
   use: github

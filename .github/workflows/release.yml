@@ -3,12 +3,19 @@
 # Release
 # =======
 # One-click release pipeline triggered via workflow_dispatch.
-# Validates pre-flight conditions (semver format, tag
-# uniqueness, CI status, unreleased commits), creates the
-# tag, builds cross-platform binaries via GoReleaser with
-# SBOM and Cosign signing, signs macOS archives with Apple
-# Developer ID, notarizes them, and publishes to the
-# Homebrew tap.
+# Delegates to org-infra reusable workflows for preflight
+# validation and GoReleaser execution with supply chain
+# artifacts (cosign signatures and SBOMs).
+#
+# Preflight validates semver format, tag uniqueness (with
+# re-run resilience), semver ordering, CI check status,
+# and unreleased commits before creating an annotated tag.
+#
+# After release, signs macOS archives with Apple Developer
+# ID, notarizes them, patches Homebrew cask and formula
+# checksums, and pushes to the Homebrew tap.
+#
+# Fixes: https://github.com/unbound-force/unbound-force/issues/428
 
 name: Release
 
@@ -19,215 +26,96 @@ on:
         description: 'Release tag (e.g., v0.15.0)'
         required: true
         type: string
+      skip_semver_check:
+        description: 'Skip semver ordering verification'
+        type: boolean
+        default: false
+      skip_ci_checks:
+        description: 'Skip CI check verification on HEAD'
+        type: boolean
+        default: false
+      skip_unreleased_check:
+        description: 'Skip unreleased commits verification'
+        type: boolean
+        default: false
 
 permissions: {}
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
   preflight:
-    runs-on: ubuntu-latest
+    name: Preflight
+    uses: complytime/org-infra/.github/workflows/reusable_release_preflight.yml@0c784711926c9864f027ec565fd7c06a382d80f8 # v0.7.1
+    with:
+      tag: ${{ inputs.tag }}
+      # Check names from ci_local.yml, ci_checks.yml, ci_security.yml
+      ci_checks: '["Build and Test", "Standardized CI / Run linters", "OSV-Scanner / Trivy Source Scan"]'
+      skip_semver_check: ${{ inputs.skip_semver_check }}
+      skip_ci_checks: ${{ inputs.skip_ci_checks }}
+      skip_unreleased_check: ${{ inputs.skip_unreleased_check }}
     permissions:
       contents: write
       checks: read
-    timeout-minutes: 10
-    env:
-      RELEASE_TAG: ${{ inputs.tag }}
+
+  release:
+    name: Release
+    needs: preflight
+    if: needs.preflight.outputs.tag != ''
+    uses: complytime/org-infra/.github/workflows/reusable_release_goreleaser.yml@0c784711926c9864f027ec565fd7c06a382d80f8 # v0.7.1
+    with:
+      tag: ${{ needs.preflight.outputs.tag }}
+    permissions:
+      contents: write
+      id-token: write
+
+  check-signing-secrets:
+    name: Check Signing Secrets
+    needs: preflight
+    if: needs.preflight.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions: {}
+    timeout-minutes: 5
     outputs:
-      has_signing_secrets: ${{ steps.check-secrets.outputs.has_secrets }}
+      has_signing_secrets: ${{ steps.check.outputs.has_secrets }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Validate tag format
-        run: |
-          if ! echo "$RELEASE_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Invalid tag format: '$RELEASE_TAG'. Must match vMAJOR.MINOR.PATCH (e.g., v0.15.0)."
-            exit 1
-          fi
-          echo "Tag format valid: $RELEASE_TAG"
-
-      - name: Check tag uniqueness
-        run: |
-          if git ls-remote --tags origin | grep -q "refs/tags/${RELEASE_TAG}$"; then
-            echo "::error::Tag '$RELEASE_TAG' already exists. Choose a different version."
-            exit 1
-          fi
-          echo "Tag '$RELEASE_TAG' does not exist yet."
-
-      - name: Verify semver ordering
-        run: |
-          LATEST=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -1)
-          if [ -z "$LATEST" ]; then
-            echo "No existing tags found. First release."
-            exit 0
-          fi
-          echo "Latest existing tag: $LATEST"
-          # Compare using sort -V: if TAG sorts after LATEST, it is greater
-          HIGHER=$(printf '%s\n%s' "$LATEST" "$RELEASE_TAG" | sort -V | tail -1)
-          if [ "$HIGHER" = "$LATEST" ]; then
-            echo "::error::Tag '$RELEASE_TAG' is not greater than latest release '$LATEST'."
-            exit 1
-          fi
-          echo "Version ordering valid: $RELEASE_TAG > $LATEST"
-
-      - name: Verify CI passed on HEAD
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          HEAD_SHA=$(git rev-parse HEAD)
-          echo "Checking CI status for commit $HEAD_SHA"
-
-          REQUIRED_CHECKS=(
-            "Build and Test"
-            "Standardized CI / Run linters"
-          )
-
-          for CHECK_NAME in "${REQUIRED_CHECKS[@]}"; do
-            STATUS=$(gh api "repos/${GH_REPO}/commits/${HEAD_SHA}/check-runs" \
-              --jq ".check_runs[] | select(.name == \"${CHECK_NAME}\") | .conclusion" \
-              2>/dev/null | head -1)
-            if [ "$STATUS" != "success" ]; then
-              echo "::error::Required check '${CHECK_NAME}' has not passed (status: ${STATUS:-not found}). Push to main and wait for CI before releasing."
-              exit 1
-            fi
-            echo "  ✓ ${CHECK_NAME}: success"
-          done
-
-          # Security checks: verify at least one scan passed
-          SECURITY_PASSED=false
-          for CHECK_NAME in "OSV-Scanner / Trivy Source Scan" "OSV-Scanner / OSV-Scanner / osv-scan"; do
-            STATUS=$(gh api "repos/${GH_REPO}/commits/${HEAD_SHA}/check-runs" \
-              --jq ".check_runs[] | select(.name == \"${CHECK_NAME}\") | .conclusion" \
-              2>/dev/null | head -1)
-            if [ "$STATUS" = "success" ]; then
-              echo "  ✓ ${CHECK_NAME}: success"
-              SECURITY_PASSED=true
-            else
-              echo "  ⚠ ${CHECK_NAME}: ${STATUS:-not found}"
-            fi
-          done
-
-          if [ "$SECURITY_PASSED" != "true" ]; then
-            echo "::error::No security scan checks have passed on HEAD. Push to main and wait for CI before releasing."
-            exit 1
-          fi
-
-          echo "All required CI checks passed."
-
-      - name: Verify unreleased commits
-        run: |
-          LATEST=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -1)
-          if [ -z "$LATEST" ]; then
-            COUNT=$(git rev-list --count HEAD)
-          else
-            COUNT=$(git rev-list --count "${LATEST}..HEAD")
-          fi
-          if [ "$COUNT" -eq 0 ]; then
-            echo "::error::No unreleased commits since ${LATEST:-initial commit}. Nothing to release."
-            exit 1
-          fi
-          echo "$COUNT commit(s) since ${LATEST:-initial commit}."
-
-      - name: Create and push tag
-        run: |
-          # Skip if tag was already created (e.g., re-run after
-          # partial failure or manual tag via GitHub API).
-          if git ls-remote --tags origin | grep -q "refs/tags/${RELEASE_TAG}$"; then
-            echo "Tag $RELEASE_TAG already exists, skipping creation."
-            exit 0
-          fi
-          # Annotated tags require a committer identity on the
-          # CI runner (git tag -a uses GIT_COMMITTER_NAME/EMAIL).
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$RELEASE_TAG" -m "$RELEASE_TAG"
-          git push origin "$RELEASE_TAG"
-          echo "Created and pushed tag: $RELEASE_TAG"
-
       - name: Check signing secrets
-        id: check-secrets
+        id: check
         run: |
-          if [ -n "$MACOS_SIGN_P12" ]; then
+          missing=""
+          for var in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_KEY \
+                     MACOS_SIGN_IDENTITY MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER_ID; do
+            eval "val=\$$var"
+            if [ -z "$val" ]; then
+              missing="$missing $var"
+            fi
+          done
+          if [ -z "$missing" ]; then
             echo "has_secrets=true" >> "$GITHUB_OUTPUT"
           else
+            echo "::notice::Missing signing secrets:$missing"
             echo "has_secrets=false" >> "$GITHUB_OUTPUT"
           fi
         env:
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-
-  release:
-    runs-on: ubuntu-latest
-    needs: preflight
-    permissions:
-      contents: write
-      id-token: write
-    timeout-minutes: 45
-    env:
-      RELEASE_TAG: ${{ inputs.tag }}
-    outputs:
-      has_signing_secrets: ${{ needs.preflight.outputs.has_signing_secrets }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-          ref: ${{ inputs.tag }}
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
-
-      - name: Install Syft
-        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
-        with:
-          distribution: goreleaser
-          version: 'v2.14.1'
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
-
-      - name: Upload generated cask and formula as release artifacts
-        # GoReleaser writes dist/homebrew/Casks/unbound-force.rb and
-        # dist/homebrew/Formula/unbound-force.rb with skip_upload: true.
-        # Upload both so the sign-macos job can download and patch darwin checksums.
-        run: |
-          gh release upload "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            dist/homebrew/Casks/unbound-force.rb \
-            --clobber
-
-          # Rename formula to avoid filename collision with cask (both are unbound-force.rb)
-          cp dist/homebrew/Formula/unbound-force.rb dist/homebrew/Formula/unbound-force-formula.rb
-          gh release upload "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            dist/homebrew/Formula/unbound-force-formula.rb \
-            --clobber
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
 
   sign-macos:
+    name: Sign macOS
     runs-on: macos-latest
-    needs: release
-    if: ${{ needs.release.outputs.has_signing_secrets == 'true' }}
+    needs: [preflight, release, check-signing-secrets]
+    if: needs.check-signing-secrets.outputs.has_signing_secrets == 'true'
     permissions:
       contents: write
     timeout-minutes: 30
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
     steps:
       - name: Import certificate into Keychain
         run: |

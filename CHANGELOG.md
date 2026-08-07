@@ -5,6 +5,23 @@ Each entry follows the format: `- <change-name>: <summary>`.
 
 ## Unreleased
 
+### Changed
+- adopt-org-infra-release-workflows: Replace inline
+  release preflight and GoReleaser jobs with org-infra
+  reusable workflow callers (`reusable_release_preflight`
+  + `reusable_release_goreleaser` @ v0.7.1). Adds smart
+  re-run detection, spec-compliant semver comparator
+  (replaces `sort -V`), configurable `ci_checks` input
+  (build, lint, and security scan gates), skip inputs
+  for debugging, and concurrency guard. Signing secrets
+  check expanded to verify all 6 required secrets.
+  GoReleaser config gains `release.extra_files` for
+  Homebrew artifact upload. `sign-macos` stays inline.
+  Updated `docs/RELEASE_PROCESS.md` to reflect the new
+  pipeline, including org-infra upgrade path.
+  (Spec: openspec/changes/adopt-org-infra-release-workflows/,
+  Fixes: #428)
+
 ### Added
 - council-review-action: New composite GitHub Action for
   AI code review using OpenCode with Divisor persona
