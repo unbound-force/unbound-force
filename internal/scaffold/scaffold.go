@@ -246,8 +246,11 @@ func Run(opts Options) (*Result, error) {
 
 	// Remove orphaned old-name command files left behind
 	// after the uf. namespace prefix rename.
-	migrated := cleanupRenamedCommands(opts.TargetDir)
+	migrated := cleanupRenamedCommands(opts.Stdout, opts.TargetDir)
 	result.Migrated = append(result.Migrated, migrated...)
+
+	// Warn about stale command references in agent files.
+	warnStaleCommandRefs(opts.Stdout, opts.TargetDir)
 
 	printSummary(opts.Stdout, opts.DivisorOnly, langExplicit, langDetected, result, subResults)
 	return result, nil
@@ -324,7 +327,8 @@ var renamedCommands = map[string]string{
 // cleanupRenamedCommands removes old-name command files that
 // were replaced by the uf. namespace prefix rename. Returns
 // the list of removed file paths (relative to targetDir).
-func cleanupRenamedCommands(targetDir string) []string {
+// Warnings for files that cannot be removed are written to w.
+func cleanupRenamedCommands(w io.Writer, targetDir string) []string {
 	var removed []string
 	for oldRel := range renamedCommands {
 		oldOut := mapAssetPath(oldRel)
@@ -332,10 +336,68 @@ func cleanupRenamedCommands(targetDir string) []string {
 		if _, err := os.Stat(oldPath); err == nil {
 			if err := os.Remove(oldPath); err == nil {
 				removed = append(removed, oldOut)
+			} else {
+				_, _ = fmt.Fprintf(w, "  ⚠  could not remove %s: %v\n", oldOut, err)
 			}
 		}
 	}
 	return removed
+}
+
+// warnStaleCommandRefs scans agent files in .opencode/agents/
+// for references to old (pre-namespace-prefix) command names
+// and prints a warning listing affected files and replacements.
+// Agent files are user-owned and are not modified.
+func warnStaleCommandRefs(w io.Writer, targetDir string) {
+	pattern := filepath.Join(targetDir, ".opencode", "agents", "*.md")
+	matches, err := filepath.Glob(pattern)
+	if err != nil || len(matches) == 0 {
+		return
+	}
+
+	// Build old->new command name mapping from renamedCommands.
+	// Keys: "/address-feedback", values: "/uf.address-feedback"
+	refMap := make(map[string]string, len(renamedCommands))
+	for oldRel, newRel := range renamedCommands {
+		oldBase := strings.TrimSuffix(filepath.Base(oldRel), ".md")
+		newBase := strings.TrimSuffix(filepath.Base(newRel), ".md")
+		refMap["/"+oldBase] = "/" + newBase
+	}
+
+	type staleRef struct {
+		file   string
+		oldRef string
+		newRef string
+	}
+	var found []staleRef
+
+	for _, m := range matches {
+		data, readErr := os.ReadFile(m)
+		if readErr != nil {
+			_, _ = fmt.Fprintf(w, "  warning: could not read %s: %v\n", filepath.Base(m), readErr)
+			continue
+		}
+		content := string(data)
+		base := filepath.Base(m)
+		for oldRef, newRef := range refMap {
+			if strings.Contains(content, oldRef) {
+				found = append(found, staleRef{file: base, oldRef: oldRef, newRef: newRef})
+			}
+		}
+	}
+
+	if len(found) == 0 {
+		return
+	}
+
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "⚠  Stale command references in agent files:")
+	for _, f := range found {
+		_, _ = fmt.Fprintf(w, "    %s: %s → %s\n", f.file, f.oldRef, f.newRef)
+	}
+	_, _ = fmt.Fprintln(w, "  Agent files are user-owned and not auto-updated.")
+	_, _ = fmt.Fprintln(w, "  Update these references manually, or run `uf init --force` to")
+	_, _ = fmt.Fprintln(w, "  re-scaffold all agent files (this will overwrite customizations).")
 }
 
 // isToolOwned returns true if the file is maintained by the

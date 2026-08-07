@@ -32,6 +32,13 @@ Each entry follows the format: `- <change-name>: <summary>`.
   tests.
   (Spec: openspec/changes/fix-incorrect-guardrails/,
   Fixes: #256)
+- uf-init-rename-migration: Hardened `uf init` command
+  rename migration with warnings for stale agent
+  references and removal failures. `cleanupRenamedCommands`
+  now reports non-removable files; `warnStaleCommandRefs`
+  scans agent files for old command paths.
+  (Spec: openspec/changes/fix-uf-init-command-rename-migration/,
+  Fixes: #419)
 - fix-review-pr-step7-gate: Step 7 verdict-posting offer
   in `/uf.review-pr` was gated behind a HIGH+ findings
   condition, causing the `AskUserQuestion` to be skipped

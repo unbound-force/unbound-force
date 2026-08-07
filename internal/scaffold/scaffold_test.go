@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -6594,5 +6595,174 @@ func TestGuardrailTemplates_CommandSpecificContent(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCleanupRenamedCommands_HappyPath(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a subset of old-name command files.
+	cmdDir := filepath.Join(dir, ".opencode", "commands")
+	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	oldFiles := []string{"address-feedback.md", "review-council.md"}
+	for _, f := range oldFiles {
+		if err := os.WriteFile(filepath.Join(cmdDir, f), []byte("old"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", f, err)
+		}
+	}
+
+	var buf bytes.Buffer
+	removed := cleanupRenamedCommands(&buf, dir)
+
+	// Verify files are removed from disk.
+	for _, f := range oldFiles {
+		p := filepath.Join(cmdDir, f)
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("expected %s to be removed, but it still exists", f)
+		}
+	}
+
+	// Verify returned paths use mapped output format.
+	if len(removed) != 2 {
+		t.Fatalf("expected 2 removed paths, got %d", len(removed))
+	}
+	for _, r := range removed {
+		if !strings.HasPrefix(r, ".opencode/commands/") {
+			t.Errorf("removed path %q does not have expected prefix .opencode/commands/", r)
+		}
+	}
+
+	// No warnings should have been emitted.
+	if buf.Len() != 0 {
+		t.Errorf("expected no warnings, got: %s", buf.String())
+	}
+}
+
+func TestCleanupRenamedCommands_NoOldFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	var buf bytes.Buffer
+	removed := cleanupRenamedCommands(&buf, dir)
+
+	if len(removed) != 0 {
+		t.Errorf("expected 0 removed paths, got %d", len(removed))
+	}
+	if buf.Len() != 0 {
+		t.Errorf("expected no warnings, got: %s", buf.String())
+	}
+}
+
+func TestCleanupRenamedCommands_NonWritableDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only file test not reliable on Windows")
+	}
+
+	dir := t.TempDir()
+	cmdDir := filepath.Join(dir, ".opencode", "commands")
+	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Create two old-name files.
+	removable := "address-feedback.md"
+	readonly := "review-council.md"
+	for _, f := range []string{removable, readonly} {
+		if err := os.WriteFile(filepath.Join(cmdDir, f), []byte("old"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", f, err)
+		}
+	}
+
+	// Make a file read-only, then make the directory non-writable so
+	// os.Remove fails for ALL files (total failure, not partial).
+	readonlyPath := filepath.Join(cmdDir, readonly)
+	if err := os.Chmod(readonlyPath, 0o444); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if err := os.Chmod(cmdDir, 0o555); err != nil {
+		t.Fatalf("chmod dir: %v", err)
+	}
+	t.Cleanup(func() {
+		// Restore permissions so t.TempDir() cleanup succeeds.
+		_ = os.Chmod(cmdDir, 0o755)
+		_ = os.Chmod(readonlyPath, 0o644)
+	})
+
+	var buf bytes.Buffer
+	removed := cleanupRenamedCommands(&buf, dir)
+
+	// No files should be removable since the directory is non-writable.
+	if len(removed) != 0 {
+		t.Errorf("expected 0 removed (dir is non-writable), got %d: %v", len(removed), removed)
+	}
+
+	// Warnings should have been emitted for both files.
+	warnings := buf.String()
+	if !strings.Contains(warnings, "could not remove") {
+		t.Errorf("expected warning about removal failure, got: %s", warnings)
+	}
+}
+
+func TestWarnStaleCommandRefs_StaleRef(t *testing.T) {
+	dir := t.TempDir()
+	agentDir := filepath.Join(dir, ".opencode", "agents")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Write an agent file containing a stale reference.
+	content := "Run /review-council to review the code.\n"
+	if err := os.WriteFile(filepath.Join(agentDir, "cobalt-crush-dev.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	var buf bytes.Buffer
+	warnStaleCommandRefs(&buf, dir)
+
+	output := buf.String()
+	if !strings.Contains(output, "Stale command references") {
+		t.Errorf("expected stale reference warning header, got: %s", output)
+	}
+	if !strings.Contains(output, "cobalt-crush-dev.md") {
+		t.Errorf("expected agent file name in warning, got: %s", output)
+	}
+	if !strings.Contains(output, "/review-council") {
+		t.Errorf("expected old ref /review-council in warning, got: %s", output)
+	}
+	if !strings.Contains(output, "/uf.review-council") {
+		t.Errorf("expected new ref /uf.review-council in warning, got: %s", output)
+	}
+}
+
+func TestWarnStaleCommandRefs_NoStaleRefs(t *testing.T) {
+	dir := t.TempDir()
+	agentDir := filepath.Join(dir, ".opencode", "agents")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Write an agent file with only current references.
+	content := "Run /uf.review-council to review the code.\n"
+	if err := os.WriteFile(filepath.Join(agentDir, "cobalt-crush-dev.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	var buf bytes.Buffer
+	warnStaleCommandRefs(&buf, dir)
+
+	if buf.Len() != 0 {
+		t.Errorf("expected no warning for current refs, got: %s", buf.String())
+	}
+}
+
+func TestWarnStaleCommandRefs_NoAgentFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	var buf bytes.Buffer
+	warnStaleCommandRefs(&buf, dir)
+
+	if buf.Len() != 0 {
+		t.Errorf("expected no output when no agent dir exists, got: %s", buf.String())
 	}
 }
