@@ -41,16 +41,13 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: release-${{ github.repository }}
-  cancel-in-progress: false
-
 jobs:
   preflight:
     name: Preflight
     uses: complytime/org-infra/.github/workflows/reusable_release_preflight.yml@0c784711926c9864f027ec565fd7c06a382d80f8 # v0.7.1
     with:
       tag: ${{ inputs.tag }}
+      allow_prerelease: true
       # Check names from ci_local.yml, ci_checks.yml, ci_security.yml
       ci_checks: '["Build and Test", "Standardized CI / Run linters", "OSV-Scanner / Trivy Source Scan"]'
       skip_semver_check: ${{ inputs.skip_semver_check }}
