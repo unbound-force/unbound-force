@@ -47,6 +47,16 @@ Each entry follows the format: `- <change-name>: <summary>`.
   the user-owned `AGENTS.md` is never modified.
   (Spec: openspec/changes/scaffold-agents-md-stale-refs/,
   Fixes: #567)
+- refine-bash-permissions: Refine `permission.bash`
+  `gh api` rules in `opencode.json`. Read-only API
+  calls (implicit or explicit GET) execute without
+  prompting; mutating methods (`-X POST/PATCH/PUT/
+  DELETE`, `--method` equivalents) and data-sending
+  flags (`-f`, `-F`, `--input`) require approval. All
+  original mutation guards for `gh issue`, `gh pr`,
+  `git push`, `git commit`, and `rm` preserved.
+  (Spec: openspec/changes/refine-bash-permissions/,
+  Fixes: #531)
 - pre-flight-file-scope-filter: Add Phase 2a file-scope
   filtering to skip tools that have zero in-scope files
   in the branch diff. Applies to all three execution
