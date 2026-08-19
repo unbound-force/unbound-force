@@ -97,14 +97,6 @@ approval regardless of HTTP method.
   `gh api /repos/owner/repo -X GET -f query=val`
 - **THEN** the command MUST prompt for approval
 
-## MODIFIED Requirements
-
-No requirements are modified.
-
-## REMOVED Requirements
-
-No requirements are removed.
-
 ### FR-004: Preserve Original Mutation Guards
 
 All original non-api mutation guards from the
@@ -132,3 +124,11 @@ The global default `"*": "allow"` MUST also be present.
 - **WHEN** the block is inspected
 - **THEN** all 13 original ask rules and the global
   default MUST be present and unchanged
+
+## MODIFIED Requirements
+
+No requirements are modified.
+
+## REMOVED Requirements
+
+No requirements are removed.
