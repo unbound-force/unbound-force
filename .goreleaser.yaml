@@ -47,6 +47,7 @@ signs:
       - --yes
 
 release:
+  prerelease: auto
   extra_files:
     - glob: dist/homebrew/Casks/unbound-force.rb
     - glob: dist/homebrew/Formula/unbound-force.rb
