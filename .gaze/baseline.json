@@ -4218,15 +4218,6 @@
     },
     {
       "package": "sandbox",
-      "function": "buildPersistentRunArgs",
-      "file": "/home/maburgha/GIT/ProdSec/uf-unbound-force/internal/sandbox/podman.go",
-      "line": 277,
-      "complexity": 3,
-      "line_coverage": 100,
-      "crap": 3
-    },
-    {
-      "package": "sandbox",
       "function": "mergeDemoPorts",
       "file": "/home/maburgha/GIT/ProdSec/uf-unbound-force/internal/sandbox/podman.go",
       "line": 321,
@@ -5830,7 +5821,7 @@
     }
   ],
   "summary": {
-    "total_functions": 530,
+    "total_functions": 529,
     "avg_complexity": 4.886792452830188,
     "avg_line_coverage": 83.7510284411904,
     "avg_crap": 5.451891735498352,

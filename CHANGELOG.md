@@ -6,6 +6,13 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Fixed
+- fix-sandbox-persistent-workdir: `buildPersistentRunArgs()`
+  now sets `--workdir` and `WORKSPACE` env var for persistent
+  Podman workspaces. OpenCode starts in the project directory
+  instead of `/`. Mirrors the ephemeral-path fix from PR #123.
+  Removed private function `buildPersistentRunArgs` from CRAP
+  baseline (Gaze only analyzes exported functions).
+  (Spec: openspec/changes/fix-sandbox-persistent-workdir/)
 - fix-init-force-passthrough: `uf init --force` now
   correctly re-initializes Group B sub-tools (specify,
   replicator, openspec, gaze) and passes `--force`
