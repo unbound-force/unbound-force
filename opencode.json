@@ -13,7 +13,7 @@
       "gh pr comment*": "ask",
       "gh pr edit*": "ask",
       "gh pr review*": "ask",
-      "gh api*": "allow",
+      "gh api *": "allow",
       "gh api * -X POST*": "ask",
       "gh api * -X PATCH*": "ask",
       "gh api * -X PUT*": "ask",
