@@ -16,9 +16,11 @@ so read-only operations do not prompt.
 
 Replace the blanket `"gh api*": "ask"` rule with a
 refined set: default `gh api*` to `allow`, then
-explicitly gate mutating methods (`-X` and `--method`
-forms of POST/PATCH/PUT/DELETE) and data-sending flags
-(`-f`, `-F`, `--input`) behind `ask`. All other
+explicitly gate mutating methods in all flag forms
+(`-X`, `-X` glued, `--method`, `--method=`, each in
+uppercase and lowercase) and data-sending flags (`-f`,
+`-F`, `--field`, `--field=`, `--raw-field`,
+`--raw-field=`, `--input`) behind `ask`. All other
 original mutation guards remain unchanged.
 
 ### Capabilities
@@ -83,9 +85,12 @@ approval prompts while allowing read-only operations.
 The `permission.bash` block provides defense-in-depth
 alongside the `<protect>` tags from PR #499: if DCP
 compression strips `<protect>` tags, the permission
-rules remain as a secondary guard. Both `-X` and
-`--method` flag forms are covered, as are data-sending
-flags (`-f`, `-F`, `--input`). The allow-default for
-read-only `gh api` calls follows least privilege:
+rules remain as a secondary guard. Mutation patterns
+cover uppercase and lowercase method names, short
+(`-X`), glued (`-XPOST`), long (`--method`), and
+equals (`--method=`) forms, as well as data-sending
+flags in both short (`-f`, `-F`) and long (`--field`,
+`--raw-field`) forms plus `--input`. The allow-default
+for read-only `gh api` calls follows least privilege:
 read operations are the minimum permission needed for
 context gathering.

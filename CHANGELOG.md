@@ -50,9 +50,11 @@ Each entry follows the format: `- <change-name>: <summary>`.
 - refine-bash-permissions: Refine `permission.bash`
   `gh api` rules in `opencode.json`. Read-only API
   calls (implicit or explicit GET) execute without
-  prompting; mutating methods (`-X POST/PATCH/PUT/
-  DELETE`, `--method` equivalents) and data-sending
-  flags (`-f`, `-F`, `--input`) require approval. All
+  prompting; mutating methods in all flag forms (`-X`,
+  `-XPOST` glued, `--method`, `--method=`, each in
+  uppercase and lowercase) and data-sending flags
+  (`-f`, `-F`, `--field`, `--raw-field`, `--input`,
+  including `=` variants) require approval. All
   original mutation guards for `gh issue`, `gh pr`,
   `git push`, `git commit`, and `rm` preserved.
   (Spec: openspec/changes/refine-bash-permissions/,

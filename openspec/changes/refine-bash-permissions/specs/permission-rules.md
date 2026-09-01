@@ -21,8 +21,10 @@ prompting for approval.
 ### FR-002: Gate Mutating `gh api` Methods
 
 Mutating HTTP methods MUST prompt for approval.
-Both `-X` short form and `--method` long form MUST
-be covered.
+All flag forms MUST be covered: `-X` (spaced), `-X`
+(glued), `--method` (spaced), `--method=` (equals).
+Both uppercase and lowercase method names MUST be
+covered due to case-sensitive matching on Linux/macOS.
 
 #### Scenario: gh api with -X POST
 - **GIVEN** a `permission.bash` block in `opencode.json`
@@ -60,6 +62,36 @@ be covered.
   `gh api /repos/owner/repo/issues/1 --method DELETE`
 - **THEN** the command MUST prompt for approval
 
+#### Scenario: gh api with lowercase -X post
+- **GIVEN** a `permission.bash` block in `opencode.json`
+- **WHEN** the agent runs
+  `gh api /repos/owner/repo/issues -X post`
+- **THEN** the command MUST prompt for approval
+
+#### Scenario: gh api with glued -XPOST (no space)
+- **GIVEN** a `permission.bash` block in `opencode.json`
+- **WHEN** the agent runs
+  `gh api /repos/owner/repo/issues -XPOST`
+- **THEN** the command MUST prompt for approval
+
+#### Scenario: gh api with glued lowercase -Xpost
+- **GIVEN** a `permission.bash` block in `opencode.json`
+- **WHEN** the agent runs
+  `gh api /repos/owner/repo/issues -Xpost`
+- **THEN** the command MUST prompt for approval
+
+#### Scenario: gh api with --method=POST (equals form)
+- **GIVEN** a `permission.bash` block in `opencode.json`
+- **WHEN** the agent runs
+  `gh api /repos/owner/repo/issues --method=POST`
+- **THEN** the command MUST prompt for approval
+
+#### Scenario: gh api with --method=delete (lowercase)
+- **GIVEN** a `permission.bash` block in `opencode.json`
+- **WHEN** the agent runs
+  `gh api /repos/owner/repo/issues/1 --method=delete`
+- **THEN** the command MUST prompt for approval
+
 #### Known Limitation: Flag-before-endpoint ordering
 - **GIVEN** a `permission.bash` block in `opencode.json`
 - **WHEN** the agent runs
@@ -71,7 +103,9 @@ be covered.
 ### FR-003: Gate Data-Sending Flags
 
 Commands with data-sending flags MUST prompt for
-approval regardless of HTTP method.
+approval regardless of HTTP method. Both short forms
+(`-f`, `-F`) and long forms (`--field`, `--raw-field`)
+MUST be covered, including `=` syntax variants.
 
 #### Scenario: gh api with -f flag
 - **GIVEN** a `permission.bash` block in `opencode.json`
@@ -83,6 +117,30 @@ approval regardless of HTTP method.
 - **GIVEN** a `permission.bash` block in `opencode.json`
 - **WHEN** the agent runs
   `gh api /repos/owner/repo/issues -F body=@file.md`
+- **THEN** the command MUST prompt for approval
+
+#### Scenario: gh api with --field (long form of -F)
+- **GIVEN** a `permission.bash` block in `opencode.json`
+- **WHEN** the agent runs
+  `gh api /repos/owner/repo/issues --field body=text`
+- **THEN** the command MUST prompt for approval
+
+#### Scenario: gh api with --field= (equals form)
+- **GIVEN** a `permission.bash` block in `opencode.json`
+- **WHEN** the agent runs
+  `gh api /repos/owner/repo/issues --field=body=text`
+- **THEN** the command MUST prompt for approval
+
+#### Scenario: gh api with --raw-field (long form of -f)
+- **GIVEN** a `permission.bash` block in `opencode.json`
+- **WHEN** the agent runs
+  `gh api /repos/owner/repo/issues --raw-field title=bug`
+- **THEN** the command MUST prompt for approval
+
+#### Scenario: gh api with --raw-field= (equals form)
+- **GIVEN** a `permission.bash` block in `opencode.json`
+- **WHEN** the agent runs
+  `gh api /repos/owner/repo --raw-field=query=val`
 - **THEN** the command MUST prompt for approval
 
 #### Scenario: gh api with --input flag

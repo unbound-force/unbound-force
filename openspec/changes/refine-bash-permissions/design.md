@@ -49,26 +49,45 @@ not contain `-X GET`.
 
 ### D3: Wildcard Mutation Patterns
 
-Eleven patterns gate mutating `gh api` calls:
+Thirty-nine patterns gate mutating `gh api` calls.
+OpenCode's wildcard matcher is case-sensitive on
+Linux/macOS (verified against v1.18.23 source:
+`wildcard.ts`, regex flag `"s"`; only Windows adds
+`"i"`). Each method flag form requires both uppercase
+and lowercase variants.
 
-**Method flags (short form)**:
-- `"gh api * -X POST*": "ask"`
-- `"gh api * -X PATCH*": "ask"`
-- `"gh api * -X PUT*": "ask"`
-- `"gh api * -X DELETE*": "ask"`
+**Method flags — `-X` short form** (8 rules):
+- `"gh api * -X POST*"` / `"gh api * -X post*"`
+- `"gh api * -X PATCH*"` / `"gh api * -X patch*"`
+- `"gh api * -X PUT*"` / `"gh api * -X put*"`
+- `"gh api * -X DELETE*"` / `"gh api * -X delete*"`
 
-**Method flags (long form)** — actively used by this
-project's own commands (uf.triage-issue, uf.review-pr,
-uf.review-council, uf.address-feedback):
-- `"gh api * --method POST*": "ask"`
-- `"gh api * --method PATCH*": "ask"`
-- `"gh api * --method PUT*": "ask"`
-- `"gh api * --method DELETE*": "ask"`
+**Method flags — `-X` glued form** (8 rules):
+- `"gh api * -XPOST*"` / `"gh api * -Xpost*"`
+- `"gh api * -XPATCH*"` / `"gh api * -Xpatch*"`
+- `"gh api * -XPUT*"` / `"gh api * -Xput*"`
+- `"gh api * -XDELETE*"` / `"gh api * -Xdelete*"`
 
-**Data-sending flags**:
-- `"gh api * -f *": "ask"`
-- `"gh api * -F *": "ask"`
-- `"gh api * --input*": "ask"`
+**Method flags — `--method` long form** (8 rules) —
+actively used by this project's own commands
+(uf.triage-issue, uf.review-pr, uf.review-council,
+uf.address-feedback):
+- `"gh api * --method POST*"` / `"... post*"`
+- `"gh api * --method PATCH*"` / `"... patch*"`
+- `"gh api * --method PUT*"` / `"... put*"`
+- `"gh api * --method DELETE*"` / `"... delete*"`
+
+**Method flags — `--method=` equals form** (8 rules):
+- `"gh api * --method=POST*"` / `"... =post*"`
+- `"gh api * --method=PATCH*"` / `"... =patch*"`
+- `"gh api * --method=PUT*"` / `"... =put*"`
+- `"gh api * --method=DELETE*"` / `"... =delete*"`
+
+**Data-sending flags** (7 rules):
+- `"gh api * -f *"` / `"gh api * -F *"` (short forms)
+- `"gh api * --field *"` / `"gh api * --field=*"`
+- `"gh api * --raw-field *"` / `"gh api * --raw-field=*"`
+- `"gh api * --input*"`
 
 ### D4: Preserve Non-API Rules
 
@@ -83,8 +102,8 @@ restored unchanged:
 - `rm` (1 rule)
 - `*: allow` global default (1 rule)
 
-Total: 14 non-api + 1 `gh api*: allow` + 11 gh api
-mutation patterns = **26 rules**.
+Total: 14 non-api + 1 `gh api*: allow` + 39 gh api
+mutation patterns = **54 rules**.
 
 ## Risks
 
@@ -92,9 +111,12 @@ mutation patterns = **26 rules**.
 
 Glob patterns cannot cover every possible flag
 combination. The covered patterns match all documented
-`gh` CLI mutation flags in both `-X` and `--method`
-forms. The `<protect>` tags from PR #499 provide the
-primary guard; permission rules are defense-in-depth.
+`gh` CLI mutation flags across `-X` (spaced and glued),
+`--method` (spaced and `=` forms), and data-sending
+flags (`-f`/`-F`/`--field`/`--raw-field`/`--input`) in
+both uppercase and lowercase. The `<protect>` tags from
+PR #499 provide the primary guard; permission rules are
+defense-in-depth.
 
 ### R2: Flag-Ordering Sensitivity (Accepted)
 
