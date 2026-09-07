@@ -19,6 +19,7 @@ create_issues:
         repos:
             - unbound-force/unbound-force
             - fullsend-ai/fullsend
+mint_url: https://mint.fullsend.sh
 inference:
     project: unbound-force
     wif_provider: projects/21066242673/locations/global/workloadIdentityPools/itpc-identity-pool/providers/unbound-force
