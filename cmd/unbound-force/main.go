@@ -34,6 +34,7 @@ func main() {
 	root.AddCommand(newGatewayCmd())
 	root.AddCommand(newConfigCmd())
 	root.AddCommand(newHomebrewCaskCmd())
+	root.AddCommand(newGateCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
