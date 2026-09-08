@@ -141,12 +141,13 @@ appropriate for the risk level.
 
 ## 8. Documentation
 
-- [ ] 8.1 Update AGENTS.md project structure to include
+- [x] 8.1 Update AGENTS.md project structure to include
   `internal/gate/` entry.
-- [ ] 8.2 Add CHANGELOG.md entry for the new `gate`
+- [x] 8.2 Add CHANGELOG.md entry for the new `gate`
   subcommand.
-- [ ] 8.3 [P] File documentation issue against the
+- [x] 8.3 [P] File documentation issue against the
   current repo for user-facing `uf gate` usage docs.
+  (Filed: #583)
 
 <!-- spec-review: passed -->
 <!-- code-review: passed -->
