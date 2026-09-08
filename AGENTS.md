@@ -84,6 +84,7 @@ unbound-force/
 │   ├── config/                       # Unified config loading
 │   ├── dashboard/                    # Mx F dashboard rendering
 │   ├── doctor/                       # Environment health checks
+│   ├── gate/                         # Constitution compliance gate checks
 │   ├── gateway/                      # LLM reverse proxy (Vertex/Bedrock/Anthropic)
 │   ├── impediment/                   # Impediment tracking and detection
 │   ├── metrics/                      # Metrics collection and health analysis
