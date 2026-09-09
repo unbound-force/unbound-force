@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# fullsend-opencode: extends fullsend-sandbox with opencode + uf CLI
+ARG FULLSEND_SANDBOX_DIGEST=sha256:f8255971fec8a72a60adb20f501e55098f237e699dc829f0894647c0de2a19c2
+FROM ghcr.io/fullsend-ai/fullsend-sandbox@${FULLSEND_SANDBOX_DIGEST}
+
+# --- opencode ---
+ARG OPENCODE_VERSION=1.18.29
+USER root
+RUN npm install -g opencode-ai@${OPENCODE_VERSION}
+
+# --- uf CLI (release tarball + SHA256 verification) ---
+ARG UF_VERSION=0.17.0
+ARG TARGETARCH
+# When updating UF_VERSION, update both checksums from the matching release
+# checksums.txt asset. A version-only Renovate update must fail image validation
+# until both architecture checksums are updated.
+ARG UF_SHA256_AMD64=b5a633e1e3d5fa5c1061d4468fdb4d74b60d1d0cf46aea0f9836881f08fa4af6
+ARG UF_SHA256_ARM64=921f498b50214510301804049465e3aabe23d00adde6b7b4f2f32c0fad57c1b7
+
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) UF_SHA256="${UF_SHA256_AMD64}" ;; \
+      arm64) UF_SHA256="${UF_SHA256_ARM64}" ;; \
+      *) echo "unsupported arch: ${TARGETARCH}" && exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/unbound-force/unbound-force/releases/download/v${UF_VERSION}/unbound-force_${UF_VERSION}_linux_${TARGETARCH}.tar.gz" \
+      -o /tmp/uf.tar.gz; \
+    echo "${UF_SHA256}  /tmp/uf.tar.gz" | sha256sum -c; \
+    tar -xzf /tmp/uf.tar.gz -C /usr/local/bin ; \
+    rm /tmp/uf.tar.gz; \
+    chmod +x /usr/local/bin/unbound-force ; \
+    ln -s /usr/local/bin/unbound-force /usr/local/bin/uf
+
+RUN opencode --version
+RUN uf --version
+
+USER sandbox

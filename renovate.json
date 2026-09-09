@@ -1,0 +1,39 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "enabledManagers": ["custom.regex"],
+  "packageRules": [
+    {
+      "description": "uf updates require reviewed architecture checksums",
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["unbound-force/unbound-force"],
+      "automerge": false,
+      "prBodyNotes": [
+        "**Manual action required:** Update `UF_SHA256_AMD64` and `UF_SHA256_ARM64` from the `checksums.txt` asset for `v{{newVersion}}`. The image build intentionally fails until both checksums match the new release."
+      ]
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track the OpenCode version pin in the FullSend sandbox image",
+      "fileMatch": ["^images/fullsend-opencode/Containerfile$"],
+      "matchStrings": [
+        "OPENCODE_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "opencode-ai",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the uf CLI version pin. Renovate updates UF_VERSION only; maintainers must update both architecture checksums from the matching signed release checksums.",
+      "fileMatch": ["^images/fullsend-opencode/Containerfile$"],
+      "matchStrings": [
+        "UF_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "unbound-force/unbound-force",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    }
+  ]
+}

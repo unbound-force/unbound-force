@@ -22,7 +22,17 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/fix-init-force-passthrough/,
   Fixes: #479)
 
-### Changed
+### Added
+- publish-fullsend-opencode-image: Added a multi-architecture FullSend
+  OpenCode sandbox image workflow for `linux/amd64` and `linux/arm64`.
+  Non-PR builds publish the FullSend tag convention to GHCR, while pull
+  requests run non-publishing architecture validation. Published manifest
+  digests are signed with keyless cosign and receive SLSA provenance and SPDX
+  SBOM attestations, which the workflow verifies. PRs validate both
+  architectures without registry write access; published digests are
+  validated on both architectures and scanned with Trivy. Renovate tracks
+  the pinned OpenCode and uf CLI versions in the image Containerfile.
+  (Relates to: #511)
 - add-todowrite-to-pipelines: Pipeline commands
   (/uf.unleash, /uf.finale, /uf.review-council,
   /uf.address-feedback) now use TodoWrite for live
