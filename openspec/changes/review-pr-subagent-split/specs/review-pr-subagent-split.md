@@ -14,8 +14,8 @@ The parent MUST construct the subagent prompt containing:
 - File-focus scope (if the user selected specific files in the
   pre-delegation large-diff prompt)
 
-The subagent MUST return its findings as a single structured
-message to the parent.
+The subagent MUST write full findings to a temporary file
+and return a compact summary (under 4 KB) to the parent.
 
 #### Scenario: Normal PR review with subagent delegation
 

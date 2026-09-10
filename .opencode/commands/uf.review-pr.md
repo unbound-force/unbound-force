@@ -200,11 +200,12 @@ Invoke the **Task tool** with:
 - `FILE_FOCUS_SCOPE`: from Step 3.5
 
 **Wait** for the subagent to return its compact summary.
-The subagent writes the full findings report to
-`/tmp/pr<PR_NUMBER>-findings.md` and returns only a
+The subagent writes the full findings report to a
+temporary file (created via `mktemp`) and returns only a
 compact summary (verdict, counts, top-3 findings, file
-path). Parse the summary and proceed to Step 5 (Output
-Format), which reads needed sections from the file.
+path). Parse the `FINDINGS_FILE` path from the summary
+and proceed to Step 5 (Output Format), which reads
+needed sections from that file.
 
 ---
 
@@ -642,8 +643,15 @@ The calibration pass MUST NOT introduce new findings
 
 **Output contract — keep the returned message under 4 KB.**
 
-1. Write the full findings report to
-   `/tmp/pr<PR_NUMBER>-findings.md` using this format:
+1. Create a temporary file for the findings report and
+   write to it:
+
+```bash
+FINDINGS_FILE=$(mktemp /tmp/pr-findings-XXXXXXXX.md)
+```
+
+   Write the full findings report to that file using
+   this format:
 
 ```
 ### CI Coverage Matrix
@@ -685,7 +693,7 @@ The calibration pass MUST NOT introduce new findings
    final message (no tables, no markdown fences):
 
 ```
-FINDINGS_FILE: /tmp/pr<PR_NUMBER>-findings.md
+FINDINGS_FILE: <path from mktemp>
 VERDICT: <APPROVE / REQUEST CHANGES / COMMENT>
 COUNTS: <N> critical, <N> high, <N> medium, <N> low
 TOP_FINDINGS:
@@ -705,12 +713,22 @@ reads sections from the findings file as needed.
 ### 5. Output Format
 
 Parse the subagent's compact summary (verdict, counts,
-top findings, file path). Then read sections from the
-findings file using scoped `offset`/`limit` reads:
+top findings, file path). Extract the `FINDINGS_FILE`
+path from the summary.
+
+**Error handling:** If the findings file does not exist
+or is empty, fall back to the compact summary alone —
+use the verdict, counts, and top findings from the
+inline summary to populate the output format below.
+Note the missing file in the output as:
+`> ⚠️ Full findings file unavailable; summary only.`
+
+When the findings file exists, read sections using
+scoped `offset`/`limit` reads:
 
 ```bash
 # Find section boundaries in the findings file
-grep -n '^### ' /tmp/pr<PR_NUMBER>-findings.md
+grep -n '^### ' "${FINDINGS_FILE}"
 ```
 
 Read only the sections needed for the output below:
@@ -722,6 +740,13 @@ Read only the sections needed for the output below:
 
 Use `offset`/`limit` parameters on the findings file
 to read individual sections rather than the entire file.
+
+**Cleanup:** After rendering the output, remove the
+temporary findings file:
+
+```bash
+rm -f "${FINDINGS_FILE}"
+```
 
 Present the findings in this structured format:
 
