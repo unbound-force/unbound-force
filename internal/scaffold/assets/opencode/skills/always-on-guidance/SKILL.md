@@ -50,6 +50,13 @@ Rules that apply to every coding session.
   authority for prescribed output format — never
   reconstruct it from memory or compressed summaries
 
+## Tool Output Overflow Recovery
+
+When any tool result reports overflow to a file
+(matching the pattern "Full output saved to: <path>"),
+read only the missing sections with `offset`/`limit`;
+never read the whole file.
+
 ## Git Discipline
 
 - Conventional commits: `type: description`

@@ -199,10 +199,13 @@ Invoke the **Task tool** with:
   results with name, state, classification)
 - `FILE_FOCUS_SCOPE`: from Step 3.5
 
-**Wait** for the subagent to return its findings. The
-subagent returns a structured message containing all the
-sections listed below. Parse the returned message and
-proceed to Step 5 (Output Format).
+**Wait** for the subagent to return its compact summary.
+The subagent writes the full findings report to a
+temporary file (created via `mktemp`) and returns only a
+compact summary (verdict, counts, top-3 findings, file
+path). Parse the `FINDINGS_FILE` path from the summary
+and proceed to Step 5 (Output Format), which reads
+needed sections from that file.
 
 ---
 
@@ -211,8 +214,9 @@ proceed to Step 5 (Output Format).
 You are analyzing PR #<PR_NUMBER> ("<PR_TITLE>") for a
 code review. The parent agent has already completed
 prerequisites, metadata gathering, and CI check analysis.
-Your job is to run the analysis steps and return structured
-findings.
+Your job is to run the analysis steps, write full
+findings to a temporary file, and return a compact
+summary.
 
 **PR Metadata:**
 - PR: #<PR_NUMBER> — <PR_TITLE>
@@ -226,8 +230,9 @@ findings.
 **PR Description:**
 <PR_BODY>
 
-Execute the following analysis steps in order, then return
-your findings in the structured format at the end.
+Execute the following analysis steps in order, then
+write your findings to a temporary file and return a
+compact summary as described at the end.
 
 ##### Step A. Run Local Deterministic Tools (Pre-flight)
 
@@ -638,7 +643,17 @@ For each finding:
 The calibration pass MUST NOT introduce new findings
 — it only adjusts severity levels on existing findings.
 
-**Return your findings in this format:**
+**Output contract — keep the returned message under 4 KB.**
+
+1. Create a temporary file for the findings report and
+   write to it:
+
+```bash
+FINDINGS_FILE=$(mktemp /tmp/pr-findings-XXXXXXXX.md)
+```
+
+   Write the full findings report to that file using
+   this format:
 
 ```
 ### CI Coverage Matrix
@@ -671,10 +686,31 @@ The calibration pass MUST NOT introduce new findings
 ### CI Failures (Pre-existing)
 [findings from Step F.4, if any]
 
+### Existing Review State
+USER_LOGIN: <login from Step E.3>
+REVIEWS: <summary list of existing reviews: id, user, state, verdict>
+INLINE_COMMENT_COUNT: <N>
+
 ### Verdict
 **<APPROVE / REQUEST CHANGES / COMMENT>**
 [brief justification]
 ```
+
+2. Return ONLY a compact plain-text summary as your
+   final message (no tables, no markdown fences):
+
+```
+FINDINGS_FILE: <path from mktemp>
+VERDICT: <APPROVE / REQUEST CHANGES / COMMENT>
+COUNTS: <N> critical, <N> high, <N> medium, <N> low
+TOP_FINDINGS: [SEV] title (file) | [SEV] title (file) | [SEV] title (file)
+USER_LOGIN: <login from Step E.3>
+REVIEW_COUNT: <N existing reviews>
+JUSTIFICATION: <1 sentence>
+```
+
+Do NOT return the full report inline — the parent agent
+reads sections from the findings file as needed.
 
 #### END SUBAGENT PROMPT
 
@@ -682,8 +718,46 @@ The calibration pass MUST NOT introduce new findings
 
 ### 5. Output Format
 
-Parse the subagent's returned findings and present them
-in this structured format:
+Parse the subagent's compact summary (verdict, counts,
+top findings, file path). Extract the `FINDINGS_FILE`
+path from the summary.
+
+**Path validation:** Before using the extracted path in
+any command, verify it matches the expected pattern —
+it MUST start with `/tmp/pr-findings-`, end with
+`.md`, and contain no `..` path segments. If the path
+does not match, treat it as missing and fall back to
+the compact summary alone.
+
+**Error handling:** If the findings file does not exist
+or is empty, fall back to the compact summary alone —
+use the verdict, counts, and top findings from the
+inline summary to populate the output format below.
+Note the missing file in the output as:
+```
+Warning: Full findings file unavailable; summary only.
+```
+
+When the findings file exists, read sections using
+scoped `offset`/`limit` reads:
+
+```bash
+# Find section boundaries in the findings file
+grep -n '^### ' "${FINDINGS_FILE}"
+```
+
+Read only the sections needed for the output below:
+- **Always read**: Summary, Verdict, Existing Review
+  State
+- **Read if counts > 0**: Alignment, Security,
+  Constitution Compliance, CI Failures
+- **Read for context**: Walkthrough, Linked Issues,
+  CI Coverage Matrix, Local Tool Results
+
+Use `offset`/`limit` parameters on the findings file
+to read individual sections rather than the entire file.
+
+Present the findings in this structured format:
 
 ```markdown
 ## PR Review: #<NUMBER> — <TITLE>
@@ -938,13 +1012,14 @@ summary is sufficient"]`.
 #### 7a. Pre-posting Checks
 
 Before preparing comments, run three state-awareness
-checks using the review state data returned by the
-subagent (from its Step E):
+checks using the review state data from the subagent's
+findings file (the "Existing Review State" section) and
+compact summary (USER_LOGIN, REVIEW_COUNT fields):
 
 **Duplicate review detection**: Check if a review from
-the current user (from the subagent's user identification)
-already exists in the review list (from the subagent's
-review fetch):
+the current user (USER_LOGIN from the compact summary)
+already exists in the review list (from the findings
+file's "Existing Review State" section):
 
 - If a prior review with the **same verdict** exists:
   Inform the user that a prior review exists and the
@@ -1037,6 +1112,12 @@ account is not listed in CODEOWNERS.
    in doubt, re-confirm — false re-confirmation is
    harmless; posting without consent is a violation.
 
+**Cleanup:** After completing the pre-posting checks,
+remove the temporary findings file:
+
+```bash
+rm -f "${FINDINGS_FILE}"
+```
 
 1. **Prepare comments**: For each finding that maps to a
    specific file and line range in the diff, prepare an
