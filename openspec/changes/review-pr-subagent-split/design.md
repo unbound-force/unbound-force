@@ -83,22 +83,27 @@ as part of its prompt.
 Moving it preserves the user's ability to scope the review
 while keeping the subagent non-interactive.
 
-### D4: Structured findings return format
+### D4: File-based findings with compact summary
 
-The subagent returns its findings as a structured Markdown
-section with clear headings matching the Step 9 output format:
-CI Coverage Matrix, Local Tool Results, Walkthrough, Linked
-Issues, Summary, Alignment findings, Security findings,
-Constitution Compliance findings, CI Failure Analysis, and
-Verdict recommendation.
+The subagent writes full findings to a temporary file
+(created via `mktemp`) with structured Markdown sections
+matching the Step 9 output format: CI Coverage Matrix,
+Local Tool Results, Walkthrough, Linked Issues, Summary,
+Alignment findings, Security findings, Constitution
+Compliance findings, CI Failure Analysis, Existing
+Review State, and Verdict recommendation.
 
-The parent then renders this directly into the Step 9 output,
-adding the PR header and any interactive elements.
+The subagent returns only a compact summary (under 4 KB)
+containing the findings file path, verdict, severity
+counts, top findings, user login, review count, and
+justification. The parent reads needed sections from the
+findings file using scoped offset/limit reads, then
+renders into the Step 9 output.
 
-**Rationale**: Using the same structure as the final output
-avoids a translation step. The parent's job is orchestration
-(pre-delegation checks, post-delegation interaction), not
-reformatting.
+**Rationale**: Returning the full report inline caused
+tool_output truncation and a double context pass. Writing
+to a file and returning a compact summary eliminates
+both issues while preserving the structured format.
 
 ### D5: Session title preservation via frontmatter description
 

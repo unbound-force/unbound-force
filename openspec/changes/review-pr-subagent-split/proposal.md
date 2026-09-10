@@ -28,10 +28,11 @@ Task subagent.
 - Steps 9-11: output formatting, fix-branch offer, interactive
   verdict posting (requires user interaction)
 
-**Task subagent** (isolated context, returns findings):
+**Task subagent** (isolated context, writes findings to file):
 - Steps 4-8: pre-flight, diff fetch, context discovery,
   convention pack loading, full AI review (8a-8g)
-- Returns structured findings as a single message to the parent
+- Writes full findings to a temporary file and returns a
+  compact summary (under 4 KB) to the parent
 
 **Session title fix**: Add the PR number to the frontmatter
 `description` field so compression preserves it.
@@ -42,9 +43,10 @@ Task subagent.
 - `subagent-delegation`: Parent delegates Steps 4-8 to a Task
   subagent, keeping the parent context small enough that
   compression never triggers on the command instructions
-- `structured-findings-return`: Subagent returns findings in a
-  defined format that the parent can directly render into the
-  Step 9 output template
+- `file-based-findings-return`: Subagent writes full findings
+  to a temporary file and returns a compact summary (under
+  4 KB) that the parent uses to read needed sections via
+  scoped offset/limit reads
 
 ### Modified Capabilities
 - `/uf.review-pr`: Same user-facing behavior — the split is
@@ -81,12 +83,14 @@ Assessed against the Unbound Force org constitution.
 
 **Assessment**: PASS
 
-The subagent communicates with the parent through a structured
-findings artifact returned as a single message. This is
+The subagent communicates with the parent through a two-part
+output contract: full findings written to a temporary file
+and a compact summary (under 4 KB) returned inline. This is
 artifact-based communication — the subagent produces a
 self-describing output (findings with severity, category,
-file/line references) that the parent consumes without
-synchronous coupling during the analysis phase.
+file/line references) that the parent reads from the file
+using scoped offset/limit reads without synchronous coupling
+during the analysis phase.
 
 ### II. Composability First
 
@@ -102,9 +106,11 @@ simply makes it resilient to compression.
 
 **Assessment**: PASS
 
-The structured findings format returned by the subagent is
-machine-parseable (severity levels, file paths, line numbers,
-category tags). The output format (Step 9) is unchanged.
+The findings file written by the subagent is machine-parseable
+(severity levels, file paths, line numbers, category tags),
+and the compact summary provides structured key-value fields
+for verdict, counts, and top findings. The output format
+(Step 9) is unchanged.
 
 ### IV. Testability
 

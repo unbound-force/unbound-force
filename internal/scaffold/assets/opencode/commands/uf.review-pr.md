@@ -686,6 +686,11 @@ FINDINGS_FILE=$(mktemp /tmp/pr-findings-XXXXXXXX.md)
 ### CI Failures (Pre-existing)
 [findings from Step F.4, if any]
 
+### Existing Review State
+USER_LOGIN: <login from Step E.3>
+REVIEWS: <summary list of existing reviews: id, user, state, verdict>
+INLINE_COMMENT_COUNT: <N>
+
 ### Verdict
 **<APPROVE / REQUEST CHANGES / COMMENT>**
 [brief justification]
@@ -699,6 +704,8 @@ FINDINGS_FILE: <path from mktemp>
 VERDICT: <APPROVE / REQUEST CHANGES / COMMENT>
 COUNTS: <N> critical, <N> high, <N> medium, <N> low
 TOP_FINDINGS: [SEV] title (file) | [SEV] title (file) | [SEV] title (file)
+USER_LOGIN: <login from Step E.3>
+REVIEW_COUNT: <N existing reviews>
 JUSTIFICATION: <1 sentence>
 ```
 
@@ -727,7 +734,9 @@ or is empty, fall back to the compact summary alone —
 use the verdict, counts, and top findings from the
 inline summary to populate the output format below.
 Note the missing file in the output as:
-`> ⚠️ Full findings file unavailable; summary only.`
+```
+Warning: Full findings file unavailable; summary only.
+```
 
 When the findings file exists, read sections using
 scoped `offset`/`limit` reads:
@@ -1009,13 +1018,14 @@ summary is sufficient"]`.
 #### 7a. Pre-posting Checks
 
 Before preparing comments, run three state-awareness
-checks using the review state data returned by the
-subagent (from its Step E):
+checks using the review state data from the subagent's
+findings file (the "Existing Review State" section) and
+compact summary (USER_LOGIN, REVIEW_COUNT fields):
 
 **Duplicate review detection**: Check if a review from
-the current user (from the subagent's user identification)
-already exists in the review list (from the subagent's
-review fetch):
+the current user (USER_LOGIN from the compact summary)
+already exists in the review list (from the findings
+file's "Existing Review State" section):
 
 - If a prior review with the **same verdict** exists:
   Inform the user that a prior review exists and the
