@@ -7149,6 +7149,62 @@ func TestWarnStaleCommandRefs_ProjectAGENTSmdHasNoStaleRefs(t *testing.T) {
 	}
 }
 
+// TestSkillTemplates_NoStaleCommandRefs is a drift-detection test
+// that walks every .md file under internal/scaffold/assets/opencode/
+// skills/ and asserts that zero stale (pre-namespace-prefix) command
+// references remain. It uses the same word-boundary-anchored matching
+// as warnStaleCommandRefs so that already-migrated references (e.g.
+// /uf.review-council) are not falsely counted as stale.
+func TestSkillTemplates_NoStaleCommandRefs(t *testing.T) {
+	projectRoot := findProjectRoot(t)
+	if projectRoot == "" {
+		t.Skip("could not locate project root (no go.mod found)")
+	}
+
+	skillsDir := filepath.Join(projectRoot,
+		"internal", "scaffold", "assets", "opencode", "skills")
+	if _, err := os.Stat(skillsDir); err != nil {
+		t.Skip("skills directory not found")
+	}
+
+	var files []string
+	err := filepath.Walk(skillsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(path, ".md") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk skills directory: %v", err)
+	}
+	if len(files) == 0 {
+		t.Skip("no .md files found under skills directory")
+	}
+
+	for _, f := range files {
+		data, readErr := os.ReadFile(f)
+		if readErr != nil {
+			t.Fatalf("read %s: %v", f, readErr)
+		}
+		content := string(data)
+		relPath, _ := filepath.Rel(projectRoot, f)
+
+		for oldRel, newRel := range renamedCommands {
+			staleRef := "/" + strings.TrimSuffix(filepath.Base(oldRel), ".md")
+			newRef := "/" + strings.TrimSuffix(filepath.Base(newRel), ".md")
+
+			pat := "(^|[^.a-zA-Z0-9_-])" + regexp.QuoteMeta(staleRef) + "($|[^a-zA-Z0-9_-])"
+			re := regexp.MustCompile(pat)
+			if re.MatchString(content) {
+				t.Errorf("%s contains stale command reference %s (should be %s)", relPath, staleRef, newRef)
+			}
+		}
+	}
+}
+
 // --- initSimpleTool force re-init tests ---
 
 func TestInitSimpleTool_SentinelExistsForceTrue(t *testing.T) {
