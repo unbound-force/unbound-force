@@ -621,7 +621,7 @@ For each file:
 
 - **NEVER modify source code** — this command updates
   spec artifacts ONLY. Implementation changes belong in
-  `/speckit.implement`, `/unleash`, or `/cobalt-crush`.
+  `/speckit.implement`, `/uf.unleash`, or `/uf.cobalt-crush`.
 - **NEVER modify test files, Go source, Markdown agents,
   convention packs, or config files** outside the
   `specs/NNN-*/` feature directory.
@@ -854,7 +854,7 @@ For each target file:
 
 Your job is done. Report the results and prompt the
 user. The user will invoke a separate command
-(`/speckit.implement`, `/unleash`, or `/cobalt-crush`)
+(`/speckit.implement`, `/uf.unleash`, or `/uf.cobalt-crush`)
 when they are ready to implement.
 ```
 
@@ -867,11 +867,11 @@ file.
 ### Step 11: Scaffold Comment Deduplication
 
 Deduplicate scaffold comments in all files processed by
-`/uf-init`. Repeated runs of `uf init` across versions
+`/uf.init`. Repeated runs of `uf init` across versions
 can accumulate multiple `<!-- scaffolded by uf ... -->`
 comments in the same file.
 
-**Target scope**: All files processed by `/uf-init`:
+**Target scope**: All files processed by `/uf.init`:
 - The 4 OpenSpec skill files (Step 2-4 targets)
 - The 3 OpenSpec command files (Step 2-3 targets)
 - The 9 speckit command files (Step 5-6 targets)
