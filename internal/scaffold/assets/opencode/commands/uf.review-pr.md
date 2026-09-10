@@ -747,7 +747,8 @@ grep -n '^### ' "${FINDINGS_FILE}"
 ```
 
 Read only the sections needed for the output below:
-- **Always read**: Summary, Verdict
+- **Always read**: Summary, Verdict, Existing Review
+  State
 - **Read if counts > 0**: Alignment, Security,
   Constitution Compliance, CI Failures
 - **Read for context**: Walkthrough, Linked Issues,
@@ -755,13 +756,6 @@ Read only the sections needed for the output below:
 
 Use `offset`/`limit` parameters on the findings file
 to read individual sections rather than the entire file.
-
-**Cleanup:** After rendering the output, remove the
-temporary findings file:
-
-```bash
-rm -f "${FINDINGS_FILE}"
-```
 
 Present the findings in this structured format:
 
@@ -1118,6 +1112,12 @@ account is not listed in CODEOWNERS.
    in doubt, re-confirm — false re-confirmation is
    harmless; posting without consent is a violation.
 
+**Cleanup:** After completing the pre-posting checks,
+remove the temporary findings file:
+
+```bash
+rm -f "${FINDINGS_FILE}"
+```
 
 1. **Prepare comments**: For each finding that maps to a
    specific file and line range in the diff, prepare an

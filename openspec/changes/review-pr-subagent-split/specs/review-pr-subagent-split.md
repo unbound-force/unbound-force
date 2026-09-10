@@ -37,12 +37,13 @@ and return a compact summary (under 4 KB) to the parent.
 - **THEN** the findings FILE on disk MUST contain sections
   for: CI Coverage Matrix, Local Tool Results, Walkthrough,
   Linked Issues, Summary, Alignment, Security, Constitution
-  Compliance, CI Failure Analysis, and Verdict recommendation
+  Compliance, CI Failure Analysis, Existing Review State,
+  and Verdict recommendation
 - **AND** each finding in the file MUST include severity
   level, category, and file/line references where applicable
 - **AND** the returned compact summary MUST contain:
-  FINDINGS_FILE path, VERDICT, COUNTS, TOP_FINDINGS, and
-  JUSTIFICATION
+  FINDINGS_FILE path, VERDICT, COUNTS, TOP_FINDINGS,
+  USER_LOGIN, REVIEW_COUNT, and JUSTIFICATION
 
 ### Requirement: Pre-delegation Large-Diff Prompt
 

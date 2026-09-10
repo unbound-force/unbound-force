@@ -50,7 +50,7 @@ Rules that apply to every coding session.
   authority for prescribed output format — never
   reconstruct it from memory or compressed summaries
 
-## Tool Output Overflow Recovery (all tools)
+## Tool Output Overflow Recovery
 
 When any tool result reports overflow to a file
 (matching the pattern "Full output saved to: <path>"),
