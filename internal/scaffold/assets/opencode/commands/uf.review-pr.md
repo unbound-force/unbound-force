@@ -214,8 +214,9 @@ needed sections from that file.
 You are analyzing PR #<PR_NUMBER> ("<PR_TITLE>") for a
 code review. The parent agent has already completed
 prerequisites, metadata gathering, and CI check analysis.
-Your job is to run the analysis steps and return structured
-findings.
+Your job is to run the analysis steps, write full
+findings to a temporary file, and return a compact
+summary.
 
 **PR Metadata:**
 - PR: #<PR_NUMBER> — <PR_TITLE>
@@ -229,8 +230,9 @@ findings.
 **PR Description:**
 <PR_BODY>
 
-Execute the following analysis steps in order, then return
-your findings in the structured format at the end.
+Execute the following analysis steps in order, then
+write your findings to a temporary file and return a
+compact summary as described at the end.
 
 ##### Step A. Run Local Deterministic Tools (Pre-flight)
 
@@ -696,10 +698,7 @@ FINDINGS_FILE=$(mktemp /tmp/pr-findings-XXXXXXXX.md)
 FINDINGS_FILE: <path from mktemp>
 VERDICT: <APPROVE / REQUEST CHANGES / COMMENT>
 COUNTS: <N> critical, <N> high, <N> medium, <N> low
-TOP_FINDINGS:
-- [SEVERITY] <title> (<file>)
-- [SEVERITY] <title> (<file>)
-- [SEVERITY] <title> (<file>)
+TOP_FINDINGS: [SEV] title (file) | [SEV] title (file) | [SEV] title (file)
 JUSTIFICATION: <1 sentence>
 ```
 
@@ -718,9 +717,10 @@ path from the summary.
 
 **Path validation:** Before using the extracted path in
 any command, verify it matches the expected pattern —
-it MUST start with `/tmp/pr-findings-` and end with
-`.md`. If the path does not match, treat it as missing
-and fall back to the compact summary alone.
+it MUST start with `/tmp/pr-findings-`, end with
+`.md`, and contain no `..` path segments. If the path
+does not match, treat it as missing and fall back to
+the compact summary alone.
 
 **Error handling:** If the findings file does not exist
 or is empty, fall back to the compact summary alone —
