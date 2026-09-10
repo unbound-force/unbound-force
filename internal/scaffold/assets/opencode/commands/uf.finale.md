@@ -680,7 +680,7 @@ git merge <target-remote>/<base-branch>
   > - <file2>
   >
   > Resolve the conflicts manually, then re-run
-  > /finale."
+  > /uf.finale."
 
 **Option 2 — Rebase onto target branch**:
 
@@ -739,14 +739,14 @@ git rebase <target-remote>/<base-branch>
   > - <file2>
   >
   > Resolve the conflicts manually, then re-run
-  > /finale."
+  > /uf.finale."
 
 **Option 3 — Stop for manual resolution**:
 
 Report the conflict and **STOP**:
 
 > "Merge conflict detected. Resolve it manually,
-> then re-run /finale."
+> then re-run /uf.finale."
 
 **Option 4 — Continue anyway**:
 

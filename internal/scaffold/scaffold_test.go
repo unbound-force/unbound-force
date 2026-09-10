@@ -7151,37 +7151,42 @@ func TestWarnStaleCommandRefs_ProjectAGENTSmdHasNoStaleRefs(t *testing.T) {
 
 // TestSkillTemplates_NoStaleCommandRefs is a drift-detection test
 // that walks every .md file under internal/scaffold/assets/opencode/
-// skills/ and asserts that zero stale (pre-namespace-prefix) command
-// references remain. It uses the same word-boundary-anchored matching
-// as warnStaleCommandRefs so that already-migrated references (e.g.
-// /uf.review-council) are not falsely counted as stale.
+// skills/ and commands/ and asserts that zero stale (pre-namespace-
+// prefix) command references remain. It uses the same word-boundary-
+// anchored matching as warnStaleCommandRefs so that already-migrated
+// references (e.g. /uf.review-council) are not falsely counted as
+// stale.
 func TestSkillTemplates_NoStaleCommandRefs(t *testing.T) {
 	projectRoot := findProjectRoot(t)
 	if projectRoot == "" {
 		t.Skip("could not locate project root (no go.mod found)")
 	}
 
-	skillsDir := filepath.Join(projectRoot,
-		"internal", "scaffold", "assets", "opencode", "skills")
-	if _, err := os.Stat(skillsDir); err != nil {
-		t.Skip("skills directory not found")
+	dirs := []string{
+		filepath.Join(projectRoot, "internal", "scaffold", "assets", "opencode", "skills"),
+		filepath.Join(projectRoot, "internal", "scaffold", "assets", "opencode", "commands"),
 	}
 
 	var files []string
-	err := filepath.Walk(skillsDir, func(path string, info os.FileInfo, err error) error {
+	for _, dir := range dirs {
+		if _, err := os.Stat(dir); err != nil {
+			continue
+		}
+		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() && strings.HasSuffix(path, ".md") {
+				files = append(files, path)
+			}
+			return nil
+		})
 		if err != nil {
-			return err
+			t.Fatalf("walk %s: %v", dir, err)
 		}
-		if !info.IsDir() && strings.HasSuffix(path, ".md") {
-			files = append(files, path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk skills directory: %v", err)
 	}
 	if len(files) == 0 {
-		t.Skip("no .md files found under skills directory")
+		t.Skip("no .md files found under skills or commands directories")
 	}
 
 	for _, f := range files {
