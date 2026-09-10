@@ -24,20 +24,25 @@ and return a compact summary (under 4 KB) to the parent.
 - **THEN** the parent MUST invoke the Task tool with Steps 4-8
   as the prompt, injecting the PR metadata values
 - **AND** the parent MUST wait for the subagent to return
-  structured findings
+  a compact summary (under 4 KB)
+- **AND** the parent MUST extract the FINDINGS_FILE path from
+  the compact summary and read needed sections from that file
 - **AND** the parent MUST render the findings into the Step 9
   output format
 
-#### Scenario: Subagent returns findings
+#### Scenario: Subagent returns compact summary
 
 - **GIVEN** the subagent completes Steps 4-8
-- **WHEN** the subagent returns its findings
-- **THEN** the findings MUST contain sections for: CI Coverage
-  Matrix, Local Tool Results, Walkthrough, Linked Issues,
-  Summary, Alignment, Security, Constitution Compliance,
-  CI Failure Analysis, and Verdict recommendation
-- **AND** each finding MUST include severity level, category,
-  and file/line references where applicable
+- **WHEN** the subagent returns its compact summary
+- **THEN** the findings FILE on disk MUST contain sections
+  for: CI Coverage Matrix, Local Tool Results, Walkthrough,
+  Linked Issues, Summary, Alignment, Security, Constitution
+  Compliance, CI Failure Analysis, and Verdict recommendation
+- **AND** each finding in the file MUST include severity
+  level, category, and file/line references where applicable
+- **AND** the returned compact summary MUST contain:
+  FINDINGS_FILE path, VERDICT, COUNTS, TOP_FINDINGS, and
+  JUSTIFICATION
 
 ### Requirement: Pre-delegation Large-Diff Prompt
 

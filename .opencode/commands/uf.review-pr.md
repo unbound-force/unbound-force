@@ -716,6 +716,12 @@ Parse the subagent's compact summary (verdict, counts,
 top findings, file path). Extract the `FINDINGS_FILE`
 path from the summary.
 
+**Path validation:** Before using the extracted path in
+any command, verify it matches the expected pattern —
+it MUST start with `/tmp/pr-findings-` and end with
+`.md`. If the path does not match, treat it as missing
+and fall back to the compact summary alone.
+
 **Error handling:** If the findings file does not exist
 or is empty, fall back to the compact summary alone —
 use the verdict, counts, and top findings from the
