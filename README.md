@@ -62,7 +62,8 @@ See [AGENTS.md](AGENTS.md) for full workflow documentation and boundary guidelin
 
 This repo contains architectural design specs for all heroes and shared standards:
 
-- **`specs/`** -- 35 architectural specifications covering constitution, hero architectures, swarm orchestration, tooling, and workflows
+- **`specs/`** -- 37 architectural specifications covering constitution, hero architectures, swarm orchestration, tooling, and workflows
+- **`images/`** -- Published sandbox images, including the FullSend OpenCode image
 - **`cmd/unbound-force/`** -- Go CLI binary for framework distribution
 - **`cmd/mutimind/`** -- Muti-Mind product owner backend CLI
 - **`internal/`** -- Business logic packages (scaffold, sandbox, gateway, config, doctor, setup, orchestration, schemas, artifacts, backlog, sync, coaching, dashboard, impediment, metrics, sprint)

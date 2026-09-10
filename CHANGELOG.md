@@ -103,6 +103,17 @@ Each entry follows the format: `- <change-name>: <summary>`.
   Fixes: #428)
 
 ### Added
+- publish-fullsend-opencode-image: Added a multi-architecture FullSend
+  OpenCode sandbox image workflow for `linux/amd64` and `linux/arm64`.
+  Main/version-tag builds and trusted manual dispatches publish the FullSend
+  tag convention to GHCR, while pull requests and untrusted manual refs run
+  non-publishing validation. Published manifest
+  digests are signed with keyless cosign and receive SLSA provenance and SPDX
+  SBOM attestations, which the workflow verifies. PRs validate both
+  architectures without registry write access; published digests are
+  validated on both architectures and scanned with Trivy. Renovate tracks
+  the pinned OpenCode and uf CLI versions in the image Containerfile.
+  (Spec: specs/037-publish-fullsend-opencode/spec.md, Relates: #511)
 - add-speckit-ref-assertion-test: Add red-first
   content-assertion test `TestSpeckitTemplates_RequiredReferences`
   (internal/scaffold) that verifies Step 6 of the embedded
