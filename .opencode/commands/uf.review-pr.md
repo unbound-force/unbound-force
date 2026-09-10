@@ -199,10 +199,12 @@ Invoke the **Task tool** with:
   results with name, state, classification)
 - `FILE_FOCUS_SCOPE`: from Step 3.5
 
-**Wait** for the subagent to return its findings. The
-subagent returns a structured message containing all the
-sections listed below. Parse the returned message and
-proceed to Step 5 (Output Format).
+**Wait** for the subagent to return its compact summary.
+The subagent writes the full findings report to
+`/tmp/pr<PR_NUMBER>-findings.md` and returns only a
+compact summary (verdict, counts, top-3 findings, file
+path). Parse the summary and proceed to Step 5 (Output
+Format), which reads needed sections from the file.
 
 ---
 
@@ -638,7 +640,10 @@ For each finding:
 The calibration pass MUST NOT introduce new findings
 — it only adjusts severity levels on existing findings.
 
-**Return your findings in this format:**
+**Output contract — keep the returned message under 4 KB.**
+
+1. Write the full findings report to
+   `/tmp/pr<PR_NUMBER>-findings.md` using this format:
 
 ```
 ### CI Coverage Matrix
@@ -676,14 +681,49 @@ The calibration pass MUST NOT introduce new findings
 [brief justification]
 ```
 
+2. Return ONLY a compact plain-text summary as your
+   final message (no tables, no markdown fences):
+
+```
+FINDINGS_FILE: /tmp/pr<PR_NUMBER>-findings.md
+VERDICT: <APPROVE / REQUEST CHANGES / COMMENT>
+COUNTS: <N> critical, <N> high, <N> medium, <N> low
+TOP_FINDINGS:
+- [SEVERITY] <title> (<file>)
+- [SEVERITY] <title> (<file>)
+- [SEVERITY] <title> (<file>)
+JUSTIFICATION: <1 sentence>
+```
+
+Do NOT return the full report inline — the parent agent
+reads sections from the findings file as needed.
+
 #### END SUBAGENT PROMPT
 
 ---
 
 ### 5. Output Format
 
-Parse the subagent's returned findings and present them
-in this structured format:
+Parse the subagent's compact summary (verdict, counts,
+top findings, file path). Then read sections from the
+findings file using scoped `offset`/`limit` reads:
+
+```bash
+# Find section boundaries in the findings file
+grep -n '^### ' /tmp/pr<PR_NUMBER>-findings.md
+```
+
+Read only the sections needed for the output below:
+- **Always read**: Summary, Verdict
+- **Read if counts > 0**: Alignment, Security,
+  Constitution Compliance, CI Failures
+- **Read for context**: Walkthrough, Linked Issues,
+  CI Coverage Matrix, Local Tool Results
+
+Use `offset`/`limit` parameters on the findings file
+to read individual sections rather than the entire file.
+
+Present the findings in this structured format:
 
 ```markdown
 ## PR Review: #<NUMBER> — <TITLE>
