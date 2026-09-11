@@ -7514,6 +7514,36 @@ func TestContentPortability_TriageIssueCommand(t *testing.T) {
 	}
 }
 
+// TestContentPortability_TasksToIssuesCommand verifies that the
+// speckit.taskstoissues command contains a content portability
+// guardrail. This file is not an embedded scaffold asset, so it
+// must be tested via filesystem read (os.ReadFile) rather than
+// assetContent(). Regression guard for issue #593.
+func TestContentPortability_TasksToIssuesCommand(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Skip("project root not found; skipping filesystem test")
+	}
+
+	path := filepath.Join(root, ".opencode", "commands", "speckit.taskstoissues.md")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read speckit.taskstoissues.md: %v", err)
+	}
+	text := string(content)
+
+	requiredPhrases := []string{
+		"Content portability",
+		"CP-001",
+	}
+
+	for _, phrase := range requiredPhrases {
+		if !strings.Contains(text, phrase) {
+			t.Errorf("speckit.taskstoissues.md MUST contain %q (content portability guardrail from issue #593)", phrase)
+		}
+	}
+}
+
 // TestContentPortability_CuratorAgent verifies that the
 // divisor-curator agent contains a Content Portability section
 // in its audit checklist. Regression guard for issue #593.

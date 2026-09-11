@@ -70,5 +70,8 @@ Add Content Portability rules at two levels:
 ## Status
 
 Retroactive. Implementation preceded this spec artifact.
-Documented per AGENTS.md emergency hotfix exemption
-(retroactively documented).
+This was a planned bug fix (issue #593, labels: bug,
+ready-to-code), not an emergency hotfix. The spec is
+documented retroactively as an acknowledged process
+deviation from the spec-before-implementation ordering
+rule.
