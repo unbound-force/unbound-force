@@ -210,6 +210,31 @@ type portMapping struct {
 	container int
 }
 
+// advanceStringLiteral copies a JSON string literal (opening
+// quote already detected at src[i]) into out, including the
+// opening and closing quotes, handling backslash escapes. It
+// returns the index of the first character after the closing
+// quote. Both stripJSONComments and stripTrailingCommas use
+// this to skip string contents without misinterpreting their
+// characters as comment markers or trailing commas.
+func advanceStringLiteral(src string, out *strings.Builder, i int) int {
+	out.WriteByte(src[i]) // opening quote
+	i++
+	for i < len(src) {
+		out.WriteByte(src[i])
+		if src[i] == '\\' {
+			i++
+			if i < len(src) {
+				out.WriteByte(src[i])
+			}
+		} else if src[i] == '"' {
+			break
+		}
+		i++
+	}
+	return i + 1 // past closing quote
+}
+
 // stripJSONComments removes single-line (//) and block (/* */)
 // comments from JSONC input, preserving string contents. The
 // devcontainer spec uses JSONC (JSON with Comments) as the
@@ -222,21 +247,7 @@ func stripJSONComments(data []byte) []byte {
 	for i < len(src) {
 		// String literal — copy verbatim.
 		if src[i] == '"' {
-			out.WriteByte(src[i])
-			i++
-			for i < len(src) {
-				out.WriteByte(src[i])
-				if src[i] == '\\' {
-					i++
-					if i < len(src) {
-						out.WriteByte(src[i])
-					}
-				} else if src[i] == '"' {
-					break
-				}
-				i++
-			}
-			i++
+			i = advanceStringLiteral(src, &out, i)
 			continue
 		}
 		// Line comment.
@@ -274,21 +285,7 @@ func stripTrailingCommas(data []byte) []byte {
 	for i < len(src) {
 		// String literal — copy verbatim.
 		if src[i] == '"' {
-			out.WriteByte(src[i])
-			i++
-			for i < len(src) {
-				out.WriteByte(src[i])
-				if src[i] == '\\' {
-					i++
-					if i < len(src) {
-						out.WriteByte(src[i])
-					}
-				} else if src[i] == '"' {
-					break
-				}
-				i++
-			}
-			i++
+			i = advanceStringLiteral(src, &out, i)
 			continue
 		}
 		// Trailing comma — skip if next non-whitespace is ] or }.
