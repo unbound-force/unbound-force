@@ -340,6 +340,7 @@ func parseDevcontainerPorts(opts Options, excludePorts map[int]bool) []portMappi
 		return nil
 	}
 
+	seen := make(map[int]bool)
 	var ports []portMapping
 	for _, raw := range dc.ForwardPorts {
 		pm, ok := parsePortEntry(raw)
@@ -352,9 +353,11 @@ func parseDevcontainerPorts(opts Options, excludePorts map[int]bool) []portMappi
 		if pm.container < 1 || pm.container > 65535 {
 			continue
 		}
-		if !excludePorts[pm.host] {
-			ports = append(ports, pm)
+		if excludePorts[pm.host] || seen[pm.host] {
+			continue
 		}
+		seen[pm.host] = true
+		ports = append(ports, pm)
 	}
 	return ports
 }
