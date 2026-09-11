@@ -6054,3 +6054,35 @@ func TestBuildPersistentRunArgs_DevcontainerDemoDedup(t *testing.T) {
 		t.Errorf("expected -p 3000:3000, got: %s", joined)
 	}
 }
+
+func TestParseDevcontainerPorts_DuplicateHostPorts(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			// Duplicate host port: 8080 appears as a number and
+			// as the host side of a host:container mapping.
+			return []byte(`{
+				"forwardPorts": [8080, 8080, "8080:3000"]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	// Host port 8080 should appear exactly once — the first
+	// entry wins and subsequent duplicates are skipped.
+	if len(ports) != 1 {
+		t.Fatalf("expected 1 port after dedup, got %d: %v",
+			len(ports), ports)
+	}
+	if ports[0].host != 8080 {
+		t.Errorf("expected host port 8080, got: %d", ports[0].host)
+	}
+	// First entry is the numeric 8080, so container is also 8080.
+	if ports[0].container != 8080 {
+		t.Errorf("expected container port 8080, got: %d",
+			ports[0].container)
+	}
+}
