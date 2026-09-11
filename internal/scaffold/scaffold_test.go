@@ -7554,8 +7554,8 @@ func TestContentPortability_CuratorAgent(t *testing.T) {
 	}
 	text := string(content)
 
-	if !strings.Contains(text, "#### Content Portability") {
-		t.Error("divisor-curator.md MUST contain '#### Content Portability' section (issue #593)")
+	if !strings.Contains(text, "#### 4. Content Portability") {
+		t.Error("divisor-curator.md MUST contain '#### 4. Content Portability' section (issue #593)")
 	}
 	if !strings.Contains(text, "CP-001") {
 		t.Error("divisor-curator.md MUST reference CP-001 (issue #593)")
