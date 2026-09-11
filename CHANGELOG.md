@@ -6,6 +6,15 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Fixed
+- content-portability-guardrails: Add Content Portability
+  rules (CP-001, CP-002, CP-003) to the default convention
+  pack and targeted guardrails in four issue-generating
+  components (triage child issues, tasks-to-issues command,
+  uf.init taskstoissues template, divisor-curator agent).
+  Prevents LLM-generated issue content from using
+  org-config-specific terminology for non-org-config repos.
+  (Spec: openspec/changes/content-portability-guardrails/,
+  Fixes: #593)
 - fix-sandbox-persistent-workdir: `buildPersistentRunArgs()`
   now sets `--workdir` and `WORKSPACE` env var for persistent
   Podman workspaces. OpenCode starts in the project directory

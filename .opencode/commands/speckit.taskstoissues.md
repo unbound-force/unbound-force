@@ -37,5 +37,14 @@ git config --get remote.origin.url
 - Issues MUST only be created in the repository matching
   the current Git remote. NEVER create issues in
   unrelated repositories.
+- **Content portability**: Issue titles and bodies MUST
+  use language appropriate to the target repository's
+  language and project type. Read README.md or AGENTS.md
+  to determine the project type. MUST NOT reference
+  tools or concepts specific to a different repository
+  type (e.g., "organization-configuration repository",
+  "Peribolos", "safe-settings") unless the target
+  repository actually uses them. See convention pack
+  rules CP-001 through CP-003.
 - Do NOT modify source code, spec artifacts, or any
   local files.

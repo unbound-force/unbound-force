@@ -395,6 +395,16 @@ rm -f "$COMMENT_FILE"
 
 This section applies only when Phase 3.5 produced split recommendations.
 
+**Content portability**: Child issue titles and bodies
+MUST use language appropriate to this repository's
+language and project type (as described in README.md
+and AGENTS.md). MUST NOT use terminology specific to
+a different repository type (e.g., do not reference
+"organization-configuration repository", "Peribolos",
+or "safe-settings" unless this repository actually uses
+those tools). See convention pack rules CP-001 through
+CP-003.
+
 For each proposed child issue:
 
 1. **Present to user**: Show the proposed title and body.

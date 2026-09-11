@@ -6637,6 +6637,8 @@ func TestGuardrailTemplates_CommandSpecificContent(t *testing.T) {
 			mustContain: []string{
 				"GitHub issues via",
 				"the current Git remote",
+				"Content portability", // issue #593
+				"CP-001",              // issue #593
 			},
 			mustNotContain: []string{
 				"NEVER modify source code",
@@ -7449,5 +7451,113 @@ func TestInitSimpleTool_NoSentinelForceTrue(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected call %q, got: %v", expected, rec.calls)
+	}
+}
+
+// TestContentPortability_DefaultPack verifies that the default
+// convention pack contains Content Portability rules (CP-001
+// through CP-003) that prevent LLM-generated issue content from
+// using org-config-specific terminology for non-org-config repos.
+// Regression guard for issue #593.
+func TestContentPortability_DefaultPack(t *testing.T) {
+	content, err := assetContent("opencode/uf/packs/default.md")
+	if err != nil {
+		t.Fatalf("read embedded default.md: %v", err)
+	}
+	text := string(content)
+
+	requiredMarkers := []string{
+		"## Content Portability",
+		"CP-001",
+		"CP-002",
+		"CP-003",
+		"organization-configuration repository",
+		"Peribolos",
+		"safe-settings",
+	}
+
+	for _, marker := range requiredMarkers {
+		if !strings.Contains(text, marker) {
+			t.Errorf("default.md MUST contain %q (content portability guardrail from issue #593)", marker)
+		}
+	}
+}
+
+// TestContentPortability_TriageIssueCommand verifies that the
+// triage-issue command contains a content portability guardrail
+// in the child issue creation section (Phase 4.4).
+// Regression guard for issue #593.
+func TestContentPortability_TriageIssueCommand(t *testing.T) {
+	content, err := assetContent("opencode/commands/uf.triage-issue.md")
+	if err != nil {
+		t.Fatalf("read embedded uf.triage-issue.md: %v", err)
+	}
+	text := string(content)
+
+	// The content portability block must appear in the child
+	// issue creation section (4.4), not elsewhere.
+	idx := strings.Index(text, "### 4.4 Child Issue Creation")
+	if idx < 0 {
+		t.Fatal("section '### 4.4 Child Issue Creation' not found")
+	}
+
+	section := text[idx:]
+	requiredPhrases := []string{
+		"Content portability",
+		"CP-001",
+	}
+
+	for _, phrase := range requiredPhrases {
+		if !strings.Contains(section, phrase) {
+			t.Errorf("triage-issue.md section 4.4 MUST contain %q (content portability guardrail from issue #593)", phrase)
+		}
+	}
+}
+
+// TestContentPortability_TasksToIssuesCommand verifies that the
+// speckit.taskstoissues command contains a content portability
+// guardrail. This file is not an embedded scaffold asset, so it
+// must be tested via filesystem read (os.ReadFile) rather than
+// assetContent(). Regression guard for issue #593.
+func TestContentPortability_TasksToIssuesCommand(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Skip("project root not found; skipping filesystem test")
+	}
+
+	path := filepath.Join(root, ".opencode", "commands", "speckit.taskstoissues.md")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read speckit.taskstoissues.md: %v", err)
+	}
+	text := string(content)
+
+	requiredPhrases := []string{
+		"Content portability",
+		"CP-001",
+	}
+
+	for _, phrase := range requiredPhrases {
+		if !strings.Contains(text, phrase) {
+			t.Errorf("speckit.taskstoissues.md MUST contain %q (content portability guardrail from issue #593)", phrase)
+		}
+	}
+}
+
+// TestContentPortability_CuratorAgent verifies that the
+// divisor-curator agent contains a Content Portability section
+// in its audit checklist. Regression guard for issue #593.
+func TestContentPortability_CuratorAgent(t *testing.T) {
+	content, err := assetContent("opencode/agents/divisor-curator.md")
+	if err != nil {
+		t.Fatalf("read embedded divisor-curator.md: %v", err)
+	}
+	text := string(content)
+
+	if !strings.Contains(text, "#### 4. Content Portability") {
+		t.Error("divisor-curator.md MUST contain '#### 4. Content Portability' section (issue #593)")
+	}
+	if !strings.Contains(text, "CP-001") {
+		t.Error("divisor-curator.md MUST reference CP-001 (issue #593)")
 	}
 }
