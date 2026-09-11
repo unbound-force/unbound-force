@@ -160,13 +160,12 @@ uf sandbox init [flags]
 | `--force` | bool | `false` | Overwrite existing `.devcontainer/devcontainer.json` |
 
 > **Automatic port forwarding:** When using the Podman backend,
-> `uf sandbox init`, `uf sandbox create`, and `uf sandbox start`
-> automatically read `forwardPorts` from
-> `.devcontainer/devcontainer.json` and publish those ports via
-> `-p` flags. Ports already covered by `DefaultServerPort` (4096)
-> or `--demo-ports` are deduplicated. Both numeric (`8080`) and
-> string (`"8080:3000"`) entries are supported, and JSONC comments
-> in the file are tolerated.
+> `uf sandbox create` and `uf sandbox start` automatically read
+> `forwardPorts` from `.devcontainer/devcontainer.json` and
+> publish those ports via `-p` flags. Ports already covered by
+> `DefaultServerPort` (4096) or `--demo-ports` are deduplicated.
+> Both numeric (`8080`) and string (`"8080:3000"`) entries are
+> supported, and JSONC comments in the file are tolerated.
 
 **Example**
 

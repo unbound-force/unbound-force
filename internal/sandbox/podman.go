@@ -300,8 +300,8 @@ func buildPersistentRunArgs(opts Options, platform PlatformConfig, ctrName, volN
 	for _, port := range allPorts {
 		excludePorts[port] = true
 	}
-	for _, port := range parseDevcontainerPorts(opts, excludePorts) {
-		args = append(args, "-p", fmt.Sprintf("%d:%d", port, port))
+	for _, pm := range parseDevcontainerPorts(opts, excludePorts) {
+		args = append(args, "-p", fmt.Sprintf("%d:%d", pm.Host, pm.Container))
 	}
 
 	// Environment variables (gateway-aware per D3).
