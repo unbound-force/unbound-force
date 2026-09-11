@@ -5648,3 +5648,441 @@ func TestFormatWorkspaceStatus_StoppedWorkspace(t *testing.T) {
 	}
 }
 
+// --- parseDevcontainerPorts tests ---
+
+func TestParseDevcontainerPorts_HappyPath(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"image": "test:latest",
+				"forwardPorts": [4096, 8080, 3000]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	// 4096 is DefaultServerPort and should be excluded.
+	for _, pm := range ports {
+		if pm.host == DefaultServerPort {
+			t.Errorf("DefaultServerPort (%d) should be excluded",
+				DefaultServerPort)
+		}
+	}
+	// 8080 and 3000 should be present with matching host/container.
+	found8080 := false
+	found3000 := false
+	for _, pm := range ports {
+		if pm.host == 8080 && pm.container == 8080 {
+			found8080 = true
+		}
+		if pm.host == 3000 && pm.container == 3000 {
+			found3000 = true
+		}
+	}
+	if !found8080 {
+		t.Errorf("expected port 8080 in result, got: %v", ports)
+	}
+	if !found3000 {
+		t.Errorf("expected port 3000 in result, got: %v", ports)
+	}
+}
+
+func TestParseDevcontainerPorts_NoFile(t *testing.T) {
+	opts := testOpts()
+	// Default ReadFile returns error.
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	if len(ports) != 0 {
+		t.Errorf("expected no ports when file missing, got: %v", ports)
+	}
+}
+
+func TestParseDevcontainerPorts_NoForwardPorts(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{"image": "test:latest"}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	if len(ports) != 0 {
+		t.Errorf("expected no ports when forwardPorts absent, got: %v", ports)
+	}
+}
+
+func TestParseDevcontainerPorts_StringPorts(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [8080, "3000", "9090:3001"]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	// 8080 (number), 3000 (plain string), 9090 (host from
+	// host:container string) should all be present.
+	if len(ports) != 3 {
+		t.Fatalf("expected 3 ports, got %d: %v", len(ports), ports)
+	}
+	expectedHosts := map[int]bool{8080: true, 3000: true, 9090: true}
+	gotHosts := make(map[int]bool)
+	for _, pm := range ports {
+		gotHosts[pm.host] = true
+	}
+	for p := range expectedHosts {
+		if !gotHosts[p] {
+			t.Errorf("expected host port %d in result, got: %v",
+				p, ports)
+		}
+	}
+	// Verify the "9090:3001" entry has distinct host/container.
+	for _, pm := range ports {
+		if pm.host == 9090 && pm.container != 3001 {
+			t.Errorf("expected container port 3001 for host 9090, "+
+				"got: %d", pm.container)
+		}
+	}
+}
+
+func TestParseDevcontainerPorts_JSONC(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				// This is a line comment.
+				"image": "test:latest",
+				/* Block comment */
+				"forwardPorts": [8080, 3000]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	if len(ports) != 2 {
+		t.Errorf("expected 2 ports from JSONC input, got: %v", ports)
+	}
+	found8080 := false
+	found3000 := false
+	for _, pm := range ports {
+		if pm.host == 8080 {
+			found8080 = true
+		}
+		if pm.host == 3000 {
+			found3000 = true
+		}
+	}
+	if !found8080 {
+		t.Errorf("expected port 8080 in result, got: %v", ports)
+	}
+	if !found3000 {
+		t.Errorf("expected port 3000 in result, got: %v", ports)
+	}
+}
+
+func TestParseDevcontainerPorts_InvalidRange(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [0, 8080, 70000, -1]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	// Only 8080 is valid (1-65535).
+	if len(ports) != 1 || ports[0].host != 8080 {
+		t.Errorf("expected [{8080 8080}], got: %v", ports)
+	}
+}
+
+func TestParseDevcontainerPorts_AllExcluded(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{"forwardPorts": [4096]}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	if len(ports) != 0 {
+		t.Errorf("expected no ports when all excluded, got: %v", ports)
+	}
+}
+
+func TestParseDevcontainerPorts_TrailingComma(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [8080, 3000,],
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	if len(ports) != 2 {
+		t.Fatalf("expected 2 ports from trailing-comma input, "+
+			"got: %v", ports)
+	}
+	found8080 := false
+	found3000 := false
+	for _, pm := range ports {
+		if pm.host == 8080 {
+			found8080 = true
+		}
+		if pm.host == 3000 {
+			found3000 = true
+		}
+	}
+	if !found8080 {
+		t.Errorf("expected port 8080 in result, got: %v", ports)
+	}
+	if !found3000 {
+		t.Errorf("expected port 3000 in result, got: %v", ports)
+	}
+}
+
+func TestBuildPersistentRunArgs_DevcontainerPorts(t *testing.T) {
+	opts := testOpts()
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [4096, 8080, 3000]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildPersistentRunArgs(opts, platform, "uf-sandbox-test", "uf-sandbox-test")
+	joined := strings.Join(args, " ")
+
+	// DefaultServerPort (4096) should appear exactly once.
+	if !strings.Contains(joined, "-p 4096:4096") {
+		t.Errorf("expected -p 4096:4096, got: %s", joined)
+	}
+	// Count occurrences of -p 4096:4096 — should be 1.
+	count := strings.Count(joined, "4096:4096")
+	if count != 1 {
+		t.Errorf("expected 4096:4096 once, found %d times in: %s",
+			count, joined)
+	}
+	// Devcontainer ports 8080 and 3000 should be published.
+	if !strings.Contains(joined, "-p 8080:8080") {
+		t.Errorf("expected -p 8080:8080, got: %s", joined)
+	}
+	if !strings.Contains(joined, "-p 3000:3000") {
+		t.Errorf("expected -p 3000:3000, got: %s", joined)
+	}
+}
+
+func TestBuildPersistentRunArgs_DevcontainerPortsAbsentFile(t *testing.T) {
+	opts := testOpts()
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	// Default ReadFile returns error (no devcontainer.json).
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildPersistentRunArgs(opts, platform, "uf-sandbox-test", "uf-sandbox-test")
+	joined := strings.Join(args, " ")
+
+	// DefaultServerPort should still be present.
+	if !strings.Contains(joined, "-p 4096:4096") {
+		t.Errorf("expected -p 4096:4096, got: %s", joined)
+	}
+}
+
+func TestBuildRunArgs_DevcontainerPorts(t *testing.T) {
+	opts := testOpts()
+	opts.Mode = ModeIsolated
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [4096, 8080, 3000]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildRunArgs(opts, platform, false, 0)
+	joined := strings.Join(args, " ")
+
+	// DefaultServerPort should appear exactly once.
+	count := strings.Count(joined, "4096:4096")
+	if count != 1 {
+		t.Errorf("expected 4096:4096 once, found %d times in: %s",
+			count, joined)
+	}
+	// Devcontainer ports should be published.
+	if !strings.Contains(joined, "-p 8080:8080") {
+		t.Errorf("expected -p 8080:8080, got: %s", joined)
+	}
+	if !strings.Contains(joined, "-p 3000:3000") {
+		t.Errorf("expected -p 3000:3000, got: %s", joined)
+	}
+}
+
+func TestBuildRunArgs_DevcontainerHostContainerMapping(t *testing.T) {
+	opts := testOpts()
+	opts.Mode = ModeIsolated
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [8080, "9090:3001"]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildRunArgs(opts, platform, false, 0)
+	joined := strings.Join(args, " ")
+
+	// Plain numeric port: -p 8080:8080.
+	if !strings.Contains(joined, "-p 8080:8080") {
+		t.Errorf("expected -p 8080:8080, got: %s", joined)
+	}
+	// Host:container mapping: -p 9090:3001 (not -p 9090:9090).
+	if !strings.Contains(joined, "-p 9090:3001") {
+		t.Errorf("expected -p 9090:3001, got: %s", joined)
+	}
+	if strings.Contains(joined, "-p 9090:9090") {
+		t.Errorf("should not produce -p 9090:9090, got: %s", joined)
+	}
+}
+
+func TestBuildPersistentRunArgs_DevcontainerHostContainerMapping(t *testing.T) {
+	opts := testOpts()
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [8080, "9090:3001"]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildPersistentRunArgs(opts, platform,
+		"uf-sandbox-test", "uf-sandbox-test")
+	joined := strings.Join(args, " ")
+
+	// Plain numeric port: -p 8080:8080.
+	if !strings.Contains(joined, "-p 8080:8080") {
+		t.Errorf("expected -p 8080:8080, got: %s", joined)
+	}
+	// Host:container mapping: -p 9090:3001 (not -p 9090:9090).
+	if !strings.Contains(joined, "-p 9090:3001") {
+		t.Errorf("expected -p 9090:3001, got: %s", joined)
+	}
+	if strings.Contains(joined, "-p 9090:9090") {
+		t.Errorf("should not produce -p 9090:9090, got: %s", joined)
+	}
+}
+
+func TestBuildPersistentRunArgs_DevcontainerDemoDedup(t *testing.T) {
+	opts := testOpts()
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.DemoPorts = []int{8080}
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			// forwardPorts includes 8080 which is also a demo port.
+			return []byte(`{
+				"forwardPorts": [4096, 8080, 3000]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildPersistentRunArgs(opts, platform, "uf-sandbox-test", "uf-sandbox-test")
+	joined := strings.Join(args, " ")
+
+	// 8080 should appear exactly once (from demo ports, not
+	// duplicated by devcontainer ports).
+	count := strings.Count(joined, "8080:8080")
+	if count != 1 {
+		t.Errorf("expected 8080:8080 once, found %d times in: %s",
+			count, joined)
+	}
+	// 3000 should be added from devcontainer.
+	if !strings.Contains(joined, "-p 3000:3000") {
+		t.Errorf("expected -p 3000:3000, got: %s", joined)
+	}
+}
+
+func TestParseDevcontainerPorts_DuplicateHostPorts(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			// Duplicate host port: 8080 appears as a number and
+			// as the host side of a host:container mapping.
+			return []byte(`{
+				"forwardPorts": [8080, 8080, "8080:3000"]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	// Host port 8080 should appear exactly once — the first
+	// entry wins and subsequent duplicates are skipped.
+	if len(ports) != 1 {
+		t.Fatalf("expected 1 port after dedup, got %d: %v",
+			len(ports), ports)
+	}
+	if ports[0].host != 8080 {
+		t.Errorf("expected host port 8080, got: %d", ports[0].host)
+	}
+	// First entry is the numeric 8080, so container is also 8080.
+	if ports[0].container != 8080 {
+		t.Errorf("expected container port 8080, got: %d",
+			ports[0].container)
+	}
+}

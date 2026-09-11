@@ -293,6 +293,17 @@ func buildPersistentRunArgs(opts Options, platform PlatformConfig, ctrName, volN
 		args = append(args, "-p", fmt.Sprintf("%d:%d", port, port))
 	}
 
+	// Devcontainer forwardPorts: read from
+	// .devcontainer/devcontainer.json and publish any ports
+	// not already covered by DefaultServerPort or demo ports.
+	excludePorts := map[int]bool{DefaultServerPort: true}
+	for _, port := range allPorts {
+		excludePorts[port] = true
+	}
+	for _, pm := range parseDevcontainerPorts(opts, excludePorts) {
+		args = append(args, "-p", fmt.Sprintf("%d:%d", pm.host, pm.container))
+	}
+
 	// Environment variables (gateway-aware per D3).
 	args = append(args, forwardedEnvVars(opts, opts.GatewayActive)...)
 

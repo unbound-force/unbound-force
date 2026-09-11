@@ -6,8 +6,11 @@
 package sandbox
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -66,11 +69,11 @@ var forwardedAPIKeys = []string{
 // providers, so their credentials must not leak into the
 // container (FR-011).
 var gatewaySkippedKeys = map[string]bool{
-	"ANTHROPIC_API_KEY":            true,
-	"ANTHROPIC_VERTEX_PROJECT_ID":  true,
-	"CLAUDE_CODE_USE_VERTEX":       true,
-	"GOOGLE_CLOUD_PROJECT":         true,
-	"VERTEX_LOCATION":              true,
+	"ANTHROPIC_API_KEY":           true,
+	"ANTHROPIC_VERTEX_PROJECT_ID": true,
+	"CLAUDE_CODE_USE_VERTEX":      true,
+	"GOOGLE_CLOUD_PROJECT":        true,
+	"VERTEX_LOCATION":             true,
 }
 
 // gatewayEnvVars returns -e flag pairs for the gateway's
@@ -200,6 +203,197 @@ func uidMappingArgs(opts Options) []string {
 	return []string{"--userns=keep-id:uid=1000,gid=1000"}
 }
 
+// portMapping represents a host:container port pair parsed
+// from a devcontainer.json forwardPorts entry.
+type portMapping struct {
+	host      int
+	container int
+}
+
+// advanceStringLiteral copies a JSON string literal (opening
+// quote already detected at src[i]) into out, including the
+// opening and closing quotes, handling backslash escapes. It
+// returns the index of the first character after the closing
+// quote. Both stripJSONComments and stripTrailingCommas use
+// this to skip string contents without misinterpreting their
+// characters as comment markers or trailing commas.
+func advanceStringLiteral(src string, out *strings.Builder, i int) int {
+	out.WriteByte(src[i]) // opening quote
+	i++
+	for i < len(src) {
+		out.WriteByte(src[i])
+		if src[i] == '\\' {
+			i++
+			if i < len(src) {
+				out.WriteByte(src[i])
+			}
+		} else if src[i] == '"' {
+			break
+		}
+		i++
+	}
+	return i + 1 // past closing quote
+}
+
+// stripJSONComments removes single-line (//) and block (/* */)
+// comments from JSONC input, preserving string contents. The
+// devcontainer spec uses JSONC (JSON with Comments) as the
+// canonical format for devcontainer.json.
+func stripJSONComments(data []byte) []byte {
+	src := string(data)
+	var out strings.Builder
+	out.Grow(len(src))
+	i := 0
+	for i < len(src) {
+		// String literal — copy verbatim.
+		if src[i] == '"' {
+			i = advanceStringLiteral(src, &out, i)
+			continue
+		}
+		// Line comment.
+		if i+1 < len(src) && src[i] == '/' && src[i+1] == '/' {
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		// Block comment.
+		if i+1 < len(src) && src[i] == '/' && src[i+1] == '*' {
+			i += 2
+			for i+1 < len(src) && !(src[i] == '*' && src[i+1] == '/') {
+				i++
+			}
+			if i+1 < len(src) {
+				i += 2
+			}
+			continue
+		}
+		out.WriteByte(src[i])
+		i++
+	}
+	return []byte(out.String())
+}
+
+// stripTrailingCommas removes trailing commas before ] or }
+// in JSON input, preserving string contents. This handles
+// the JSONC convention of allowing trailing commas.
+func stripTrailingCommas(data []byte) []byte {
+	src := string(data)
+	var out strings.Builder
+	out.Grow(len(src))
+	i := 0
+	for i < len(src) {
+		// String literal — copy verbatim.
+		if src[i] == '"' {
+			i = advanceStringLiteral(src, &out, i)
+			continue
+		}
+		// Trailing comma — skip if next non-whitespace is ] or }.
+		if src[i] == ',' {
+			j := i + 1
+			for j < len(src) && (src[j] == ' ' || src[j] == '\t' || src[j] == '\n' || src[j] == '\r') {
+				j++
+			}
+			if j < len(src) && (src[j] == ']' || src[j] == '}') {
+				i++
+				continue
+			}
+		}
+		out.WriteByte(src[i])
+		i++
+	}
+	return []byte(out.String())
+}
+
+// parseDevcontainerPorts reads .devcontainer/devcontainer.json
+// from the project directory via opts.ReadFile and returns the
+// forwardPorts array as port mappings. Returns nil with no
+// error when the file is absent or contains no forwardPorts.
+// Ports whose host port is already published (DefaultServerPort
+// and demo ports) are excluded from the result to avoid
+// duplicates.
+//
+// The devcontainer spec defines forwardPorts as
+// Array<number | string>, where string values represent
+// host:container port mappings (e.g., "8080:3000"). This
+// function handles both forms and strips JSONC comments and
+// trailing commas before parsing.
+func parseDevcontainerPorts(opts Options, excludePorts map[int]bool) []portMapping {
+	dcPath := filepath.Join(opts.ProjectDir,
+		".devcontainer", "devcontainer.json")
+	data, err := opts.ReadFile(dcPath)
+	if err != nil {
+		return nil
+	}
+
+	// Strip JSONC comments and trailing commas before
+	// unmarshaling.
+	data = stripTrailingCommas(stripJSONComments(data))
+
+	var dc struct {
+		ForwardPorts []json.RawMessage `json:"forwardPorts"`
+	}
+	if err := json.Unmarshal(data, &dc); err != nil {
+		return nil
+	}
+
+	seen := make(map[int]bool)
+	var ports []portMapping
+	for _, raw := range dc.ForwardPorts {
+		pm, ok := parsePortEntry(raw)
+		if !ok {
+			continue
+		}
+		if pm.host < 1 || pm.host > 65535 {
+			continue
+		}
+		if pm.container < 1 || pm.container > 65535 {
+			continue
+		}
+		if excludePorts[pm.host] || seen[pm.host] {
+			continue
+		}
+		seen[pm.host] = true
+		ports = append(ports, pm)
+	}
+	return ports
+}
+
+// parsePortEntry extracts the host and container ports from a
+// single forwardPorts entry. Handles JSON numbers (8080) and
+// strings ("8080" or "8080:3000"). For plain numbers and plain
+// strings, host and container are the same. For "host:container"
+// strings, returns distinct values. Returns false on failure.
+func parsePortEntry(raw json.RawMessage) (portMapping, bool) {
+	// Try as number first.
+	var n float64
+	if err := json.Unmarshal(raw, &n); err == nil {
+		p := int(n)
+		return portMapping{host: p, container: p}, true
+	}
+
+	// Try as string.
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return portMapping{}, false
+	}
+
+	// "host:container" format.
+	if idx := strings.IndexByte(s, ':'); idx >= 0 {
+		host, err1 := strconv.Atoi(s[:idx])
+		container, err2 := strconv.Atoi(s[idx+1:])
+		if err1 != nil || err2 != nil {
+			return portMapping{}, false
+		}
+		return portMapping{host: host, container: container}, true
+	}
+	port, err := strconv.Atoi(s)
+	if err != nil {
+		return portMapping{}, false
+	}
+	return portMapping{host: port, container: port}, true
+}
+
 // buildRunArgs assembles the complete podman run argument list
 // from Options and PlatformConfig. All values are passed as
 // discrete exec.Command arguments — never shell-interpolated —
@@ -214,6 +408,14 @@ func buildRunArgs(opts Options, platform PlatformConfig, gatewayActive bool, gat
 		"--name", ContainerName,
 		"--hostname", ContainerName,
 		"-p", fmt.Sprintf("%d:%d", DefaultServerPort, DefaultServerPort),
+	}
+
+	// Devcontainer forwardPorts: read from
+	// .devcontainer/devcontainer.json and publish any ports
+	// not already covered by DefaultServerPort.
+	excludePorts := map[int]bool{DefaultServerPort: true}
+	for _, pm := range parseDevcontainerPorts(opts, excludePorts) {
+		args = append(args, "-p", fmt.Sprintf("%d:%d", pm.host, pm.container))
 	}
 
 	// UID/GID mapping (before volume mounts).
