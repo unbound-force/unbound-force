@@ -6637,6 +6637,8 @@ func TestGuardrailTemplates_CommandSpecificContent(t *testing.T) {
 			mustContain: []string{
 				"GitHub issues via",
 				"the current Git remote",
+				"Content portability", // issue #593
+				"CP-001",              // issue #593
 			},
 			mustNotContain: []string{
 				"NEVER modify source code",
@@ -7509,42 +7511,6 @@ func TestContentPortability_TriageIssueCommand(t *testing.T) {
 		if !strings.Contains(section, phrase) {
 			t.Errorf("triage-issue.md section 4.4 MUST contain %q (content portability guardrail from issue #593)", phrase)
 		}
-	}
-}
-
-// TestContentPortability_TasksToIssuesGuardrail verifies that the
-// uf.init.md taskstoissues guardrail block contains a content
-// portability rule. Regression guard for issue #593.
-func TestContentPortability_TasksToIssuesGuardrail(t *testing.T) {
-	content, err := assetContent("opencode/commands/uf.init.md")
-	if err != nil {
-		t.Fatalf("read embedded uf.init.md: %v", err)
-	}
-	text := string(content)
-
-	// Locate the Taskstoissues guardrails block.
-	idx := strings.Index(text, "Taskstoissues guardrails block")
-	if idx < 0 {
-		t.Fatal("'Taskstoissues guardrails block' not found in uf.init.md")
-	}
-
-	// Extract from the label to the closing fence.
-	remainder := text[idx:]
-	fenceStart := strings.Index(remainder, "```markdown")
-	if fenceStart < 0 {
-		t.Fatal("no ```markdown fence found after Taskstoissues label")
-	}
-	fenceEnd := strings.Index(remainder[fenceStart+len("```markdown"):], "```")
-	if fenceEnd < 0 {
-		t.Fatal("no closing ``` found for Taskstoissues block")
-	}
-	block := remainder[fenceStart : fenceStart+len("```markdown")+fenceEnd+len("```")]
-
-	if !strings.Contains(block, "Content portability") {
-		t.Error("Taskstoissues guardrails MUST contain 'Content portability' (issue #593)")
-	}
-	if !strings.Contains(block, "CP-001") {
-		t.Error("Taskstoissues guardrails MUST reference CP-001 (issue #593)")
 	}
 }
 
