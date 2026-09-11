@@ -152,6 +152,18 @@ Classify files as user-facing or internal based on path patterns:
 - If a matching issue already exists, reference it in your findings instead of creating a duplicate.
 - If no match exists, proceed with filing.
 
+#### Content Portability
+
+All filed issue titles and bodies MUST use language
+appropriate to the target repository's language and
+project type. Read README.md or AGENTS.md to determine
+the project type. MUST NOT reference tools or concepts
+specific to a different repository type (e.g.,
+"organization-configuration repository", "Peribolos",
+"safe-settings") unless the target repository actually
+uses those tools. See convention pack rules CP-001
+through CP-003.
+
 #### 4. Blog Opportunity Identification
 
 - Does this change introduce a significant new capability? Significance thresholds:

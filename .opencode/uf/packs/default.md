@@ -206,6 +206,36 @@ precedence on overlapping concerns.
 
 ---
 
+## Content Portability
+
+- **CP-001** [MUST] Generated content (issue bodies,
+  comments, checklists, verification plans) MUST use
+  language appropriate to the target repository's
+  language and project type. MUST NOT assume the target
+  is an organization-configuration repository unless
+  the repository's README or AGENTS.md explicitly
+  identifies it as one.
+
+- **CP-002** [MUST] Generated content MUST NOT reference
+  tools or concepts specific to a single repository
+  type (e.g., Peribolos, safe-settings, organization
+  membership management) unless the target repository
+  actually uses those tools. Use generic equivalents
+  instead:
+  - "organization-configuration repository"
+    → "this repository's language and project type"
+  - "Peribolos, and safe-settings configuration"
+    → "existing project configuration"
+
+- **CP-003** [SHOULD] Checklists and verification plans
+  generated for scaffolding upgrades SHOULD describe
+  checks in terms of the target repository's actual
+  technology stack, not in terms of a presumed stack.
+  Read README.md or AGENTS.md to determine the project
+  type before composing checklists.
+
+---
+
 ## Custom Rules
 
 <!-- This section is intentionally empty in the canonical

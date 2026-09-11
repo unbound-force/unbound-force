@@ -7451,3 +7451,117 @@ func TestInitSimpleTool_NoSentinelForceTrue(t *testing.T) {
 		t.Errorf("expected call %q, got: %v", expected, rec.calls)
 	}
 }
+
+// TestContentPortability_DefaultPack verifies that the default
+// convention pack contains Content Portability rules (CP-001
+// through CP-003) that prevent LLM-generated issue content from
+// using org-config-specific terminology for non-org-config repos.
+// Regression guard for issue #593.
+func TestContentPortability_DefaultPack(t *testing.T) {
+	content, err := assetContent("opencode/uf/packs/default.md")
+	if err != nil {
+		t.Fatalf("read embedded default.md: %v", err)
+	}
+	text := string(content)
+
+	requiredMarkers := []string{
+		"## Content Portability",
+		"CP-001",
+		"CP-002",
+		"CP-003",
+		"organization-configuration repository",
+		"Peribolos",
+		"safe-settings",
+	}
+
+	for _, marker := range requiredMarkers {
+		if !strings.Contains(text, marker) {
+			t.Errorf("default.md MUST contain %q (content portability guardrail from issue #593)", marker)
+		}
+	}
+}
+
+// TestContentPortability_TriageIssueCommand verifies that the
+// triage-issue command contains a content portability guardrail
+// in the child issue creation section (Phase 4.4).
+// Regression guard for issue #593.
+func TestContentPortability_TriageIssueCommand(t *testing.T) {
+	content, err := assetContent("opencode/commands/uf.triage-issue.md")
+	if err != nil {
+		t.Fatalf("read embedded uf.triage-issue.md: %v", err)
+	}
+	text := string(content)
+
+	// The content portability block must appear in the child
+	// issue creation section (4.4), not elsewhere.
+	idx := strings.Index(text, "### 4.4 Child Issue Creation")
+	if idx < 0 {
+		t.Fatal("section '### 4.4 Child Issue Creation' not found")
+	}
+
+	section := text[idx:]
+	requiredPhrases := []string{
+		"Content portability",
+		"CP-001",
+	}
+
+	for _, phrase := range requiredPhrases {
+		if !strings.Contains(section, phrase) {
+			t.Errorf("triage-issue.md section 4.4 MUST contain %q (content portability guardrail from issue #593)", phrase)
+		}
+	}
+}
+
+// TestContentPortability_TasksToIssuesGuardrail verifies that the
+// uf.init.md taskstoissues guardrail block contains a content
+// portability rule. Regression guard for issue #593.
+func TestContentPortability_TasksToIssuesGuardrail(t *testing.T) {
+	content, err := assetContent("opencode/commands/uf.init.md")
+	if err != nil {
+		t.Fatalf("read embedded uf.init.md: %v", err)
+	}
+	text := string(content)
+
+	// Locate the Taskstoissues guardrails block.
+	idx := strings.Index(text, "Taskstoissues guardrails block")
+	if idx < 0 {
+		t.Fatal("'Taskstoissues guardrails block' not found in uf.init.md")
+	}
+
+	// Extract from the label to the closing fence.
+	remainder := text[idx:]
+	fenceStart := strings.Index(remainder, "```markdown")
+	if fenceStart < 0 {
+		t.Fatal("no ```markdown fence found after Taskstoissues label")
+	}
+	fenceEnd := strings.Index(remainder[fenceStart+len("```markdown"):], "```")
+	if fenceEnd < 0 {
+		t.Fatal("no closing ``` found for Taskstoissues block")
+	}
+	block := remainder[fenceStart : fenceStart+len("```markdown")+fenceEnd+len("```")]
+
+	if !strings.Contains(block, "Content portability") {
+		t.Error("Taskstoissues guardrails MUST contain 'Content portability' (issue #593)")
+	}
+	if !strings.Contains(block, "CP-001") {
+		t.Error("Taskstoissues guardrails MUST reference CP-001 (issue #593)")
+	}
+}
+
+// TestContentPortability_CuratorAgent verifies that the
+// divisor-curator agent contains a Content Portability section
+// in its audit checklist. Regression guard for issue #593.
+func TestContentPortability_CuratorAgent(t *testing.T) {
+	content, err := assetContent("opencode/agents/divisor-curator.md")
+	if err != nil {
+		t.Fatalf("read embedded divisor-curator.md: %v", err)
+	}
+	text := string(content)
+
+	if !strings.Contains(text, "#### Content Portability") {
+		t.Error("divisor-curator.md MUST contain '#### Content Portability' section (issue #593)")
+	}
+	if !strings.Contains(text, "CP-001") {
+		t.Error("divisor-curator.md MUST reference CP-001 (issue #593)")
+	}
+}
