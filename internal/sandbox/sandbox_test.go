@@ -5719,6 +5719,96 @@ func TestParseDevcontainerPorts_NoForwardPorts(t *testing.T) {
 	}
 }
 
+func TestParseDevcontainerPorts_StringPorts(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [8080, "3000", "9090:3001"]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	// 8080 (number), 3000 (plain string), 9090 (host from
+	// host:container string) should all be present.
+	expected := map[int]bool{8080: true, 3000: true, 9090: true}
+	got := make(map[int]bool)
+	for _, p := range ports {
+		got[p] = true
+	}
+	for p := range expected {
+		if !got[p] {
+			t.Errorf("expected port %d in result, got: %v", p, ports)
+		}
+	}
+	if len(ports) != len(expected) {
+		t.Errorf("expected %d ports, got %d: %v",
+			len(expected), len(ports), ports)
+	}
+}
+
+func TestParseDevcontainerPorts_JSONC(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				// This is a line comment.
+				"image": "test:latest",
+				/* Block comment */
+				"forwardPorts": [8080, 3000]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	if len(ports) != 2 {
+		t.Errorf("expected 2 ports from JSONC input, got: %v", ports)
+	}
+	found8080 := false
+	found3000 := false
+	for _, p := range ports {
+		if p == 8080 {
+			found8080 = true
+		}
+		if p == 3000 {
+			found3000 = true
+		}
+	}
+	if !found8080 {
+		t.Errorf("expected port 8080 in result, got: %v", ports)
+	}
+	if !found3000 {
+		t.Errorf("expected port 3000 in result, got: %v", ports)
+	}
+}
+
+func TestParseDevcontainerPorts_InvalidRange(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [0, 8080, 70000, -1]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	// Only 8080 is valid (1-65535).
+	if len(ports) != 1 || ports[0] != 8080 {
+		t.Errorf("expected [8080], got: %v", ports)
+	}
+}
+
 func TestParseDevcontainerPorts_AllExcluded(t *testing.T) {
 	opts := testOpts()
 	opts.ReadFile = func(path string) ([]byte, error) {
