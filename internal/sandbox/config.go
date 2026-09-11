@@ -6,6 +6,7 @@
 package sandbox
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -200,6 +201,41 @@ func uidMappingArgs(opts Options) []string {
 	return []string{"--userns=keep-id:uid=1000,gid=1000"}
 }
 
+// parseDevcontainerPorts reads .devcontainer/devcontainer.json
+// from the project directory via opts.ReadFile and returns the
+// forwardPorts array as integer port numbers. Returns nil with
+// no error when the file is absent or contains no forwardPorts.
+// Ports that are already published (DefaultServerPort and demo
+// ports) are excluded from the result to avoid duplicates.
+func parseDevcontainerPorts(opts Options, excludePorts map[int]bool) []int {
+	dcPath := filepath.Join(opts.ProjectDir,
+		".devcontainer", "devcontainer.json")
+	data, err := opts.ReadFile(dcPath)
+	if err != nil {
+		return nil
+	}
+
+	var dc struct {
+		ForwardPorts []json.Number `json:"forwardPorts"`
+	}
+	if err := json.Unmarshal(data, &dc); err != nil {
+		return nil
+	}
+
+	var ports []int
+	for _, p := range dc.ForwardPorts {
+		n, err := p.Int64()
+		if err != nil {
+			continue
+		}
+		port := int(n)
+		if !excludePorts[port] {
+			ports = append(ports, port)
+		}
+	}
+	return ports
+}
+
 // buildRunArgs assembles the complete podman run argument list
 // from Options and PlatformConfig. All values are passed as
 // discrete exec.Command arguments — never shell-interpolated —
@@ -214,6 +250,15 @@ func buildRunArgs(opts Options, platform PlatformConfig, gatewayActive bool, gat
 		"--name", ContainerName,
 		"--hostname", ContainerName,
 		"-p", fmt.Sprintf("%d:%d", DefaultServerPort, DefaultServerPort),
+	}
+
+	// Devcontainer forwardPorts: read from
+	// .devcontainer/devcontainer.json and publish any ports
+	// not already covered by DefaultServerPort.
+	excludePorts := map[int]bool{DefaultServerPort: true}
+	for _, port := range parseDevcontainerPorts(opts, excludePorts) {
+		args = append(args, "-p",
+			fmt.Sprintf("%d:%d", port, port))
 	}
 
 	// UID/GID mapping (before volume mounts).
