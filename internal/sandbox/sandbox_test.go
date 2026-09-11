@@ -5667,7 +5667,7 @@ func TestParseDevcontainerPorts_HappyPath(t *testing.T) {
 
 	// 4096 is DefaultServerPort and should be excluded.
 	for _, pm := range ports {
-		if pm.Host == DefaultServerPort {
+		if pm.host == DefaultServerPort {
 			t.Errorf("DefaultServerPort (%d) should be excluded",
 				DefaultServerPort)
 		}
@@ -5676,10 +5676,10 @@ func TestParseDevcontainerPorts_HappyPath(t *testing.T) {
 	found8080 := false
 	found3000 := false
 	for _, pm := range ports {
-		if pm.Host == 8080 && pm.Container == 8080 {
+		if pm.host == 8080 && pm.container == 8080 {
 			found8080 = true
 		}
-		if pm.Host == 3000 && pm.Container == 3000 {
+		if pm.host == 3000 && pm.container == 3000 {
 			found3000 = true
 		}
 	}
@@ -5742,7 +5742,7 @@ func TestParseDevcontainerPorts_StringPorts(t *testing.T) {
 	expectedHosts := map[int]bool{8080: true, 3000: true, 9090: true}
 	gotHosts := make(map[int]bool)
 	for _, pm := range ports {
-		gotHosts[pm.Host] = true
+		gotHosts[pm.host] = true
 	}
 	for p := range expectedHosts {
 		if !gotHosts[p] {
@@ -5752,9 +5752,9 @@ func TestParseDevcontainerPorts_StringPorts(t *testing.T) {
 	}
 	// Verify the "9090:3001" entry has distinct host/container.
 	for _, pm := range ports {
-		if pm.Host == 9090 && pm.Container != 3001 {
+		if pm.host == 9090 && pm.container != 3001 {
 			t.Errorf("expected container port 3001 for host 9090, "+
-				"got: %d", pm.Container)
+				"got: %d", pm.container)
 		}
 	}
 }
@@ -5782,10 +5782,10 @@ func TestParseDevcontainerPorts_JSONC(t *testing.T) {
 	found8080 := false
 	found3000 := false
 	for _, pm := range ports {
-		if pm.Host == 8080 {
+		if pm.host == 8080 {
 			found8080 = true
 		}
-		if pm.Host == 3000 {
+		if pm.host == 3000 {
 			found3000 = true
 		}
 	}
@@ -5812,7 +5812,7 @@ func TestParseDevcontainerPorts_InvalidRange(t *testing.T) {
 	ports := parseDevcontainerPorts(opts, exclude)
 
 	// Only 8080 is valid (1-65535).
-	if len(ports) != 1 || ports[0].Host != 8080 {
+	if len(ports) != 1 || ports[0].host != 8080 {
 		t.Errorf("expected [{8080 8080}], got: %v", ports)
 	}
 }
@@ -5855,10 +5855,10 @@ func TestParseDevcontainerPorts_TrailingComma(t *testing.T) {
 	found8080 := false
 	found3000 := false
 	for _, pm := range ports {
-		if pm.Host == 8080 {
+		if pm.host == 8080 {
 			found8080 = true
 		}
-		if pm.Host == 3000 {
+		if pm.host == 3000 {
 			found3000 = true
 		}
 	}
