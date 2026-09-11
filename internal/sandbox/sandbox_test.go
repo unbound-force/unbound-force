@@ -5648,3 +5648,212 @@ func TestFormatWorkspaceStatus_StoppedWorkspace(t *testing.T) {
 	}
 }
 
+// --- parseDevcontainerPorts tests ---
+
+func TestParseDevcontainerPorts_HappyPath(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"image": "test:latest",
+				"forwardPorts": [4096, 8080, 3000]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	// 4096 is DefaultServerPort and should be excluded.
+	for _, p := range ports {
+		if p == DefaultServerPort {
+			t.Errorf("DefaultServerPort (%d) should be excluded", DefaultServerPort)
+		}
+	}
+	// 8080 and 3000 should be present.
+	found8080 := false
+	found3000 := false
+	for _, p := range ports {
+		if p == 8080 {
+			found8080 = true
+		}
+		if p == 3000 {
+			found3000 = true
+		}
+	}
+	if !found8080 {
+		t.Errorf("expected port 8080 in result, got: %v", ports)
+	}
+	if !found3000 {
+		t.Errorf("expected port 3000 in result, got: %v", ports)
+	}
+}
+
+func TestParseDevcontainerPorts_NoFile(t *testing.T) {
+	opts := testOpts()
+	// Default ReadFile returns error.
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	if len(ports) != 0 {
+		t.Errorf("expected no ports when file missing, got: %v", ports)
+	}
+}
+
+func TestParseDevcontainerPorts_NoForwardPorts(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{"image": "test:latest"}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	if len(ports) != 0 {
+		t.Errorf("expected no ports when forwardPorts absent, got: %v", ports)
+	}
+}
+
+func TestParseDevcontainerPorts_AllExcluded(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{"forwardPorts": [4096]}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	if len(ports) != 0 {
+		t.Errorf("expected no ports when all excluded, got: %v", ports)
+	}
+}
+
+func TestBuildPersistentRunArgs_DevcontainerPorts(t *testing.T) {
+	opts := testOpts()
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [4096, 8080, 3000]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildPersistentRunArgs(opts, platform, "uf-sandbox-test", "uf-sandbox-test")
+	joined := strings.Join(args, " ")
+
+	// DefaultServerPort (4096) should appear exactly once.
+	if !strings.Contains(joined, "-p 4096:4096") {
+		t.Errorf("expected -p 4096:4096, got: %s", joined)
+	}
+	// Count occurrences of -p 4096:4096 — should be 1.
+	count := strings.Count(joined, "4096:4096")
+	if count != 1 {
+		t.Errorf("expected 4096:4096 once, found %d times in: %s",
+			count, joined)
+	}
+	// Devcontainer ports 8080 and 3000 should be published.
+	if !strings.Contains(joined, "-p 8080:8080") {
+		t.Errorf("expected -p 8080:8080, got: %s", joined)
+	}
+	if !strings.Contains(joined, "-p 3000:3000") {
+		t.Errorf("expected -p 3000:3000, got: %s", joined)
+	}
+}
+
+func TestBuildPersistentRunArgs_DevcontainerPortsAbsentFile(t *testing.T) {
+	opts := testOpts()
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	// Default ReadFile returns error (no devcontainer.json).
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildPersistentRunArgs(opts, platform, "uf-sandbox-test", "uf-sandbox-test")
+	joined := strings.Join(args, " ")
+
+	// DefaultServerPort should still be present.
+	if !strings.Contains(joined, "-p 4096:4096") {
+		t.Errorf("expected -p 4096:4096, got: %s", joined)
+	}
+}
+
+func TestBuildRunArgs_DevcontainerPorts(t *testing.T) {
+	opts := testOpts()
+	opts.Mode = ModeIsolated
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [4096, 8080, 3000]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildRunArgs(opts, platform, false, 0)
+	joined := strings.Join(args, " ")
+
+	// DefaultServerPort should appear exactly once.
+	count := strings.Count(joined, "4096:4096")
+	if count != 1 {
+		t.Errorf("expected 4096:4096 once, found %d times in: %s",
+			count, joined)
+	}
+	// Devcontainer ports should be published.
+	if !strings.Contains(joined, "-p 8080:8080") {
+		t.Errorf("expected -p 8080:8080, got: %s", joined)
+	}
+	if !strings.Contains(joined, "-p 3000:3000") {
+		t.Errorf("expected -p 3000:3000, got: %s", joined)
+	}
+}
+
+func TestBuildPersistentRunArgs_DevcontainerDemoDedup(t *testing.T) {
+	opts := testOpts()
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.DemoPorts = []int{8080}
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			// forwardPorts includes 8080 which is also a demo port.
+			return []byte(`{
+				"forwardPorts": [4096, 8080, 3000]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildPersistentRunArgs(opts, platform, "uf-sandbox-test", "uf-sandbox-test")
+	joined := strings.Join(args, " ")
+
+	// 8080 should appear exactly once (from demo ports, not
+	// duplicated by devcontainer ports).
+	count := strings.Count(joined, "8080:8080")
+	if count != 1 {
+		t.Errorf("expected 8080:8080 once, found %d times in: %s",
+			count, joined)
+	}
+	// 3000 should be added from devcontainer.
+	if !strings.Contains(joined, "-p 3000:3000") {
+		t.Errorf("expected -p 3000:3000, got: %s", joined)
+	}
+}
+
