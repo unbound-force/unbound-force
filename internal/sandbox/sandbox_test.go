@@ -5666,19 +5666,20 @@ func TestParseDevcontainerPorts_HappyPath(t *testing.T) {
 	ports := parseDevcontainerPorts(opts, exclude)
 
 	// 4096 is DefaultServerPort and should be excluded.
-	for _, p := range ports {
-		if p == DefaultServerPort {
-			t.Errorf("DefaultServerPort (%d) should be excluded", DefaultServerPort)
+	for _, pm := range ports {
+		if pm.Host == DefaultServerPort {
+			t.Errorf("DefaultServerPort (%d) should be excluded",
+				DefaultServerPort)
 		}
 	}
-	// 8080 and 3000 should be present.
+	// 8080 and 3000 should be present with matching host/container.
 	found8080 := false
 	found3000 := false
-	for _, p := range ports {
-		if p == 8080 {
+	for _, pm := range ports {
+		if pm.Host == 8080 && pm.Container == 8080 {
 			found8080 = true
 		}
-		if p == 3000 {
+		if pm.Host == 3000 && pm.Container == 3000 {
 			found3000 = true
 		}
 	}
@@ -5735,19 +5736,26 @@ func TestParseDevcontainerPorts_StringPorts(t *testing.T) {
 
 	// 8080 (number), 3000 (plain string), 9090 (host from
 	// host:container string) should all be present.
-	expected := map[int]bool{8080: true, 3000: true, 9090: true}
-	got := make(map[int]bool)
-	for _, p := range ports {
-		got[p] = true
+	if len(ports) != 3 {
+		t.Fatalf("expected 3 ports, got %d: %v", len(ports), ports)
 	}
-	for p := range expected {
-		if !got[p] {
-			t.Errorf("expected port %d in result, got: %v", p, ports)
+	expectedHosts := map[int]bool{8080: true, 3000: true, 9090: true}
+	gotHosts := make(map[int]bool)
+	for _, pm := range ports {
+		gotHosts[pm.Host] = true
+	}
+	for p := range expectedHosts {
+		if !gotHosts[p] {
+			t.Errorf("expected host port %d in result, got: %v",
+				p, ports)
 		}
 	}
-	if len(ports) != len(expected) {
-		t.Errorf("expected %d ports, got %d: %v",
-			len(expected), len(ports), ports)
+	// Verify the "9090:3001" entry has distinct host/container.
+	for _, pm := range ports {
+		if pm.Host == 9090 && pm.Container != 3001 {
+			t.Errorf("expected container port 3001 for host 9090, "+
+				"got: %d", pm.Container)
+		}
 	}
 }
 
@@ -5773,11 +5781,11 @@ func TestParseDevcontainerPorts_JSONC(t *testing.T) {
 	}
 	found8080 := false
 	found3000 := false
-	for _, p := range ports {
-		if p == 8080 {
+	for _, pm := range ports {
+		if pm.Host == 8080 {
 			found8080 = true
 		}
-		if p == 3000 {
+		if pm.Host == 3000 {
 			found3000 = true
 		}
 	}
@@ -5804,8 +5812,8 @@ func TestParseDevcontainerPorts_InvalidRange(t *testing.T) {
 	ports := parseDevcontainerPorts(opts, exclude)
 
 	// Only 8080 is valid (1-65535).
-	if len(ports) != 1 || ports[0] != 8080 {
-		t.Errorf("expected [8080], got: %v", ports)
+	if len(ports) != 1 || ports[0].Host != 8080 {
+		t.Errorf("expected [{8080 8080}], got: %v", ports)
 	}
 }
 
@@ -5823,6 +5831,42 @@ func TestParseDevcontainerPorts_AllExcluded(t *testing.T) {
 
 	if len(ports) != 0 {
 		t.Errorf("expected no ports when all excluded, got: %v", ports)
+	}
+}
+
+func TestParseDevcontainerPorts_TrailingComma(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [8080, 3000,],
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	if len(ports) != 2 {
+		t.Fatalf("expected 2 ports from trailing-comma input, "+
+			"got: %v", ports)
+	}
+	found8080 := false
+	found3000 := false
+	for _, pm := range ports {
+		if pm.Host == 8080 {
+			found8080 = true
+		}
+		if pm.Host == 3000 {
+			found3000 = true
+		}
+	}
+	if !found8080 {
+		t.Errorf("expected port 8080 in result, got: %v", ports)
+	}
+	if !found3000 {
+		t.Errorf("expected port 3000 in result, got: %v", ports)
 	}
 }
 
@@ -5914,6 +5958,70 @@ func TestBuildRunArgs_DevcontainerPorts(t *testing.T) {
 	}
 }
 
+func TestBuildRunArgs_DevcontainerHostContainerMapping(t *testing.T) {
+	opts := testOpts()
+	opts.Mode = ModeIsolated
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [8080, "9090:3001"]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildRunArgs(opts, platform, false, 0)
+	joined := strings.Join(args, " ")
+
+	// Plain numeric port: -p 8080:8080.
+	if !strings.Contains(joined, "-p 8080:8080") {
+		t.Errorf("expected -p 8080:8080, got: %s", joined)
+	}
+	// Host:container mapping: -p 9090:3001 (not -p 9090:9090).
+	if !strings.Contains(joined, "-p 9090:3001") {
+		t.Errorf("expected -p 9090:3001, got: %s", joined)
+	}
+	if strings.Contains(joined, "-p 9090:9090") {
+		t.Errorf("should not produce -p 9090:9090, got: %s", joined)
+	}
+}
+
+func TestBuildPersistentRunArgs_DevcontainerHostContainerMapping(t *testing.T) {
+	opts := testOpts()
+	opts.Image = DefaultImage
+	opts.Memory = DefaultMemory
+	opts.CPUs = DefaultCPUs
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			return []byte(`{
+				"forwardPorts": [8080, "9090:3001"]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	platform := PlatformConfig{OS: "darwin", Arch: "arm64"}
+	args := buildPersistentRunArgs(opts, platform,
+		"uf-sandbox-test", "uf-sandbox-test")
+	joined := strings.Join(args, " ")
+
+	// Plain numeric port: -p 8080:8080.
+	if !strings.Contains(joined, "-p 8080:8080") {
+		t.Errorf("expected -p 8080:8080, got: %s", joined)
+	}
+	// Host:container mapping: -p 9090:3001 (not -p 9090:9090).
+	if !strings.Contains(joined, "-p 9090:3001") {
+		t.Errorf("expected -p 9090:3001, got: %s", joined)
+	}
+	if strings.Contains(joined, "-p 9090:9090") {
+		t.Errorf("should not produce -p 9090:9090, got: %s", joined)
+	}
+}
+
 func TestBuildPersistentRunArgs_DevcontainerDemoDedup(t *testing.T) {
 	opts := testOpts()
 	opts.Image = DefaultImage
@@ -5946,4 +6054,3 @@ func TestBuildPersistentRunArgs_DevcontainerDemoDedup(t *testing.T) {
 		t.Errorf("expected -p 3000:3000, got: %s", joined)
 	}
 }
-
