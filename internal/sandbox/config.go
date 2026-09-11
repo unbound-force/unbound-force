@@ -206,8 +206,8 @@ func uidMappingArgs(opts Options) []string {
 // portMapping represents a host:container port pair parsed
 // from a devcontainer.json forwardPorts entry.
 type portMapping struct {
-	Host      int
-	Container int
+	host      int
+	container int
 }
 
 // stripJSONComments removes single-line (//) and block (/* */)
@@ -342,14 +342,17 @@ func parseDevcontainerPorts(opts Options, excludePorts map[int]bool) []portMappi
 
 	var ports []portMapping
 	for _, raw := range dc.ForwardPorts {
-		pm := parsePortEntry(raw)
-		if pm.Host < 1 || pm.Host > 65535 {
+		pm, ok := parsePortEntry(raw)
+		if !ok {
 			continue
 		}
-		if pm.Container < 1 || pm.Container > 65535 {
+		if pm.host < 1 || pm.host > 65535 {
 			continue
 		}
-		if !excludePorts[pm.Host] {
+		if pm.container < 1 || pm.container > 65535 {
+			continue
+		}
+		if !excludePorts[pm.host] {
 			ports = append(ports, pm)
 		}
 	}
@@ -360,19 +363,19 @@ func parseDevcontainerPorts(opts Options, excludePorts map[int]bool) []portMappi
 // single forwardPorts entry. Handles JSON numbers (8080) and
 // strings ("8080" or "8080:3000"). For plain numbers and plain
 // strings, host and container are the same. For "host:container"
-// strings, returns distinct values. Returns {-1, -1} on failure.
-func parsePortEntry(raw json.RawMessage) portMapping {
+// strings, returns distinct values. Returns false on failure.
+func parsePortEntry(raw json.RawMessage) (portMapping, bool) {
 	// Try as number first.
 	var n float64
 	if err := json.Unmarshal(raw, &n); err == nil {
 		p := int(n)
-		return portMapping{Host: p, Container: p}
+		return portMapping{host: p, container: p}, true
 	}
 
 	// Try as string.
 	var s string
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return portMapping{Host: -1, Container: -1}
+		return portMapping{}, false
 	}
 
 	// "host:container" format.
@@ -380,15 +383,15 @@ func parsePortEntry(raw json.RawMessage) portMapping {
 		host, err1 := strconv.Atoi(s[:idx])
 		container, err2 := strconv.Atoi(s[idx+1:])
 		if err1 != nil || err2 != nil {
-			return portMapping{Host: -1, Container: -1}
+			return portMapping{}, false
 		}
-		return portMapping{Host: host, Container: container}
+		return portMapping{host: host, container: container}, true
 	}
 	port, err := strconv.Atoi(s)
 	if err != nil {
-		return portMapping{Host: -1, Container: -1}
+		return portMapping{}, false
 	}
-	return portMapping{Host: port, Container: port}
+	return portMapping{host: port, container: port}, true
 }
 
 // buildRunArgs assembles the complete podman run argument list
@@ -412,7 +415,7 @@ func buildRunArgs(opts Options, platform PlatformConfig, gatewayActive bool, gat
 	// not already covered by DefaultServerPort.
 	excludePorts := map[int]bool{DefaultServerPort: true}
 	for _, pm := range parseDevcontainerPorts(opts, excludePorts) {
-		args = append(args, "-p", fmt.Sprintf("%d:%d", pm.Host, pm.Container))
+		args = append(args, "-p", fmt.Sprintf("%d:%d", pm.host, pm.container))
 	}
 
 	// UID/GID mapping (before volume mounts).
