@@ -164,6 +164,11 @@ sessions.
 | `uid_map` | bool | `false` | Enable UID mapping for rootless containers. |
 | `ide` | string | `none` | IDE for DevPod to open after workspace creation. |
 
+> **Note:** The Podman backend also reads `forwardPorts` from
+> `.devcontainer/devcontainer.json` and publishes those ports
+> automatically. Ports already listed in `demo_ports` or the
+> default server port (4096) are deduplicated.
+
 Valid values for `runtime`: `auto`, `podman`, `docker`.
 
 Valid values for `backend`: `auto`, `podman`, `devpod`.

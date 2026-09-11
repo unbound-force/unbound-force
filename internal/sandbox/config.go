@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -201,12 +203,71 @@ func uidMappingArgs(opts Options) []string {
 	return []string{"--userns=keep-id:uid=1000,gid=1000"}
 }
 
+// stripJSONComments removes single-line (//) and block (/* */)
+// comments from JSONC input, preserving string contents. The
+// devcontainer spec uses JSONC (JSON with Comments) as the
+// canonical format for devcontainer.json.
+func stripJSONComments(data []byte) []byte {
+	src := string(data)
+	var out strings.Builder
+	out.Grow(len(src))
+	i := 0
+	for i < len(src) {
+		// String literal — copy verbatim.
+		if src[i] == '"' {
+			out.WriteByte(src[i])
+			i++
+			for i < len(src) {
+				out.WriteByte(src[i])
+				if src[i] == '\\' {
+					i++
+					if i < len(src) {
+						out.WriteByte(src[i])
+					}
+				} else if src[i] == '"' {
+					break
+				}
+				i++
+			}
+			i++
+			continue
+		}
+		// Line comment.
+		if i+1 < len(src) && src[i] == '/' && src[i+1] == '/' {
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		// Block comment.
+		if i+1 < len(src) && src[i] == '/' && src[i+1] == '*' {
+			i += 2
+			for i+1 < len(src) && !(src[i] == '*' && src[i+1] == '/') {
+				i++
+			}
+			if i+1 < len(src) {
+				i += 2
+			}
+			continue
+		}
+		out.WriteByte(src[i])
+		i++
+	}
+	return []byte(out.String())
+}
+
 // parseDevcontainerPorts reads .devcontainer/devcontainer.json
 // from the project directory via opts.ReadFile and returns the
 // forwardPorts array as integer port numbers. Returns nil with
 // no error when the file is absent or contains no forwardPorts.
 // Ports that are already published (DefaultServerPort and demo
 // ports) are excluded from the result to avoid duplicates.
+//
+// The devcontainer spec defines forwardPorts as
+// Array<number | string>, where string values represent
+// host:container port mappings (e.g., "8080:3000"). This
+// function handles both forms and strips JSONC comments
+// before parsing.
 func parseDevcontainerPorts(opts Options, excludePorts map[int]bool) []int {
 	dcPath := filepath.Join(opts.ProjectDir,
 		".devcontainer", "devcontainer.json")
@@ -215,25 +276,54 @@ func parseDevcontainerPorts(opts Options, excludePorts map[int]bool) []int {
 		return nil
 	}
 
+	// Strip JSONC comments before unmarshaling.
+	data = stripJSONComments(data)
+
 	var dc struct {
-		ForwardPorts []json.Number `json:"forwardPorts"`
+		ForwardPorts []json.RawMessage `json:"forwardPorts"`
 	}
 	if err := json.Unmarshal(data, &dc); err != nil {
 		return nil
 	}
 
 	var ports []int
-	for _, p := range dc.ForwardPorts {
-		n, err := p.Int64()
-		if err != nil {
+	for _, raw := range dc.ForwardPorts {
+		port := parsePortEntry(raw)
+		if port < 1 || port > 65535 {
 			continue
 		}
-		port := int(n)
 		if !excludePorts[port] {
 			ports = append(ports, port)
 		}
 	}
 	return ports
+}
+
+// parsePortEntry extracts the host port from a single
+// forwardPorts entry. Handles JSON numbers (8080) and
+// strings ("8080" or "8080:3000"). Returns -1 on failure.
+func parsePortEntry(raw json.RawMessage) int {
+	// Try as number first.
+	var n float64
+	if err := json.Unmarshal(raw, &n); err == nil {
+		return int(n)
+	}
+
+	// Try as string.
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return -1
+	}
+
+	// "host:container" format — use the host port.
+	if idx := strings.IndexByte(s, ':'); idx >= 0 {
+		s = s[:idx]
+	}
+	port, err := strconv.Atoi(s)
+	if err != nil {
+		return -1
+	}
+	return port
 }
 
 // buildRunArgs assembles the complete podman run argument list
@@ -257,8 +347,7 @@ func buildRunArgs(opts Options, platform PlatformConfig, gatewayActive bool, gat
 	// not already covered by DefaultServerPort.
 	excludePorts := map[int]bool{DefaultServerPort: true}
 	for _, port := range parseDevcontainerPorts(opts, excludePorts) {
-		args = append(args, "-p",
-			fmt.Sprintf("%d:%d", port, port))
+		args = append(args, "-p", fmt.Sprintf("%d:%d", port, port))
 	}
 
 	// UID/GID mapping (before volume mounts).
