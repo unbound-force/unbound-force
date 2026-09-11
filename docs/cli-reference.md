@@ -202,6 +202,11 @@ uf sandbox create [flags]
 | `--demo-ports` | int slice | `nil` | Additional ports to expose for demos (comma-separated, e.g., `3000,8080`) |
 | `--ide` | string | `"none"` | IDE for DevPod to open: `none`, `vscode`, `openvscode`, `fleet`, `jupyternotebook`, `cursor` |
 
+> **Note:** Ports listed in `forwardPorts` in
+> `.devcontainer/devcontainer.json` are also published
+> automatically. See [Automatic port forwarding](#uf-sandbox-init)
+> above for details.
+
 **Example**
 
 ```bash
@@ -260,6 +265,11 @@ uf sandbox start [flags]
 | `--no-parent` | bool | `false` | Mount only the project directory (disable parent directory mount) |
 | `--uidmap` | bool | `false` | Use explicit UID/GID mapping (for macOS when Podman machine virtiofs does not support `--userns=keep-id`) |
 | `--ide` | string | `"none"` | IDE for DevPod to open: `none`, `vscode`, `openvscode`, `fleet`, `jupyternotebook`, `cursor` |
+
+> **Note:** Ports listed in `forwardPorts` in
+> `.devcontainer/devcontainer.json` are also published
+> automatically. See [Automatic port forwarding](#uf-sandbox-init)
+> above for details.
 
 **Example**
 
