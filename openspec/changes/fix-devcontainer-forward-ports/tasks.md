@@ -74,3 +74,10 @@
 
 <!-- spec-review: retroactive -->
 <!-- code-review: passed -->
+
+> **Process note:** These spec artifacts were created
+> retroactively after implementation (iteration 4 of the
+> review→fix loop). AGENTS.md requires spec artifacts to be
+> committed before implementation begins. This deviation is
+> acknowledged; future changes should follow the spec-first
+> workflow.

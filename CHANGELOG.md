@@ -20,8 +20,10 @@ Each entry follows the format: `- <change-name>: <summary>`.
   read `forwardPorts` from `.devcontainer/devcontainer.json`
   and publish them via `-p` flags. Supports numeric ports,
   `"host:container"` string mappings, and JSONC comments/
-  trailing commas. Deduplicates against `DefaultServerPort`
-  and `--demo-ports`. (Fixes: #595)
+  trailing commas. `uf sandbox create` (persistent path)
+  deduplicates against both `DefaultServerPort` and
+  `--demo-ports`; `uf sandbox start` (ephemeral path)
+  deduplicates against `DefaultServerPort`. (Fixes: #595)
 - fix-sandbox-persistent-workdir: `buildPersistentRunArgs()`
   now sets `--workdir` and `WORKSPACE` env var for persistent
   Podman workspaces. OpenCode starts in the project directory
