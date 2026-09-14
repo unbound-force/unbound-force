@@ -33,6 +33,17 @@ type Summary struct {
 	Failed int `json:"failed"`
 }
 
+// InternalError indicates an internal (exit code 2) failure such
+// as invalid arguments or filesystem errors. Callers use
+// errors.As to distinguish internal errors from check failures
+// (exit code 1).
+type InternalError struct {
+	Err error
+}
+
+func (e *InternalError) Error() string { return e.Err.Error() }
+func (e *InternalError) Unwrap() error { return e.Err }
+
 // GateReport is the complete output from a gate run, including
 // provenance metadata per Constitution III.
 type GateReport struct {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,17 +21,13 @@ type gateParams struct {
 }
 
 // runGate executes the gate command with testable parameters.
-// Returns an exitCode and optional error. Exit code 0 = pass,
-// 1 = check failure or validation error, 2 = internal error.
-func runGate(p gateParams) (int, error) {
-	// Validate format flag (FR-003).
-	if p.format != "text" && p.format != "json" {
-		fmt.Fprintf(p.stderr,
-			"Error: invalid format %q: must be 'text' or 'json'\n",
-			p.format)
-		return 1, fmt.Errorf("invalid format %q", p.format)
-	}
-
+// Returns error on check failure or internal error. Callers
+// inspect the error type to determine exit code:
+//
+//	nil         → exit 0 (all checks pass)
+//	gate error  → exit 1 (check failure)
+//	other error → exit 2 (internal error)
+func runGate(p gateParams) error {
 	opts := gate.Options{
 		TargetDir: p.targetDir,
 		Phase:     p.phase,
@@ -41,10 +38,9 @@ func runGate(p gateParams) (int, error) {
 
 	report, err := gate.Run(opts)
 
-	// Internal error (no report) — exit code 2.
+	// Internal error (no report) — caller maps to exit 2.
 	if report == nil && err != nil {
-		fmt.Fprintf(p.stderr, "Error: %v\n", err)
-		return 2, err
+		return &gate.InternalError{Err: err}
 	}
 
 	// Format and write output to stdout (FR-009, D7).
@@ -52,23 +48,34 @@ func runGate(p gateParams) (int, error) {
 		switch p.format {
 		case "json":
 			if fmtErr := gate.FormatJSON(report, p.stdout); fmtErr != nil {
-				fmt.Fprintf(p.stderr, "Error: format json: %v\n", fmtErr)
-				return 2, fmt.Errorf("format json: %w", fmtErr)
+				return &gate.InternalError{
+					Err: fmt.Errorf("format json: %w", fmtErr),
+				}
 			}
 		default:
 			if fmtErr := gate.FormatText(report, p.stdout); fmtErr != nil {
-				fmt.Fprintf(p.stderr, "Error: format text: %v\n", fmtErr)
-				return 2, fmt.Errorf("format text: %w", fmtErr)
+				return &gate.InternalError{
+					Err: fmt.Errorf("format text: %w", fmtErr),
+				}
 			}
 		}
 	}
 
-	// Check failure — exit code 1.
-	if err != nil {
-		return 1, err
-	}
+	// Check failure — caller maps to exit 1.
+	return err
+}
 
-	return 0, nil
+// gateExitCode returns the appropriate exit code for a gate error.
+// Exit 0 = pass, 1 = check failure, 2 = internal error.
+func gateExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var internal *gate.InternalError
+	if errors.As(err, &internal) {
+		return 2
+	}
+	return 1
 }
 
 // newGateCmd creates the cobra command for the gate subcommand.
@@ -101,10 +108,16 @@ metadata (version, producer, timestamp, branch).`,
 			// --phase is required (FR-002).
 			if phase == "" {
 				validList := strings.Join(gate.ValidPhases(), ", ")
-				fmt.Fprintf(cmd.ErrOrStderr(),
-					"Error: --phase is required (valid phases: %s)\n",
+				return fmt.Errorf(
+					"--phase is required (valid phases: %s)",
 					validList)
-				return fmt.Errorf("--phase is required")
+			}
+
+			// Validate format flag (FR-003).
+			if format != "text" && format != "json" {
+				return fmt.Errorf(
+					"invalid format %q: must be 'text' or 'json'",
+					format)
 			}
 
 			if dir == "" || dir == "." {
@@ -115,7 +128,7 @@ metadata (version, producer, timestamp, branch).`,
 				dir = cwd
 			}
 
-			exitCode, err := runGate(gateParams{
+			err := runGate(gateParams{
 				targetDir: dir,
 				phase:     phase,
 				format:    format,
@@ -123,7 +136,11 @@ metadata (version, producer, timestamp, branch).`,
 				stderr:    cmd.ErrOrStderr(),
 			})
 
-			if exitCode == 2 {
+			if gateExitCode(err) == 2 {
+				// Cobra prints the error; use os.Exit for
+				// exit code 2 since Cobra always returns 1.
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"Error: %v\n", err)
 				os.Exit(2)
 			}
 

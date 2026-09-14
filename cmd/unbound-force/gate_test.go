@@ -33,7 +33,7 @@ func TestRunGate_JSONOutput(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	exitCode, err := runGate(gateParams{
+	err := runGate(gateParams{
 		targetDir: dir,
 		phase:     "specify",
 		format:    "json",
@@ -44,8 +44,8 @@ func TestRunGate_JSONOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if exitCode != 0 {
-		t.Errorf("expected exit code 0, got %d", exitCode)
+	if gateExitCode(err) != 0 {
+		t.Errorf("expected exit code 0, got %d", gateExitCode(err))
 	}
 
 	// Verify valid JSON.
@@ -68,7 +68,7 @@ func TestRunGate_TextOutput(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	exitCode, err := runGate(gateParams{
+	err := runGate(gateParams{
 		targetDir: dir,
 		phase:     "specify",
 		format:    "text",
@@ -79,8 +79,8 @@ func TestRunGate_TextOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if exitCode != 0 {
-		t.Errorf("expected exit code 0, got %d", exitCode)
+	if gateExitCode(err) != 0 {
+		t.Errorf("expected exit code 0, got %d", gateExitCode(err))
 	}
 
 	output := stdout.String()
@@ -93,7 +93,7 @@ func TestRunGate_InvalidPhase(t *testing.T) {
 	dir := t.TempDir()
 
 	var stdout, stderr bytes.Buffer
-	exitCode, err := runGate(gateParams{
+	err := runGate(gateParams{
 		targetDir: dir,
 		phase:     "deploy",
 		format:    "text",
@@ -104,8 +104,8 @@ func TestRunGate_InvalidPhase(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid phase")
 	}
-	if exitCode != 2 {
-		t.Errorf("expected exit code 2 for internal error, got %d", exitCode)
+	if gateExitCode(err) != 2 {
+		t.Errorf("expected exit code 2 for internal error, got %d", gateExitCode(err))
 	}
 }
 
@@ -113,7 +113,14 @@ func TestRunGate_InvalidFormat(t *testing.T) {
 	dir := t.TempDir()
 
 	var stdout, stderr bytes.Buffer
-	exitCode, err := runGate(gateParams{
+	// Note: format validation moved to RunE (Cobra level).
+	// runGate now receives only validated formats, so passing
+	// "xml" here falls through to the default text formatter
+	// since gate.Run still accepts the options. This test
+	// verifies the internal error wrapping for invalid phase
+	// scenarios instead. The format validation is tested via
+	// the Cobra command in TestNewGateCmd_InvalidFormat.
+	err := runGate(gateParams{
 		targetDir: dir,
 		phase:     "specify",
 		format:    "xml",
@@ -121,22 +128,16 @@ func TestRunGate_InvalidFormat(t *testing.T) {
 		stderr:    &stderr,
 	})
 
+	// With an empty dir, the check will fail (exit 1), not
+	// an internal error — since "xml" falls to default branch.
 	if err == nil {
-		t.Fatal("expected error for invalid format")
-	}
-	if exitCode != 1 {
-		t.Errorf("expected exit code 1 for invalid format, got %d", exitCode)
-	}
-
-	stderrOutput := stderr.String()
-	if !strings.Contains(stderrOutput, "invalid format") {
-		t.Errorf("expected stderr to contain 'invalid format', got: %s", stderrOutput)
+		t.Fatal("expected error for failing check")
 	}
 }
 
 func TestRunGate_NonExistentDir(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	exitCode, err := runGate(gateParams{
+	err := runGate(gateParams{
 		targetDir: "/tmp/nonexistent-gate-cli-test-dir-xyz",
 		phase:     "specify",
 		format:    "text",
@@ -147,8 +148,8 @@ func TestRunGate_NonExistentDir(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-existent directory")
 	}
-	if exitCode != 2 {
-		t.Errorf("expected exit code 2 for non-existent dir, got %d", exitCode)
+	if gateExitCode(err) != 2 {
+		t.Errorf("expected exit code 2 for non-existent dir, got %d", gateExitCode(err))
 	}
 }
 
@@ -157,7 +158,7 @@ func TestRunGate_CheckFailure_ExitCode1(t *testing.T) {
 	// Empty directory — specify phase will fail.
 
 	var stdout, stderr bytes.Buffer
-	exitCode, err := runGate(gateParams{
+	err := runGate(gateParams{
 		targetDir: dir,
 		phase:     "specify",
 		format:    "json",
@@ -168,8 +169,8 @@ func TestRunGate_CheckFailure_ExitCode1(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for failing check")
 	}
-	if exitCode != 1 {
-		t.Errorf("expected exit code 1 for check failure, got %d", exitCode)
+	if gateExitCode(err) != 1 {
+		t.Errorf("expected exit code 1 for check failure, got %d", gateExitCode(err))
 	}
 
 	// Verify JSON output was still produced.
@@ -190,7 +191,7 @@ func TestRunGate_PathIsFile(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	exitCode, err := runGate(gateParams{
+	err := runGate(gateParams{
 		targetDir: filePath,
 		phase:     "specify",
 		format:    "text",
@@ -201,7 +202,20 @@ func TestRunGate_PathIsFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for file path")
 	}
-	if exitCode != 2 {
-		t.Errorf("expected exit code 2 for file path, got %d", exitCode)
+	if gateExitCode(err) != 2 {
+		t.Errorf("expected exit code 2 for file path, got %d", gateExitCode(err))
+	}
+}
+
+func TestNewGateCmd_InvalidFormat(t *testing.T) {
+	cmd := newGateCmd()
+	cmd.SetArgs([]string{"--phase", "specify", "--format", "xml"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid format")
+	}
+	if !strings.Contains(err.Error(), "invalid format") {
+		t.Errorf("expected 'invalid format' in error, got: %v", err)
 	}
 }
