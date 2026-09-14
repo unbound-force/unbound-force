@@ -39,56 +39,94 @@ var phaseChecks = map[string][]CheckFunc{
 	"pr":        {checkReviewPass, checkNotOnMain},
 }
 
+func init() {
+	for _, phase := range validPhases {
+		if _, ok := phaseChecks[phase]; !ok {
+			panic(fmt.Sprintf(
+				"gate: validPhases contains %q but phaseChecks has no entry for it",
+				phase))
+		}
+	}
+}
+
+// artifactQuery describes the artifact to probe across both
+// OpenSpec and Speckit locations.
+type artifactQuery struct {
+	dir          string // project root directory
+	checkName    string // check identifier for the result
+	label        string // human-readable artifact label
+	openspecFile string // filename under openspec/changes/*/
+	speckitFile  string // filename under specs/*/
+}
+
 // checkArtifactExists probes both OpenSpec and Speckit locations
 // for an artifact. Returns a CheckResult with the given check
 // name and label. Glob errors are impossible since patterns are
 // constructed from constants via filepath.Join.
-func checkArtifactExists(dir, checkName, label, openspecFile, speckitFile string) CheckResult {
+func checkArtifactExists(q artifactQuery) CheckResult {
 	// OpenSpec: openspec/changes/*/<file>
-	pattern := filepath.Join(dir, "openspec", "changes", "*", openspecFile)
+	pattern := filepath.Join(q.dir, "openspec", "changes", "*", q.openspecFile)
 	if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
-		rel, _ := filepath.Rel(dir, matches[0])
+		rel, _ := filepath.Rel(q.dir, matches[0])
 		return CheckResult{
-			Name:    checkName,
+			Name:    q.checkName,
 			Passed:  true,
-			Message: fmt.Sprintf("%s found at %s", label, rel),
+			Message: fmt.Sprintf("%s found at %s", q.label, rel),
 		}
 	}
 
 	// Speckit: specs/*/<file>
-	pattern = filepath.Join(dir, "specs", "*", speckitFile)
+	pattern = filepath.Join(q.dir, "specs", "*", q.speckitFile)
 	if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
-		rel, _ := filepath.Rel(dir, matches[0])
+		rel, _ := filepath.Rel(q.dir, matches[0])
 		return CheckResult{
-			Name:    checkName,
+			Name:    q.checkName,
 			Passed:  true,
-			Message: fmt.Sprintf("%s found at %s", label, rel),
+			Message: fmt.Sprintf("%s found at %s", q.label, rel),
 		}
 	}
 
 	return CheckResult{
-		Name:    checkName,
+		Name:    q.checkName,
 		Passed:  false,
-		Message: fmt.Sprintf("No %s artifact found (expected openspec/changes/*/%s or specs/*/%s)", label, openspecFile, speckitFile),
+		Message: fmt.Sprintf("No %s artifact found (expected openspec/changes/*/%s or specs/*/%s)", q.label, q.openspecFile, q.speckitFile),
 	}
 }
 
 // checkSpecExists probes both OpenSpec and Speckit locations for
 // a spec artifact (FR-004). Passes if found in either location.
 func checkSpecExists(dir string) CheckResult {
-	return checkArtifactExists(dir, "spec-exists", "Spec", "proposal.md", "spec.md")
+	return checkArtifactExists(artifactQuery{
+		dir:          dir,
+		checkName:    "spec-exists",
+		label:        "Spec",
+		openspecFile: "proposal.md",
+		speckitFile:  "spec.md",
+	})
 }
 
 // checkPlanExists probes both OpenSpec and Speckit locations for
 // a plan/design artifact (FR-005).
 func checkPlanExists(dir string) CheckResult {
-	return checkArtifactExists(dir, "plan-exists", "Plan", "design.md", "plan.md")
+	return checkArtifactExists(artifactQuery{
+		dir:          dir,
+		checkName:    "plan-exists",
+		label:        "Plan",
+		openspecFile: "design.md",
+		speckitFile:  "plan.md",
+	})
 }
 
 // checkTasksExist probes both OpenSpec and Speckit locations for
 // a tasks artifact (FR-006).
 func checkTasksExist(dir string) CheckResult {
-	return checkArtifactExists(dir, "tasks-exist", "Tasks", "tasks.md", "tasks.md")
+	return checkArtifactExists(artifactQuery{
+		dir:          dir,
+		checkName:    "tasks-exist",
+		label:        "Tasks",
+		openspecFile: "tasks.md",
+		speckitFile:  "tasks.md",
+	})
 }
 
 // coveragePctRe matches lines containing a coverage percentage

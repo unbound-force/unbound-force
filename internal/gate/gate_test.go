@@ -892,6 +892,30 @@ func TestValidPhases_ReturnsAllPhases(t *testing.T) {
 	}
 }
 
+func TestValidPhases_SyncWithPhaseChecks(t *testing.T) {
+	// Verify every valid phase has a corresponding entry in
+	// phaseChecks. This is also enforced by the init() guard
+	// in checks.go, but a test documents the expectation and
+	// catches map-only additions that skip validPhases.
+	for _, phase := range validPhases {
+		if _, ok := phaseChecks[phase]; !ok {
+			t.Errorf("validPhases contains %q but phaseChecks has no entry", phase)
+		}
+	}
+	for phase := range phaseChecks {
+		found := false
+		for _, p := range validPhases {
+			if p == phase {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("phaseChecks contains %q but validPhases does not", phase)
+		}
+	}
+}
+
 func TestValidPhases_ReturnsCopy(t *testing.T) {
 	phases := ValidPhases()
 	phases[0] = "mutated"
