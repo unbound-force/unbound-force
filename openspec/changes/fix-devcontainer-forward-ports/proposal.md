@@ -54,7 +54,7 @@ devcontainer spec.
   (~200 lines)
 - `internal/sandbox/podman.go` — devcontainer port
   integration in `buildPersistentRunArgs()` (~10 lines)
-- `internal/sandbox/sandbox_test.go` — 11 new test
+- `internal/sandbox/sandbox_test.go` — 15 new test
   functions (~410 lines)
 - `docs/cli-reference.md` — notes for `uf sandbox init`,
   `uf sandbox create`, `uf sandbox start`
@@ -93,6 +93,6 @@ argument list, which is testable.
 **Assessment**: PASS
 
 All functions use dependency injection (`opts.ReadFile`)
-for testability. Eleven unit and integration tests cover
+for testability. Fifteen unit and integration tests cover
 happy path, edge cases, JSONC, trailing commas, port
 validation, deduplication, and absent files.

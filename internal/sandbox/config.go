@@ -305,6 +305,41 @@ func stripTrailingCommas(data []byte) []byte {
 	return []byte(out.String())
 }
 
+// parsePortEntry extracts the host and container ports from a
+// single forwardPorts entry. Handles JSON numbers (8080) and
+// strings ("8080" or "8080:3000"). For plain numbers and plain
+// strings, host and container are the same. For "host:container"
+// strings, returns distinct values. Returns false on failure.
+func parsePortEntry(raw json.RawMessage) (portMapping, bool) {
+	// Try as number first.
+	var n float64
+	if err := json.Unmarshal(raw, &n); err == nil {
+		p := int(n)
+		return portMapping{host: p, container: p}, true
+	}
+
+	// Try as string.
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return portMapping{}, false
+	}
+
+	// "host:container" format.
+	if idx := strings.IndexByte(s, ':'); idx >= 0 {
+		host, err1 := strconv.Atoi(s[:idx])
+		container, err2 := strconv.Atoi(s[idx+1:])
+		if err1 != nil || err2 != nil {
+			return portMapping{}, false
+		}
+		return portMapping{host: host, container: container}, true
+	}
+	port, err := strconv.Atoi(s)
+	if err != nil {
+		return portMapping{}, false
+	}
+	return portMapping{host: port, container: port}, true
+}
+
 // parseDevcontainerPorts reads .devcontainer/devcontainer.json
 // from the project directory via opts.ReadFile and returns the
 // forwardPorts array as port mappings. Returns nil with no
@@ -357,41 +392,6 @@ func parseDevcontainerPorts(opts Options, excludePorts map[int]bool) []portMappi
 		ports = append(ports, pm)
 	}
 	return ports
-}
-
-// parsePortEntry extracts the host and container ports from a
-// single forwardPorts entry. Handles JSON numbers (8080) and
-// strings ("8080" or "8080:3000"). For plain numbers and plain
-// strings, host and container are the same. For "host:container"
-// strings, returns distinct values. Returns false on failure.
-func parsePortEntry(raw json.RawMessage) (portMapping, bool) {
-	// Try as number first.
-	var n float64
-	if err := json.Unmarshal(raw, &n); err == nil {
-		p := int(n)
-		return portMapping{host: p, container: p}, true
-	}
-
-	// Try as string.
-	var s string
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return portMapping{}, false
-	}
-
-	// "host:container" format.
-	if idx := strings.IndexByte(s, ':'); idx >= 0 {
-		host, err1 := strconv.Atoi(s[:idx])
-		container, err2 := strconv.Atoi(s[idx+1:])
-		if err1 != nil || err2 != nil {
-			return portMapping{}, false
-		}
-		return portMapping{host: host, container: container}, true
-	}
-	port, err := strconv.Atoi(s)
-	if err != nil {
-		return portMapping{}, false
-	}
-	return portMapping{host: port, container: port}, true
 }
 
 // buildRunArgs assembles the complete podman run argument list
