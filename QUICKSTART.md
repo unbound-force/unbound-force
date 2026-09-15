@@ -103,6 +103,22 @@ curl -fsSL https://opencode.ai/install | bash
 For ARM64 systems, replace `amd64` with `arm64` in the
 grep pattern.
 
+### Build from Source
+
+```bash
+git clone https://github.com/unbound-force/unbound-force.git
+cd unbound-force
+make install
+```
+
+Requires Go 1.25+ and `make`. Installs `unbound-force` and
+creates a `uf` symlink in `$GOPATH/bin`. Ensure `$GOPATH/bin`
+is on your `$PATH`, then verify with:
+
+```bash
+uf version
+```
+
 ## For Project Maintainers
 
 Add Unbound Force to your project:
