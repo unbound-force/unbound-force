@@ -15,6 +15,15 @@ Each entry follows the format: `- <change-name>: <summary>`.
   org-config-specific terminology for non-org-config repos.
   (Spec: openspec/changes/content-portability-guardrails/,
   Fixes: #593)
+- devcontainer-forward-ports: Podman sandbox commands
+  (`uf sandbox create`, `uf sandbox start`) now automatically
+  read `forwardPorts` from `.devcontainer/devcontainer.json`
+  and publish them via `-p` flags. Supports numeric ports,
+  `"host:container"` string mappings, and JSONC comments/
+  trailing commas. `uf sandbox create` (persistent path)
+  deduplicates against both `DefaultServerPort` and
+  `--demo-ports`; `uf sandbox start` (ephemeral path)
+  deduplicates against `DefaultServerPort`. (Fixes: #595)
 - fix-sandbox-persistent-workdir: `buildPersistentRunArgs()`
   now sets `--workdir` and `WORKSPACE` env var for persistent
   Podman workspaces. OpenCode starts in the project directory
