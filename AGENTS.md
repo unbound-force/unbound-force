@@ -161,9 +161,11 @@ These rules are non-negotiable. Violations are CRITICAL severity.
   or CI reliability fix when the target immutable commit SHA is
   verified upstream, existing gates remain enforced, rollback to
   the previous SHA is documented, reproducible validation evidence
-  is provided, and normal review and CI approval are complete. Do
-  not use mutable tags or weaken, bypass, or disable any gate; stop
-  and report when these conditions cannot be met.
+  is provided; and normal review and CI approval are completed.
+  Pins MUST NOT be changed to mutable tags or other
+  name-addressed refs. Agents MUST report and stop when any
+  condition is missing or when a change would weaken, bypass,
+  or disable a gate.
 - **Phase boundaries**: MUST NOT cross workflow phase boundaries.
   Spec phases: spec artifacts only. Implement: source code.
   Review: fixes only. Violation = process error, stop immediately.
