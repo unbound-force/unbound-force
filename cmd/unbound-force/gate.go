@@ -24,9 +24,9 @@ type gateParams struct {
 // Returns error on check failure or internal error. Callers
 // inspect the error type to determine exit code:
 //
-//	nil         → exit 0 (all checks pass)
-//	gate error  → exit 1 (check failure)
-//	other error → exit 2 (internal error)
+//	nil              → exit 0 (all checks pass)
+//	plain error      → exit 1 (validation or check failure)
+//	*InternalError   → exit 2 (internal error)
 func runGate(p gateParams) error {
 	opts := gate.Options{
 		TargetDir: p.targetDir,
@@ -38,9 +38,11 @@ func runGate(p gateParams) error {
 
 	report, err := gate.Run(opts)
 
-	// Internal error (no report) — caller maps to exit 2.
+	// No report and error — gate.Run already wraps true
+	// internal errors as *gate.InternalError (exit 2).
+	// Validation errors are plain errors (exit 1).
 	if report == nil && err != nil {
-		return &gate.InternalError{Err: err}
+		return err
 	}
 
 	// Format and write output to stdout (FR-009, D7).
@@ -96,7 +98,7 @@ Phases:
 Exit codes:
   0  All checks pass
   1  One or more checks failed
-  2  Internal error (invalid arguments, filesystem error)
+  2  Internal error (unexpected filesystem failure)
 
 Use --format json for machine-readable output with provenance
 metadata (version, producer, timestamp, branch).`,

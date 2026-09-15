@@ -104,8 +104,8 @@ func TestRunGate_InvalidPhase(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid phase")
 	}
-	if gateExitCode(err) != 2 {
-		t.Errorf("expected exit code 2 for internal error, got %d", gateExitCode(err))
+	if gateExitCode(err) != 1 {
+		t.Errorf("expected exit code 1 for invalid phase, got %d", gateExitCode(err))
 	}
 }
 
@@ -148,8 +148,8 @@ func TestRunGate_NonExistentDir(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-existent directory")
 	}
-	if gateExitCode(err) != 2 {
-		t.Errorf("expected exit code 2 for non-existent dir, got %d", gateExitCode(err))
+	if gateExitCode(err) != 1 {
+		t.Errorf("expected exit code 1 for non-existent dir, got %d", gateExitCode(err))
 	}
 }
 
@@ -202,8 +202,8 @@ func TestRunGate_PathIsFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for file path")
 	}
-	if gateExitCode(err) != 2 {
-		t.Errorf("expected exit code 2 for file path, got %d", gateExitCode(err))
+	if gateExitCode(err) != 1 {
+		t.Errorf("expected exit code 1 for file path, got %d", gateExitCode(err))
 	}
 }
 

@@ -51,11 +51,12 @@ func (o *Options) defaults() {
 // Run executes the gate checks for the requested phase and
 // returns the report. Returns an error with the report when
 // any check fails (exit code 1). Returns a nil report with
-// error for internal errors (exit code 2).
+// error for validation errors (exit code 1) or internal
+// errors wrapped as *InternalError (exit code 2).
 func Run(opts Options) (*GateReport, error) {
 	opts.defaults()
 
-	// Validate phase.
+	// Validate phase — user error, not internal (exit 1).
 	if !isValidPhase(opts.Phase) {
 		return nil, fmt.Errorf(
 			"invalid phase %q: must be one of %s",
@@ -67,22 +68,30 @@ func Run(opts Options) (*GateReport, error) {
 	// Canonicalize and validate target directory (FR-010).
 	absDir, err := filepath.Abs(opts.TargetDir)
 	if err != nil {
-		return nil, fmt.Errorf("resolve directory: %w", err)
+		return nil, &InternalError{
+			Err: fmt.Errorf("resolve directory: %w", err),
+		}
 	}
 
 	resolved, err := filepath.EvalSymlinks(absDir)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// User-supplied path does not exist — exit 1.
 			return nil, fmt.Errorf("directory does not exist: %s", opts.TargetDir)
 		}
-		return nil, fmt.Errorf("resolve symlinks: %w", err)
+		return nil, &InternalError{
+			Err: fmt.Errorf("resolve symlinks: %w", err),
+		}
 	}
 
 	info, err := os.Stat(resolved)
 	if err != nil {
-		return nil, fmt.Errorf("stat directory: %w", err)
+		return nil, &InternalError{
+			Err: fmt.Errorf("stat directory: %w", err),
+		}
 	}
 	if !info.IsDir() {
+		// User-supplied path is a file — exit 1.
 		return nil, fmt.Errorf("path is not a directory: %s", opts.TargetDir)
 	}
 
