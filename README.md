@@ -43,6 +43,16 @@ sudo dnf install -y "$(
 )"
 ```
 
+### Build from Source
+
+```bash
+git clone https://github.com/unbound-force/unbound-force.git
+cd unbound-force
+make install
+```
+
+Requires Go 1.25+ and `make`. Installs `unbound-force` and creates a `uf` symlink in `$GOPATH/bin`. Ensure `$GOPATH/bin` is on your `$PATH`, then verify with `uf version`.
+
 See **[QUICKSTART.md](QUICKSTART.md)** for full installation instructions (macOS and Fedora/RHEL), first-use walkthrough, and platform-specific guidance. See **[Usage Guide](docs/usage.md)** for common workflows and command reference.
 
 ## Specification Framework

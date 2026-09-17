@@ -5,6 +5,14 @@ Each entry follows the format: `- <change-name>: <summary>`.
 
 ## Unreleased
 
+### Added
+- build-from-source: Added "Build from Source" install
+  instructions to README.md and QUICKSTART.md. Documents
+  prerequisites (Go 1.25+, make), clone + install commands
+  (`make install`), and verification (`uf version`).
+  (Spec: openspec/changes/build-from-source/,
+  Fixes: #536)
+
 ### Fixed
 - content-portability-guardrails: Add Content Portability
   rules (CP-001, CP-002, CP-003) to the default convention
