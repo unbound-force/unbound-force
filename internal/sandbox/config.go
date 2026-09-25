@@ -8,6 +8,7 @@ package sandbox
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -309,12 +310,24 @@ func stripTrailingCommas(data []byte) []byte {
 // single forwardPorts entry. Handles JSON numbers (8080) and
 // strings ("8080" or "8080:3000"). For plain numbers and plain
 // strings, host and container are the same. For "host:container"
-// strings, returns distinct values. Returns false on failure.
+// strings, returns distinct values. Fractional numbers (8080.5),
+// exponent-notation overflow (1e18), Inf, and NaN are rejected.
+// Returns false on failure.
 func parsePortEntry(raw json.RawMessage) (portMapping, bool) {
 	// Try as number first.
 	var n float64
 	if err := json.Unmarshal(raw, &n); err == nil {
+		// Reject fractional, Inf, and NaN values — ports
+		// must be exact integers. math.Trunc strips the
+		// fractional part; NaN fails because NaN != NaN.
+		if n != math.Trunc(n) || math.IsInf(n, 0) {
+			return portMapping{}, false
+		}
+		// Reject values that overflow int on conversion.
 		p := int(n)
+		if float64(p) != n {
+			return portMapping{}, false
+		}
 		return portMapping{host: p, container: p}, true
 	}
 

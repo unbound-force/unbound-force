@@ -6086,3 +6086,64 @@ func TestParseDevcontainerPorts_DuplicateHostPorts(t *testing.T) {
 			ports[0].container)
 	}
 }
+
+func TestParseDevcontainerPorts_FractionalPort(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			// 8080.5 is fractional and must be rejected,
+			// not silently truncated to 8080.
+			return []byte(`{
+				"forwardPorts": [8080.5, 3000]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	// Only 3000 is valid; 8080.5 must be rejected.
+	if len(ports) != 1 {
+		t.Fatalf("expected 1 port, got %d: %v",
+			len(ports), ports)
+	}
+	if ports[0].host != 3000 {
+		t.Errorf("expected host port 3000, got: %d",
+			ports[0].host)
+	}
+	// Verify 8080 was NOT silently accepted via truncation.
+	for _, pm := range ports {
+		if pm.host == 8080 {
+			t.Errorf("fractional port 8080.5 should not "+
+				"truncate to 8080, got: %v", ports)
+		}
+	}
+}
+
+func TestParseDevcontainerPorts_ExponentOverflow(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			// 1e18 overflows the valid port range and must
+			// be rejected. 8080 is valid and should survive.
+			return []byte(`{
+				"forwardPorts": [1e18, 8080]
+			}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	// Only 8080 is valid; 1e18 must be rejected.
+	if len(ports) != 1 {
+		t.Fatalf("expected 1 port, got %d: %v",
+			len(ports), ports)
+	}
+	if ports[0].host != 8080 {
+		t.Errorf("expected host port 8080, got: %d",
+			ports[0].host)
+	}
+}
