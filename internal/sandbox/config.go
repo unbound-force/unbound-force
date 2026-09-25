@@ -266,6 +266,8 @@ func stripJSONComments(data []byte) []byte {
 			}
 			if i+1 < len(src) {
 				i += 2
+			} else {
+				i = len(src)
 			}
 			continue
 		}
@@ -366,7 +368,7 @@ func parsePortEntry(raw json.RawMessage) (portMapping, bool) {
 // host:container port mappings (e.g., "8080:3000"). This
 // function handles both forms and strips JSONC comments and
 // trailing commas before parsing.
-func parseDevcontainerPorts(opts Options, excludePorts map[int]bool) []portMapping {
+func parseDevcontainerPorts(opts Options, excludedPorts map[int]bool) []portMapping {
 	dcPath := filepath.Join(opts.ProjectDir,
 		".devcontainer", "devcontainer.json")
 	data, err := opts.ReadFile(dcPath)
@@ -398,7 +400,7 @@ func parseDevcontainerPorts(opts Options, excludePorts map[int]bool) []portMappi
 		if pm.container < 1 || pm.container > 65535 {
 			continue
 		}
-		if excludePorts[pm.host] || seen[pm.host] {
+		if excludedPorts[pm.host] || seen[pm.host] {
 			continue
 		}
 		seen[pm.host] = true
@@ -426,8 +428,8 @@ func buildRunArgs(opts Options, platform PlatformConfig, gatewayActive bool, gat
 	// Devcontainer forwardPorts: read from
 	// .devcontainer/devcontainer.json and publish any ports
 	// not already covered by DefaultServerPort.
-	excludePorts := map[int]bool{DefaultServerPort: true}
-	for _, pm := range parseDevcontainerPorts(opts, excludePorts) {
+	excludedPorts := map[int]bool{DefaultServerPort: true}
+	for _, pm := range parseDevcontainerPorts(opts, excludedPorts) {
 		args = append(args, "-p", fmt.Sprintf("%d:%d", pm.host, pm.container))
 	}
 

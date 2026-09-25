@@ -296,11 +296,11 @@ func buildPersistentRunArgs(opts Options, platform PlatformConfig, ctrName, volN
 	// Devcontainer forwardPorts: read from
 	// .devcontainer/devcontainer.json and publish any ports
 	// not already covered by DefaultServerPort or demo ports.
-	excludePorts := map[int]bool{DefaultServerPort: true}
+	excludedPorts := map[int]bool{DefaultServerPort: true}
 	for _, port := range allPorts {
-		excludePorts[port] = true
+		excludedPorts[port] = true
 	}
-	for _, pm := range parseDevcontainerPorts(opts, excludePorts) {
+	for _, pm := range parseDevcontainerPorts(opts, excludedPorts) {
 		args = append(args, "-p", fmt.Sprintf("%d:%d", pm.host, pm.container))
 	}
 

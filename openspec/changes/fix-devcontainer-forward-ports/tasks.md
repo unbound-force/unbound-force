@@ -61,8 +61,8 @@
 
 - [x] 4.1 Add `CHANGELOG.md` entry under Unreleased/Fixed
 - [x] 4.2 Add port forwarding note to `docs/cli-reference.md`
-  under `uf sandbox init`, `uf sandbox create`, and
-  `uf sandbox start` sections
+  under `uf sandbox create` and `uf sandbox start`
+  sections
 - [x] 4.3 Add note to `docs/configuration.md` sandbox
   configuration section
 

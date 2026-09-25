@@ -5797,6 +5797,49 @@ func TestParseDevcontainerPorts_JSONC(t *testing.T) {
 	}
 }
 
+func TestParseDevcontainerPorts_UnterminatedBlockComment(t *testing.T) {
+	opts := testOpts()
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, "devcontainer.json") {
+			// The block comment is never closed. The
+			// parser must discard the entire tail —
+			// including the last character — so nothing
+			// from the comment body leaks into the output.
+			return []byte(`{
+				"forwardPorts": [8080]
+			} /* unterminated`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+
+	exclude := map[int]bool{DefaultServerPort: true}
+	ports := parseDevcontainerPorts(opts, exclude)
+
+	// 8080 appears before the unterminated comment and
+	// must still parse correctly.
+	if len(ports) != 1 {
+		t.Fatalf("expected 1 port, got %d: %v",
+			len(ports), ports)
+	}
+	if ports[0].host != 8080 {
+		t.Errorf("expected host port 8080, got: %d",
+			ports[0].host)
+	}
+}
+
+func TestStripJSONComments_UnterminatedBlockNoLeak(t *testing.T) {
+	// Verify that stripJSONComments does not leak the
+	// final character of an unterminated block comment
+	// into the output.
+	input := []byte(`{"a":1} /* leaked`)
+	got := string(stripJSONComments(input))
+	want := `{"a":1} `
+	if got != want {
+		t.Errorf("stripJSONComments unterminated block:\n"+
+			"  got:  %q\n  want: %q", got, want)
+	}
+}
+
 func TestParseDevcontainerPorts_InvalidRange(t *testing.T) {
 	opts := testOpts()
 	opts.ReadFile = func(path string) ([]byte, error) {
