@@ -650,6 +650,7 @@ update_all_existing_agents() {
     _try_update "$Q_FILE" "Amazon Q Developer CLI"
     _try_update "$AGY_FILE" "Antigravity"
     _try_update "$BOB_FILE" "IBM Bob"
+    _try_update "$AMP_FILE" "Amp"
 
     # If no agent files exist, create a default Claude file
     if [[ "$found_agent" == false ]]; then
@@ -657,6 +658,7 @@ update_all_existing_agents() {
         update_agent_file "$CLAUDE_FILE" "Claude Code"
     fi
 }
+
 print_summary() {
     echo
     log_info "Summary of changes:"

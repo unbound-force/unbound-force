@@ -21,7 +21,7 @@ Automate the end-of-branch workflow. Stages all changes,
 generates a conventional commit message, pushes, creates
 a PR, watches CI checks, and returns to `main`. The PR
 stays open for human review. Works with both Speckit
-(`NNN-*` or `NNN-*` legacy) and OpenSpec
+(`speckit/NNN-*` or `NNN-*` legacy) and OpenSpec
 (`opsx/*`) branches.
 
 ## Usage

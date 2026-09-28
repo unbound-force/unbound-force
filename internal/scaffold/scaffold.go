@@ -161,13 +161,19 @@ func Run(opts Options) (*Result, error) {
 			return fmt.Errorf("create directory %s: %w", dir, err)
 		}
 
+		// Shell scripts need the execute bit for direct invocation.
+		mode := os.FileMode(0o644)
+		if ext == ".sh" {
+			mode = 0o755
+		}
+
 		// Check if file already exists
 		existing, readErr := os.ReadFile(outPath)
 		fileExists := readErr == nil
 
 		if !fileExists {
 			// New file -- create it
-			if err := os.WriteFile(outPath, out, 0o644); err != nil {
+			if err := os.WriteFile(outPath, out, mode); err != nil {
 				return fmt.Errorf("write %s: %w", outPath, err)
 			}
 			result.Created = append(result.Created, outRel)
@@ -184,7 +190,7 @@ func Run(opts Options) (*Result, error) {
 
 		if opts.Force {
 			// Force mode -- overwrite everything
-			if err := os.WriteFile(outPath, out, 0o644); err != nil {
+			if err := os.WriteFile(outPath, out, mode); err != nil {
 				return fmt.Errorf("write %s: %w", outPath, err)
 			}
 			result.Overwritten = append(result.Overwritten, outRel)
@@ -196,7 +202,7 @@ func Run(opts Options) (*Result, error) {
 			if bytes.Equal(existing, out) {
 				result.Skipped = append(result.Skipped, outRel)
 			} else {
-				if err := os.WriteFile(outPath, out, 0o644); err != nil {
+				if err := os.WriteFile(outPath, out, mode); err != nil {
 					return fmt.Errorf("write %s: %w", outPath, err)
 				}
 				result.Updated = append(result.Updated, outRel)
@@ -2074,9 +2080,13 @@ func ensureSpeckitScripts(opts *Options) []subToolResult {
 			return fmt.Errorf("create directory %s: %w", dir, mkErr)
 		}
 
-		// Tool-owned overwrite-on-diff: skip if content is identical.
+		// Tool-owned overwrite-on-diff: skip if content is identical,
+		// but still correct permissions for shell scripts.
 		existing, existErr := os.ReadFile(outPath)
 		if existErr == nil && bytes.Equal(existing, out) {
+			if filepath.Ext(outPath) == ".sh" {
+				_ = os.Chmod(outPath, 0o755)
+			}
 			return nil // Already up to date.
 		}
 

@@ -105,7 +105,7 @@ git rev-parse --abbrev-ref HEAD
 
 - If on `main`: **STOP** with error:
   > "Cannot run /uf.unleash on main. Must be on a Speckit
-  > (`NNN-*`) or OpenSpec (`opsx/*`) feature branch."
+  > (`speckit/NNN-*`) or OpenSpec (`opsx/*`) feature branch."
 
 - If on `opsx/*`: **OpenSpec mode detected.**
   Extract the change name from the branch:
@@ -120,8 +120,8 @@ git rev-parse --abbrev-ref HEAD
 
   Announce: "Detected OpenSpec change: `<name>`"
 
-- If the branch matches `NNN-*` (digits followed by a
-  dash): **Speckit mode detected.**
+- If the branch matches `speckit/NNN-*` (speckit/ prefix +
+  digits followed by a dash): **Speckit mode detected.**
 
   Validate that spec.md exists by running from the repo
   root:
@@ -139,10 +139,10 @@ git rev-parse --abbrev-ref HEAD
   is the working directory for all subsequent steps.
   Set `WORKFLOW_TIER = speckit`.
 
-- If the branch does not match `NNN-*` or `opsx/*`:
+- If the branch does not match `speckit/NNN-*` or `opsx/*`:
   **STOP** with error:
   > "Unrecognized branch pattern. /uf.unleash requires a
-  > Speckit feature branch (`NNN-*`) or OpenSpec branch
+  > Speckit feature branch (`speckit/NNN-*`) or OpenSpec branch
   > (`opsx/*`). Run `/speckit.specify` or
   > `/opsx-propose` to create one."
 
@@ -759,7 +759,7 @@ Format the output as:
   merge conflicts, and 3 review iterations exhausted.
   All other transitions are autonomous.
 - **NEVER run on `main`** -- the command is for Speckit
-  (`NNN-*`) and OpenSpec (`opsx/*`) feature branches
+  (`speckit/NNN-*`) and OpenSpec (`opsx/*`) feature branches
 - **NEVER skip spec review exit on HIGH/CRITICAL** --
   these findings block implementation to prevent wasted
   effort on a flawed spec
