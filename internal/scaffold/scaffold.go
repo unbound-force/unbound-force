@@ -247,7 +247,7 @@ func Run(opts Options) (*Result, error) {
 	// installed specify-cli that lack the speckit/ branch prefix
 	// convention. The embedded scripts are the source of truth (#620).
 	if !opts.DivisorOnly {
-		subResults = append(subResults, ensureSpeckitScripts(&opts, opts.Version)...)
+		subResults = append(subResults, ensureSpeckitScripts(&opts)...)
 	}
 
 	// Migrate legacy .opencode/command/ to .opencode/commands/.
@@ -473,9 +473,10 @@ func warnStaleCommandRefs(w io.Writer, targetDir string) {
 // isToolOwned returns true if the file is maintained by the
 // unbound tool and should be overwritten when content differs.
 // Tool-owned files: all OpenCode commands, OpenSpec schema
-// files, and canonical convention packs (but NOT custom packs).
-// Agent files (including Divisor personas) are user-owned and
-// fall through to the default return false.
+// files, Speckit scripts (specify/scripts/), and canonical
+// convention packs (but NOT custom packs). Agent files
+// (including Divisor personas) are user-owned and fall through
+// to the default return false.
 func isToolOwned(relPath string) bool {
 	if strings.HasPrefix(relPath, "openspec/schemas/") {
 		return true
@@ -2033,7 +2034,7 @@ func extractGitHubOrg(opts *Options) string {
 //
 // Uses tool-owned overwrite-on-diff semantics: files are only written
 // when the content differs from what is on disk.
-func ensureSpeckitScripts(opts *Options, version string) []subToolResult {
+func ensureSpeckitScripts(opts *Options) []subToolResult {
 	const prefix = "assets/specify/scripts"
 
 	// Check if the embedded assets contain specify/scripts/ at all.
@@ -2061,7 +2062,7 @@ func ensureSpeckitScripts(opts *Options, version string) []subToolResult {
 		ext := filepath.Ext(relPath)
 		var out []byte
 		if markerFileExtensions[ext] {
-			marker := versionMarker(version, ext)
+			marker := versionMarker(opts.Version, ext)
 			out = insertMarkerAfterFrontmatter(content, marker)
 		} else {
 			out = content
@@ -2079,11 +2080,16 @@ func ensureSpeckitScripts(opts *Options, version string) []subToolResult {
 			return nil // Already up to date.
 		}
 
-		if writeErr := os.WriteFile(outPath, out, 0o644); writeErr != nil {
+		// Shell scripts need the execute bit to allow direct invocation.
+		perm := os.FileMode(0o644)
+		if filepath.Ext(outPath) == ".sh" {
+			perm = 0o755
+		}
+		if writeErr := os.WriteFile(outPath, out, perm); writeErr != nil {
 			return fmt.Errorf("write %s: %w", outPath, writeErr)
 		}
 
-		action := "ensured"
+		action := "updated"
 		if existErr != nil {
 			action = "created"
 		}

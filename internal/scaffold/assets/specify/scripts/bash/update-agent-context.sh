@@ -358,9 +358,6 @@ create_new_agent_file() {
     return 0
 }
 
-
-
-
 update_existing_agent_file() {
     local target_file="$1"
     local current_date="$2"
@@ -622,87 +619,38 @@ update_specific_agent() {
 
 update_all_existing_agents() {
     local found_agent=false
-    
+    # Track processed file paths to avoid duplicate updates when
+    # multiple agent variables resolve to the same file (e.g.
+    # AGENTS_FILE, Q_FILE, and BOB_FILE all point to AGENTS.md).
+    local _seen=""
+
+    _try_update() {
+        local path="$1" label="$2"
+        if [[ -f "$path" ]] && [[ ":${_seen}:" != *":${path}:"* ]]; then
+            update_agent_file "$path" "$label"
+            _seen="${_seen}:${path}"
+            found_agent=true
+        fi
+    }
+
     # Check each possible agent file and update if it exists
-    if [[ -f "$CLAUDE_FILE" ]]; then
-        update_agent_file "$CLAUDE_FILE" "Claude Code"
-        found_agent=true
-    fi
-    
-    if [[ -f "$GEMINI_FILE" ]]; then
-        update_agent_file "$GEMINI_FILE" "Gemini CLI"
-        found_agent=true
-    fi
-    
-    if [[ -f "$COPILOT_FILE" ]]; then
-        update_agent_file "$COPILOT_FILE" "GitHub Copilot"
-        found_agent=true
-    fi
-    
-    if [[ -f "$CURSOR_FILE" ]]; then
-        update_agent_file "$CURSOR_FILE" "Cursor IDE"
-        found_agent=true
-    fi
-    
-    if [[ -f "$QWEN_FILE" ]]; then
-        update_agent_file "$QWEN_FILE" "Qwen Code"
-        found_agent=true
-    fi
-    
-    if [[ -f "$AGENTS_FILE" ]]; then
-        update_agent_file "$AGENTS_FILE" "Codex/opencode"
-        found_agent=true
-    fi
-    
-    if [[ -f "$WINDSURF_FILE" ]]; then
-        update_agent_file "$WINDSURF_FILE" "Windsurf"
-        found_agent=true
-    fi
-    
-    if [[ -f "$KILOCODE_FILE" ]]; then
-        update_agent_file "$KILOCODE_FILE" "Kilo Code"
-        found_agent=true
-    fi
+    _try_update "$CLAUDE_FILE" "Claude Code"
+    _try_update "$GEMINI_FILE" "Gemini CLI"
+    _try_update "$COPILOT_FILE" "GitHub Copilot"
+    _try_update "$CURSOR_FILE" "Cursor IDE"
+    _try_update "$QWEN_FILE" "Qwen Code"
+    _try_update "$AGENTS_FILE" "Codex/opencode"
+    _try_update "$WINDSURF_FILE" "Windsurf"
+    _try_update "$KILOCODE_FILE" "Kilo Code"
+    _try_update "$AUGGIE_FILE" "Auggie CLI"
+    _try_update "$ROO_FILE" "Roo Code"
+    _try_update "$CODEBUDDY_FILE" "CodeBuddy CLI"
+    _try_update "$SHAI_FILE" "SHAI"
+    _try_update "$QODER_FILE" "Qoder CLI"
+    _try_update "$Q_FILE" "Amazon Q Developer CLI"
+    _try_update "$AGY_FILE" "Antigravity"
+    _try_update "$BOB_FILE" "IBM Bob"
 
-    if [[ -f "$AUGGIE_FILE" ]]; then
-        update_agent_file "$AUGGIE_FILE" "Auggie CLI"
-        found_agent=true
-    fi
-    
-    if [[ -f "$ROO_FILE" ]]; then
-        update_agent_file "$ROO_FILE" "Roo Code"
-        found_agent=true
-    fi
-
-    if [[ -f "$CODEBUDDY_FILE" ]]; then
-        update_agent_file "$CODEBUDDY_FILE" "CodeBuddy CLI"
-        found_agent=true
-    fi
-
-    if [[ -f "$SHAI_FILE" ]]; then
-        update_agent_file "$SHAI_FILE" "SHAI"
-        found_agent=true
-    fi
-
-    if [[ -f "$QODER_FILE" ]]; then
-        update_agent_file "$QODER_FILE" "Qoder CLI"
-        found_agent=true
-    fi
-
-    if [[ -f "$Q_FILE" ]]; then
-        update_agent_file "$Q_FILE" "Amazon Q Developer CLI"
-        found_agent=true
-    fi
-
-    if [[ -f "$AGY_FILE" ]]; then
-        update_agent_file "$AGY_FILE" "Antigravity"
-        found_agent=true
-    fi
-    if [[ -f "$BOB_FILE" ]]; then
-        update_agent_file "$BOB_FILE" "IBM Bob"
-        found_agent=true
-    fi
-    
     # If no agent files exist, create a default Claude file
     if [[ "$found_agent" == false ]]; then
         log_info "No existing agent files found, creating default Claude file..."

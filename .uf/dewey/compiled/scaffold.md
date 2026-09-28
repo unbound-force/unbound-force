@@ -24,7 +24,7 @@ The scaffold system (`internal/scaffold/`) uses `embed.FS` to bundle canonical a
 
 Every scaffolded file exists in two places:
 1. **Source of truth**: `internal/scaffold/assets/` (embedded via `embed.FS`)
-2. **Active copy**: `.opencode/commands/`, `.opencode/agents/`, `.opencode/skills/`
+2. **Active copy**: `.opencode/commands/`, `.opencode/agents/`, `.opencode/skills/`, `.specify/scripts/bash/`
 
 These MUST be byte-identical. The scaffold engine (`uf init`) auto-overwrites active copies from embedded assets when `isToolOwned` is true.
 

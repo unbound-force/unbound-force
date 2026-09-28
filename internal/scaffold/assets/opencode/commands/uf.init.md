@@ -977,8 +977,9 @@ to external CLIs when they are available:
 - **Speckit**: `.specify/` is created by `specify init` (not
   embedded). If `specify` is in PATH and `.specify/` does not
   exist, `uf init` calls `specify init` automatically.
-  Post-init customization of Speckit scripts/templates is
-  handled by the `specify` CLI itself.
+  After `specify init`, `uf init` re-applies embedded Speckit
+  scripts (`.specify/scripts/bash/`) to enforce the `speckit/`
+  branch prefix convention (see issue #620).
 
 - **OpenSpec**: `openspec/config.yaml` and base structure are
   created by `openspec init --tools opencode` (not embedded).
