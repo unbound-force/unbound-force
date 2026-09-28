@@ -2091,11 +2091,11 @@ func ensureSpeckitScripts(opts *Options) []subToolResult {
 		}
 
 		// Shell scripts need the execute bit to allow direct invocation.
-		perm := os.FileMode(0o644)
+		mode := os.FileMode(0o644)
 		if ext == ".sh" {
-			perm = 0o755
+			mode = 0o755
 		}
-		if writeErr := os.WriteFile(outPath, out, perm); writeErr != nil {
+		if writeErr := os.WriteFile(outPath, out, mode); writeErr != nil {
 			return fmt.Errorf("write %s: %w", outPath, writeErr)
 		}
 
