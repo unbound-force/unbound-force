@@ -252,8 +252,12 @@ func Run(opts Options) (*Result, error) {
 	// (invoked above) may overwrite the scripts with versions from the
 	// installed specify-cli that lack the speckit/ branch prefix
 	// convention. The embedded scripts are the source of truth (#620).
+	// Only run when .specify/ exists (i.e., specify init has been run).
+	specifyDir := filepath.Join(opts.TargetDir, ".specify")
 	if !opts.DivisorOnly {
-		subResults = append(subResults, ensureSpeckitScripts(&opts)...)
+		if info, err := os.Stat(specifyDir); err == nil && info.IsDir() {
+			subResults = append(subResults, ensureSpeckitScripts(&opts)...)
+		}
 	}
 
 	// Migrate legacy .opencode/command/ to .opencode/commands/.

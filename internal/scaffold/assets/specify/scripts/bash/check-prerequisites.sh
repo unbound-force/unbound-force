@@ -72,7 +72,7 @@ EXAMPLES:
 
   # Get feature paths only (no validation)
   ./check-prerequisites.sh --paths-only
-  
+
 EOF
             exit 0
             ;;
@@ -122,10 +122,15 @@ if $REQUIRE_SPEC && [[ ! -f "$FEATURE_SPEC" ]]; then
     exit 1
 fi
 
-if [[ ! -f "$IMPL_PLAN" ]]; then
-    echo "ERROR: plan.md not found in $FEATURE_DIR" >&2
-    echo "Run /speckit.plan first to create the implementation plan." >&2
-    exit 1
+# plan.md is required by default (task-prep phase) and when --require-tasks
+# is set (implementation phase). Skip when --require-spec is set alone
+# (validation phase — plan.md may not exist yet).
+if ! $REQUIRE_SPEC || $REQUIRE_TASKS; then
+    if [[ ! -f "$IMPL_PLAN" ]]; then
+        echo "ERROR: plan.md not found in $FEATURE_DIR" >&2
+        echo "Run /speckit.plan first to create the implementation plan." >&2
+        exit 1
+    fi
 fi
 
 # Check for tasks.md if required
