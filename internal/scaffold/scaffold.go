@@ -2084,7 +2084,7 @@ func ensureSpeckitScripts(opts *Options) []subToolResult {
 		// but still correct permissions for shell scripts.
 		existing, existErr := os.ReadFile(outPath)
 		if existErr == nil && bytes.Equal(existing, out) {
-			if filepath.Ext(outPath) == ".sh" {
+			if ext == ".sh" {
 				_ = os.Chmod(outPath, 0o755)
 			}
 			return nil // Already up to date.
@@ -2092,7 +2092,7 @@ func ensureSpeckitScripts(opts *Options) []subToolResult {
 
 		// Shell scripts need the execute bit to allow direct invocation.
 		perm := os.FileMode(0o644)
-		if filepath.Ext(outPath) == ".sh" {
+		if ext == ".sh" {
 			perm = 0o755
 		}
 		if writeErr := os.WriteFile(outPath, out, perm); writeErr != nil {

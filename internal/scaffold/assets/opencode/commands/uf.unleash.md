@@ -105,7 +105,8 @@ git rev-parse --abbrev-ref HEAD
 
 - If on `main`: **STOP** with error:
   > "Cannot run /uf.unleash on main. Must be on a Speckit
-  > (`speckit/NNN-*`) or OpenSpec (`opsx/*`) feature branch."
+  > (`speckit/NNN-*` or `NNN-*` legacy) or OpenSpec
+  > (`opsx/*`) feature branch."
 
 - If on `opsx/*`: **OpenSpec mode detected.**
   Extract the change name from the branch:
@@ -139,12 +140,17 @@ git rev-parse --abbrev-ref HEAD
   is the working directory for all subsequent steps.
   Set `WORKFLOW_TIER = speckit`.
 
-- If the branch does not match `speckit/NNN-*` or `opsx/*`:
-  **STOP** with error:
+- If the branch matches `NNN-*` (digits followed by a
+  dash, no `speckit/` prefix): **Legacy Speckit mode detected.**
+  Treat identically to `speckit/NNN-*` above (validate
+  spec.md, extract `FEATURE_DIR`, set `WORKFLOW_TIER = speckit`).
+
+- If the branch does not match `speckit/NNN-*`, `NNN-*`,
+  or `opsx/*`: **STOP** with error:
   > "Unrecognized branch pattern. /uf.unleash requires a
-  > Speckit feature branch (`speckit/NNN-*`) or OpenSpec branch
-  > (`opsx/*`). Run `/speckit.specify` or
-  > `/opsx-propose` to create one."
+  > Speckit feature branch (`speckit/NNN-*` or `NNN-*`
+  > legacy) or OpenSpec branch (`opsx/*`). Run
+  > `/speckit.specify` or `/opsx-propose` to create one."
 
 > CHECKPOINT: Mark Step 1 complete in the execution
 > checklist before proceeding. Proceed immediately to
@@ -759,7 +765,7 @@ Format the output as:
   merge conflicts, and 3 review iterations exhausted.
   All other transitions are autonomous.
 - **NEVER run on `main`** -- the command is for Speckit
-  (`speckit/NNN-*`) and OpenSpec (`opsx/*`) feature branches
+  (`speckit/NNN-*` or `NNN-*` legacy) and OpenSpec (`opsx/*`) feature branches
 - **NEVER skip spec review exit on HIGH/CRITICAL** --
   these findings block implementation to prevent wasted
   effort on a flawed spec
