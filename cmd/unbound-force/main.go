@@ -33,6 +33,7 @@ func main() {
 	root.AddCommand(newSandboxCmd())
 	root.AddCommand(newGatewayCmd())
 	root.AddCommand(newConfigCmd())
+	root.AddCommand(newGateCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
