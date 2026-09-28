@@ -242,6 +242,14 @@ func Run(opts Options) (*Result, error) {
 	// Initialize sub-tools after file scaffolding, before summary.
 	subResults := append([]subToolResult{giResult, agentsResult}, initSubTools(&opts)...)
 
+	// Re-apply embedded Speckit scripts after initSubTools. specify init
+	// (invoked above) may overwrite the scripts with versions from the
+	// installed specify-cli that lack the speckit/ branch prefix
+	// convention. The embedded scripts are the source of truth (#620).
+	if !opts.DivisorOnly {
+		subResults = append(subResults, ensureSpeckitScripts(&opts, opts.Version)...)
+	}
+
 	// Migrate legacy .opencode/command/ to .opencode/commands/.
 	// Runs after initSubTools() so files created by specify init,
 	// gaze init, etc. in the old directory are caught and moved.
@@ -477,6 +485,12 @@ func isToolOwned(relPath string) bool {
 	}
 	// Skill files are tool-owned (maintained by unbound init).
 	if strings.HasPrefix(relPath, "opencode/skills/") {
+		return true
+	}
+	// Speckit scripts are tool-owned. These embed the speckit/
+	// branch prefix convention and must overwrite whatever the
+	// external specify-cli generates.
+	if strings.HasPrefix(relPath, "specify/scripts/") {
 		return true
 	}
 	// Convention packs: canonical packs are tool-owned,
@@ -2008,6 +2022,87 @@ func extractGitHubOrg(opts *Options) string {
 
 	// Not a GitHub remote — omit GitHub source.
 	return ""
+}
+
+// ensureSpeckitScripts re-applies embedded specify/scripts/ assets
+// after initSubTools completes. This is necessary because specify init
+// (invoked by initSubTools) may overwrite the scripts with versions
+// from the installed specify-cli that lack the speckit/ branch prefix
+// convention. The embedded scripts are the source of truth for the
+// prefix behavior (see issue #620).
+//
+// Uses tool-owned overwrite-on-diff semantics: files are only written
+// when the content differs from what is on disk.
+func ensureSpeckitScripts(opts *Options, version string) []subToolResult {
+	const prefix = "assets/specify/scripts"
+
+	// Check if the embedded assets contain specify/scripts/ at all.
+	if _, err := fs.Stat(assets, prefix); err != nil {
+		return nil // No scripts embedded — nothing to do.
+	}
+
+	var results []subToolResult
+
+	err := fs.WalkDir(assets, prefix, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return walkErr
+		}
+
+		relPath := strings.TrimPrefix(path, "assets/")
+		outRel := mapAssetPath(relPath)
+		outPath := filepath.Join(opts.TargetDir, outRel)
+
+		content, readErr := assets.ReadFile(path)
+		if readErr != nil {
+			return fmt.Errorf("read embedded %s: %w", path, readErr)
+		}
+
+		// Insert format-appropriate version marker.
+		ext := filepath.Ext(relPath)
+		var out []byte
+		if markerFileExtensions[ext] {
+			marker := versionMarker(version, ext)
+			out = insertMarkerAfterFrontmatter(content, marker)
+		} else {
+			out = content
+		}
+
+		// Create parent directories.
+		dir := filepath.Dir(outPath)
+		if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+			return fmt.Errorf("create directory %s: %w", dir, mkErr)
+		}
+
+		// Tool-owned overwrite-on-diff: skip if content is identical.
+		existing, existErr := os.ReadFile(outPath)
+		if existErr == nil && bytes.Equal(existing, out) {
+			return nil // Already up to date.
+		}
+
+		if writeErr := os.WriteFile(outPath, out, 0o644); writeErr != nil {
+			return fmt.Errorf("write %s: %w", outPath, writeErr)
+		}
+
+		action := "ensured"
+		if existErr != nil {
+			action = "created"
+		}
+		results = append(results, subToolResult{
+			name:   outRel,
+			action: action,
+		})
+		return nil
+	})
+
+	if err != nil {
+		results = append(results, subToolResult{
+			name:   ".specify/scripts/",
+			action: "failed",
+			detail: err.Error(),
+		})
+	}
+
+	return results
 }
 
 // DevcontainerContent returns the raw content of the embedded

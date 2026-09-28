@@ -30,14 +30,15 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 
 	// Verify the summary includes a non-trivial file count
-	// 45 = 39 prior + 1 pre-flight skill + 1 review-context
+	// 50 = 39 prior + 1 pre-flight skill + 1 review-context
 	// skill + 1 always-on-guidance skill + 2 CI convention
 	// pack files (ci.md + ci-custom.md)
-	// + 1 starter constitution (.specify/memory/constitution.md).
+	// + 1 starter constitution (.specify/memory/constitution.md)
+	// + 5 Speckit scripts (.specify/scripts/bash/*.sh, issue #620).
 	// (devcontainer excluded — OS-specific, generated
 	// per-user by uf sandbox init).
-	if !strings.Contains(output, "45 files processed") {
-		t.Errorf("expected '45 files processed' in output, got:\n%s", output)
+	if !strings.Contains(output, "50 files processed") {
+		t.Errorf("expected '50 files processed' in output, got:\n%s", output)
 	}
 
 	// Verify a user-owned file was created

@@ -62,10 +62,12 @@ func TestEmbeddedAssets_MatchSource(t *testing.T) {
 		if strings.HasPrefix(relPath, "devcontainer/") {
 			continue
 		}
-		// specify/ assets are starter templates, not mirrors of
-		// the org's .specify/ files. The embedded starter
+		// specify/memory/ assets are starter templates, not mirrors
+		// of the org's .specify/ files. The embedded starter
 		// constitution is the source of truth.
-		if strings.HasPrefix(relPath, "specify/") {
+		// specify/scripts/ assets ARE mirrors of the org's live
+		// files and must be checked for drift (issue #620).
+		if strings.HasPrefix(relPath, "specify/memory/") {
 			continue
 		}
 
@@ -192,6 +194,12 @@ var expectedAssetPaths = []string{
 	"opencode/skills/speckit-workflow/SKILL.md",
 	// Specify — starter constitution (1)
 	"specify/memory/constitution.md",
+	// Specify — Speckit scripts with speckit/ branch prefix (5)
+	"specify/scripts/bash/check-prerequisites.sh",
+	"specify/scripts/bash/common.sh",
+	"specify/scripts/bash/create-new-feature.sh",
+	"specify/scripts/bash/setup-plan.sh",
+	"specify/scripts/bash/update-agent-context.sh",
 }
 
 // nonDeployedAssetPaths lists embedded assets that are NOT
@@ -266,6 +274,7 @@ func TestRun_CreatesFiles(t *testing.T) {
 		".opencode/agents",
 		".opencode/uf/packs",
 		".specify/memory",
+		".specify/scripts/bash",
 		"openspec/specs",
 		"openspec/changes",
 	}
@@ -818,6 +827,12 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/uf/packs/typescript-custom.md", false},
 		{"opencode/uf/packs/python-custom.md", false},
 		{"opencode/uf/packs/ci-custom.md", false},
+		// Tool-owned: Speckit scripts (speckit/ branch prefix)
+		{"specify/scripts/bash/common.sh", true},
+		{"specify/scripts/bash/create-new-feature.sh", true},
+		{"specify/scripts/bash/check-prerequisites.sh", true},
+		{"specify/scripts/bash/setup-plan.sh", true},
+		{"specify/scripts/bash/update-agent-context.sh", true},
 		// User-owned: agents (including Divisor personas and Cobalt-Crush)
 		{"opencode/agents/divisor-guard.md", false},
 		{"opencode/agents/divisor-architect.md", false},
@@ -1252,18 +1267,14 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".opencode/commands/speckit.constitution.md":  true,
 	".opencode/commands/speckit.taskstoissues.md": true,
 	// Speckit files — created by specify init, not scaffolded by uf init
-	".specify/config.yaml":                          true,
-	".specify/templates/agent-file-template.md":     true,
-	".specify/templates/checklist-template.md":      true,
-	".specify/templates/constitution-template.md":   true,
-	".specify/templates/plan-template.md":           true,
-	".specify/templates/spec-template.md":           true,
-	".specify/templates/tasks-template.md":          true,
-	".specify/scripts/bash/check-prerequisites.sh":  true,
-	".specify/scripts/bash/common.sh":               true,
-	".specify/scripts/bash/create-new-feature.sh":   true,
-	".specify/scripts/bash/setup-plan.sh":           true,
-	".specify/scripts/bash/update-agent-context.sh": true,
+	// (Scripts are now embedded as scaffold assets — see issue #620)
+	".specify/config.yaml":                        true,
+	".specify/templates/agent-file-template.md":   true,
+	".specify/templates/checklist-template.md":    true,
+	".specify/templates/constitution-template.md": true,
+	".specify/templates/plan-template.md":         true,
+	".specify/templates/spec-template.md":         true,
+	".specify/templates/tasks-template.md":        true,
 	// OpenSpec config — created by openspec init
 	"openspec/config.yaml": true,
 	// Agents — local-only tooling, not scaffolded by uf init
@@ -7684,5 +7695,154 @@ func TestNoObsoleteToolNames(t *testing.T) {
 		if err != nil {
 			t.Fatalf("walk %s: %v", dirLabel, err)
 		}
+	}
+}
+
+// TestScaffold_SpeckitBranchPrefix verifies that the scaffold
+// distributes Speckit scripts with the speckit/ branch prefix
+// convention. This is the regression test for issue #620.
+func TestScaffold_SpeckitBranchPrefix(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	_, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Verify create-new-feature.sh prepends "speckit/" to branch names.
+	cnf, err := os.ReadFile(filepath.Join(dir,
+		".specify", "scripts", "bash", "create-new-feature.sh"))
+	if err != nil {
+		t.Fatalf("read create-new-feature.sh: %v", err)
+	}
+	cnfText := string(cnf)
+	if !strings.Contains(cnfText, `BRANCH_NAME="speckit/${FEATURE_NUM}-${BRANCH_SUFFIX}"`) {
+		t.Error("create-new-feature.sh does not create speckit/ prefixed branches")
+	}
+
+	// Verify common.sh strips "speckit/" prefix in get_current_feature.
+	common, err := os.ReadFile(filepath.Join(dir,
+		".specify", "scripts", "bash", "common.sh"))
+	if err != nil {
+		t.Fatalf("read common.sh: %v", err)
+	}
+	commonText := string(common)
+	if !strings.Contains(commonText, `echo "${branch#speckit/}"`) {
+		t.Error("common.sh does not strip speckit/ prefix in get_current_feature")
+	}
+
+	// Verify common.sh strips "speckit/" prefix from SPECIFY_FEATURE env var.
+	if !strings.Contains(commonText, `echo "${SPECIFY_FEATURE#speckit/}"`) {
+		t.Error("common.sh does not strip speckit/ prefix from SPECIFY_FEATURE")
+	}
+
+	// Verify validation accepts NNN-<name> (prefix already stripped).
+	if !strings.Contains(commonText, `^[0-9]{3}-`) {
+		t.Error("common.sh validation does not accept NNN-<name> format")
+	}
+
+	// Verify spec directory resolves to specs/NNN-<name>/ (no speckit/ in path).
+	if !strings.Contains(commonText, `"$specs_dir/$branch_name"`) ||
+		!strings.Contains(commonText, `"$specs_dir/${matches[0]}"`) {
+		t.Error("common.sh does not resolve spec directories to specs/NNN-<name>/")
+	}
+}
+
+// TestScaffold_SpeckitScriptsOverwriteSpecifyInit verifies that the
+// post-initSubTools ensureSpeckitScripts step overwrites whatever
+// specify init produced, ensuring the speckit/ prefix scripts survive.
+func TestScaffold_SpeckitScriptsOverwriteSpecifyInit(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	// Simulate specify init having created a script without the prefix.
+	scriptsDir := filepath.Join(dir, ".specify", "scripts", "bash")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	noPrefix := []byte("#!/usr/bin/env bash\n# old script without speckit/ prefix\n")
+	if err := os.WriteFile(filepath.Join(scriptsDir, "common.sh"), noPrefix, 0o644); err != nil {
+		t.Fatalf("write old common.sh: %v", err)
+	}
+
+	_, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// The embedded version (with speckit/ prefix) must overwrite the old one.
+	common, err := os.ReadFile(filepath.Join(scriptsDir, "common.sh"))
+	if err != nil {
+		t.Fatalf("read common.sh: %v", err)
+	}
+	if !strings.Contains(string(common), "speckit/") {
+		t.Error("common.sh was not overwritten with the speckit/ prefix version")
+	}
+}
+
+// TestScaffold_SpeckitScriptsIdempotent verifies that a second scaffold
+// run does not change the speckit scripts when content is identical.
+func TestScaffold_SpeckitScriptsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	// First run.
+	_, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0",
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("first Run() error: %v", err)
+	}
+
+	// Second run — scripts should be skipped (identical content).
+	buf.Reset()
+	result, err := Run(Options{
+		TargetDir: dir,
+		Version:   "1.0.0",
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("second Run() error: %v", err)
+	}
+
+	// Verify no scripts appear in Updated (tool-owned identical → skipped).
+	for _, f := range result.Updated {
+		if strings.Contains(f, ".specify/scripts/") {
+			t.Errorf("speckit script %s should not be in Updated on identical re-run", f)
+		}
+	}
+}
+
+// TestScaffold_SpeckitScriptsDivisorOnly verifies that DivisorOnly mode
+// does not deploy the specify scripts.
+func TestScaffold_SpeckitScriptsDivisorOnly(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	_, err := Run(Options{
+		TargetDir:   dir,
+		DivisorOnly: true,
+		Version:     "1.0.0",
+		Stdout:      &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Verify no specify scripts directory exists.
+	scriptsDir := filepath.Join(dir, ".specify", "scripts")
+	if _, statErr := os.Stat(scriptsDir); !os.IsNotExist(statErr) {
+		t.Error("DivisorOnly should not create .specify/scripts/ directory")
 	}
 }
