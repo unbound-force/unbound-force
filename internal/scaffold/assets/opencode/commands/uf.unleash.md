@@ -380,7 +380,15 @@ analysis + quality validation) in a single pass.
   > review iteration N/3.
 
 - If HIGH or CRITICAL findings remain after auto-fixing
-  LOW/MEDIUM: **EXIT** with the findings:
+  LOW/MEDIUM: **EXIT** with the findings. Use
+  `WORKFLOW_TIER` to select the "What to do next"
+  recovery guidance:
+  - **If `WORKFLOW_TIER = openspec`**: "Update the
+    artifacts under `openspec/changes/<name>/` to
+    address the findings, then re-run `/uf.unleash`."
+  - **If `WORKFLOW_TIER = speckit`**: "Run
+    `/speckit.clarify` to address the findings, then
+    re-run `/uf.unleash`."
 
   ```
   ## /uf.unleash paused at: spec review
@@ -392,8 +400,7 @@ analysis + quality validation) in a single pass.
   [list each HIGH/CRITICAL finding with context]
 
   ### What to do next
-  Run `/speckit.clarify` to address the findings, then
-  re-run `/uf.unleash`.
+  [tier-specific recovery guidance from above]
 
   ### Then resume
   Run `/uf.unleash` to continue from spec review.
@@ -713,8 +720,13 @@ Present structured demo instructions to the developer.
    most recent build/test checkpoint.
 
 5. **Next Steps**: always present exactly these two
-   options as shown in the format block below — do not
-   paraphrase, add, or remove options.
+   options — do not add or remove options. Use
+   `WORKFLOW_TIER` to select the second option:
+   - **If `WORKFLOW_TIER = openspec`**: "Update the
+     artifacts under `openspec/changes/<name>/` to
+     refine and iterate"
+   - **If `WORKFLOW_TIER = speckit`**: "Run
+     `/speckit.clarify` to refine and iterate"
    **Note**: The pre-PR `/uf.review-council` requirement
    is already satisfied by Step 8 (Code Review). Do NOT
    re-suggest `/uf.review-council` or hand-roll git
@@ -743,7 +755,7 @@ Format the output as:
 ## Next Steps
 
 - Run `/uf.finale` to create PR and watch CI
-- Run `/speckit.clarify` to refine and iterate
+- [tier-specific refinement option from above]
 ```
 
 > CHECKPOINT: Mark Step 10 complete in the execution
