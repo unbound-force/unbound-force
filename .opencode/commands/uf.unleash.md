@@ -722,11 +722,12 @@ Present structured demo instructions to the developer.
 5. **Next Steps**: always present exactly these two
    options — do not add or remove options. Use
    `WORKFLOW_TIER` to select the second option:
+   - **If `WORKFLOW_TIER = speckit`**: "Run
+     `/speckit.clarify` to refine and iterate"
    - **If `WORKFLOW_TIER = openspec`**: "Update the
      artifacts under `openspec/changes/<name>/` to
      refine and iterate"
-   - **If `WORKFLOW_TIER = speckit`**: "Run
-     `/speckit.clarify` to refine and iterate"
+
    **Note**: The pre-PR `/uf.review-council` requirement
    is already satisfied by Step 8 (Code Review). Do NOT
    re-suggest `/uf.review-council` or hand-roll git
