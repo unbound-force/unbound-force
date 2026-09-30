@@ -56,6 +56,7 @@ Always run tests with `-race -count=1`. CI enforces this.
 | Dependencies | `ci_dependencies.yml` | Dependency review + dependabot |
 | CRAP Load | `ci_crapload.yml` | CRAP regression analysis |
 | Release | `release.yml` | workflow_dispatch, GoReleaser + Cosign + Syft + Homebrew tap |
+| FullSend OpenCode Image | `fullsend-opencode-image.yml` | Multi-arch GHCR image build, publication, validation, scanning, signing, and attestations |
 | Scheduled | `ci_scheduled.yml` | Daily OSV-Scanner + Scorecards |
 
 ## Project Structure
@@ -74,6 +75,9 @@ unbound-force/
 │   ├── scripts/                      # Pipeline scripts (diff, prompt, review, parse)
 │   ├── test/                         # Pipeline tests (91 assertions)
 │   └── docs/                         # Architecture, decisions, security, testing
+├── images/
+│   └── fullsend-opencode/             # FullSend OpenCode sandbox image
+│       └── Containerfile              # Digest-pinned image definition
 ├── cmd/unbound-force/                # Cobra CLI entry point
 ├── cmd/mutimind/                     # Muti-Mind backend CLI
 ├── cmd/mxf/                          # Mx F backend CLI
@@ -97,7 +101,7 @@ unbound-force/
 │   └── textutil/                     # Shared text formatting helpers
 ├── docs/                             # User-facing documentation
 │   └── decisions/                    # Architecture Decision Records (ADRs)
-├── specs/                            # Architectural specs (001-035)
+├── specs/                            # Architectural specs (001-037)
 ├── openspec/                         # OpenSpec tactical workflow
 ├── schemas/                          # JSON Schema registry
 │   ├── feedback-triage/              # Feedback triage schemas
