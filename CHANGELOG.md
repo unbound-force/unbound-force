@@ -138,6 +138,14 @@ Each entry follows the format: `- <change-name>: <summary>`.
   Fixes: #428)
 
 ### Added
+- uf-init-stealth-mode: `uf init` gains a `--stealth` flag for
+  local-only scaffolding that leaves the working tree git-clean
+  and tracked files (`.gitignore`, `AGENTS.md`) unmodified. Uses
+  `.git/info/exclude` for exclusion, snapshots and restores all
+  tracked files (bytes and mode/permission bits), and provides a
+  `--check` flag for verifying git-cleanliness without writing.
+  (Spec: openspec/changes/uf-init-stealth-mode/, Fixes: #638,
+  Website issue: unbound-force/website#292)
 - add-speckit-ref-assertion-test: Add red-first
   content-assertion test `TestSpeckitTemplates_RequiredReferences`
   (internal/scaffold) that verifies Step 6 of the embedded

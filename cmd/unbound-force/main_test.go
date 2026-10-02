@@ -336,3 +336,24 @@ func TestRootCmd_HelpOutput(t *testing.T) {
 		t.Errorf("expected help output to contain 'unbound-force [command]', got:\n%s", output)
 	}
 }
+
+// TestInitCmd_StealthHelpText is task 3.13's help-text assertion: the
+// --stealth flag help documents that the exclusion is local-only and not
+// preserved on re-clone.
+func TestInitCmd_StealthHelpText(t *testing.T) {
+	cmd := newInitCmd()
+	stealthFlag := cmd.Flags().Lookup("stealth")
+	if stealthFlag == nil {
+		t.Fatal("expected --stealth flag to be registered")
+	}
+	if !strings.Contains(stealthFlag.Usage, "local-only") {
+		t.Errorf("expected --stealth usage to mention local-only, got: %q", stealthFlag.Usage)
+	}
+	long := cmd.Long
+	if !strings.Contains(long, "local-only") {
+		t.Errorf("expected help text to mention local-only:\n%s", long)
+	}
+	if !strings.Contains(long, "re-clone") {
+		t.Errorf("expected help text to document re-clone non-portability:\n%s", long)
+	}
+}

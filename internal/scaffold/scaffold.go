@@ -37,6 +37,8 @@ type Options struct {
 	Force       bool                                    // Overwrite existing files when true
 	DivisorOnly bool                                    // Deploy only Divisor agents, command, and packs
 	DryRun      bool                                    // When true, configureOpencodeJSON() skips writing
+	Stealth     bool                                    // Local-only: hide scaffolded files from git, leave tracked files unmodified
+	Check       bool                                    // Verify git-cleanliness without writing (requires Stealth)
 	Lang        string                                  // Language for convention pack selection (auto-detect if empty)
 	Version     string                                  // Version string for marker comment (default: "dev")
 	Stdout      io.Writer                               // Writer for summary output (default: os.Stdout)
@@ -101,6 +103,39 @@ func Run(opts Options) (*Result, error) {
 	langDetected := lang != ""
 	if lang == "" {
 		lang = "default"
+	}
+
+	// Stealth mode (--stealth) is a local-only variant that keeps the
+	// working tree git-clean by hiding scaffolded files via
+	// .git/info/exclude and leaving tracked files (.gitignore, AGENTS.md)
+	// unmodified. --check verifies the invariant without writing anything.
+	if opts.Check {
+		if !opts.Stealth {
+			return nil, fmt.Errorf("--check requires --stealth")
+		}
+		if err := runStealthCheck(&opts); err != nil {
+			return nil, err
+		}
+		return &Result{}, nil
+	}
+
+	// Stealth rollback context. The deferred rollback runs only on the
+	// failure paths (any early return); it is disarmed before the success
+	// return so a successful stealth init leaves its exclusion in place.
+	var stealth *stealthContext
+	if opts.Stealth {
+		ctx, err := beginStealth(&opts)
+		if err != nil {
+			return nil, err
+		}
+		stealth = ctx
+		defer func() {
+			if stealth != nil {
+				if rerr := stealth.rollback(&opts); rerr != nil {
+					fmt.Fprintln(opts.Stdout, "  warning: "+rerr.Error())
+				}
+			}
+		}()
 	}
 
 	result := &Result{}
@@ -234,13 +269,47 @@ func Run(opts Options) (*Result, error) {
 	// Ensure .gitignore has the standard UF ignore block.
 	// Called after file scaffolding but before sub-tool delegation
 	// so that .gitignore is ready before sub-tools create runtime files.
-	giResult := ensureGitignore(&opts)
+	// Stealth mode skips both tracked-file mutations.
+	var giResult, agentsResult subToolResult
+	if opts.Stealth {
+		giResult = subToolResult{name: ".gitignore", action: "skipped (stealth)"}
+		agentsResult = subToolResult{name: "AGENTS.md", action: "skipped (stealth)"}
+	} else {
+		giResult = ensureGitignore(&opts)
+		agentsResult = ensureAGENTSmdPackSection(&opts, lang)
+		warnStaleStealthExclusion(&opts)
+	}
 
-	// Ensure AGENTS.md pack section is up-to-date.
-	agentsResult := ensureAGENTSmdPackSection(&opts, lang)
+	// Stealth mode snapshots every tracked file before sub-tool
+	// delegation so that any mutation a sub-tool makes can be reverted.
+	if opts.Stealth {
+		snap, snapErr := snapshotTrackedFiles(&opts)
+		if snapErr != nil {
+			return result, fmt.Errorf("snapshot tracked files: %w", snapErr)
+		}
+		stealth.snapshot = snap
+		stealth.didSnapshot = true
+	}
 
 	// Initialize sub-tools after file scaffolding, before summary.
 	subResults := append([]subToolResult{giResult, agentsResult}, initSubTools(&opts)...)
+
+	if opts.Stealth {
+		// A sub-tool failure leaves a half-applied tree; roll back
+		// (deferred) rather than silently asserting cleanliness.
+		for _, sr := range subResults {
+			if sr.err != nil {
+				return result, fmt.Errorf("stealth init sub-tool %q failed: %w", sr.name, sr.err)
+			}
+		}
+		_, failed := restoreTrackedFiles(&opts, stealth.snapshot)
+		if len(failed) > 0 {
+			return result, fmt.Errorf("stealth init could not restore tracked files: %s", strings.Join(failed, ", "))
+		}
+		if sr := appendNewUntrackedToExclude(&opts, stealth.preUntracked); sr.err != nil {
+			return result, fmt.Errorf("stealth init could not record new untracked paths: %w", sr.err)
+		}
+	}
 
 	// Migrate legacy .opencode/command/ to .opencode/commands/.
 	// Runs after initSubTools() so files created by specify init,
@@ -258,6 +327,13 @@ func Run(opts Options) (*Result, error) {
 	warnStaleCommandRefs(opts.Stdout, opts.TargetDir)
 
 	printSummary(opts.Stdout, opts.DivisorOnly, langExplicit, langDetected, result, subResults)
+	if opts.Stealth {
+		emitStealthSummary(&opts)
+	}
+
+	// Disarm the deferred rollback: a successful stealth init keeps its
+	// exclusion and scaffolded files in place.
+	stealth = nil
 	return result, nil
 }
 
