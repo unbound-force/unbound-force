@@ -547,6 +547,12 @@ unvalidated input.
 
 ###### Step F.3. Constitution Compliance (AI-only items)
 
+**Workflow-gate marker exception (pre-filter)**: Before checking constitution compliance, apply this exception to avoid false-positive gatekeeping findings:
+
+- If a file path matches `openspec/changes/*/tasks.md` or `specs/*/tasks.md` (relative to repo root) AND that file contains the exact marker `<!-- code-review: passed -->` or `<!-- spec-review: passed -->`, do NOT flag those markers as gatekeeping violations. These markers are legitimate workflow resumability records written by `/uf.unleash` and `/uf.review-council`.
+- This exception applies ONLY when BOTH conditions are met simultaneously: (1) the marker string is exactly one of the two specified strings, and (2) the file path matches one of the two specified patterns.
+- You MUST still flag as gatekeeping violations: (a) these same marker strings in any OTHER file path (e.g., `AGENTS.md`, `README.md`), (b) any OTHER marker-like HTML comments in task files (e.g., `<!-- coverage-threshold: lowered -->`), and (c) any real weakening of coverage thresholds, CI flags, severity definitions, convention rules, or constitution gates regardless of file path.
+
 Read `.specify/memory/constitution.md` if it exists. Extract all principles and their MUST/SHOULD rules. For each principle, check whether the PR's changes comply. **Only check items that local tools and CI did NOT already verify.**
 
 If no constitution file exists, note this and review against general software engineering best practices. Do NOT hardcode specific principle names or numbers — each project defines its own constitution.
