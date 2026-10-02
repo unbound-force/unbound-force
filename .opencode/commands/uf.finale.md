@@ -241,6 +241,14 @@ The user MAY edit or remove the attribution during
 the approval step. If the user removes it, use their
 edited message without re-adding attribution.
 
+**VISIBILITY DIRECTIVE**: Before invoking the question
+tool below, the agent MUST print the full proposed
+commit message (summary, body, and attribution footer)
+as plain assistant output. This ensures the complete
+text appears in the transcript regardless of context
+compression. The printed text MUST be identical to the
+content presented to the question tool.
+
 Use the **question tool** with options
 `["Approve and commit", "Edit commit message",
 "Provide my own message"]`.
@@ -488,6 +496,13 @@ gh pr view --json number,url 2>/dev/null
   > ```
   > <body>
   > ```
+
+  **VISIBILITY DIRECTIVE**: Before invoking the question
+  tool below, the agent MUST print the full proposed PR
+  title and body as plain assistant output. This ensures
+  the complete text appears in the transcript regardless
+  of context compression. The printed text MUST be
+  identical to the content presented to the question tool.
 
   Use the **question tool** with options
   `["Approve — create PR", "Edit title or body",
@@ -973,6 +988,16 @@ ls .github/workflows/*.yml .github/workflows/*.yaml \
 
 **Checkpoint**: Update the execution checklist (mark
 Step 6 `[x]`) before proceeding.
+
+**POST-CI MOMENTUM CHECKPOINT**: After marking Step 6
+complete, the agent MUST proceed immediately to Step 7
+(Return to Main) WITHOUT producing any user-facing
+output about CI results. The agent MUST NOT pause,
+summarize, or report CI status at this point. All CI
+result reporting is deferred until Step 8 (Summary)
+is reached. This checkpoint prevents the natural
+"report CI results" moment from breaking the workflow
+chain.
 
 ### 7. Return to Main
 

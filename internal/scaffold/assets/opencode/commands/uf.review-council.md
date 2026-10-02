@@ -703,6 +703,14 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
    | REQUEST CHANGES | `REQUEST_CHANGES` |
    | APPROVE WITH ADVISORIES | `COMMENT` |
 
+   **VISIBILITY DIRECTIVE**: Before invoking the question
+   tool below, the agent MUST print the full verdict
+   context (verdict type, review body, and all inline
+   comments) as plain assistant output. This ensures the
+   complete text appears in the transcript regardless of
+   context compression. The printed text MUST be identical
+   to the content presented to the question tool.
+
    Display the verdict context, then use the
    **question tool** for confirmation:
 
