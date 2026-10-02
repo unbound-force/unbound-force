@@ -78,19 +78,41 @@ needed — not every change has a spec.
 
 ## Protocol 2: Issue Linking
 
-Parse and fetch linked issues to extract acceptance
-criteria for alignment checking. This protocol applies
-when a PR body is available. For local reviews without
-a PR, skip this protocol.
+Resolve the originating issue and fetch its acceptance
+criteria for alignment checking. The originating issue
+is resolved using a priority-based fallback chain.
 
-### Step 1: Parse issue references
+### Originating-Issue Resolution Priority
 
-Parse the PR body for issue references using
-case-insensitive matching:
+1. **`originating_issue` field in `.openspec.yaml`**
+   (authoritative when present). Read the
+   `.openspec.yaml` file from the active OpenSpec change
+   directory (`openspec/changes/<name>/.openspec.yaml`)
+   or Speckit feature directory. If the file contains an
+   `originating_issue` field with a positive integer
+   value, use that issue number as the originating issue.
+   Do NOT parse the PR body for issue references when
+   this field is present — the field is authoritative.
 
-- `Fixes #N`, `Closes #N`, `Resolves #N`
-- GitHub URL variants:
-  `Fixes https://github.com/<owner>/<repo>/issues/N`
+2. **PR body parsing** (fallback). If `.openspec.yaml`
+   does not exist or does not contain an
+   `originating_issue` field, parse the PR body for
+   issue references using case-insensitive matching:
+   - `Fixes #N`, `Closes #N`, `Resolves #N`
+   - GitHub URL variants:
+     `Fixes https://github.com/<owner>/<repo>/issues/N`
+
+3. **No originating issue** (skip criteria evaluation).
+   If neither source yields an originating issue, skip
+   criteria evaluation and note "no originating issue
+   resolved — criteria evaluation skipped" in the output.
+
+### Step 1: Resolve originating issue
+
+Apply the resolution priority above to determine the
+originating issue number. Record the resolution source
+(`.openspec.yaml` field, PR body parsing, or none) for
+the output.
 
 ### Step 2: Validate references
 
@@ -98,7 +120,9 @@ Apply all of the following validation controls:
 
 - **Digits-only validation**: Each parsed issue number
   MUST be a positive integer (digits only). Discard
-  non-numeric values.
+  non-numeric values. When the originating issue was
+  resolved from `.openspec.yaml`, this validation is
+  inherent (the field is defined as a positive integer).
 - **Same-repo URL scoping**: URL-format references MUST
   belong to the same `{owner}/{repo}` as the PR. List
   cross-repo references in the output as "cross-repo —
@@ -237,6 +261,7 @@ format that consuming commands can reference:
 - Sections loaded: Functional Requirements, User Stories
 
 ### Linked Issues
+Originating issue: #42 (resolved from .openspec.yaml)
 | Issue | Title | Criteria |
 |-------|-------|----------|
 | #42 | Add auth endpoint | 3 checkboxes extracted |

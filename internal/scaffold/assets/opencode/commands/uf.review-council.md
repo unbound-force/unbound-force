@@ -280,17 +280,32 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
          using the branch name from auto-detection and
          the changed file list.
       2. Protocol 2 (Issue Linking) — **conditional**.
+         The review-context skill now resolves the
+         originating issue from `.openspec.yaml` first
+         (priority 1), falling back to PR body parsing
+         (priority 2), or no originating issue (priority 3).
          - If an **explicit PR number** was provided
            via `$ARGUMENTS` (see PR Number Argument
            above): fetch the PR body via
            `gh pr view <N> --json body --jq '.body'`
-           and run Protocol 2 to extract linked issues
-           and acceptance criteria. Pass the results
-           to the Guard persona in Step 2 for
-           concrete drift detection.
+           and run Protocol 2 to resolve the originating
+           issue and extract linked issues and acceptance
+           criteria. Pass the resolved originating-issue
+           context (issue number, resolution source, and
+           acceptance criteria) to the Guard persona in
+           Step 2 for concrete drift detection and
+           deviation governance evaluation.
          - If **no explicit PR number** was provided:
-           **skip**. Auto-detected PRs (from Step 7)
-           are not available at Phase 1c time.
+           check for `.openspec.yaml` in the active
+           change directory. If it contains an
+           `originating_issue` field, resolve the
+           originating issue from it and fetch the issue
+           via `gh issue view <N> --json title,body`.
+           Pass the resolved context to the Guard persona
+           in Step 2. If no `.openspec.yaml` or no
+           `originating_issue` field: **skip** Protocol 2.
+           Auto-detected PRs (from Step 7) are not
+           available at Phase 1c time.
       3. Protocol 3 (Path-Based Focus Heuristics) —
          classify each changed file from the
          auto-detection step for review emphasis.
@@ -350,9 +365,34 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
      Instruct agents to reference this data in their
      findings where relevant.
 
+   - **Originating-Issue Context** (from Phase 1c,
+     when the originating issue was resolved): Include
+     the originating issue number, resolution source
+     (`.openspec.yaml` field or PR body parsing), and
+     the acceptance criteria extracted from the issue.
+     This context is passed to ALL agents but is
+     especially critical for the Guard persona
+     (`divisor-guard`).
+
+   **Guard persona specific instructions**: When the
+   originating issue is resolved and acceptance criteria
+   are available, instruct the Guard persona to:
+   (a) evaluate whether each acceptance criterion is
+   addressed by the changes,
+   (b) for any unmet criterion, check whether an
+   `IMPLEMENTATION_DEVIATION` finding with adequate
+   governance documentation exists (e.g., PRD/spec
+   amendment, follow-up issue filed),
+   (c) flag missing governance as a HIGH-severity
+   finding. An `IMPLEMENTATION_DEVIATION` with adequate
+   documented governance results in a COMMENT verdict
+   (not REQUEST CHANGES) when no other REQUEST CHANGES
+   findings exist.
+
    **When Gaze data is NOT available**: include only
-   the Review Context section. Agents review based on
-   file reading plus spec/classification context.
+   the Review Context section (and Originating-Issue
+   Context if resolved). Agents review based on file
+   reading plus spec/classification context.
 
    For each agent, instruct it to review the full branch diff (all changed files vs `main`) and return its verdict (**APPROVE** or **REQUEST CHANGES**) along with all findings.
 

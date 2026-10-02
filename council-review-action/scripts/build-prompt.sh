@@ -12,6 +12,24 @@ set -euo pipefail
 PR_TITLE=$(jq -r '.title' "${META_PATH}")
 PR_TITLE="${PR_TITLE:0:200}"
 
+# Detect originating_issue from .openspec.yaml when available.
+# The change directory is derived from the head ref (PR branch name).
+ORIGINATING_ISSUE_CONTEXT=""
+if [[ -n "${META_PATH}" ]]; then
+  HEAD_REF=$(jq -r '.headRefName // empty' "${META_PATH}" 2>/dev/null || true)
+  if [[ -n "${HEAD_REF}" && "${HEAD_REF}" == opsx/* ]]; then
+    CHANGE_NAME="${HEAD_REF#opsx/}"
+    OPENSPEC_YAML="openspec/changes/${CHANGE_NAME}/.openspec.yaml"
+    if [[ -f "${OPENSPEC_YAML}" ]]; then
+      ORIGINATING_ISSUE=$(grep -E '^originating_issue:' "${OPENSPEC_YAML}" \
+        | sed 's/^originating_issue:[[:space:]]*//' | tr -d '[:space:]')
+      if [[ -n "${ORIGINATING_ISSUE}" && "${ORIGINATING_ISSUE}" =~ ^[0-9]+$ ]]; then
+        ORIGINATING_ISSUE_CONTEXT="originating_issue=#${ORIGINATING_ISSUE} (from .openspec.yaml)"
+      fi
+    fi
+  fi
+fi
+
 # Quoted heredoc ('PROMPT_STATIC') suppresses shell expansion so
 # untrusted content cannot be interpolated. The PR title is
 # injected separately via printf to preserve it literally.
@@ -47,6 +65,11 @@ Pre-fetched context (read with Read tool):
 - pr-review-comments.json — existing inline comments
 - pr-linked-issues.json — linked issues from PR body
 PROMPT_CONTEXT
+
+if [[ -n "${ORIGINATING_ISSUE_CONTEXT}" ]]; then
+  printf '\nOriginating issue: %s\n' "${ORIGINATING_ISSUE_CONTEXT}"
+  printf 'When the originating issue is resolved, evaluate the PR against its acceptance criteria. Use rigorous mode (SATISFIED/NOT SATISFIED/PARTIAL per Given/When/Then scenario) when structured criteria are available, or best-effort mode (COVERED/NOT COVERED/PARTIAL) for freeform criteria. Surface IMPLEMENTATION_DEVIATION findings (severity HIGH) for intentional deviations with documented governance actions.\n'
+fi
 
 cat << 'PROMPT_OUTPUT'
 

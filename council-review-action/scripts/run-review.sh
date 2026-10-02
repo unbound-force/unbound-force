@@ -89,6 +89,24 @@ fi
 # reads for authentication. Unsetting it breaks auth.
 unset GH_TOKEN 2>/dev/null || true
 
+# Detect originating-issue context from .openspec.yaml when available.
+# This supplements the prompt file built by build-prompt.sh with
+# acceptance-criteria evaluation instructions for the Divisor agents.
+if [[ -n "${GITHUB_EVENT_PATH:-}" && -f "${GITHUB_EVENT_PATH}" ]]; then
+  HEAD_REF=$(jq -r '.pull_request.head.ref // empty' "${GITHUB_EVENT_PATH}" 2>/dev/null || true)
+  if [[ -n "${HEAD_REF}" && "${HEAD_REF}" == opsx/* ]]; then
+    CHANGE_NAME="${HEAD_REF#opsx/}"
+    OPENSPEC_YAML="openspec/changes/${CHANGE_NAME}/.openspec.yaml"
+    if [[ -f "${OPENSPEC_YAML}" ]]; then
+      ORIGINATING_ISSUE=$(grep -E '^originating_issue:' "${OPENSPEC_YAML}" \
+        | sed 's/^originating_issue:[[:space:]]*//' | tr -d '[:space:]')
+      if [[ -n "${ORIGINATING_ISSUE}" && "${ORIGINATING_ISSUE}" =~ ^[0-9]+$ ]]; then
+        printf '\n::notice::Originating issue #%s resolved from .openspec.yaml\n' "${ORIGINATING_ISSUE}"
+      fi
+    fi
+  fi
+fi
+
 # --pure: skip external MCP plugins (closes plugin bypass vector)
 OPENCODE_EXIT=0
 timeout 300 opencode run \

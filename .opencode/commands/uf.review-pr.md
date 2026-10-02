@@ -491,7 +491,24 @@ Compare the PR intent (title + description + linked spec + linked issues) agains
 - **Requirement coverage**: For each requirement in the spec (if found), verify the code changes address it. Flag uncovered requirements.
 - **Completeness**: Are there partial implementations that could leave the system in an inconsistent state?
 - **Drift detection**: Does the code do anything NOT described in the intent/spec? Flag undocumented behavioral changes.
-- **Issue criteria coverage**: For each acceptance criterion from linked issues (Step C, Protocol 2), verify the code changes address it. Report uncovered criteria as MEDIUM findings with per-criterion status (COVERED / NOT COVERED / PARTIAL).
+- **Issue criteria coverage**: When the originating issue is resolved (Step C, Protocol 2), fetch its acceptance criteria and evaluate the PR against them using one of two modes:
+
+  **Mode auto-detection**: If the acceptance criteria contain Given/When/Then scenarios (structured or extracted from intake-kit), use **rigorous mode**. Otherwise, use **best-effort mode**.
+
+  **Rigorous mode** (Given/When/Then scenarios available): Each scenario SHALL be individually assessed as SATISFIED, NOT SATISFIED, or PARTIAL. Each assessment SHALL include evidence from the diff (file paths, line references, or "no evidence found").
+
+  **Best-effort mode** (freeform criteria): Each criterion SHALL be assessed as COVERED, NOT COVERED, or PARTIAL. Each assessment SHALL include a brief justification.
+
+  **No originating issue**: If no originating issue was resolved, skip criteria evaluation and note "no originating issue resolved — criteria evaluation skipped" in the Linked Issues section.
+
+  **IMPLEMENTATION_DEVIATION finding type**: When a criterion is assessed as NOT SATISFIED or NOT COVERED AND the PR description or commit messages document an intentional deviation with a governance action (e.g., "amend PRD section X", "file follow-up issue #Y"):
+  - Emit an `IMPLEMENTATION_DEVIATION` finding with severity HIGH.
+  - The finding SHALL include: the criterion reference, the reason for deviation, and the required governance action.
+  - The finding is NOT auto-fixable — it requires human decision.
+  - When the governance action is adequately documented, the verdict SHALL be COMMENT (not REQUEST CHANGES) if no other REQUEST CHANGES findings exist.
+  - When no deviation governance is documented, emit a standard alignment finding (not IMPLEMENTATION_DEVIATION) with severity based on the criterion's importance.
+
+  Report per-criterion evaluation results in the Linked Issues section (see Output Format, Step 5).
 - **Issue suggestion gap detection**: After checking
   acceptance criteria, scan each linked issue body for
   explicit code suggestions — fenced code blocks
@@ -666,7 +683,9 @@ FINDINGS_FILE=$(mktemp /tmp/pr-findings-XXXXXXXX.md)
 [table from Step C]
 
 ### Linked Issues
-[from Step C, if any]
+[from Step C, if any — include originating issue resolution
+source, evaluation mode, and per-criterion results with
+diff evidence or IMPLEMENTATION_DEVIATION findings]
 
 ### Summary
 [1-2 sentence assessment]
@@ -784,13 +803,15 @@ Present the findings in this structured format:
 
 ### Linked Issues
 <Only include this section if the subagent found linked issues>
+Originating issue: #38 (resolved from .openspec.yaml)
+Evaluation mode: rigorous
 | Issue | Title | Criteria |
 |-------|-------|----------|
-| #38 | Export metrics to CSV | 3/4 COVERED |
-|      | | ✓ CSV export with headers |
-|      | | ✓ Date range filtering |
-|      | | ✓ Output to stdout or file |
-|      | | ✗ Support custom delimiters |
+| #38 | Export metrics to CSV | 3/4 SATISFIED |
+|      | | ✓ CSV export with headers — diff: internal/export/csv.go:42-58 |
+|      | | ✓ Date range filtering — diff: internal/export/csv.go:60-75 |
+|      | | ✓ Output to stdout or file — diff: cmd/unbound-force/export.go:12-30 |
+|      | | ✗ Support custom delimiters — IMPLEMENTATION_DEVIATION (HIGH): Follow-up issue #1234 filed |
 | #999 | (fetch failed) | — |
 
 ### Summary
