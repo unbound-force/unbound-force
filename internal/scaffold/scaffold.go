@@ -31,19 +31,45 @@ var markerFileExtensions = map[string]bool{
 //go:embed assets
 var assets embed.FS
 
+const (
+	invokeAgentPluginAsset    = "opencode/plugins/invoke-agent/index.ts"
+	reviewDispatchPluginAsset = "opencode/plugins/review-dispatch/index.ts"
+
+	// resultStatusPartial marks a scaffold run that completed file and
+	// sub-tool work but recorded non-fatal sub-tool failures (for example,
+	// review plugin activation). Per design D12, a partial run still
+	// returns a nil error so the CLI exits zero.
+	resultStatusPartial = "partial"
+)
+
+// isActivationGatedAsset identifies source that the ordinary scaffold walk
+// must never place in OpenCode's auto-discovery directory. The dedicated
+// activation workflow may materialize these assets only after dependency
+// installation and both provider-free probes succeed.
+func isActivationGatedAsset(relPath string) bool {
+	return relPath == invokeAgentPluginAsset || relPath == reviewDispatchPluginAsset
+}
+
 // Options configures a scaffold run.
 type Options struct {
-	TargetDir   string                                  // Root dir to scaffold into (default: cwd)
-	Force       bool                                    // Overwrite existing files when true
-	DivisorOnly bool                                    // Deploy only Divisor agents, command, and packs
-	DryRun      bool                                    // When true, configureOpencodeJSON() skips writing
-	Lang        string                                  // Language for convention pack selection (auto-detect if empty)
-	Version     string                                  // Version string for marker comment (default: "dev")
-	Stdout      io.Writer                               // Writer for summary output (default: os.Stdout)
-	LookPath    func(string) (string, error)            // Finds a binary in PATH (default: exec.LookPath)
-	ExecCmd     func(string, ...string) ([]byte, error) // Runs a command (default: exec.Command wrapper)
-	ReadFile    func(string) ([]byte, error)            // Reads a file (default: os.ReadFile)
-	WriteFile   func(string, []byte, os.FileMode) error // Writes a file (default: os.WriteFile)
+	TargetDir    string                                          // Root dir to scaffold into (default: cwd)
+	Force        bool                                            // Overwrite existing files when true
+	DivisorOnly  bool                                            // Deploy only Divisor agents, command, and packs
+	DryRun       bool                                            // When true, configureOpencodeJSON() skips writing
+	Lang         string                                          // Language for convention pack selection (auto-detect if empty)
+	Version      string                                          // Version string for marker comment (default: "dev")
+	Stdout       io.Writer                                       // Writer for summary output (default: os.Stdout)
+	LookPath     func(string) (string, error)                    // Finds a binary in PATH (default: exec.LookPath)
+	ExecCmd      func(string, ...string) ([]byte, error)         // Runs a command (default: exec.Command wrapper)
+	ExecCmdInDir func(string, string, ...string) ([]byte, error) // Runs a command in an explicit directory
+	ReadFile     func(string) ([]byte, error)                    // Reads a file (default: os.ReadFile)
+	Stat         func(string) (os.FileInfo, error)                 // Gets file info (default: os.Stat)
+	Lstat        func(string) (os.FileInfo, error)                 // Gets file info without following symlinks (default: os.Lstat)
+	WriteFile    func(string, []byte, os.FileMode) error         // Writes a file (default: os.WriteFile)
+	MkdirTemp    func(string, string) (string, error)            // Creates a temporary directory (default: os.MkdirTemp)
+	MkdirAll     func(string, os.FileMode) error                 // Creates directories (default: os.MkdirAll)
+	Rename       func(string, string) error                      // Atomically renames a path (default: os.Rename)
+	RemoveAll    func(string) error                              // Removes a path tree (default: os.RemoveAll)
 }
 
 // Result tracks the disposition of each scaffolded file.
@@ -53,11 +79,31 @@ type Result struct {
 	Overwritten []string // Files that existed and were replaced (Force=true)
 	Updated     []string // Tool-owned files overwritten via overwrite-on-diff
 	Migrated    []string // Old-name files removed by rename migration
+
+	// Status is resultStatusPartial when one or more non-fatal sub-tools
+	// (for example, review plugin activation) failed while the scaffold
+	// itself still completed. Empty otherwise. Per design D12, a partial
+	// run returns a nil error so the CLI exits zero.
+	Status string
+
+	// FailedSubTools counts non-fatal sub-tool failures recorded during
+	// this run. Kept separate from the returned error so the caller can
+	// distinguish a soft partial result from a fatal core scaffold I/O
+	// failure (which returns a non-nil error and exits non-zero).
+	FailedSubTools int
 }
 
 // defaultExecCmd is the production implementation of ExecCmd.
 func defaultExecCmd(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).CombinedOutput()
+}
+
+// defaultExecCmdInDir is the production command boundary for operations whose
+// behavior must not depend on the process working directory.
+func defaultExecCmdInDir(dir, name string, args ...string) ([]byte, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	return cmd.CombinedOutput()
 }
 
 // Run walks the embedded assets and writes them to the target directory.
@@ -71,11 +117,26 @@ func Run(opts Options) (*Result, error) {
 	if opts.ExecCmd == nil {
 		opts.ExecCmd = defaultExecCmd
 	}
+	if opts.ExecCmdInDir == nil {
+		opts.ExecCmdInDir = defaultExecCmdInDir
+	}
 	if opts.ReadFile == nil {
 		opts.ReadFile = os.ReadFile
 	}
 	if opts.WriteFile == nil {
 		opts.WriteFile = os.WriteFile
+	}
+	if opts.MkdirTemp == nil {
+		opts.MkdirTemp = os.MkdirTemp
+	}
+	if opts.MkdirAll == nil {
+		opts.MkdirAll = os.MkdirAll
+	}
+	if opts.Rename == nil {
+		opts.Rename = os.Rename
+	}
+	if opts.RemoveAll == nil {
+		opts.RemoveAll = os.RemoveAll
 	}
 
 	if opts.TargetDir == "" {
@@ -122,6 +183,12 @@ func Run(opts Options) (*Result, error) {
 			return nil
 		}
 
+		// Plugin sources remain embedded for the activation workflow, but the
+		// initial scaffold pass must not expose unloadable source to OpenCode.
+		if isActivationGatedAsset(relPath) {
+			return nil
+		}
+
 		// DivisorOnly mode: skip non-Divisor assets
 		if opts.DivisorOnly && !isDivisorAsset(relPath) {
 			return nil
@@ -136,6 +203,8 @@ func Run(opts Options) (*Result, error) {
 		// Map asset paths to output paths:
 		//   opencode/   -> .opencode/
 		//   openspec/   -> openspec/
+		//   uf/         -> .uf/
+		//   schemas/    -> schemas/
 		outRel := mapAssetPath(relPath)
 		outPath := filepath.Join(opts.TargetDir, outRel)
 
@@ -214,6 +283,17 @@ func Run(opts Options) (*Result, error) {
 		return result, err
 	}
 
+	pluginResult := activateReviewPlugins(&opts)
+	result.Created = append(result.Created, pluginResult.activated...)
+	// A failed plugin activation is a soft, repairable failure: it does not
+	// abort the scaffold, but it must be visible on the top-level Result.
+	// Design D12 requires Status "partial" and an incremented FailedSubTools
+	// count, while the nil error return keeps the CLI exit code zero.
+	if pluginResult.result.action == "failed" {
+		result.Status = resultStatusPartial
+		result.FailedSubTools++
+	}
+
 	// Create empty directories for user content (skip in DivisorOnly mode)
 	if !opts.DivisorOnly {
 		emptyDirs := []string{
@@ -240,7 +320,7 @@ func Run(opts Options) (*Result, error) {
 	agentsResult := ensureAGENTSmdPackSection(&opts, lang)
 
 	// Initialize sub-tools after file scaffolding, before summary.
-	subResults := append([]subToolResult{giResult, agentsResult}, initSubTools(&opts)...)
+	subResults := append([]subToolResult{giResult, agentsResult, pluginResult.result}, initSubTools(&opts)...)
 
 	// Migrate legacy .opencode/command/ to .opencode/commands/.
 	// Runs after initSubTools() so files created by specify init,
@@ -284,7 +364,7 @@ func warnLegacyReviewerFiles(w io.Writer, targetDir string) {
 // knownAssetPrefixes enumerates the valid top-level prefixes
 // in the embedded assets directory. Used by mapAssetPath to
 // detect assets added under unexpected directories.
-var knownAssetPrefixes = []string{"opencode/", "openspec/", "devcontainer/", "specify/"}
+var knownAssetPrefixes = []string{"opencode/", "openspec/", "devcontainer/", "specify/", "uf/", "schemas/"}
 
 // mapAssetPath converts an embedded asset relative path to the
 // output path in the target directory. The assets/ directory
@@ -293,6 +373,8 @@ var knownAssetPrefixes = []string{"opencode/", "openspec/", "devcontainer/", "sp
 //	opencode/ -> .opencode/
 //	openspec/ -> openspec/  (no dot prefix)
 //	specify/  -> .specify/
+//	uf/       -> .uf/
+//	schemas/  -> schemas/   (no dot prefix)
 func mapAssetPath(relPath string) string {
 	switch {
 	case strings.HasPrefix(relPath, "opencode/"):
@@ -309,6 +391,12 @@ func mapAssetPath(relPath string) string {
 		// specify/ assets map to .specify/ in the target
 		// directory (e.g., starter constitution).
 		return "." + relPath
+	case strings.HasPrefix(relPath, "uf/"):
+		// Review policy assets live under the shared .uf runtime root.
+		return "." + relPath
+	case strings.HasPrefix(relPath, "schemas/"):
+		// Shared data-model schemas retain their repository-root path.
+		return relPath
 	default:
 		// Unknown prefix — pass through unchanged but this
 		// indicates a new asset directory was added without
@@ -318,20 +406,26 @@ func mapAssetPath(relPath string) string {
 	}
 }
 
+// regularFileExists reports whether path exists and is a regular file.
+func regularFileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
 // renamedCommands maps old embedded command file paths to
 // their new uf.-prefixed paths. Used by Run() to remove
 // orphaned old-name files after the main scaffold walk.
 var renamedCommands = map[string]string{
-	"opencode/commands/address-feedback.md":  "opencode/commands/uf.address-feedback.md",
-	"opencode/commands/agent-brief.md":       "opencode/commands/uf.agent-brief.md",
-	"opencode/commands/cobalt-crush.md":      "opencode/commands/uf.cobalt-crush.md",
+	"opencode/commands/address-feedback.md":   "opencode/commands/uf.address-feedback.md",
+	"opencode/commands/agent-brief.md":        "opencode/commands/uf.agent-brief.md",
+	"opencode/commands/cobalt-crush.md":       "opencode/commands/uf.cobalt-crush.md",
 	"opencode/commands/constitution-check.md": "opencode/commands/uf.constitution-check.md",
-	"opencode/commands/finale.md":            "opencode/commands/uf.finale.md",
-	"opencode/commands/review-council.md":    "opencode/commands/uf.review-council.md",
-	"opencode/commands/review-pr.md":         "opencode/commands/uf.review-pr.md",
-	"opencode/commands/triage-issue.md":      "opencode/commands/uf.triage-issue.md",
-	"opencode/commands/uf-init.md":           "opencode/commands/uf.init.md",
-	"opencode/commands/unleash.md":           "opencode/commands/uf.unleash.md",
+	"opencode/commands/finale.md":             "opencode/commands/uf.finale.md",
+	"opencode/commands/review-council.md":     "opencode/commands/uf.review-council.md",
+	"opencode/commands/review-pr.md":          "opencode/commands/uf.review-pr.md",
+	"opencode/commands/triage-issue.md":       "opencode/commands/uf.triage-issue.md",
+	"opencode/commands/uf-init.md":            "opencode/commands/uf.init.md",
+	"opencode/commands/unleash.md":            "opencode/commands/uf.unleash.md",
 }
 
 // cleanupRenamedCommands removes old-name command files that
@@ -472,12 +566,39 @@ func isToolOwned(relPath string) bool {
 	if strings.HasPrefix(relPath, "openspec/schemas/") {
 		return true
 	}
+	if strings.HasPrefix(relPath, "schemas/") {
+		return true
+	}
 	if strings.HasPrefix(relPath, "opencode/commands/") {
 		return true
 	}
 	// Skill files are tool-owned (maintained by unbound init).
 	if strings.HasPrefix(relPath, "opencode/skills/") {
 		return true
+	}
+	if relPath == "opencode/package.json" || relPath == "opencode/package-lock.json" {
+		return true
+	}
+	if isActivationGatedAsset(relPath) {
+		return true
+	}
+	if relPath == "opencode/lib/review-dispatch-sibling-evidence.ts" ||
+		relPath == "opencode/lib/review-dispatch-lesson-proposal.ts" ||
+		relPath == "opencode/lib/reviewer-manifest.ts" {
+		return true
+	}
+	if relPath == "uf/reviewer-capabilities.yaml" {
+		return true
+	}
+	// The matrix is a project-owned extension point: generated repositories
+	// may customize model selection without --force replacing their policy.
+	if relPath == "uf/review-matrix.yaml" {
+		return false
+	}
+	// Sibling declarations are project-owned because active repository
+	// relationships are specific to each generated project.
+	if relPath == "uf/sibling-repos.yaml" {
+		return false
 	}
 	// Convention packs: canonical packs are tool-owned,
 	// custom packs (-custom.md) are user-owned
@@ -508,13 +629,39 @@ func isDivisorAsset(relPath string) bool {
 	if strings.HasPrefix(relPath, "opencode/agents/divisor-") {
 		return true
 	}
-	if relPath == "opencode/commands/uf.review-council.md" {
+	if relPath == "opencode/commands/uf.review-council.md" ||
+		relPath == "opencode/commands/uf.triage-issue.md" ||
+		relPath == "opencode/commands/uf.address-feedback.md" {
 		return true
 	}
 	if isConventionPack(relPath) {
 		return true
 	}
-	if relPath == "opencode/skills/review-context/SKILL.md" {
+	if relPath == "opencode/skills/review-context/SKILL.md" ||
+		relPath == "opencode/skills/dispatch-advisor/SKILL.md" {
+		return true
+	}
+	if isActivationGatedAsset(relPath) {
+		return true
+	}
+	if relPath == "opencode/package.json" || relPath == "opencode/package-lock.json" {
+		return true
+	}
+	if relPath == "opencode/lib/review-dispatch-sibling-evidence.ts" ||
+		relPath == "opencode/lib/review-dispatch-lesson-proposal.ts" ||
+		relPath == "opencode/lib/reviewer-manifest.ts" {
+		return true
+	}
+	if relPath == "uf/review-matrix.yaml" || relPath == "uf/reviewer-capabilities.yaml" ||
+		relPath == "uf/sibling-repos.yaml" {
+		return true
+	}
+	if strings.HasPrefix(relPath, "schemas/review-matrix/") ||
+		strings.HasPrefix(relPath, "schemas/reviewer-capabilities/") ||
+		strings.HasPrefix(relPath, "schemas/sibling-repos/") ||
+		strings.HasPrefix(relPath, "schemas/lesson-proposal/") ||
+		strings.HasPrefix(relPath, "schemas/review-dispatch/") ||
+		strings.HasPrefix(relPath, "schemas/review-verdict/") {
 		return true
 	}
 	return false
@@ -672,9 +819,67 @@ type subToolResult struct {
 	output []byte // captured stdout+stderr from CombinedOutput()
 }
 
+// configurePluginEntries registers the managed review plugin sources when
+// present and migrates legacy opencode-swarm-plugin entries out of the
+// plugin array. A non-array plugin value (e.g., [name, options] tuples) is
+// left untouched — only plain string entries are managed. It returns true
+// when the plugin array changed.
+func configurePluginEntries(ocMap map[string]json.RawMessage, hasPlugins bool) bool {
+	pluginsRaw, hasPluginKey := ocMap["plugin"]
+	var plugins []string
+	pluginEditable := !hasPluginKey
+	if hasPluginKey {
+		pluginEditable = json.Unmarshal(pluginsRaw, &plugins) == nil
+	}
+	if !pluginEditable {
+		return false
+	}
+	next := make([]string, 0, len(plugins)+2)
+	seen := make(map[string]bool, len(plugins)+2)
+	for _, p := range plugins {
+		if p == "opencode-swarm-plugin" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		next = append(next, p)
+	}
+	if hasPlugins {
+		for _, entry := range []string{
+			"./" + mapAssetPath(invokeAgentPluginAsset),
+			"./" + mapAssetPath(reviewDispatchPluginAsset),
+		} {
+			if seen[entry] {
+				continue
+			}
+			seen[entry] = true
+			next = append(next, entry)
+		}
+	}
+	pluginChanged := len(next) != len(plugins)
+	if !pluginChanged {
+		for i := range plugins {
+			if plugins[i] != next[i] {
+				pluginChanged = true
+				break
+			}
+		}
+	}
+	if pluginChanged {
+		if len(next) == 0 {
+			// Empty plugin array — remove the key entirely.
+			delete(ocMap, "plugin")
+		} else {
+			pluginJSON, _ := json.Marshal(next)
+			ocMap["plugin"] = json.RawMessage(pluginJSON)
+		}
+	}
+	return pluginChanged
+}
+
 // configureOpencodeJSON creates or updates opencode.json with the Dewey
-// MCP server entry (when dewey is in PATH) and the Replicator MCP entry
-// (when replicator is in PATH). Respects setup.tools.*.method: skip in
+// MCP server entry (when dewey is in PATH), the Replicator MCP entry
+// (when replicator is in PATH), and the managed review plugin entries
+// (when their sources are present). Respects setup.tools.*.method: skip in
 // .uf/config.yaml — tools configured as "skip" are treated as absent.
 // Migrates legacy opencode-swarm-plugin entries from the plugin array.
 // Idempotent by default; Force overwrites stale mcp.dewey entries.
@@ -724,8 +929,14 @@ func configureOpencodeJSON(opts *Options) []subToolResult {
 		hasReplicator = false
 	}
 
+	// Detect whether the managed review plugin sources are present so
+	// OpenCode can load them explicitly (see configureOpencodeJSON plugin
+	// registration below).
+	hasPlugins := regularFileExists(filepath.Join(opts.TargetDir, mapAssetPath(invokeAgentPluginAsset))) &&
+		regularFileExists(filepath.Join(opts.TargetDir, mapAssetPath(reviewDispatchPluginAsset)))
+
 	// Nothing to configure — skip.
-	if !hasDewey && !hasReplicator {
+	if !hasDewey && !hasReplicator && !hasPlugins {
 		return []subToolResult{{
 			name:   "opencode.json",
 			action: "skipped",
@@ -859,31 +1070,9 @@ func configureOpencodeJSON(opts *Options) []subToolResult {
 		}
 	}
 
-	// --- Legacy plugin migration ---
-	// Remove opencode-swarm-plugin from plugin array if present.
-	if pluginRaw, ok := ocMap["plugin"]; ok {
-		var plugins []string
-		if json.Unmarshal(pluginRaw, &plugins) == nil {
-			var filtered []string
-			removed := false
-			for _, p := range plugins {
-				if p == "opencode-swarm-plugin" {
-					removed = true
-					continue
-				}
-				filtered = append(filtered, p)
-			}
-			if removed {
-				if len(filtered) == 0 {
-					// Empty plugin array — remove the key entirely.
-					delete(ocMap, "plugin")
-				} else {
-					pluginJSON, _ := json.Marshal(filtered)
-					ocMap["plugin"] = json.RawMessage(pluginJSON)
-				}
-				changed = true
-			}
-		}
+	// --- Plugin registration and legacy migration ---
+	if configurePluginEntries(ocMap, hasPlugins) {
+		changed = true
 	}
 
 	// Nothing changed — already configured.
@@ -1628,9 +1817,9 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 		if out, initErr := opts.ExecCmd("dewey", "init"); initErr != nil {
 			return []subToolResult{{
 				name: ".uf/dewey/", action: "failed",
-				detail:  fmt.Sprintf("dewey init: %s", initErr),
-				err:     initErr,
-				output:  out,
+				detail: fmt.Sprintf("dewey init: %s", initErr),
+				err:    initErr,
+				output: out,
 			}}
 		}
 		results = append(results, subToolResult{
@@ -1645,9 +1834,9 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 		if out, idxErr := opts.ExecCmd("dewey", "index", "--no-embeddings"); idxErr != nil {
 			results = append(results, subToolResult{
 				name: "dewey index", action: "failed",
-				detail:  fmt.Sprintf("dewey index: %s", idxErr),
-				err:     idxErr,
-				output:  out,
+				detail: fmt.Sprintf("dewey index: %s", idxErr),
+				err:    idxErr,
+				output: out,
 			})
 		} else {
 			results = append(results, subToolResult{
@@ -1667,9 +1856,9 @@ func initDewey(opts *Options, logf func(string, ...interface{})) []subToolResult
 		if out, idxErr := opts.ExecCmd("dewey", "index", "--no-embeddings"); idxErr != nil {
 			results = append(results, subToolResult{
 				name: "dewey index", action: "failed",
-				detail:  fmt.Sprintf("dewey index: %s", idxErr),
-				err:     idxErr,
-				output:  out,
+				detail: fmt.Sprintf("dewey index: %s", idxErr),
+				err:    idxErr,
+				output: out,
 			})
 		} else {
 			results = append(results, subToolResult{
@@ -1711,9 +1900,9 @@ func initSimpleTool(opts *Options, tool simpleTool, logf func(string, ...interfa
 	if out, initErr := opts.ExecCmd(tool.name, args...); initErr != nil {
 		return &subToolResult{
 			name: tool.result, action: "failed",
-			detail:  fmt.Sprintf("%s init: %s", tool.name, initErr),
-			err:     initErr,
-			output:  out,
+			detail: fmt.Sprintf("%s init: %s", tool.name, initErr),
+			err:    initErr,
+			output: out,
 		}
 	}
 

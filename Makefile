@@ -1,7 +1,8 @@
 .PHONY: check build test lint install
 .PHONY: coverage ensure-gaze crapload crapload-baseline crapload-check
+.PHONY: coverage-gate plugin-test
 
-check: lint test build
+check: lint test build coverage-gate plugin-test
 
 build:
 	go build ./...
@@ -16,6 +17,18 @@ lint:
 install:
 	go build -o $(shell go env GOPATH)/bin/unbound-force ./cmd/unbound-force/
 	ln -sf $(shell go env GOPATH)/bin/unbound-force $(shell go env GOPATH)/bin/uf
+
+##@ Coverage Gate (scope-based)
+
+COVERAGE_GATE_MANIFEST := coverage-gate.json
+
+coverage-gate: coverage ## enforce scope-based coverage thresholds on changed packages
+	go run ./cmd/coverage-gate -manifest $(COVERAGE_GATE_MANIFEST) -profile $(GAZE_COVERPROFILE)
+
+##@ Plugin Tests (TypeScript)
+
+plugin-test: ## run TypeScript plugin unit, integration, smoke, and coverage checks
+	cd .opencode && npm ci && npx vitest run --coverage
 
 ##@ CRAP Load Monitoring
 

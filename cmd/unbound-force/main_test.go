@@ -29,15 +29,18 @@ func TestRunInit_FreshDir(t *testing.T) {
 		t.Errorf("expected output to contain 'files processed', got:\n%s", output)
 	}
 
-	// Verify the summary includes a non-trivial file count
-	// 45 = 39 prior + 1 pre-flight skill + 1 review-context
-	// skill + 1 always-on-guidance skill + 2 CI convention
-	// pack files (ci.md + ci-custom.md)
-	// + 1 starter constitution (.specify/memory/constitution.md).
-	// (devcontainer excluded — OS-specific, generated
-	// per-user by uf sandbox init).
-	if !strings.Contains(output, "45 files processed") {
-		t.Errorf("expected '45 files processed' in output, got:\n%s", output)
+	// Verify the summary includes a non-trivial, correct file count.
+	// The exact count is environment-dependent: review plugin activation
+	// appends the two plugin sources plus the shared reviewer-manifest
+	// module to the created set only when
+	// Node/npm/OpenCode are present and the install plus probes succeed
+	// (62 files). Otherwise the sources remain activation-gated and only 60
+	// files are processed. The scaffold-level asset inventory and drift tests
+	// pin the exact asset list, so this CLI check asserts either valid count.
+	// (devcontainer excluded — OS-specific, generated per-user by
+	// uf sandbox init.)
+	if !strings.Contains(output, "60 files processed") && !strings.Contains(output, "62 files processed") {
+		t.Errorf("expected '60 files processed' or '62 files processed' in output, got:\n%s", output)
 	}
 
 	// Verify a user-owned file was created

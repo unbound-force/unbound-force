@@ -66,6 +66,14 @@ When evaluating a Gaze Quality Report against a backlog item's acceptance criter
 - `rationale`: Markdown explanation
 - `criteria_met` / `criteria_failed`
 
+Before proposing acceptance, treat `review-verdict` as the canonical decision artifact; use `review-dispatch` only as additive provenance. Migrated reading supports historical schema version 1 and current schema version 2. Apply the Hero Interface Contract same-major compatibility rule before interpreting the payload. An unmigrated v1-only consumer must reject version 2 rather than guessing at compatibility.
+
+Apply these fail-closed acceptance semantics:
+- `APPROVED` permits progression to the existing acceptance evaluation and human confirmation gate; it does not auto-accept the item.
+- `CHANGES_REQUESTED` blocks automated progression until findings are addressed and review succeeds.
+- `ESCALATED` is advisory but blocks automated progression until the existing human gate explicitly resolves it.
+- `INCONCLUSIVE` and `UNAVAILABLE` are not approvals. Both block automated progression and acceptance until a successful rerun or explicit human resolution.
+
 **Interactive Approval**: Before running the `bash` tool to record an acceptance decision using the `go run cmd/mutimind/main.go decide` command, you MUST use the **question tool** to present:
 - The target backlog item (e.g., `BI-NNN`)
 - The proposed decision (`accept`, `reject`, or `conditional`)

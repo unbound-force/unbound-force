@@ -199,6 +199,12 @@ func appendConditionalGroups(groups []CheckGroup, opts *Options) []CheckGroup {
 		groups = append(groups, checkPythonTools(opts))
 	}
 
+	// Review plugins: included when the scaffolded .opencode/package.json
+	// manifest is present (SC-FR-005). The check returns nil otherwise.
+	if reviewGroup := checkReviewPlugins(opts); reviewGroup != nil {
+		groups = append(groups, *reviewGroup)
+	}
+
 	return groups
 }
 

@@ -36,13 +36,22 @@ make build
 make test
 # or: go test -race -count=1 ./...
 
-# Run all checks (lint, test, build)
+# Run all checks (lint, test, build, coverage gate, plugin tests)
 make check
+
+# TypeScript plugin tests (unit, integration, smoke, coverage)
+make plugin-test
+
+# Scope-based Go coverage gate (changed packages)
+make coverage-gate
 
 # Lint (vet + golangci-lint)
 make lint
 # or: go vet ./... && golangci-lint run
 ```
+
+`make check` now depends on both `make coverage-gate` (scope-based Go
+coverage) and `make plugin-test` (TypeScript plugin suite).
 
 Always run tests with `-race -count=1`. CI enforces this.
 
@@ -63,11 +72,16 @@ Always run tests with `-race -count=1`. CI enforces this.
 ```text
 unbound-force/
 ├── .specify/                         # Speckit framework (templates, scripts, memory)
+├── .uf/                              # Review config (review matrix, reviewer manifest, sibling repos)
 ├── .opencode/
 │   ├── agents/                       # Hero persona agents (18 active)
 │   ├── commands/                     # Slash commands (48 files)
+│   ├── plugins/                      # Review plugins registered in opencode.json (invoke-agent, review-dispatch)
+│   ├── lib/                          # Shared TypeScript plugin library
+│   ├── test/                         # TypeScript plugin unit/integration/smoke tests
 │   ├── skill/                        # Swarm skills packages
 │   ├── skills/                       # Additional skills packages
+│   ├── package.json                  # Plugin npm manifest (locked by package-lock.json)
 │   └── uf/packs/                     # Convention packs
 ├── council-review-action/             # AI code review composite GitHub Action
 │   ├── action.yml                    # Composite action definition
@@ -77,11 +91,13 @@ unbound-force/
 ├── cmd/unbound-force/                # Cobra CLI entry point
 ├── cmd/mutimind/                     # Muti-Mind backend CLI
 ├── cmd/mxf/                          # Mx F backend CLI
+├── cmd/coverage-gate/                # Scope-based Go coverage gate CLI
 ├── internal/
 │   ├── artifacts/                    # Artifact envelope I/O
 │   ├── backlog/                      # Muti-Mind backlog parsing
 │   ├── coaching/                     # Mx F coaching and retrospective data
 │   ├── config/                       # Unified config loading
+│   ├── coveragegate/                 # Scope-based Go coverage gate
 │   ├── dashboard/                    # Mx F dashboard rendering
 │   ├── doctor/                       # Environment health checks
 │   ├── gateway/                      # LLM reverse proxy (Vertex/Bedrock/Anthropic)
@@ -103,6 +119,7 @@ unbound-force/
 ├── schemas/                          # JSON Schema registry
 │   ├── feedback-triage/              # Feedback triage schemas
 │   └── issue-triage/                 # Issue triage schemas
+├── coverage-gate.json                # Scope-based coverage thresholds
 ├── go.mod                            # Go module (1.25+)
 ├── opencode.json                     # MCP server configuration
 ├── .goreleaser.yaml                  # Release configuration
@@ -149,6 +166,12 @@ imported externally.
 - **Container runtime**: Podman (>= 4.3)
 - **Workspace manager**: DevPod (>= 0.5.0, optional)
 - **Embedding model**: `granite-embedding:30m` via Ollama
+- **TypeScript plugins**: `.opencode/plugins/` review plugins
+  (registered via the `opencode.json` `plugin` array) and the
+  `.opencode/lib/` shared library use
+  `@opencode-ai/plugin` 1.4.10 and `zod` 4.1.8 (runtime), and
+  `vitest` 5.0.3 + `@vitest/coverage-v8` 5.0.3 (dev), managed
+  by `.opencode/package.json` / `package-lock.json`.
 
 ## Behavioral Rules
 
@@ -201,7 +224,11 @@ These rules are non-negotiable. Violations are CRITICAL severity.
   PR. Tooling scaffolds (`uf init`, convention pack updates,
   command directory renames, schema template updates) MUST be
   committed on a separate branch (e.g., `chore/uf.init-sync`),
-  not mixed into feature branches. Never use `git add -A` or
+  not mixed into feature branches. Scaffold assets and tests
+  required by and traced to an active approved change MAY ship
+  with that feature; unrelated scaffold refreshes still require
+  a separate branch, and explicit staging remains mandatory.
+  Never use `git add -A` or
   `git add .` on feature branches — stage files explicitly.
 
 ### PR Review Commands

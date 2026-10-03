@@ -635,9 +635,9 @@ func checkConfiguration(opts *Options) CheckGroup {
 		})
 	} else {
 		group.Results = append(group.Results, CheckResult{
-			Name:    ".uf/config.yaml",
+			Name:     ".uf/config.yaml",
 			Severity: Pass,
-			Message: "not found (using defaults)",
+			Message:  "not found (using defaults)",
 		})
 	}
 
@@ -2058,4 +2058,482 @@ func checkAnyTool(tc pythonToolCheck, opts *Options) CheckResult {
 		Message:     "not found",
 		InstallHint: tc.installHint,
 	}
+}
+
+// reviewPluginRuntimeRemediation mirrors the scaffold activation
+// remediation for an unsupported or missing Node.js/npm runtime. Doctor
+// must present the same Node 22 / npm 10 guidance without network access.
+const reviewPluginRuntimeRemediation = "install Node.js 22 and npm 10, then rerun uf init"
+
+// reviewPluginInstallRemediation is the doctor remediation for a missing or
+// inconsistent plugin dependency install.
+const reviewPluginInstallRemediation = "run npm ci --ignore-scripts --omit=dev in .opencode, then rerun uf init"
+
+// reviewPluginPackages lists the four direct npm packages declared by the
+// scaffolded review plugin manifest (design D13). Order is significant: it
+// is the deterministic iteration order for manifest-lock consistency and
+// dependency presence checks.
+var reviewPluginPackages = []string{
+	"@opencode-ai/plugin",
+	"zod",
+	"vitest",
+	"@vitest/coverage-v8",
+}
+
+// reviewPluginTools maps each review plugin directory to the tool names its
+// source MUST register. It mirrors the scaffold provider-free tool-definition
+// probe so doctor can verify "plugin loads" without running OpenCode or
+// touching the network.
+var reviewPluginTools = []struct {
+	pluginDir string
+	tools     []string
+}{
+	{pluginDir: "invoke-agent", tools: []string{"invoke_agent"}},
+	{pluginDir: "review-dispatch", tools: []string{
+		"plan_review_dispatch",
+		"finalize_review_dispatch",
+		"acquire_sibling_evidence",
+		"prepare_lesson_learning",
+	}},
+}
+
+// reviewPluginConfigEntries are the opencode.json plugin-array entries the
+// scaffold writes for the two review plugins. They mirror the scaffold's asset
+// paths, expressed relative to the repo root with a "./" prefix.
+var reviewPluginConfigEntries = []string{
+	"./.opencode/plugins/invoke-agent/index.ts",
+	"./.opencode/plugins/review-dispatch/index.ts",
+}
+
+// npmPackageManifest is the subset of package.json and the package-lock.json
+// root entry that the review plugin doctor checks care about: the declared
+// dependency and devDependency name→version maps.
+type npmPackageManifest struct {
+	Dependencies    map[string]string `json:"dependencies"`
+	DevDependencies map[string]string `json:"devDependencies"`
+}
+
+// npmLockfile is the subset of package-lock.json needed to verify manifest-lock
+// consistency: the lockfile version and the root package's declared versions.
+type npmLockfile struct {
+	LockfileVersion int                           `json:"lockfileVersion"`
+	Packages        map[string]npmPackageManifest `json:"packages"`
+}
+
+// mergedDependencies returns the union of dependencies and devDependencies.
+// Dependency entries take precedence on name collision (npm cannot actually
+// declare a name in both maps, so precedence is moot in practice).
+func mergedDependencies(m npmPackageManifest) map[string]string {
+	merged := make(map[string]string, len(m.Dependencies)+len(m.DevDependencies))
+	for name, version := range m.DevDependencies {
+		merged[name] = version
+	}
+	for name, version := range m.Dependencies {
+		merged[name] = version
+	}
+	return merged
+}
+
+// checkReviewPlugins verifies the scaffolded review plugin activation state
+// per SC-FR-005 and design D12: manifest-lock consistency, dependency
+// presence, exact Node/npm versions, registration state, and plugin tool
+// registration. Returns nil when the plugin scaffold is absent so existing
+// projects without the review plugins are unaffected.
+func checkReviewPlugins(opts *Options) *CheckGroup {
+	manifestPath := filepath.Join(opts.TargetDir, ".opencode", "package.json")
+	if info, err := os.Stat(manifestPath); err != nil || info.IsDir() {
+		return nil
+	}
+
+	group := &CheckGroup{
+		Name:    "Review Plugins",
+		Results: []CheckResult{},
+	}
+	group.Results = append(group.Results, checkManifestLockConsistency(opts))
+	group.Results = append(group.Results, checkReviewPluginDependencies(opts))
+	group.Results = append(group.Results, checkReviewPluginRuntime(opts, "node", true))
+	group.Results = append(group.Results, checkReviewPluginRuntime(opts, "npm", false))
+	group.Results = append(group.Results, checkPluginRegistration(opts))
+	group.Results = append(group.Results, checkPluginToolRegistration(opts))
+	return group
+}
+
+// checkManifestLockConsistency compares package.json dependency versions
+// against the package-lock.json root entry. Returns Pass when the four
+// declared packages agree, Warn for a repairable missing/malformed lock, and
+// Fail for a hard version mismatch (broken activation state).
+func checkManifestLockConsistency(opts *Options) CheckResult {
+	readFile := opts.ReadFile
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
+
+	manifestPath := filepath.Join(opts.TargetDir, ".opencode", "package.json")
+	manifestData, err := readFile(manifestPath)
+	if err != nil {
+		return CheckResult{
+			Name:        "manifest-lock",
+			Severity:    Warn,
+			Message:     "package.json missing",
+			InstallHint: reviewPluginInstallRemediation,
+		}
+	}
+	var manifest npmPackageManifest
+	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+		return CheckResult{
+			Name:        "manifest-lock",
+			Severity:    Warn,
+			Message:     "package.json malformed",
+			InstallHint: reviewPluginInstallRemediation,
+		}
+	}
+	declared := mergedDependencies(manifest)
+
+	lockPath := filepath.Join(opts.TargetDir, ".opencode", "package-lock.json")
+	lockData, err := readFile(lockPath)
+	if err != nil {
+		return CheckResult{
+			Name:        "manifest-lock",
+			Severity:    Warn,
+			Message:     "package-lock.json missing",
+			InstallHint: reviewPluginInstallRemediation,
+		}
+	}
+	var lock npmLockfile
+	if err := json.Unmarshal(lockData, &lock); err != nil {
+		return CheckResult{
+			Name:        "manifest-lock",
+			Severity:    Warn,
+			Message:     "package-lock.json malformed",
+			InstallHint: reviewPluginInstallRemediation,
+		}
+	}
+	if lock.LockfileVersion != 3 {
+		return CheckResult{
+			Name:        "manifest-lock",
+			Severity:    Warn,
+			Message:     fmt.Sprintf("lockfileVersion %d (want 3)", lock.LockfileVersion),
+			InstallHint: reviewPluginInstallRemediation,
+		}
+	}
+	locked := mergedDependencies(lock.Packages[""])
+
+	var mismatches []string
+	for _, name := range reviewPluginPackages {
+		want := declared[name]
+		if want == "" {
+			mismatches = append(mismatches, fmt.Sprintf("%s not declared in package.json", name))
+			continue
+		}
+		got := locked[name]
+		if got == "" {
+			mismatches = append(mismatches, fmt.Sprintf("%s@%s not in package-lock.json", name, want))
+			continue
+		}
+		if got != want {
+			mismatches = append(mismatches, fmt.Sprintf("%s: package.json %s != lock %s", name, want, got))
+		}
+	}
+	if len(mismatches) > 0 {
+		return CheckResult{
+			Name:        "manifest-lock",
+			Severity:    Fail,
+			Message:     strings.Join(mismatches, "; "),
+			InstallHint: reviewPluginInstallRemediation,
+		}
+	}
+	return CheckResult{
+		Name:     "manifest-lock",
+		Severity: Pass,
+		Message:  "package.json and package-lock.json consistent",
+	}
+}
+
+// checkReviewPluginDependencies verifies the four declared packages are
+// present under .opencode/node_modules/. Returns Pass when all are present,
+// Warn (repairable) when one or more are missing.
+func checkReviewPluginDependencies(opts *Options) CheckResult {
+	var missing []string
+	for _, pkg := range reviewPluginPackages {
+		pkgDir := filepath.Join(opts.TargetDir, ".opencode", "node_modules", filepath.FromSlash(pkg))
+		if info, err := os.Stat(pkgDir); err != nil || !info.IsDir() {
+			missing = append(missing, pkg)
+		}
+	}
+	if len(missing) > 0 {
+		return CheckResult{
+			Name:        "dependencies",
+			Severity:    Warn,
+			Message:     fmt.Sprintf("missing node_modules: %s", strings.Join(missing, ", ")),
+			InstallHint: reviewPluginInstallRemediation,
+		}
+	}
+	return CheckResult{
+		Name:     "dependencies",
+		Severity: Pass,
+		Message:  fmt.Sprintf("%d packages installed", len(reviewPluginPackages)),
+	}
+}
+
+// checkReviewPluginRuntime resolves and parses the exact Node.js or npm
+// version, then verifies it falls in the supported range (Node 20-24,
+// npm 10-11) per design D12. Reports the precise detected version.
+func checkReviewPluginRuntime(opts *Options, name string, allowVPrefix bool) CheckResult {
+	if opts.ExecCmd == nil {
+		return CheckResult{Name: name + " version", Severity: Warn, Message: "not checked", InstallHint: reviewPluginRuntimeRemediation}
+	}
+	path, err := opts.LookPath(name)
+	if err != nil {
+		return CheckResult{
+			Name:        name + " version",
+			Severity:    Warn,
+			Message:     "not found",
+			InstallHint: reviewPluginRuntimeRemediation,
+		}
+	}
+	output, err := opts.ExecCmd(name, "--version")
+	if err != nil {
+		return CheckResult{
+			Name:        name + " version",
+			Severity:    Warn,
+			Message:     "version could not be read",
+			Detail:      path,
+			InstallHint: reviewPluginRuntimeRemediation,
+		}
+	}
+	parsed, parseErr := parseExactSemver(string(output), allowVPrefix)
+	if parseErr != nil {
+		return CheckResult{
+			Name:        name + " version",
+			Severity:    Warn,
+			Message:     "version could not be parsed",
+			Detail:      strings.TrimSpace(string(output)),
+			InstallHint: reviewPluginRuntimeRemediation,
+		}
+	}
+	version := parsed.String()
+	if !reviewPluginRuntimeSupported(name, parsed) {
+		return CheckResult{
+			Name:        name + " version",
+			Severity:    Fail,
+			Message:     fmt.Sprintf("%s %s (unsupported)", name, version),
+			Detail:      path,
+			InstallHint: reviewPluginRuntimeRemediation,
+		}
+	}
+	return CheckResult{
+		Name:     name + " version",
+		Severity: Pass,
+		Message:  version,
+		Detail:   path,
+	}
+}
+
+// checkPluginRegistration reports the activation state of the two review
+// plugin sources and their opencode.json registration. Pass when both sources
+// are present AND both are registered in the opencode.json plugin array, Warn
+// when the sources are absent (inactive but repairable via uf init), Warn when
+// exactly one source is present (a partially-activated state), and Fail when
+// both sources are present but either entry is missing from opencode.json (a
+// broken activation state).
+func checkPluginRegistration(opts *Options) CheckResult {
+	readFile := opts.ReadFile
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
+	pluginsDir := filepath.Join(opts.TargetDir, ".opencode", "plugins")
+	invokePresent := isRegularFile(filepath.Join(pluginsDir, "invoke-agent", "index.ts"))
+	reviewPresent := isRegularFile(filepath.Join(pluginsDir, "review-dispatch", "index.ts"))
+
+	switch {
+	case invokePresent && reviewPresent:
+	case !invokePresent && !reviewPresent:
+		return CheckResult{
+			Name:        "registration",
+			Severity:    Warn,
+			Message:     "plugin sources inactive (activation pending or failed)",
+			InstallHint: "Run: uf init",
+		}
+	default:
+		return CheckResult{
+			Name:        "registration",
+			Severity:    Warn,
+			Message:     "partial activation (one plugin source missing)",
+			InstallHint: "Run: uf init",
+		}
+	}
+
+	registered := make(map[string]bool)
+	if data, err := readFile(filepath.Join(opts.TargetDir, "opencode.json")); err == nil {
+		var cfg struct {
+			Plugin []string `json:"plugin"`
+		}
+		if json.Unmarshal(data, &cfg) == nil {
+			for _, p := range cfg.Plugin {
+				registered[p] = true
+			}
+		}
+	}
+	for _, entry := range reviewPluginConfigEntries {
+		if !registered[entry] {
+			return CheckResult{
+				Name:        "registration",
+				Severity:    Fail,
+				Message:     fmt.Sprintf("plugin source not registered in opencode.json: %s", entry),
+				InstallHint: "Run: uf init",
+			}
+		}
+	}
+	return CheckResult{
+		Name:     "registration",
+		Severity: Pass,
+		Message:  "both plugin sources present and registered",
+	}
+}
+
+// checkPluginToolRegistration verifies that each registered plugin source
+// registers the expected tools. Returns Pass when every expected tool name is
+// present, Warn when a source is absent (inactive), and Fail when a present
+// source is missing a required tool (a hard-broken activation state).
+func checkPluginToolRegistration(opts *Options) CheckResult {
+	readFile := opts.ReadFile
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
+	pluginsDir := filepath.Join(opts.TargetDir, ".opencode", "plugins")
+
+	var missingTools []string
+	sourcesPresent := 0
+	for _, spec := range reviewPluginTools {
+		indexPath := filepath.Join(pluginsDir, spec.pluginDir, "index.ts")
+		data, err := readFile(indexPath)
+		if err != nil {
+			continue // absent source is reported by checkPluginRegistration
+		}
+		sourcesPresent++
+		source := string(data)
+		for _, tool := range spec.tools {
+			if !strings.Contains(source, tool) {
+				missingTools = append(missingTools, spec.pluginDir+":"+tool)
+			}
+		}
+	}
+
+	if sourcesPresent == 0 {
+		return CheckResult{
+			Name:        "plugin tools",
+			Severity:    Warn,
+			Message:     "plugin sources not loaded (activation inactive)",
+			InstallHint: "Run: uf init",
+		}
+	}
+	if len(missingTools) > 0 {
+		return CheckResult{
+			Name:        "plugin tools",
+			Severity:    Fail,
+			Message:     "missing tool registration: " + strings.Join(missingTools, ", "),
+			InstallHint: reviewPluginInstallRemediation,
+		}
+	}
+	return CheckResult{
+		Name:     "plugin tools",
+		Severity: Pass,
+		Message:  "invoke-agent and review-dispatch tools registered",
+	}
+}
+
+// isRegularFile reports whether path exists and is a regular file.
+func isRegularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// reviewPluginRuntimeSupported reports whether the parsed version is in the
+// supported range for the named runtime per design D12: Node 20 through 24,
+// npm 10 through 11 (inclusive).
+func reviewPluginRuntimeSupported(name string, v exactSemver) bool {
+	switch name {
+	case "node":
+		return v.Major >= 20 && v.Major <= 24
+	case "npm":
+		return v.Major >= 10 && v.Major <= 11
+	default:
+		return false
+	}
+}
+
+// exactSemver is a parsed major.minor.patch semantic version.
+type exactSemver struct {
+	Major uint32
+	Minor uint32
+	Patch uint32
+}
+
+// String returns the canonical "X.Y.Z" rendering of the version.
+func (v exactSemver) String() string {
+	return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch)
+}
+
+// parseExactSemver parses version command output into an exact semantic
+// version. It mirrors the scaffold activation parser (design D12): one
+// terminal LF or CRLF is permitted, then ASCII space and tab are trimmed at
+// both edges. The remaining value MUST match the anchored ASCII pattern
+//
+//	(v?)(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)
+//
+// where the optional `v` prefix is accepted only when allowVPrefix is true
+// (Node yes, npm no). Leading-zero components, non-ASCII digits, signs,
+// embedded whitespace, prerelease/build metadata, extra lines, and
+// components above the platform unsigned 32-bit limit are all rejected.
+// Length and overflow are checked before integer conversion.
+func parseExactSemver(output string, allowVPrefix bool) (exactSemver, error) {
+	value := strings.TrimSuffix(output, "\r\n")
+	value = strings.TrimSuffix(value, "\n")
+	value = strings.Trim(value, " \t")
+	if allowVPrefix {
+		value = strings.TrimPrefix(value, "v")
+	}
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 {
+		return exactSemver{}, fmt.Errorf("version must contain exactly three ASCII decimal components")
+	}
+
+	components := [3]uint32{}
+	for index, part := range parts {
+		component, err := parseSemverComponent(part)
+		if err != nil {
+			return exactSemver{}, fmt.Errorf("version component %d: %w", index+1, err)
+		}
+		components[index] = component
+	}
+	return exactSemver{Major: components[0], Minor: components[1], Patch: components[2]}, nil
+}
+
+// parseSemverComponent parses a single dotted version component as an ASCII
+// decimal uint32. It rejects empty values, leading zeroes, non-ASCII digits,
+// and values that exceed the unsigned 32-bit range. Length is checked before
+// conversion to short-circuit grossly oversized input.
+func parseSemverComponent(value string) (uint32, error) {
+	if value == "" {
+		return 0, fmt.Errorf("component is empty")
+	}
+	if len(value) > 1 && value[0] == '0' {
+		return 0, fmt.Errorf("leading zeroes are not allowed")
+	}
+	if len(value) > 10 {
+		return 0, fmt.Errorf("component exceeds uint32")
+	}
+
+	var parsed uint32
+	for _, character := range []byte(value) {
+		if character < '0' || character > '9' {
+			return 0, fmt.Errorf("component must contain ASCII digits only")
+		}
+		digit := uint32(character - '0')
+		if parsed > (^uint32(0)-digit)/10 {
+			return 0, fmt.Errorf("component exceeds uint32")
+		}
+		parsed = parsed*10 + digit
+	}
+	return parsed, nil
 }

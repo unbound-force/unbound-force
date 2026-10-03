@@ -1,0 +1,76 @@
+{
+  "version": 2,
+  "profiles": {
+    "lightweight": {
+      "model": "provider/light",
+      "variant": "fast"
+    },
+    "standard": {
+      "model": "provider/standard",
+      "variant": "high"
+    },
+    "heavy": {
+      "model": "provider/heavy"
+    }
+  },
+  "defaults": {
+    "code": "standard",
+    "spec": "standard",
+    "triage": "standard",
+    "feedback": "standard"
+  },
+  "always": {
+    "divisor-adversary": "heavy",
+    "divisor-sre": "lightweight"
+  },
+  "advisor": {
+    "code": [
+      "divisor-adversary",
+      "divisor-architect",
+      "divisor-guard"
+    ],
+    "spec": [
+      "divisor-adversary",
+      "divisor-architect",
+      "divisor-guard"
+    ],
+    "triage": [
+      "divisor-adversary",
+      "divisor-guard",
+      "divisor-testing"
+    ],
+    "feedback": [
+      "divisor-adversary",
+      "divisor-guard"
+    ]
+  },
+  "runs": {
+    "code": {
+      "divisor-adversary": [
+        {
+          "profile": "standard",
+          "variant": "low"
+        },
+        {
+          "model": "provider/heavy",
+          "variant": "deep"
+        }
+      ]
+    }
+  },
+  "risk_augmentation": {
+    "enabled": true,
+    "agents": [
+      "divisor-adversary",
+      "divisor-architect"
+    ]
+  },
+  "limits": {
+    "max_personas": 16,
+    "max_runs_per_persona": 3,
+    "max_total_runs": 24,
+    "max_parallel_runs": 4,
+    "per_run_timeout_seconds": 600,
+    "max_reported_cost_usd": 25
+  }
+}

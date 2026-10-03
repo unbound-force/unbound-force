@@ -299,6 +299,26 @@ workflow:
   spec_review: true
 ```
 
+## Review Council Configuration
+
+The review council is configured through three separate `.uf/` files,
+not through `.uf/config.yaml`. Each is a closed, schema-validated
+contract and is optional -- absent files fall back to compiled
+defaults.
+
+| File | Purpose |
+|------|---------|
+| `.uf/review-matrix.yaml` | Named model profiles and ordered per-mode, per-agent run arrays, plus `limits` (persona/run/timeout/cost). |
+| `.uf/reviewer-capabilities.yaml` | Classifies each Divisor persona as review or content and declares its ordered review scopes. |
+| `.uf/sibling-repos.yaml` | Declares the sibling repositories eligible for bounded evidence acquisition. |
+
+Each file has a corresponding JSON Schema under `schemas/` (and a
+scaffold mirror under `internal/scaffold/assets/schemas/`), so invalid
+values fail closed at load time rather than silently misrouting review
+fan-out.
+
+---
+
 ## Common Scenarios
 
 ### Using Vertex AI as LLM provider

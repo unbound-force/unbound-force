@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "profiles": {
+    "lightweight": {"model": "provider/light"},
+    "standard": {"model": "provider/standard"},
+    "heavy": {"model": "provider/heavy"}
+  },
+  "defaults": {
+    "code": "standard",
+    "spec": "standard",
+    "triage": "standard",
+    "feedback": "standard"
+  },
+  "limits": {
+    "max_personas": 0,
+    "max_runs_per_persona": 6,
+    "max_total_runs": 65,
+    "max_parallel_runs": 9,
+    "per_run_timeout_seconds": 29,
+    "max_reported_cost_usd": 100.01
+  }
+}

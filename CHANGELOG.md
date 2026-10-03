@@ -138,6 +138,26 @@ Each entry follows the format: `- <change-name>: <summary>`.
   Fixes: #428)
 
 ### Added
+- review-council-multi-model-fanout: Replace single-host
+  Divisor delegation with explicit-first multi-model fan-out
+  via two OpenCode plugins registered in `opencode.json`
+  (`.opencode/plugins/invoke-agent` and `review-dispatch`)
+  driven by a closed reviewer manifest
+  (`.uf/reviewer-capabilities.yaml`) and an explicit-first
+  hybrid matrix (`.uf/review-matrix.yaml`). Adds bounded
+  sibling-repository evidence (`.uf/sibling-repos.yaml`),
+  source-grounded lesson-proposal provenance, staged
+  reproducible plugin activation in `uf init`, `uf doctor`
+  review-plugin checks, a new scope-based Go coverage gate
+  (`internal/coveragegate`, `cmd/coverage-gate`,
+  `coverage-gate.json`), and `make plugin-test` and
+  `make coverage-gate` targets (both wired into `make check`
+  and `ci_local.yml`). Emits a Hero Interface Contract
+  review-dispatch envelope and versions the canonical
+  review-verdict artifact to 2.0.0 with native
+  `INCONCLUSIVE` and `UNAVAILABLE` decisions.
+  (Spec: openspec/changes/review-council-multi-model-fanout/,
+  Fixes: #635)
 - add-speckit-ref-assertion-test: Add red-first
   content-assertion test `TestSpeckitTemplates_RequiredReferences`
   (internal/scaffold) that verifies Step 6 of the embedded

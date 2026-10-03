@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "profiles": {
+    "lightweight": {"model": "provider/light"},
+    "standard": {"model": "provider/standard"},
+    "heavy": {"model": "provider/heavy"},
+    "Invalid_Profile": {"model": "provider/other"}
+  },
+  "defaults": {
+    "code": "standard",
+    "spec": "standard",
+    "triage": "standard",
+    "feedback": "standard"
+  }
+}

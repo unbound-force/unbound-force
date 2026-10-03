@@ -123,17 +123,25 @@ Before submitting for review and after receiving review feedback:
 
 ### Addressing Review Findings
 
-1. **Check for artifacts**: Look in `.uf/artifacts/review-verdict/` for Divisor review reports. Also check recent `/uf.review-council` output.
+1. **Check for artifacts**: Look in `.uf/artifacts/review-verdict/` for Divisor review reports. Also check recent `/uf.review-council` output. Treat `review-verdict` as the canonical decision artifact; `review-dispatch` is additive provenance only.
 
-2. **Categorize findings**: Group by persona (Guard, Architect, Adversary, SRE, Testing) and severity (CRITICAL, HIGH, MEDIUM, LOW).
+2. **Validate the version and decision**: Migrated reading supports historical schema version 1 and current schema version 2. Apply the Hero Interface Contract same-major compatibility rule before interpreting the payload. An unmigrated v1-only consumer must reject version 2 rather than guessing at compatibility.
 
-3. **Address in severity order**: Fix CRITICAL and HIGH findings first. These block the merge.
+3. **Apply fail-closed progression semantics**:
+   - `APPROVED` permits automated progression; no review fix is required.
+   - `CHANGES_REQUESTED` blocks automated progression until the findings are addressed and review succeeds.
+   - `ESCALATED` is advisory but blocks automated progression until the existing human gate resolves it.
+   - `INCONCLUSIVE` and `UNAVAILABLE` are not approvals. Both block automated progression until a successful rerun or explicit human resolution.
 
-4. **Learn from patterns**: Read past review findings. If The Architect frequently requests "add GoDoc to exported function," proactively include GoDoc on all new exported functions. If The Adversary frequently flags "missing error handling," add error handling proactively. This pattern recognition prevents recurring review cycles.
+4. **Categorize findings**: Group by persona (Guard, Architect, Adversary, SRE, Testing) and severity (CRITICAL, HIGH, MEDIUM, LOW).
 
-5. **Re-validate after fixes**: After addressing findings, re-run Gaze validation (if available) to verify no regressions before re-submitting.
+5. **Address in severity order**: Fix CRITICAL and HIGH findings first. These block the merge.
 
-6. **No Divisor available**: If The Divisor is not installed, note this: "Automated review is not available — The Divisor is not installed. Recommend running `uf init --divisor` to deploy the review council." Proceed with implementation using pre-review self-checks.
+6. **Learn from patterns**: Read past review findings. If The Architect frequently requests "add GoDoc to exported function," proactively include GoDoc on all new exported functions. If The Adversary frequently flags "missing error handling," add error handling proactively. This pattern recognition prevents recurring review cycles.
+
+7. **Re-validate after fixes**: After addressing findings, re-run Gaze validation (if available) to verify no regressions before re-submitting.
+
+8. **No Divisor available**: If The Divisor is not installed, note this: "Automated review is not available — The Divisor is not installed. Recommend running `uf init --divisor` to deploy the review council." Proceed with implementation using pre-review self-checks.
 
 ## Speckit Integration
 

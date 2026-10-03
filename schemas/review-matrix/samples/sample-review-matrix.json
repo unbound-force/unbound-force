@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "profiles": {
+    "lightweight": {
+      "model": "opencode-go/qwen3.8-flash"
+    },
+    "standard": {
+      "model": "opencode-go/deepseek-v4-pro",
+      "variant": "high"
+    },
+    "heavy": {
+      "model": "opencode-go/grok-4.7"
+    }
+  },
+  "defaults": {
+    "code": "standard",
+    "spec": "standard",
+    "triage": "standard",
+    "feedback": "standard"
+  },
+  "always": {
+    "divisor-adversary": "heavy",
+    "divisor-sre": "lightweight"
+  },
+  "advisor": {
+    "code": [
+      "divisor-adversary",
+      "divisor-guard"
+    ]
+  },
+  "runs": {
+    "code": {
+      "divisor-adversary": [
+        {
+          "profile": "standard",
+          "variant": "low"
+        },
+        {
+          "model": "opencode-go/grok-4.7",
+          "variant": "high"
+        }
+      ]
+    }
+  },
+  "risk_augmentation": {
+    "enabled": true,
+    "agents": [
+      "divisor-adversary"
+    ]
+  },
+  "limits": {
+    "max_personas": 16,
+    "max_runs_per_persona": 3,
+    "max_total_runs": 24,
+    "max_parallel_runs": 4,
+    "per_run_timeout_seconds": 600,
+    "max_reported_cost_usd": 25
+  }
+}

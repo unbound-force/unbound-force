@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "scopes": {
+    "helper": {
+      "threshold": 80,
+      "packages": [
+        "cmd/coverage-gate",
+        "cmd/mutimind",
+        "cmd/mxf",
+        "cmd/unbound-force",
+        "internal/scaffold",
+        "internal/doctor",
+        "internal/orchestration",
+        "internal/metrics",
+        "internal/artifacts",
+        "internal/schemas",
+        "internal/backlog",
+        "internal/coaching",
+        "internal/config",
+        "internal/dashboard",
+        "internal/gateway",
+        "internal/homebrew",
+        "internal/impediment",
+        "internal/sandbox",
+        "internal/setup",
+        "internal/sprint",
+        "internal/sync"
+      ]
+    },
+    "artifact": {
+      "threshold": 90,
+      "packages": []
+    },
+    "schema": {
+      "threshold": 90,
+      "packages": []
+    },
+    "config": {
+      "threshold": 90,
+      "packages": [
+        "internal/coveragegate"
+      ]
+    },
+    "mapping": {
+      "threshold": 90,
+      "packages": [
+        "internal/textutil"
+      ]
+    },
+    "path": {
+      "threshold": 90,
+      "packages": []
+    }
+  }
+}

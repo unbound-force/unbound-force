@@ -1,0 +1,923 @@
+{
+  "base_fixture": "schemas/review-dispatch/samples/sample-review-dispatch.json",
+  "templates": {
+    "clean-council": [
+      { "op": "set", "path": "/runs/0/workflow_verdict", "value": "APPROVE" },
+      { "op": "set", "path": "/runs/0/findings", "value": [] },
+      { "op": "set", "path": "/findings", "value": [] },
+      { "op": "set", "path": "/advisories", "value": [] },
+      { "op": "set", "path": "/verdict", "value": "APPROVE" },
+      { "op": "set", "path": "/verdict_reason", "value": "Successful assessments approved." },
+      { "op": "set", "path": "/workflow_result", "value": { "kind": "council", "value": "APPROVE" } }
+    ],
+    "test-review": [
+      { "op": "set", "path": "/command", "value": "speckit-testreview" },
+      { "op": "set", "path": "/mode", "value": "test" },
+      { "op": "set", "path": "/workflow_result", "value": { "kind": "test-review", "value": "APPROVE" } }
+    ],
+    "triage": [
+      { "op": "set", "path": "/command", "value": "triage-issue" },
+      { "op": "set", "path": "/mode", "value": "triage" },
+      {
+        "op": "set",
+        "path": "/input_context",
+        "value": {
+          "kind": "issue",
+          "issue_number": 42,
+          "issue_url": "https://github.com/unbound-force/unbound-force/issues/42",
+          "content_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      },
+      {
+        "op": "set",
+        "path": "/change_profile",
+        "value": {
+          "kind": "issue",
+          "text_bytes": 19,
+          "comment_count": 0,
+          "content_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "matched_rules": ["test-quality:coverage"],
+          "security_sensitive": false,
+          "user_facing": false,
+          "categories": ["test-quality"],
+          "tier": "lightweight"
+        }
+      },
+      { "op": "set", "path": "/runs/0/workflow_verdict", "value": "VALID" },
+      { "op": "set", "path": "/workflow_result", "value": { "kind": "triage", "value": "VALID" } }
+    ],
+    "feedback": [
+      { "op": "set", "path": "/command", "value": "address-feedback" },
+      { "op": "set", "path": "/mode", "value": "feedback" },
+      { "op": "set", "path": "/runs/0/workflow_verdict", "value": "ACCEPT" },
+      { "op": "set", "path": "/workflow_result", "value": { "kind": "feedback", "value": "ACCEPT" } }
+    ],
+    "no-success-availability": [
+      { "op": "set", "path": "/runs/0/status", "value": "failed" },
+      { "op": "set", "path": "/runs/0/usage", "value": null },
+      {
+        "op": "set",
+        "path": "/runs/0/error",
+        "value": { "code": "provider_unavailable", "message": "Provider unavailable.", "retryable": true }
+      },
+      { "op": "set", "path": "/runs/0/reported_model", "value": null },
+      { "op": "set", "path": "/runs/0/workflow_verdict", "value": null },
+      { "op": "set", "path": "/runs/0/findings", "value": [] },
+      { "op": "set", "path": "/findings", "value": [] },
+      { "op": "set", "path": "/advisories", "value": [] },
+      {
+        "op": "set",
+        "path": "/run_counts",
+        "value": {
+          "total": 1,
+          "success": 0,
+          "failed": 1,
+          "skipped": 0,
+          "budget_skipped": 0,
+          "limit_skipped": 0,
+          "cancelled": 0
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "council-approve-mapping",
+      "templates": ["clean-council"],
+      "operations": [],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "APPROVE",
+        "native_value": "APPROVE",
+        "canonical_decision": "APPROVED",
+        "persona_summary": "Native verdict: APPROVE"
+      }
+    },
+    {
+      "id": "council-advisory-mapping",
+      "templates": ["clean-council"],
+      "operations": [
+        { "op": "set", "path": "/runs/0/workflow_verdict", "value": "APPROVE WITH ADVISORIES" },
+        {
+          "op": "set",
+          "path": "/advisories",
+          "value": [
+            {
+              "severity": "LOW",
+              "description": "A human should review the non-blocking trade-off.",
+              "run_ids": ["11111111-1111-4111-8111-111111111111"]
+            }
+          ]
+        },
+        { "op": "set", "path": "/verdict", "value": "APPROVE WITH ADVISORIES" },
+        {
+          "op": "set",
+          "path": "/workflow_result",
+          "value": { "kind": "council", "value": "APPROVE WITH ADVISORIES" }
+        }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "APPROVE WITH ADVISORIES",
+        "native_value": "APPROVE WITH ADVISORIES",
+        "canonical_decision": "ESCALATED",
+        "persona_summary": "Native verdict: APPROVE WITH ADVISORIES"
+      }
+    },
+    {
+      "id": "council-request-changes-mapping",
+      "templates": [],
+      "operations": [],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "REQUEST CHANGES",
+        "native_value": "REQUEST CHANGES",
+        "canonical_decision": "CHANGES_REQUESTED",
+        "persona_summary": "Native verdict: REQUEST CHANGES"
+      }
+    },
+    {
+      "id": "test-review-approve-mapping",
+      "templates": ["clean-council", "test-review"],
+      "operations": [],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "APPROVE",
+        "native_value": "APPROVE",
+        "canonical_decision": "APPROVED",
+        "persona_summary": "Native verdict: APPROVE"
+      }
+    },
+    {
+      "id": "test-review-advisory-mapping",
+      "templates": ["clean-council", "test-review"],
+      "operations": [
+        { "op": "set", "path": "/runs/0/workflow_verdict", "value": "APPROVE WITH ADVISORIES" },
+        {
+          "op": "set",
+          "path": "/advisories",
+          "value": [
+            {
+              "severity": "MEDIUM",
+              "description": "Test coverage has a non-blocking caveat.",
+              "run_ids": ["11111111-1111-4111-8111-111111111111"]
+            }
+          ]
+        },
+        { "op": "set", "path": "/verdict", "value": "APPROVE WITH ADVISORIES" },
+        {
+          "op": "set",
+          "path": "/workflow_result",
+          "value": { "kind": "test-review", "value": "APPROVE WITH ADVISORIES" }
+        }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "APPROVE WITH ADVISORIES",
+        "native_value": "APPROVE WITH ADVISORIES",
+        "canonical_decision": "ESCALATED",
+        "persona_summary": "Native verdict: APPROVE WITH ADVISORIES"
+      }
+    },
+    {
+      "id": "test-review-request-changes-mapping",
+      "templates": ["test-review"],
+      "operations": [
+        { "op": "set", "path": "/workflow_result", "value": { "kind": "test-review", "value": "REQUEST CHANGES" } }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "REQUEST CHANGES",
+        "native_value": "REQUEST CHANGES",
+        "canonical_decision": "CHANGES_REQUESTED",
+        "persona_summary": "Native verdict: REQUEST CHANGES"
+      }
+    },
+    {
+      "id": "triage-valid-mapping",
+      "templates": ["clean-council", "triage"],
+      "operations": [],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "APPROVE",
+        "native_value": "VALID",
+        "canonical_decision": "APPROVED",
+        "persona_summary": "Native verdict: VALID"
+      }
+    },
+    {
+      "id": "triage-invalid-mapping",
+      "templates": ["clean-council", "triage"],
+      "operations": [
+        { "op": "set", "path": "/runs/0/workflow_verdict", "value": "INVALID" },
+        { "op": "set", "path": "/verdict", "value": "REQUEST CHANGES" },
+        { "op": "set", "path": "/workflow_result", "value": { "kind": "triage", "value": "INVALID" } }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "REQUEST CHANGES",
+        "native_value": "INVALID",
+        "canonical_decision": "CHANGES_REQUESTED",
+        "persona_summary": "Native verdict: INVALID"
+      }
+    },
+    {
+      "id": "triage-needs-clarification-mapping",
+      "templates": ["clean-council", "triage"],
+      "operations": [
+        { "op": "set", "path": "/runs/0/workflow_verdict", "value": "NEEDS-CLARIFICATION" },
+        { "op": "set", "path": "/verdict", "value": "APPROVE WITH ADVISORIES" },
+        {
+          "op": "set",
+          "path": "/workflow_result",
+          "value": { "kind": "triage", "value": "NEEDS-CLARIFICATION" }
+        }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "APPROVE WITH ADVISORIES",
+        "native_value": "NEEDS-CLARIFICATION",
+        "canonical_decision": "ESCALATED",
+        "persona_summary": "Native verdict: NEEDS-CLARIFICATION"
+      }
+    },
+    {
+      "id": "feedback-accept-mapping",
+      "templates": ["clean-council", "feedback"],
+      "operations": [],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "APPROVE",
+        "native_value": "ACCEPT",
+        "canonical_decision": "APPROVED",
+        "persona_summary": "Native verdict: ACCEPT"
+      }
+    },
+    {
+      "id": "feedback-author-decides-mapping",
+      "templates": ["clean-council", "feedback"],
+      "operations": [
+        { "op": "set", "path": "/runs/0/workflow_verdict", "value": "AUTHOR-DECIDES" },
+        { "op": "set", "path": "/verdict", "value": "APPROVE WITH ADVISORIES" },
+        {
+          "op": "set",
+          "path": "/workflow_result",
+          "value": { "kind": "feedback", "value": "AUTHOR-DECIDES" }
+        }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "APPROVE WITH ADVISORIES",
+        "native_value": "AUTHOR-DECIDES",
+        "canonical_decision": "ESCALATED",
+        "persona_summary": "Native verdict: AUTHOR-DECIDES"
+      }
+    },
+    {
+      "id": "partial-failure-remains-governed-by-success",
+      "templates": ["clean-council"],
+      "operations": [
+        { "op": "copy", "from": "/plan/0", "path": "/plan/1" },
+        { "op": "set", "path": "/plan/1/sequence", "value": 2 },
+        { "op": "copy", "from": "/runs/0", "path": "/runs/1" },
+        { "op": "set", "path": "/runs/1/run_id", "value": "22222222-2222-4222-8222-222222222222" },
+        { "op": "set", "path": "/runs/1/sequence", "value": 2 },
+        { "op": "set", "path": "/runs/1/status", "value": "failed" },
+        { "op": "set", "path": "/runs/1/usage", "value": null },
+        {
+          "op": "set",
+          "path": "/runs/1/error",
+          "value": { "code": "provider_unavailable", "message": "Provider unavailable.", "retryable": true }
+        },
+        { "op": "set", "path": "/runs/1/reported_model", "value": null },
+        { "op": "set", "path": "/runs/1/workflow_verdict", "value": null },
+        { "op": "set", "path": "/runs/1/findings", "value": [] },
+        {
+          "op": "set",
+          "path": "/run_counts",
+          "value": {
+            "total": 2,
+            "success": 1,
+            "failed": 1,
+            "skipped": 0,
+            "budget_skipped": 0,
+            "limit_skipped": 0,
+            "cancelled": 0
+          }
+        }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "APPROVE",
+        "native_value": "APPROVE",
+        "canonical_decision": "APPROVED",
+        "persona_summary": "Native verdict: APPROVE",
+        "non_success_has_no_votes_or_findings": true,
+        "run_counts": {
+          "total": 2,
+          "success": 1,
+          "failed": 1,
+          "skipped": 0,
+          "budget_skipped": 0,
+          "limit_skipped": 0,
+          "cancelled": 0
+        }
+      }
+    },
+    {
+      "id": "every-run-availability-failure-is-unavailable",
+      "templates": ["clean-council", "no-success-availability"],
+      "operations": [
+        { "op": "copy", "from": "/plan/0", "path": "/plan/1" },
+        { "op": "set", "path": "/plan/1/sequence", "value": 2 },
+        { "op": "copy", "from": "/runs/0", "path": "/runs/1" },
+        { "op": "set", "path": "/runs/1/run_id", "value": "22222222-2222-4222-8222-222222222222" },
+        { "op": "set", "path": "/runs/1/sequence", "value": 2 },
+        { "op": "set", "path": "/runs/1/status", "value": "cancelled" },
+        {
+          "op": "set",
+          "path": "/runs/1/error",
+          "value": { "code": "runtime_timeout", "message": "Runtime timed out.", "retryable": true }
+        },
+        {
+          "op": "set",
+          "path": "/run_counts",
+          "value": {
+            "total": 2,
+            "success": 0,
+            "failed": 1,
+            "skipped": 0,
+            "budget_skipped": 0,
+            "limit_skipped": 0,
+            "cancelled": 1
+          }
+        },
+        { "op": "set", "path": "/verdict", "value": "UNAVAILABLE" },
+        { "op": "set", "path": "/workflow_result", "value": { "kind": "council", "value": "UNAVAILABLE" } }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "UNAVAILABLE",
+        "native_value": "UNAVAILABLE",
+        "canonical_decision": "UNAVAILABLE",
+        "persona_count": 0,
+        "non_success_has_no_votes_or_findings": true
+      }
+    },
+    {
+      "id": "policy-cause-is-inconclusive",
+      "templates": ["clean-council", "no-success-availability"],
+      "operations": [
+        {
+          "op": "set",
+          "path": "/runs/0/error",
+          "value": { "code": "policy_failure", "message": "Policy failed.", "retryable": false }
+        },
+        { "op": "set", "path": "/verdict", "value": "INCONCLUSIVE" },
+        { "op": "set", "path": "/workflow_result", "value": { "kind": "council", "value": "INCONCLUSIVE" } }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "INCONCLUSIVE",
+        "native_value": "INCONCLUSIVE",
+        "canonical_decision": "INCONCLUSIVE",
+        "persona_count": 0
+      }
+    },
+    {
+      "id": "plan-cause-is-inconclusive",
+      "templates": ["clean-council", "no-success-availability"],
+      "operations": [
+        {
+          "op": "set",
+          "path": "/runs/0/error",
+          "value": { "code": "plan_validation_failure", "message": "Plan failed.", "retryable": false }
+        },
+        { "op": "set", "path": "/verdict", "value": "INCONCLUSIVE" },
+        { "op": "set", "path": "/workflow_result", "value": { "kind": "council", "value": "INCONCLUSIVE" } }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "INCONCLUSIVE",
+        "native_value": "INCONCLUSIVE",
+        "canonical_decision": "INCONCLUSIVE",
+        "persona_count": 0
+      }
+    },
+    {
+      "id": "budget-skip-is-inconclusive-and-does-not-vote",
+      "templates": ["clean-council"],
+      "operations": [
+        { "op": "set", "path": "/runs/0/status", "value": "budget_skipped" },
+        { "op": "set", "path": "/runs/0/usage", "value": null },
+        { "op": "set", "path": "/runs/0/error", "value": null },
+        { "op": "set", "path": "/runs/0/reported_model", "value": null },
+        { "op": "set", "path": "/runs/0/workflow_verdict", "value": null },
+        { "op": "set", "path": "/runs/0/findings", "value": [] },
+        {
+          "op": "set",
+          "path": "/run_counts",
+          "value": {
+            "total": 1,
+            "success": 0,
+            "failed": 0,
+            "skipped": 0,
+            "budget_skipped": 1,
+            "limit_skipped": 0,
+            "cancelled": 0
+          }
+        },
+        { "op": "set", "path": "/verdict", "value": "INCONCLUSIVE" },
+        { "op": "set", "path": "/workflow_result", "value": { "kind": "council", "value": "INCONCLUSIVE" } }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "INCONCLUSIVE",
+        "native_value": "INCONCLUSIVE",
+        "canonical_decision": "INCONCLUSIVE",
+        "persona_count": 0,
+        "non_success_has_no_votes_or_findings": true,
+        "run_counts": {
+          "total": 1,
+          "success": 0,
+          "failed": 0,
+          "skipped": 0,
+          "budget_skipped": 1,
+          "limit_skipped": 0,
+          "cancelled": 0
+        }
+      }
+    },
+    {
+      "id": "limit-skip-is-inconclusive-and-does-not-vote",
+      "templates": ["clean-council"],
+      "operations": [
+        { "op": "set", "path": "/runs/0/status", "value": "limit_skipped" },
+        { "op": "set", "path": "/runs/0/usage", "value": null },
+        { "op": "set", "path": "/runs/0/error", "value": null },
+        { "op": "set", "path": "/runs/0/reported_model", "value": null },
+        { "op": "set", "path": "/runs/0/workflow_verdict", "value": null },
+        { "op": "set", "path": "/runs/0/findings", "value": [] },
+        {
+          "op": "set",
+          "path": "/run_counts",
+          "value": {
+            "total": 1,
+            "success": 0,
+            "failed": 0,
+            "skipped": 0,
+            "budget_skipped": 0,
+            "limit_skipped": 1,
+            "cancelled": 0
+          }
+        },
+        { "op": "set", "path": "/verdict", "value": "INCONCLUSIVE" },
+        { "op": "set", "path": "/workflow_result", "value": { "kind": "council", "value": "INCONCLUSIVE" } }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "INCONCLUSIVE",
+        "native_value": "INCONCLUSIVE",
+        "canonical_decision": "INCONCLUSIVE",
+        "persona_count": 0,
+        "non_success_has_no_votes_or_findings": true,
+        "run_counts": {
+          "total": 1,
+          "success": 0,
+          "failed": 0,
+          "skipped": 0,
+          "budget_skipped": 0,
+          "limit_skipped": 1,
+          "cancelled": 0
+        }
+      }
+    },
+    {
+      "id": "persistence-cause-is-inconclusive",
+      "templates": ["clean-council"],
+      "operations": [],
+      "schema_valid": true,
+      "persistence_failure": true,
+      "expected": {
+        "finalize": "persistence_failure",
+        "operation_verdict": "INCONCLUSIVE",
+        "native_value": "APPROVE",
+        "canonical_decision": "APPROVED",
+        "error_contains": ["persist review dispatch artifact", "fixture persistence failure"]
+      }
+    },
+    {
+      "id": "calculation-cause-is-inconclusive",
+      "templates": ["clean-council", "no-success-availability"],
+      "operations": [
+        {
+          "op": "set",
+          "path": "/runs/0/error",
+          "value": { "code": "calculation_failure", "message": "Calculation failed.", "retryable": false }
+        },
+        { "op": "set", "path": "/verdict", "value": "INCONCLUSIVE" },
+        { "op": "set", "path": "/workflow_result", "value": { "kind": "council", "value": "INCONCLUSIVE" } }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "INCONCLUSIVE",
+        "native_value": "INCONCLUSIVE",
+        "canonical_decision": "INCONCLUSIVE",
+        "persona_count": 0
+      }
+    },
+    {
+      "id": "mixed-availability-and-limit-prefers-inconclusive",
+      "templates": ["clean-council", "no-success-availability"],
+      "operations": [
+        { "op": "copy", "from": "/plan/0", "path": "/plan/1" },
+        { "op": "set", "path": "/plan/1/sequence", "value": 2 },
+        { "op": "copy", "from": "/runs/0", "path": "/runs/1" },
+        { "op": "set", "path": "/runs/1/run_id", "value": "22222222-2222-4222-8222-222222222222" },
+        { "op": "set", "path": "/runs/1/sequence", "value": 2 },
+        { "op": "set", "path": "/runs/1/status", "value": "limit_skipped" },
+        { "op": "set", "path": "/runs/1/error", "value": null },
+        {
+          "op": "set",
+          "path": "/run_counts",
+          "value": {
+            "total": 2,
+            "success": 0,
+            "failed": 1,
+            "skipped": 0,
+            "budget_skipped": 0,
+            "limit_skipped": 1,
+            "cancelled": 0
+          }
+        },
+        { "op": "set", "path": "/verdict", "value": "INCONCLUSIVE" },
+        { "op": "set", "path": "/workflow_result", "value": { "kind": "council", "value": "INCONCLUSIVE" } }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "INCONCLUSIVE",
+        "native_value": "INCONCLUSIVE",
+        "canonical_decision": "INCONCLUSIVE",
+        "persona_count": 0,
+        "non_success_has_no_votes_or_findings": true
+      }
+    },
+    {
+      "id": "duplicate-findings-normalize-with-all-provenance",
+      "templates": ["clean-council"],
+      "operations": [
+        { "op": "copy", "from": "/plan/0", "path": "/plan/1" },
+        { "op": "set", "path": "/plan/1/agent", "value": "divisor-adversary" },
+        { "op": "set", "path": "/plan/1/model", "value": "provider/alternate" },
+        { "op": "set", "path": "/plan/1/variant", "value": "low" },
+        { "op": "copy", "from": "/runs/0", "path": "/runs/1" },
+        { "op": "set", "path": "/runs/1/run_id", "value": "22222222-2222-4222-8222-222222222222" },
+        { "op": "set", "path": "/runs/1/agent", "value": "divisor-adversary" },
+        { "op": "set", "path": "/runs/1/requested_model", "value": "provider/alternate" },
+        { "op": "set", "path": "/runs/1/provider", "value": "provider" },
+        { "op": "set", "path": "/runs/1/model_id", "value": "alternate" },
+        { "op": "set", "path": "/runs/1/variant", "value": "low" },
+        { "op": "set", "path": "/runs/1/reported_model", "value": "provider/alternate" },
+        { "op": "set", "path": "/runs/0/workflow_verdict", "value": "REQUEST CHANGES" },
+        { "op": "set", "path": "/runs/1/workflow_verdict", "value": "REQUEST CHANGES" },
+        {
+          "op": "set",
+          "path": "/runs/0/findings",
+          "value": [
+            {
+              "severity": "HIGH",
+              "category": "security",
+              "description": "Input is not validated.",
+              "root_cause": "  Missing   input validation ",
+              "file": "./SRC\\auth.ts",
+              "line": 12
+            }
+          ]
+        },
+        {
+          "op": "set",
+          "path": "/runs/1/findings",
+          "value": [
+            {
+              "severity": "MEDIUM",
+              "category": "security",
+              "description": "Validation is bypassed.",
+              "root_cause": "missing input VALIDATION",
+              "file": "src/auth.ts",
+              "line": 18
+            }
+          ]
+        },
+        {
+          "op": "set",
+          "path": "/findings",
+          "value": [
+            {
+              "severity": "HIGH",
+              "category": "security",
+              "description": "Input validation is missing across both assessments.",
+              "root_cause": "Missing input validation",
+              "file": "src/auth.ts",
+              "line": 12,
+              "run_ids": [
+                "11111111-1111-4111-8111-111111111111",
+                "22222222-2222-4222-8222-222222222222"
+              ]
+            }
+          ]
+        },
+        { "op": "set", "path": "/verdict", "value": "REQUEST CHANGES" },
+        { "op": "set", "path": "/workflow_result", "value": { "kind": "council", "value": "REQUEST CHANGES" } },
+        {
+          "op": "set",
+          "path": "/run_counts",
+          "value": {
+            "total": 2,
+            "success": 2,
+            "failed": 0,
+            "skipped": 0,
+            "budget_skipped": 0,
+            "limit_skipped": 0,
+            "cancelled": 0
+          }
+        }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "REQUEST CHANGES",
+        "native_value": "REQUEST CHANGES",
+        "canonical_decision": "CHANGES_REQUESTED",
+        "finding_run_ids": [
+          [
+            "11111111-1111-4111-8111-111111111111",
+            "22222222-2222-4222-8222-222222222222"
+          ]
+        ],
+        "canonical_finding_count": 1,
+        "contributor_provenance": [
+          {
+            "run_id": "11111111-1111-4111-8111-111111111111",
+            "agent": "divisor-guard",
+            "source": "explicit",
+            "requested_model": "opencode-go/deepseek-v4-pro",
+            "variant": "high",
+            "sequence": 1
+          },
+          {
+            "run_id": "22222222-2222-4222-8222-222222222222",
+            "agent": "divisor-adversary",
+            "source": "explicit",
+            "requested_model": "provider/alternate",
+            "variant": "low",
+            "sequence": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "all-terminal-counts-reconcile-exactly",
+      "templates": ["clean-council"],
+      "operations": [
+        { "op": "copy", "from": "/plan/0", "path": "/plan/1" },
+        { "op": "set", "path": "/plan/1/sequence", "value": 2 },
+        { "op": "copy", "from": "/plan/0", "path": "/plan/2" },
+        { "op": "set", "path": "/plan/2/sequence", "value": 3 },
+        { "op": "copy", "from": "/plan/0", "path": "/plan/3" },
+        { "op": "set", "path": "/plan/3/sequence", "value": 4 },
+        { "op": "copy", "from": "/plan/0", "path": "/plan/4" },
+        { "op": "set", "path": "/plan/4/sequence", "value": 5 },
+        { "op": "copy", "from": "/plan/0", "path": "/plan/5" },
+        { "op": "set", "path": "/plan/5/sequence", "value": 6 },
+        { "op": "copy", "from": "/runs/0", "path": "/runs/1" },
+        { "op": "set", "path": "/runs/1/run_id", "value": "22222222-2222-4222-8222-222222222222" },
+        { "op": "set", "path": "/runs/1/sequence", "value": 2 },
+        { "op": "set", "path": "/runs/1/status", "value": "failed" },
+        { "op": "set", "path": "/runs/1/usage", "value": null },
+        { "op": "set", "path": "/runs/1/error", "value": { "code": "calculation_failure", "message": "Failed.", "retryable": false } },
+        { "op": "set", "path": "/runs/1/reported_model", "value": null },
+        { "op": "set", "path": "/runs/1/workflow_verdict", "value": null },
+        { "op": "copy", "from": "/runs/1", "path": "/runs/2" },
+        { "op": "set", "path": "/runs/2/run_id", "value": "33333333-3333-4333-8333-333333333333" },
+        { "op": "set", "path": "/runs/2/sequence", "value": 3 },
+        { "op": "set", "path": "/runs/2/status", "value": "skipped" },
+        { "op": "set", "path": "/runs/2/error", "value": null },
+        { "op": "copy", "from": "/runs/2", "path": "/runs/3" },
+        { "op": "set", "path": "/runs/3/run_id", "value": "44444444-4444-4444-8444-444444444444" },
+        { "op": "set", "path": "/runs/3/sequence", "value": 4 },
+        { "op": "set", "path": "/runs/3/status", "value": "budget_skipped" },
+        { "op": "copy", "from": "/runs/2", "path": "/runs/4" },
+        { "op": "set", "path": "/runs/4/run_id", "value": "55555555-5555-4555-8555-555555555555" },
+        { "op": "set", "path": "/runs/4/sequence", "value": 5 },
+        { "op": "set", "path": "/runs/4/status", "value": "limit_skipped" },
+        { "op": "copy", "from": "/runs/1", "path": "/runs/5" },
+        { "op": "set", "path": "/runs/5/run_id", "value": "66666666-6666-4666-8666-666666666666" },
+        { "op": "set", "path": "/runs/5/sequence", "value": 6 },
+        { "op": "set", "path": "/runs/5/status", "value": "cancelled" },
+        { "op": "set", "path": "/runs/5/error", "value": { "code": "runtime_timeout", "message": "Cancelled.", "retryable": true } },
+        {
+          "op": "set",
+          "path": "/run_counts",
+          "value": {
+            "total": 6,
+            "success": 1,
+            "failed": 1,
+            "skipped": 1,
+            "budget_skipped": 1,
+            "limit_skipped": 1,
+            "cancelled": 1
+          }
+        }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "APPROVE",
+        "native_value": "APPROVE",
+        "canonical_decision": "APPROVED",
+        "non_success_has_no_votes_or_findings": true,
+        "run_counts": {
+          "total": 6,
+          "success": 1,
+          "failed": 1,
+          "skipped": 1,
+          "budget_skipped": 1,
+          "limit_skipped": 1,
+          "cancelled": 1
+        }
+      }
+    },
+    {
+      "id": "schema-accepts-count-mismatch-semantic-validator-rejects",
+      "templates": ["clean-council"],
+      "operations": [
+        { "op": "set", "path": "/run_counts/success", "value": 0 }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "semantic_failure",
+        "operation_verdict": "INCONCLUSIVE",
+        "error_contains": ["run_counts.success", "terminal count sum"]
+      }
+    },
+    {
+      "id": "requested-model-identity-mismatch-is-rejected",
+      "templates": ["clean-council"],
+      "operations": [
+        { "op": "set", "path": "/runs/0/requested_model", "value": "provider/other" },
+        { "op": "set", "path": "/runs/0/reported_model", "value": "provider/other" }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "semantic_failure",
+        "operation_verdict": "INCONCLUSIVE",
+        "error_contains": ["requested model does not match provider and model_id", "model provenance does not match its plan entry"],
+        "retained_model": {
+          "run_id": "11111111-1111-4111-8111-111111111111",
+          "requested_model": "provider/other",
+          "resolved_parent_model": null,
+          "reported_model": "provider/other"
+        }
+      }
+    },
+    {
+      "id": "resolved-and-reported-host-model-mismatch-is-rejected",
+      "templates": ["clean-council"],
+      "operations": [
+        { "op": "set", "path": "/plan/0/source", "value": "host" },
+        { "op": "set", "path": "/plan/0/model", "value": null },
+        { "op": "set", "path": "/plan/0/variant", "value": null },
+        { "op": "set", "path": "/runs/0/source", "value": "host" },
+        { "op": "set", "path": "/runs/0/requested_model", "value": null },
+        { "op": "set", "path": "/runs/0/provider", "value": null },
+        { "op": "set", "path": "/runs/0/model_id", "value": null },
+        { "op": "set", "path": "/runs/0/variant", "value": null },
+        { "op": "set", "path": "/runs/0/resolved_parent_model", "value": "opencode-go/deepseek-v4-pro" },
+        { "op": "set", "path": "/runs/0/resolved_parent_variant", "value": "high" },
+        { "op": "set", "path": "/runs/0/reported_model", "value": "provider/other" }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "semantic_failure",
+        "operation_verdict": "INCONCLUSIVE",
+        "error_contains": ["model_mismatch does not match reported provenance"],
+        "retained_model": {
+          "run_id": "11111111-1111-4111-8111-111111111111",
+          "requested_model": null,
+          "resolved_parent_model": "opencode-go/deepseek-v4-pro",
+          "reported_model": "provider/other"
+        }
+      }
+    },
+    {
+      "id": "reported-model-mismatch-fails-run-with-provenance-retained",
+      "templates": ["clean-council"],
+      "operations": [
+        { "op": "set", "path": "/runs/0/status", "value": "failed" },
+        { "op": "set", "path": "/runs/0/usage", "value": null },
+        {
+          "op": "set",
+          "path": "/runs/0/error",
+          "value": { "code": "model_identity_mismatch", "message": "Reported model differed.", "retryable": false }
+        },
+        { "op": "set", "path": "/runs/0/reported_model", "value": "provider/other" },
+        { "op": "set", "path": "/runs/0/model_mismatch", "value": true },
+        { "op": "set", "path": "/runs/0/workflow_verdict", "value": null },
+        {
+          "op": "set",
+          "path": "/run_counts",
+          "value": {
+            "total": 1,
+            "success": 0,
+            "failed": 1,
+            "skipped": 0,
+            "budget_skipped": 0,
+            "limit_skipped": 0,
+            "cancelled": 0
+          }
+        },
+        { "op": "set", "path": "/verdict", "value": "INCONCLUSIVE" },
+        { "op": "set", "path": "/workflow_result", "value": { "kind": "council", "value": "INCONCLUSIVE" } }
+      ],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "success",
+        "operation_verdict": "INCONCLUSIVE",
+        "native_value": "INCONCLUSIVE",
+        "canonical_decision": "INCONCLUSIVE",
+        "persona_count": 0,
+        "retained_model": {
+          "run_id": "11111111-1111-4111-8111-111111111111",
+          "requested_model": "opencode-go/deepseek-v4-pro",
+          "resolved_parent_model": null,
+          "reported_model": "provider/other"
+        }
+      }
+    },
+    {
+      "id": "zero-success-cannot-approve",
+      "templates": ["clean-council", "no-success-availability"],
+      "operations": [],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "semantic_failure",
+        "operation_verdict": "INCONCLUSIVE",
+        "error_contains": ["workflow_result.value is APPROVE; expected UNAVAILABLE", "verdict is APPROVE; expected UNAVAILABLE"]
+      }
+    },
+    {
+      "id": "zero-success-cannot-be-valid",
+      "templates": ["clean-council", "triage", "no-success-availability"],
+      "operations": [],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "semantic_failure",
+        "operation_verdict": "INCONCLUSIVE",
+        "error_contains": ["workflow_result.value is VALID; expected UNAVAILABLE", "verdict is APPROVE; expected UNAVAILABLE"]
+      }
+    },
+    {
+      "id": "zero-success-cannot-accept",
+      "templates": ["clean-council", "feedback", "no-success-availability"],
+      "operations": [],
+      "schema_valid": true,
+      "expected": {
+        "finalize": "semantic_failure",
+        "operation_verdict": "INCONCLUSIVE",
+        "error_contains": ["workflow_result.value is ACCEPT; expected UNAVAILABLE", "verdict is APPROVE; expected UNAVAILABLE"]
+      }
+    },
+    {
+      "id": "negative-count-is-owned-by-structural-schema",
+      "templates": ["clean-council"],
+      "operations": [
+        { "op": "set", "path": "/run_counts/success", "value": -1 }
+      ],
+      "schema_valid": false,
+      "expected": {
+        "finalize": "structural_failure",
+        "operation_verdict": "INCONCLUSIVE",
+        "error_contains": ["validate review dispatch input", "Too small"]
+      }
+    }
+  ]
+}

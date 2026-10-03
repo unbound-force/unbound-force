@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,6 +35,55 @@ func findProjectRoot(t *testing.T) string {
 		}
 		dir = parent
 	}
+}
+
+func runScaffoldWithoutExternalTools(t *testing.T, opts Options) (*Result, error) {
+	t.Helper()
+	if opts.LookPath == nil {
+		opts.LookPath = stubScaffoldLookPath(nil)
+	}
+	if opts.ExecCmdInDir == nil {
+		opts.ExecCmdInDir = func(dir, name string, args ...string) ([]byte, error) {
+			t.Fatalf("unexpected external command in %s: %s %v", dir, name, args)
+			return nil, nil
+		}
+	}
+	return Run(opts)
+}
+
+func readJSONFile(t *testing.T, path string, target any) {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read JSON file %s: %v", path, err)
+	}
+	if err := json.Unmarshal(data, target); err != nil {
+		t.Fatalf("parse JSON file %s: %v", path, err)
+	}
+}
+
+func assertStringMap(t *testing.T, label string, got, want map[string]string) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Errorf("%s has %d entries, want %d: %v", label, len(got), len(want), got)
+	}
+	for name, wantValue := range want {
+		if gotValue := got[name]; gotValue != wantValue {
+			t.Errorf("%s[%q] = %q, want %q", label, name, gotValue, wantValue)
+		}
+	}
+}
+
+type packageLockEntry struct {
+	Version         string            `json:"version"`
+	Resolved        string            `json:"resolved"`
+	Integrity       string            `json:"integrity"`
+	License         string            `json:"license"`
+	Dev             bool              `json:"dev"`
+	Dependencies    map[string]string `json:"dependencies"`
+	DevDependencies map[string]string `json:"devDependencies"`
 }
 
 // TestEmbeddedAssetsMatchSource verifies that every file under
@@ -68,6 +118,11 @@ func TestEmbeddedAssets_MatchSource(t *testing.T) {
 		if strings.HasPrefix(relPath, "specify/") {
 			continue
 		}
+		// The live meta-repository declaration intentionally contains active
+		// organization siblings. Generated projects receive the empty template.
+		if relPath == "uf/sibling-repos.yaml" {
+			continue
+		}
 
 		// Map asset path to canonical source path
 		srcRel := mapAssetToSource(relPath)
@@ -90,6 +145,445 @@ func TestEmbeddedAssets_MatchSource(t *testing.T) {
 				"Run: cp %s internal/scaffold/assets/%s",
 				relPath, srcRel, srcRel, relPath)
 		}
+	}
+}
+
+func TestPluginPackageInputs_ExactVersionsAndLockIntegrity(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+
+	expectedRuntime := map[string]string{
+		"@opencode-ai/plugin": "1.4.10",
+		"zod":                 "4.1.8",
+	}
+	expectedDevelopment := map[string]string{
+		"@vitest/coverage-v8": "5.0.3",
+		"vitest":              "5.0.3",
+	}
+	expectedOverrides := map[string]string{
+		"toml": "4.2.0",
+		"uuid": "13.0.1",
+	}
+
+	var manifest struct {
+		Name            string            `json:"name"`
+		Private         bool              `json:"private"`
+		Type            string            `json:"type"`
+		Scripts         map[string]string `json:"scripts"`
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+		Overrides       map[string]string `json:"overrides"`
+	}
+	readJSONFile(t, filepath.Join(root, ".opencode", "package.json"), &manifest)
+	if manifest.Name != "unbound-force-opencode-plugins" {
+		t.Errorf("manifest name = %q, want unbound-force-opencode-plugins", manifest.Name)
+	}
+	if !manifest.Private {
+		t.Error("manifest must be private")
+	}
+	if manifest.Type != "module" {
+		t.Errorf("manifest type = %q, want module", manifest.Type)
+	}
+	if len(manifest.Scripts) != 0 {
+		t.Errorf("task 1.5 must not add npm scripts, got %v", manifest.Scripts)
+	}
+	assertStringMap(t, "runtime dependencies", manifest.Dependencies, expectedRuntime)
+	assertStringMap(t, "development dependencies", manifest.DevDependencies, expectedDevelopment)
+	assertStringMap(t, "security overrides", manifest.Overrides, expectedOverrides)
+
+	var lock struct {
+		Name            string                      `json:"name"`
+		LockfileVersion int                         `json:"lockfileVersion"`
+		Requires        bool                        `json:"requires"`
+		Packages        map[string]packageLockEntry `json:"packages"`
+	}
+	readJSONFile(t, filepath.Join(root, ".opencode", "package-lock.json"), &lock)
+	if lock.Name != manifest.Name {
+		t.Errorf("lock name = %q, want manifest name %q", lock.Name, manifest.Name)
+	}
+	if lock.LockfileVersion != 3 {
+		t.Errorf("lockfileVersion = %d, want 3", lock.LockfileVersion)
+	}
+	if !lock.Requires {
+		t.Error("lock requires must be true")
+	}
+	lockRoot, ok := lock.Packages[""]
+	if !ok {
+		t.Fatal("lock is missing the root package entry")
+	}
+	assertStringMap(t, "locked runtime dependencies", lockRoot.Dependencies, expectedRuntime)
+	assertStringMap(t, "locked development dependencies", lockRoot.DevDependencies, expectedDevelopment)
+
+	for name, version := range expectedRuntime {
+		assertLockedDirectPackage(t, lock.Packages, name, version, false)
+	}
+	for name, version := range expectedDevelopment {
+		assertLockedDirectPackage(t, lock.Packages, name, version, true)
+	}
+	for path, entry := range lock.Packages {
+		if path == "" || entry.Resolved == "" {
+			continue
+		}
+		if !strings.HasPrefix(entry.Integrity, "sha512-") {
+			t.Errorf("locked package %s integrity = %q, want sha512 integrity", path, entry.Integrity)
+		}
+	}
+	assertLockedSecurityOverride(t, lock.Packages, "toml", "4.2.0",
+		"sha512-TvAJjbHZlYmI323+srtqHQFyJsoWy6mI09ppkuj9+iRsqsVKG9fvTcOP7FHF2UCb0QSYtjEavffrKzdd0XgClg==")
+	assertLockedSecurityOverride(t, lock.Packages, "uuid", "13.0.1",
+		"sha512-9ezox2roIft6ExBVTVqibSd5dc5/47Sw/uY6b4SjQUT2TzQ0tltNquWA46y4xPQmdZYqvnio22SgWd41M86+jw==")
+}
+
+func assertLockedDirectPackage(
+	t *testing.T,
+	packages map[string]packageLockEntry,
+	name, version string,
+	wantDevelopment bool,
+) {
+	t.Helper()
+
+	locked, ok := packages["node_modules/"+name]
+	if !ok {
+		t.Errorf("lock is missing direct package %s", name)
+		return
+	}
+	if locked.Version != version {
+		t.Errorf("locked %s version = %q, want %q", name, locked.Version, version)
+	}
+	if locked.License != "MIT" {
+		t.Errorf("locked %s license = %q, want MIT", name, locked.License)
+	}
+	if locked.Dev != wantDevelopment {
+		t.Errorf("locked %s dev = %t, want %t", name, locked.Dev, wantDevelopment)
+	}
+	if !strings.HasPrefix(locked.Resolved, "https://registry.npmjs.org/") {
+		t.Errorf("locked %s resolved URL = %q, want npm registry URL", name, locked.Resolved)
+	}
+	if !strings.HasPrefix(locked.Integrity, "sha512-") {
+		t.Errorf("locked %s integrity = %q, want sha512 integrity", name, locked.Integrity)
+	}
+}
+
+func assertLockedSecurityOverride(
+	t *testing.T,
+	packages map[string]packageLockEntry,
+	name, version, integrity string,
+) {
+	t.Helper()
+
+	locked, ok := packages["node_modules/"+name]
+	if !ok {
+		t.Errorf("lock is missing security override %s", name)
+		return
+	}
+	if locked.Version != version {
+		t.Errorf("locked override %s version = %q, want %q", name, locked.Version, version)
+	}
+	if locked.Integrity != integrity {
+		t.Errorf("locked override %s integrity = %q, want %q", name, locked.Integrity, integrity)
+	}
+	if locked.License != "MIT" {
+		t.Errorf("locked override %s license = %q, want MIT", name, locked.License)
+	}
+}
+
+func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+
+	type provenanceEntry struct {
+		Version             string   `json:"version"`
+		License             string   `json:"license"`
+		MaintainedBy        string   `json:"maintained_by"`
+		ProjectURL          string   `json:"project_url"`
+		RegistryMaintainers []string `json:"registry_maintainers"`
+	}
+	type overrideProvenance struct {
+		Version      string `json:"version"`
+		License      string `json:"license"`
+		GitHead      string `json:"git_head"`
+		Integrity    string `json:"integrity"`
+		MaintainedBy string `json:"maintained_by"`
+		ProjectURL   string `json:"project_url"`
+	}
+	var provenance struct {
+		VerifiedAt        string                        `json:"verified_at"`
+		Packages          map[string]provenanceEntry    `json:"packages"`
+		SecurityOverrides map[string]overrideProvenance `json:"security_overrides"`
+	}
+	readJSONFile(t, filepath.Join(root, "internal", "scaffold", "testdata", "plugin-package-provenance.json"), &provenance)
+
+	expectedPackages := map[string]struct {
+		version string
+		project string
+	}{
+		"@opencode-ai/plugin": {version: "1.4.10", project: "OpenCode"},
+		"zod":                 {version: "4.1.8", project: "Zod"},
+		"vitest":              {version: "5.0.3", project: "Vitest"},
+		"@vitest/coverage-v8": {version: "5.0.3", project: "Vitest"},
+	}
+	if provenance.VerifiedAt != "2026-10-01" {
+		t.Errorf("provenance verification date = %q, want 2026-10-01", provenance.VerifiedAt)
+	}
+	if len(provenance.Packages) != len(expectedPackages) {
+		t.Errorf("provenance has %d packages, want %d", len(provenance.Packages), len(expectedPackages))
+	}
+	for name, expected := range expectedPackages {
+		entry, ok := provenance.Packages[name]
+		if !ok {
+			t.Errorf("provenance is missing %s", name)
+			continue
+		}
+		if entry.License != "MIT" {
+			t.Errorf("%s provenance license = %q, want MIT", name, entry.License)
+		}
+		if entry.MaintainedBy != expected.project {
+			t.Errorf("%s maintained_by = %q, want %q", name, entry.MaintainedBy, expected.project)
+		}
+		if entry.Version != expected.version {
+			t.Errorf("%s provenance version = %q, want %q", name, entry.Version, expected.version)
+		}
+		parsedURL, err := url.ParseRequestURI(entry.ProjectURL)
+		if err != nil || parsedURL.Scheme != "https" || parsedURL.Host == "" {
+			t.Errorf("%s project_url = %q, want absolute HTTPS URL", name, entry.ProjectURL)
+		}
+		if len(entry.RegistryMaintainers) == 0 {
+			t.Errorf("%s registry maintainers are empty", name)
+		}
+	}
+
+	expectedOverrides := map[string]overrideProvenance{
+		"toml": {
+			Version:      "4.2.0",
+			License:      "MIT",
+			GitHead:      "6d42b7e4fa693f8e6fb025d419b10b38107e83e2",
+			Integrity:    "sha512-TvAJjbHZlYmI323+srtqHQFyJsoWy6mI09ppkuj9+iRsqsVKG9fvTcOP7FHF2UCb0QSYtjEavffrKzdd0XgClg==",
+			MaintainedBy: "toml-node",
+			ProjectURL:   "https://github.com/BinaryMuse/toml-node",
+		},
+		"uuid": {
+			Version:      "13.0.1",
+			License:      "MIT",
+			GitHead:      "0643802db81cece7ee445f5147529d7a77394630",
+			Integrity:    "sha512-9ezox2roIft6ExBVTVqibSd5dc5/47Sw/uY6b4SjQUT2TzQ0tltNquWA46y4xPQmdZYqvnio22SgWd41M86+jw==",
+			MaintainedBy: "uuidjs",
+			ProjectURL:   "https://github.com/uuidjs/uuid",
+		},
+	}
+	if len(provenance.SecurityOverrides) != len(expectedOverrides) {
+		t.Errorf("provenance has %d security overrides, want %d",
+			len(provenance.SecurityOverrides), len(expectedOverrides))
+	}
+	for name, expected := range expectedOverrides {
+		got, ok := provenance.SecurityOverrides[name]
+		if !ok {
+			t.Errorf("provenance is missing security override %s", name)
+			continue
+		}
+		if got != expected {
+			t.Errorf("security override provenance for %s = %+v, want %+v", name, got, expected)
+		}
+		parsedURL, err := url.ParseRequestURI(got.ProjectURL)
+		if err != nil || parsedURL.Scheme != "https" || parsedURL.Host == "" {
+			t.Errorf("%s override project_url = %q, want absolute HTTPS URL", name, got.ProjectURL)
+		}
+	}
+}
+
+func TestPluginPackageInputs_GitignoreTracksCanonicalInputs(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+
+	content, err := os.ReadFile(filepath.Join(root, ".opencode", ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .opencode/.gitignore: %v", err)
+	}
+	want := "node_modules\nbun.lock\n"
+	if string(content) != want {
+		t.Errorf(".opencode/.gitignore = %q, want %q", string(content), want)
+	}
+	for _, trackedInput := range []string{"package.json", "package-lock.json"} {
+		if strings.Contains(string(content), trackedInput) {
+			t.Errorf(".opencode/.gitignore must not ignore %s", trackedInput)
+		}
+	}
+}
+
+func TestPluginPackageInputs_MirrorsMatchCanonical(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+
+	for _, name := range []string{"package.json", "package-lock.json"} {
+		canonical, err := os.ReadFile(filepath.Join(root, ".opencode", name))
+		if err != nil {
+			t.Fatalf("read canonical %s: %v", name, err)
+		}
+		mirror, err := assetContent(filepath.ToSlash(filepath.Join("opencode", name)))
+		if err != nil {
+			t.Fatalf("read scaffold mirror %s: %v", name, err)
+		}
+		if !bytes.Equal(canonical, mirror) {
+			t.Errorf("scaffold mirror %s differs from canonical input", name)
+		}
+	}
+}
+
+func TestSCFR003_FreshTargetInputsDoNotActivatePlugins(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+
+	target := t.TempDir()
+	var output bytes.Buffer
+	result, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir: target,
+		Version:   "1.0.0-test",
+		Stdout:    &output,
+		LookPath:  stubScaffoldLookPath(nil),
+		ExecCmd: func(name string, args ...string) ([]byte, error) {
+			t.Fatalf("fresh package-input scaffold unexpectedly executed %s %v", name, args)
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	for _, name := range []string{"package.json", "package-lock.json"} {
+		canonical, err := os.ReadFile(filepath.Join(root, ".opencode", name))
+		if err != nil {
+			t.Fatalf("read canonical %s: %v", name, err)
+		}
+		generatedPath := filepath.Join(target, ".opencode", name)
+		generated, err := os.ReadFile(generatedPath)
+		if err != nil {
+			t.Fatalf("read fresh-target %s: %v", name, err)
+		}
+		if !bytes.Equal(generated, canonical) {
+			t.Errorf("fresh-target %s differs from canonical reproducible input", name)
+		}
+		if !containsPath(result.Created, filepath.ToSlash(filepath.Join(".opencode", name))) {
+			t.Errorf("fresh-target %s is absent from result.Created", name)
+		}
+	}
+
+	for _, relPath := range []string{invokeAgentPluginAsset, reviewDispatchPluginAsset} {
+		if !isActivationGatedAsset(relPath) {
+			t.Errorf("plugin source %s is not activation-gated", relPath)
+		}
+		if _, err := assetContent(relPath); err != nil {
+			t.Errorf("read embedded activation-gated source %s: %v", relPath, err)
+		}
+		autoDiscoveryPath := filepath.Join(target, mapAssetPath(relPath))
+		if _, err := os.Stat(autoDiscoveryPath); !os.IsNotExist(err) {
+			t.Errorf("activation-gated source exposed at %s before install and probes: %v", autoDiscoveryPath, err)
+		}
+		if containsPath(result.Created, mapAssetPath(relPath)) {
+			t.Errorf("activation-gated source %s reported as created", relPath)
+		}
+	}
+
+	pluginsDir := filepath.Join(target, ".opencode", "plugins")
+	if _, err := os.Stat(pluginsDir); !os.IsNotExist(err) {
+		t.Errorf("auto-discovery directory exists before plugin activation: %v", err)
+	}
+}
+
+func TestIsActivationGatedAsset_OnlyReviewPluginSources(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{path: invokeAgentPluginAsset, want: true},
+		{path: reviewDispatchPluginAsset, want: true},
+		{path: "opencode/package.json", want: false},
+		{path: "opencode/lib/review-dispatch-sibling-evidence.ts", want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.path, func(t *testing.T) {
+			got := isActivationGatedAsset(test.path)
+			if got != test.want {
+				t.Errorf("isActivationGatedAsset(%q) = %t, want %t", test.path, got, test.want)
+			}
+		})
+	}
+}
+
+func containsPath(paths []string, want string) bool {
+	for _, path := range paths {
+		if path == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestPluginPackageInputs_RollbackPrerequisites(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+
+	var rollback struct {
+		BaselineLockSHA256 string `json:"baseline_lock_sha256"`
+		PriorGitignore     string `json:"prior_gitignore"`
+		SecurityOverride   struct {
+			LockSHA256         string            `json:"lock_sha256"`
+			TransitiveVersions map[string]string `json:"transitive_versions"`
+		} `json:"security_override_rollback"`
+	}
+	readJSONFile(t, filepath.Join(root, "internal", "scaffold", "testdata", "plugin-package-rollback.json"), &rollback)
+
+	const baselineLockSHA256 = "b628c764236019785a620deadc06373949236ce84fb38bc68a39f619411874e3"
+	if rollback.BaselineLockSHA256 != baselineLockSHA256 {
+		t.Errorf("baseline lock SHA256 = %q, want %q", rollback.BaselineLockSHA256, baselineLockSHA256)
+	}
+	const priorGitignore = "node_modules\npackage.json\nbun.lock\n.gitignore\n"
+	if rollback.PriorGitignore != priorGitignore {
+		t.Errorf("prior .opencode/.gitignore = %q, want %q", rollback.PriorGitignore, priorGitignore)
+	}
+	const preHardeningLockSHA256 = "fef6f7f145d9dc8398233566934ff7a4e36d9505dbcb662660c773c03c1cdcba"
+	if rollback.SecurityOverride.LockSHA256 != preHardeningLockSHA256 {
+		t.Errorf("pre-hardening lock SHA256 = %q, want %q",
+			rollback.SecurityOverride.LockSHA256, preHardeningLockSHA256)
+	}
+	assertStringMap(t, "pre-hardening transitive versions",
+		rollback.SecurityOverride.TransitiveVersions,
+		map[string]string{"toml": "4.1.1", "uuid": "13.0.0"})
+}
+
+func TestDispatchRuntime_TaskScopedPluginSources(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+
+	invokeCanonical := filepath.Join(root, ".opencode", "plugins", "invoke-agent", "index.ts")
+	if _, err := os.Stat(invokeCanonical); err != nil {
+		t.Fatalf("task 2.2 invoke-agent source missing at %s: %v", invokeCanonical, err)
+	}
+	invokeEmbedded := filepath.ToSlash(filepath.Join("opencode", "plugins", "invoke-agent", "index.ts"))
+	if _, err := assetContent(invokeEmbedded); err != nil {
+		t.Fatalf("task 2.2 invoke-agent scaffold mirror missing at %s: %v", invokeEmbedded, err)
+	}
+
+	reviewCanonical := filepath.Join(root, ".opencode", "plugins", "review-dispatch", "index.ts")
+	if _, err := os.Stat(reviewCanonical); err != nil {
+		t.Fatalf("task 2.1 review-dispatch source missing at %s: %v", reviewCanonical, err)
+	}
+	reviewEmbedded := filepath.ToSlash(filepath.Join("opencode", "plugins", "review-dispatch", "index.ts"))
+	if _, err := assetContent(reviewEmbedded); err != nil {
+		t.Fatalf("task 2.1 review-dispatch scaffold mirror missing at %s: %v", reviewEmbedded, err)
 	}
 }
 
@@ -185,13 +679,143 @@ var expectedAssetPaths = []string{
 	"openspec/schemas/unbound-force/templates/spec.md",
 	"openspec/schemas/unbound-force/templates/design.md",
 	"openspec/schemas/unbound-force/templates/tasks.md",
-	// Swarm skills (4)
+	// Swarm skills (5)
 	"opencode/skills/always-on-guidance/SKILL.md",
+	"opencode/skills/dispatch-advisor/SKILL.md",
 	"opencode/skills/pre-flight/SKILL.md",
 	"opencode/skills/review-context/SKILL.md",
 	"opencode/skills/speckit-workflow/SKILL.md",
+	// Review dispatch plugins and policy modules (5)
+	"opencode/plugins/invoke-agent/index.ts",
+	"opencode/plugins/review-dispatch/index.ts",
+	"opencode/lib/review-dispatch-lesson-proposal.ts",
+	"opencode/lib/review-dispatch-sibling-evidence.ts",
+	"opencode/lib/reviewer-manifest.ts",
+	// Reproducible plugin package inputs (2)
+	"opencode/package-lock.json",
+	"opencode/package.json",
+	// Review policy and project-owned sibling template (3)
+	"uf/review-matrix.yaml",
+	"uf/reviewer-capabilities.yaml",
+	"uf/sibling-repos.yaml",
+	// Multi-model review schemas (6)
+	"schemas/lesson-proposal/v1.0.0.schema.json",
+	"schemas/review-dispatch/v1.0.0.schema.json",
+	"schemas/review-matrix/v2.schema.json",
+	"schemas/review-verdict/v2.0.0.schema.json",
+	"schemas/reviewer-capabilities/v1.0.0.schema.json",
+	"schemas/sibling-repos/v1.0.0.schema.json",
 	// Specify — starter constitution (1)
 	"specify/memory/constitution.md",
+}
+
+var task42CanonicalAssets = []struct {
+	asset  string
+	source string
+}{
+	{asset: "opencode/agents/cobalt-crush-dev.md", source: ".opencode/agents/cobalt-crush-dev.md"},
+	{asset: "opencode/commands/uf.address-feedback.md", source: ".opencode/commands/uf.address-feedback.md"},
+	{asset: "opencode/commands/uf.review-council.md", source: ".opencode/commands/uf.review-council.md"},
+	{asset: "opencode/commands/uf.triage-issue.md", source: ".opencode/commands/uf.triage-issue.md"},
+	{asset: "opencode/skills/dispatch-advisor/SKILL.md", source: ".opencode/skills/dispatch-advisor/SKILL.md"},
+	{asset: invokeAgentPluginAsset, source: ".opencode/plugins/invoke-agent/index.ts"},
+	{asset: reviewDispatchPluginAsset, source: ".opencode/plugins/review-dispatch/index.ts"},
+	{asset: "opencode/lib/review-dispatch-lesson-proposal.ts", source: ".opencode/lib/review-dispatch-lesson-proposal.ts"},
+	{asset: "opencode/lib/review-dispatch-sibling-evidence.ts", source: ".opencode/lib/review-dispatch-sibling-evidence.ts"},
+	{asset: "opencode/lib/reviewer-manifest.ts", source: ".opencode/lib/reviewer-manifest.ts"},
+	{asset: "opencode/package-lock.json", source: ".opencode/package-lock.json"},
+	{asset: "opencode/package.json", source: ".opencode/package.json"},
+	{asset: "uf/review-matrix.yaml", source: ".uf/review-matrix.yaml"},
+	{asset: "uf/reviewer-capabilities.yaml", source: ".uf/reviewer-capabilities.yaml"},
+	{asset: "schemas/lesson-proposal/v1.0.0.schema.json", source: "schemas/lesson-proposal/v1.0.0.schema.json"},
+	{asset: "schemas/review-dispatch/v1.0.0.schema.json", source: "schemas/review-dispatch/v1.0.0.schema.json"},
+	{asset: "schemas/review-matrix/v2.schema.json", source: "schemas/review-matrix/v2.schema.json"},
+	{asset: "schemas/review-verdict/v2.0.0.schema.json", source: "schemas/review-verdict/v2.0.0.schema.json"},
+	{asset: "schemas/reviewer-capabilities/v1.0.0.schema.json", source: "schemas/reviewer-capabilities/v1.0.0.schema.json"},
+	{asset: "schemas/sibling-repos/v1.0.0.schema.json", source: "schemas/sibling-repos/v1.0.0.schema.json"},
+}
+
+func TestSCFR001_CanonicalAssetSurfaceMatchesMirrors(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+
+	paths, err := assetPaths()
+	if err != nil {
+		t.Fatalf("get asset paths: %v", err)
+	}
+	embedded := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		embedded[path] = true
+	}
+
+	for _, asset := range task42CanonicalAssets {
+		t.Run(asset.asset, func(t *testing.T) {
+			if !embedded[asset.asset] {
+				t.Fatalf("required embedded asset %q is missing", asset.asset)
+			}
+			if got := mapAssetToSource(asset.asset); got != asset.source {
+				t.Fatalf("mapAssetToSource(%q) = %q, want %q", asset.asset, got, asset.source)
+			}
+			mirror, err := assetContent(asset.asset)
+			if err != nil {
+				t.Fatalf("read embedded asset: %v", err)
+			}
+			canonical, err := os.ReadFile(filepath.Join(root, asset.source))
+			if err != nil {
+				t.Fatalf("read canonical source: %v", err)
+			}
+			if !bytes.Equal(mirror, canonical) {
+				t.Errorf("embedded asset %q drifted from %q", asset.asset, asset.source)
+			}
+		})
+	}
+}
+
+func TestSCFR001_SiblingTemplateAndLiveOnlyTestReviewExclusions(t *testing.T) {
+	paths, err := assetPaths()
+	if err != nil {
+		t.Fatalf("get asset paths: %v", err)
+	}
+	embedded := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		embedded[path] = true
+	}
+
+	const siblingAsset = "uf/sibling-repos.yaml"
+	if !embedded[siblingAsset] {
+		t.Fatalf("required sibling template %q is missing", siblingAsset)
+	}
+	template, err := assetContent(siblingAsset)
+	if err != nil {
+		t.Fatalf("read sibling template: %v", err)
+	}
+	if !strings.Contains(string(template), "version: 1\nsiblings: []") {
+		t.Error("sibling scaffold must remain an empty version 1 template")
+	}
+	if strings.Contains(string(template), "github.com/unbound-force/") {
+		t.Error("sibling scaffold must not contain live organization entries")
+	}
+
+	const liveOnly = "opencode/commands/speckit.testreview.md"
+	if embedded[liveOnly] {
+		t.Errorf("live-only Speckit test-review command must not be embedded as %q", liveOnly)
+	}
+	root := findProjectRoot(t)
+	if _, err := os.Stat(filepath.Join(root, ".opencode", "commands", "speckit.testreview.md")); err != nil {
+		t.Fatalf("live-only Speckit test-review command is missing: %v", err)
+	}
+}
+
+func expectedInitiallyDeployedAssetPaths() []string {
+	paths := make([]string, 0, len(expectedAssetPaths))
+	for _, path := range expectedAssetPaths {
+		if !isActivationGatedAsset(path) {
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 // nonDeployedAssetPaths lists embedded assets that are NOT
@@ -237,7 +861,7 @@ func TestRun_CreatesFiles(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0-test",
 		Stdout:    &buf,
@@ -264,10 +888,19 @@ func TestRun_CreatesFiles(t *testing.T) {
 	expectedDirs := []string{
 		".opencode/commands",
 		".opencode/agents",
+		".opencode/lib",
+		".opencode/skills/dispatch-advisor",
 		".opencode/uf/packs",
+		".uf",
 		".specify/memory",
 		"openspec/specs",
 		"openspec/changes",
+		"schemas/lesson-proposal",
+		"schemas/review-dispatch",
+		"schemas/review-matrix",
+		"schemas/review-verdict",
+		"schemas/reviewer-capabilities",
+		"schemas/sibling-repos",
 	}
 	for _, d := range expectedDirs {
 		full := filepath.Join(dir, d)
@@ -282,8 +915,29 @@ func TestRun_CreatesFiles(t *testing.T) {
 	}
 
 	// Verify created file count matches expected assets
-	if len(result.Created) != len(expectedAssetPaths) {
-		t.Errorf("expected %d created files, got %d", len(expectedAssetPaths), len(result.Created))
+	expectedDeployed := expectedInitiallyDeployedAssetPaths()
+	if len(result.Created) != len(expectedDeployed) {
+		t.Errorf("expected %d created files, got %d", len(expectedDeployed), len(result.Created))
+	}
+	for _, asset := range expectedDeployed {
+		outputPath := mapAssetPath(asset)
+		if !containsPath(result.Created, outputPath) {
+			t.Errorf("expected deployed asset %q in result.Created", outputPath)
+		}
+		info, err := os.Stat(filepath.Join(dir, outputPath))
+		if err != nil {
+			t.Errorf("expected deployed asset %q to exist: %v", outputPath, err)
+			continue
+		}
+		if info.IsDir() {
+			t.Errorf("expected deployed asset %q to be a file", outputPath)
+		}
+	}
+	for _, asset := range []string{invokeAgentPluginAsset, reviewDispatchPluginAsset} {
+		outputPath := mapAssetPath(asset)
+		if _, err := os.Stat(filepath.Join(dir, outputPath)); !os.IsNotExist(err) {
+			t.Errorf("activation-gated asset %q must not be initially deployed: %v", outputPath, err)
+		}
 	}
 }
 
@@ -291,7 +945,7 @@ func TestRun_ConstitutionScaffolded(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0-test",
 		Stdout:    &buf,
@@ -349,7 +1003,7 @@ func TestRun_ConstitutionPreservedOnRerun(t *testing.T) {
 	var buf bytes.Buffer
 
 	// First run creates constitution.
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0",
 		Stdout:    &buf,
@@ -367,7 +1021,7 @@ func TestRun_ConstitutionPreservedOnRerun(t *testing.T) {
 
 	// Re-run without --force: constitution should be preserved.
 	buf.Reset()
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0",
 		Stdout:    &buf,
@@ -412,12 +1066,14 @@ func TestRun_ConstitutionPreservedOnRerun(t *testing.T) {
 func TestRun_ConstitutionProtectedWithForce(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
+	noTools := stubScaffoldLookPath(nil)
 
 	// First run creates constitution.
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0",
 		Stdout:    &buf,
+		LookPath:  noTools,
 	})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
@@ -432,11 +1088,12 @@ func TestRun_ConstitutionProtectedWithForce(t *testing.T) {
 
 	// Re-run with --force: constitution should be protected (skipped).
 	buf.Reset()
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Force:     true,
 		Version:   "1.0.0",
 		Stdout:    &buf,
+		LookPath:  noTools,
 	})
 	if err != nil {
 		t.Fatalf("force Run() error: %v", err)
@@ -479,7 +1136,7 @@ func TestRun_SkipsExisting(t *testing.T) {
 	var buf bytes.Buffer
 
 	// First run creates everything
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0",
 		Stdout:    &buf,
@@ -490,7 +1147,7 @@ func TestRun_SkipsExisting(t *testing.T) {
 
 	// Second run should skip user-owned, skip identical tool-owned
 	buf.Reset()
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0",
 		Stdout:    &buf,
@@ -508,9 +1165,10 @@ func TestRun_SkipsExisting(t *testing.T) {
 		t.Errorf("expected no updated files on identical re-run, got %d: %v",
 			len(result.Updated), result.Updated)
 	}
-	if len(result.Skipped) != len(expectedAssetPaths) {
+	expectedDeployed := expectedInitiallyDeployedAssetPaths()
+	if len(result.Skipped) != len(expectedDeployed) {
 		t.Errorf("expected %d skipped files, got %d",
-			len(expectedAssetPaths), len(result.Skipped))
+			len(expectedDeployed), len(result.Skipped))
 	}
 
 	// Verify a known tool-owned file is in Skipped
@@ -541,12 +1199,14 @@ func TestRun_SkipsExisting(t *testing.T) {
 func TestRun_ForceOverwrites(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
+	noTools := stubScaffoldLookPath(nil)
 
 	// First run
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0",
 		Stdout:    &buf,
+		LookPath:  noTools,
 	})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
@@ -554,11 +1214,12 @@ func TestRun_ForceOverwrites(t *testing.T) {
 
 	// Second run with --force
 	buf.Reset()
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Force:     true,
 		Version:   "1.0.0",
 		Stdout:    &buf,
+		LookPath:  noTools,
 	})
 	if err != nil {
 		t.Fatalf("force Run() error: %v", err)
@@ -567,12 +1228,13 @@ func TestRun_ForceOverwrites(t *testing.T) {
 	// Protected files (isNeverOverwrite) are skipped even with --force,
 	// so Overwritten count is total assets minus protected files.
 	neverOverwriteCount := 0
-	for _, p := range expectedAssetPaths {
+	expectedDeployed := expectedInitiallyDeployedAssetPaths()
+	for _, p := range expectedDeployed {
 		if isNeverOverwrite(p) {
 			neverOverwriteCount++
 		}
 	}
-	wantOverwritten := len(expectedAssetPaths) - neverOverwriteCount
+	wantOverwritten := len(expectedDeployed) - neverOverwriteCount
 	if len(result.Overwritten) != wantOverwritten {
 		t.Errorf("expected %d overwritten files, got %d",
 			wantOverwritten, len(result.Overwritten))
@@ -599,7 +1261,7 @@ func TestRun_VersionMarker(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.2.3",
 		Stdout:    &buf,
@@ -608,7 +1270,7 @@ func TestRun_VersionMarker(t *testing.T) {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	for _, relPath := range expectedAssetPaths {
+	for _, relPath := range expectedInitiallyDeployedAssetPaths() {
 		ext := filepath.Ext(relPath)
 		if !markerFileExtensions[ext] {
 			continue // unsupported extensions don't get markers
@@ -635,7 +1297,7 @@ func TestRun_VersionMarkerDev(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Stdout:    &buf,
 	})
@@ -644,7 +1306,7 @@ func TestRun_VersionMarkerDev(t *testing.T) {
 	}
 
 	// Version defaults to "0.0.0-dev" — check all supported files
-	for _, relPath := range expectedAssetPaths {
+	for _, relPath := range expectedInitiallyDeployedAssetPaths() {
 		ext := filepath.Ext(relPath)
 		if !markerFileExtensions[ext] {
 			continue // unsupported extensions don't get markers
@@ -672,7 +1334,7 @@ func TestRun_OverwriteOnDiff_ToolOwned(t *testing.T) {
 	var buf bytes.Buffer
 
 	// First run
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0",
 		Stdout:    &buf,
@@ -695,7 +1357,7 @@ func TestRun_OverwriteOnDiff_ToolOwned(t *testing.T) {
 
 	// Re-run
 	buf.Reset()
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0",
 		Stdout:    &buf,
@@ -756,7 +1418,7 @@ func TestRun_OverwriteOnDiff_SkipsIdentical(t *testing.T) {
 	var buf bytes.Buffer
 
 	// First run
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0",
 		Stdout:    &buf,
@@ -767,7 +1429,7 @@ func TestRun_OverwriteOnDiff_SkipsIdentical(t *testing.T) {
 
 	// Re-run without any modifications
 	buf.Reset()
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0",
 		Stdout:    &buf,
@@ -804,6 +1466,29 @@ func TestIsToolOwned(t *testing.T) {
 		// Tool-owned: OpenSpec schema
 		{"openspec/schemas/unbound-force/schema.yaml", true},
 		{"openspec/schemas/unbound-force/templates/proposal.md", true},
+		// Tool-owned: reproducible plugin package inputs
+		{"opencode/package.json", true},
+		{"opencode/package-lock.json", true},
+		// Tool-owned: activation-gated plugin sources
+		{invokeAgentPluginAsset, true},
+		{reviewDispatchPluginAsset, true},
+		// Tool-owned: review-dispatch acquisition module
+		{"opencode/lib/review-dispatch-lesson-proposal.ts", true},
+		{"opencode/lib/review-dispatch-sibling-evidence.ts", true},
+		{"opencode/lib/reviewer-manifest.ts", true},
+		// Tool-owned: canonical review policy
+		{"uf/reviewer-capabilities.yaml", true},
+		// User-owned: model policy is a supported project extension point
+		{"uf/review-matrix.yaml", false},
+		// User-owned: active sibling declarations are project-specific
+		{"uf/sibling-repos.yaml", false},
+		// Tool-owned: shared multi-model schemas
+		{"schemas/review-matrix/v2.schema.json", true},
+		{"schemas/reviewer-capabilities/v1.0.0.schema.json", true},
+		{"schemas/sibling-repos/v1.0.0.schema.json", true},
+		{"schemas/lesson-proposal/v1.0.0.schema.json", true},
+		{"schemas/review-dispatch/v1.0.0.schema.json", true},
+		{"schemas/review-verdict/v2.0.0.schema.json", true},
 		// Tool-owned: convention packs (canonical)
 		{"opencode/uf/packs/go.md", true},
 		{"opencode/uf/packs/default.md", true},
@@ -868,7 +1553,7 @@ func TestRun_SchemaDistribution(t *testing.T) {
 	var buf bytes.Buffer
 
 	// First run creates everything
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0",
 		Stdout:    &buf,
@@ -891,7 +1576,7 @@ func TestRun_SchemaDistribution(t *testing.T) {
 
 	// Re-run without --force
 	buf.Reset()
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0",
 		Stdout:    &buf,
@@ -1213,7 +1898,7 @@ func TestRun_PrintSummaryIntegration(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0",
 		Stdout:    &buf,
@@ -1310,11 +1995,11 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".opencode/agents/background-worker.md": true,
 	".opencode/agents/coordinator.md":       true,
 	".opencode/agents/worker.md":            true,
-	".opencode/commands/forge.md":            true,
-	".opencode/commands/forge-status.md":     true,
-	".opencode/commands/handoff.md":          true,
-	".opencode/commands/inbox.md":            true,
-	".opencode/commands/org.md":              true,
+	".opencode/commands/forge.md":           true,
+	".opencode/commands/forge-status.md":    true,
+	".opencode/commands/handoff.md":         true,
+	".opencode/commands/inbox.md":           true,
+	".opencode/commands/org.md":             true,
 	// OpenSpec skills — created by openspec init, not scaffolded by uf init
 	".opencode/skills/openspec-apply-change/SKILL.md":   true,
 	".opencode/skills/openspec-archive-change/SKILL.md": true,
@@ -1399,6 +2084,11 @@ func TestMapAssetPath_Prefixes(t *testing.T) {
 		{"openspec/schemas/unbound-force/schema.yaml", "openspec/schemas/unbound-force/schema.yaml"},
 		// specify/ maps to .specify/ (dot prefix)
 		{"specify/memory/constitution.md", ".specify/memory/constitution.md"},
+		// uf/ maps to .uf/ (dot prefix)
+		{"uf/reviewer-capabilities.yaml", ".uf/reviewer-capabilities.yaml"},
+		{"uf/sibling-repos.yaml", ".uf/sibling-repos.yaml"},
+		// schemas/ remains rooted at schemas/ (no dot prefix)
+		{"schemas/review-matrix/v2.schema.json", "schemas/review-matrix/v2.schema.json"},
 		// Unknown prefix passes through unchanged (default branch)
 		{"scripts/validate.sh", "scripts/validate.sh"},
 	}
@@ -1424,6 +2114,8 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/agents/divisor-testing.md", true},
 		// Divisor command
 		{"opencode/commands/uf.review-council.md", true},
+		{"opencode/commands/uf.triage-issue.md", true},
+		{"opencode/commands/uf.address-feedback.md", true},
 		// Divisor convention packs
 		{"opencode/uf/packs/go.md", true},
 		{"opencode/uf/packs/default.md", true},
@@ -1433,6 +2125,28 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/uf/packs/python-custom.md", true},
 		// Divisor review-context skill
 		{"opencode/skills/review-context/SKILL.md", true},
+		{"opencode/skills/dispatch-advisor/SKILL.md", true},
+		// Divisor runtime and package inputs
+		{invokeAgentPluginAsset, true},
+		{reviewDispatchPluginAsset, true},
+		{"opencode/package.json", true},
+		{"opencode/package-lock.json", true},
+		// Divisor acquisition implementation
+		{"opencode/lib/review-dispatch-lesson-proposal.ts", true},
+		{"opencode/lib/review-dispatch-sibling-evidence.ts", true},
+		{"opencode/lib/reviewer-manifest.ts", true},
+		// Divisor review eligibility policy
+		{"uf/reviewer-capabilities.yaml", true},
+		{"uf/review-matrix.yaml", true},
+		// Divisor sibling evidence template
+		{"uf/sibling-repos.yaml", true},
+		// Divisor contract schemas
+		{"schemas/review-matrix/v2.schema.json", true},
+		{"schemas/reviewer-capabilities/v1.0.0.schema.json", true},
+		{"schemas/sibling-repos/v1.0.0.schema.json", true},
+		{"schemas/lesson-proposal/v1.0.0.schema.json", true},
+		{"schemas/review-dispatch/v1.0.0.schema.json", true},
+		{"schemas/review-verdict/v2.0.0.schema.json", true},
 		// Non-Divisor assets
 		{"opencode/agents/constitution-check.md", false},
 		{"opencode/commands/speckit.specify.md", false},
@@ -1555,7 +2269,7 @@ func TestRun_DivisorSubset(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir:   dir,
 		DivisorOnly: true,
 		Version:     "1.0.0",
@@ -1575,7 +2289,7 @@ func TestRun_DivisorSubset(t *testing.T) {
 		if strings.HasPrefix(f, "openspec/") && !strings.Contains(f, "schemas/") {
 			t.Errorf("DivisorOnly should not create %s", f)
 		}
-		if strings.Contains(f, "reviewer-") {
+		if strings.Contains(f, ".opencode/agents/reviewer-") {
 			t.Errorf("DivisorOnly should not create legacy reviewer files: %s", f)
 		}
 		if strings.Contains(f, "speckit.") {
@@ -1643,7 +2357,7 @@ func TestRun_DivisorSubset_WithLangFlag(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir:   dir,
 		DivisorOnly: true,
 		Lang:        "typescript",
@@ -1688,7 +2402,7 @@ func TestRun_DivisorSubset_DefaultFallback(t *testing.T) {
 	dir := t.TempDir() // Empty — no language markers
 	var buf bytes.Buffer
 
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir:   dir,
 		DivisorOnly: true,
 		Version:     "1.0.0",
@@ -1766,7 +2480,7 @@ func TestScaffoldOutput_NoGraphthulhuReferences(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0-test",
 		Stdout:    &buf,
@@ -1814,7 +2528,7 @@ func TestScaffoldOutput_NoSwarmPluginReferences(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0-test",
 		Stdout:    &buf,
@@ -1864,7 +2578,7 @@ func TestScaffoldOutput_NoHivemindReferences(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0-test",
 		Stdout:    &buf,
@@ -1915,7 +2629,7 @@ func TestScaffoldOutput_NoBareUnboundReferences(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0-test",
 		Stdout:    &buf,
@@ -1966,7 +2680,7 @@ func TestScaffoldOutput_NoOldPathReferences(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0-test",
 		Stdout:    &buf,
@@ -2090,7 +2804,7 @@ func TestRun_LegacyFileWarning(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	_, err := Run(Options{
+	_, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0-test",
 		Stdout:    &buf,
@@ -2130,7 +2844,7 @@ func TestRun_DoesNotCreateBridgeFiles(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0-test",
 		Stdout:    &buf,
@@ -2183,7 +2897,7 @@ func TestRun_DoesNotModifyExistingBridgeFiles(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	result, err := Run(Options{
+	result, err := runScaffoldWithoutExternalTools(t, Options{
 		TargetDir: dir,
 		Version:   "1.0.0-test",
 		Stdout:    &buf,
@@ -3342,6 +4056,46 @@ func TestConfigureOpencodeJSON_LegacyPluginMigration_OtherPlugins(t *testing.T) 
 	plugins := getPlugins(t, ocMap)
 	if len(plugins) != 1 || plugins[0] != "other-plugin" {
 		t.Errorf("plugin = %v, want [other-plugin]", plugins)
+	}
+}
+
+func TestConfigureOpencodeJSON_RegistersReviewPlugins(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create the managed review plugin sources.
+	for _, assetPath := range []string{invokeAgentPluginAsset, reviewDispatchPluginAsset} {
+		targetPath := filepath.Join(dir, mapAssetPath(assetPath))
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			t.Fatalf("mkdir plugin dir: %v", err)
+		}
+		if err := os.WriteFile(targetPath, []byte("// plugin source\n"), 0o644); err != nil {
+			t.Fatalf("write plugin source: %v", err)
+		}
+	}
+
+	opts := &Options{
+		TargetDir: dir,
+		LookPath:  stubScaffoldLookPath(map[string]string{}),
+	}
+
+	results := configureOpencodeJSON(opts)
+	if results[0].action != "created" {
+		t.Errorf("expected action 'created', got %q", results[0].action)
+	}
+
+	ocMap := parseOpencodeJSON(t, dir)
+	gotPlugins := getPlugins(t, ocMap)
+	wantPlugins := []string{
+		"./" + mapAssetPath(invokeAgentPluginAsset),
+		"./" + mapAssetPath(reviewDispatchPluginAsset),
+	}
+	if len(gotPlugins) != len(wantPlugins) {
+		t.Fatalf("plugin = %v, want %v", gotPlugins, wantPlugins)
+	}
+	for i := range wantPlugins {
+		if gotPlugins[i] != wantPlugins[i] {
+			t.Errorf("plugin[%d] = %q, want %q", i, gotPlugins[i], wantPlugins[i])
+		}
 	}
 }
 
@@ -6603,8 +7357,8 @@ func TestGuardrailTemplates_CommandSpecificContent(t *testing.T) {
 	// The blocks are fenced in ```markdown ... ``` and preceded by
 	// a bold label like **Implement guardrails block**.
 	type guardrailBlock struct {
-		label        string
-		mustContain  []string
+		label          string
+		mustContain    []string
 		mustNotContain []string
 	}
 

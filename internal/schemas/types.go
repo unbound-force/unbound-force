@@ -115,8 +115,8 @@ type QualityRecommendation struct {
 	Target      string `json:"target" jsonschema:"description=Target function or package"`
 }
 
-// ReviewVerdictPayload defines the payload for review-verdict
-// artifacts produced by The Divisor.
+// ReviewVerdictPayload defines the historical version 1 payload for
+// review-verdict artifacts produced by The Divisor.
 type ReviewVerdictPayload struct {
 	PersonaVerdicts    []PersonaVerdict `json:"persona_verdicts" jsonschema:"description=Individual persona review verdicts"`
 	CouncilDecision    string           `json:"council_decision" jsonschema:"description=Overall council decision (APPROVED/CHANGES_REQUESTED/ESCALATED)"`
@@ -124,6 +124,38 @@ type ReviewVerdictPayload struct {
 	UnresolvedFindings []ReviewFinding  `json:"unresolved_findings,omitempty" jsonschema:"description=Findings not yet addressed"`
 	PRUrl              string           `json:"pr_url" jsonschema:"description=Pull request URL"`
 	ConventionPackUsed string           `json:"convention_pack_used" jsonschema:"description=Convention pack ID used for review"`
+}
+
+// ReviewVerdictDecision is a canonical version 2 council decision.
+type ReviewVerdictDecision = artifacts.ReviewVerdictDecision
+
+const (
+	// ReviewVerdictSchemaVersionV1 identifies historical review verdicts.
+	ReviewVerdictSchemaVersionV1 = artifacts.ReviewVerdictSchemaVersionV1
+	// ReviewVerdictSchemaVersionV2 identifies current review verdicts.
+	ReviewVerdictSchemaVersionV2 = artifacts.ReviewVerdictSchemaVersionV2
+
+	// ReviewVerdictApproved permits downstream automated progression.
+	ReviewVerdictApproved = artifacts.ReviewVerdictApproved
+	// ReviewVerdictChangesRequested blocks progression on review findings.
+	ReviewVerdictChangesRequested = artifacts.ReviewVerdictChangesRequested
+	// ReviewVerdictEscalated blocks progression pending human resolution.
+	ReviewVerdictEscalated = artifacts.ReviewVerdictEscalated
+	// ReviewVerdictInconclusive blocks progression when no result was calculated.
+	ReviewVerdictInconclusive = artifacts.ReviewVerdictInconclusive
+	// ReviewVerdictUnavailable blocks progression when assessment was unavailable.
+	ReviewVerdictUnavailable = artifacts.ReviewVerdictUnavailable
+)
+
+// ReviewVerdictV2Payload defines the current version 2 review-verdict
+// payload. Version 1 remains a separate historical read model.
+type ReviewVerdictV2Payload struct {
+	PersonaVerdicts    []PersonaVerdict      `json:"persona_verdicts"`
+	CouncilDecision    ReviewVerdictDecision `json:"council_decision"`
+	IterationCount     int                   `json:"iteration_count"`
+	UnresolvedFindings []ReviewFinding       `json:"unresolved_findings,omitempty"`
+	PRUrl              string                `json:"pr_url"`
+	ConventionPackUsed string                `json:"convention_pack_used"`
 }
 
 // PersonaVerdict represents a single reviewer persona's assessment.

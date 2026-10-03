@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "reviewers": [
+    {
+      "agent": "divisor-performance",
+      "capability": "review",
+      "scopes": ["standard", "ci-cd"]
+    }
+  ]
+}

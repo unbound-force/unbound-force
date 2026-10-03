@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "profiles": {
+    "lightweight": {"model": "provider/light"},
+    "standard": {"model": "provider/standard"},
+    "heavy": {"model": "provider/heavy"}
+  },
+  "defaults": {
+    "code": "standard",
+    "spec": "standard",
+    "triage": "standard",
+    "feedback": "standard"
+  },
+  "runs": {
+    "code": {
+      "divisor-adversary": [
+        {
+          "profile": "heavy",
+          "model": "provider/heavy"
+        }
+      ]
+    }
+  }
+}
