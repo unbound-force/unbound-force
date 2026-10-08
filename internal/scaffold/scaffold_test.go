@@ -100,17 +100,63 @@ func TestUnleashCommand_WorkflowTierBranching(t *testing.T) {
 	}
 
 	command := string(content)
-	want := []string{
-		"`/speckit.clarify` to address the findings, then",
-		"artifacts under `openspec/changes/<name>/` to\n    address the findings",
-		"`/speckit.clarify` to refine and iterate",
-		"artifacts under `openspec/changes/<name>/` to\n     refine and iterate",
-		"Before composing this exit message, re-read the\n  `WORKFLOW_TIER` branch instructions",
-	}
-	for _, expected := range want {
-		if !strings.Contains(command, expected) {
-			t.Errorf("unleash command missing workflow-tier guidance %q", expected)
+	between := func(t *testing.T, value, start, end string) string {
+		t.Helper()
+		startIndex := strings.Index(value, start)
+		if startIndex == -1 {
+			t.Fatalf("unleash command missing section start %q", start)
 		}
+		value = value[startIndex:]
+		endIndex := strings.Index(value, end)
+		if endIndex == -1 {
+			t.Fatalf("unleash command missing section end %q", end)
+		}
+		return value[:endIndex]
+	}
+
+	sections := []struct {
+		name           string
+		content        string
+		speckit        string
+		openspec       string
+		requiresReread bool
+	}{
+		{
+			name:           "spec review exit",
+			content:        between(t, command, "- If HIGH or CRITICAL findings remain", "> CHECKPOINT: Mark Step 6 complete"),
+			speckit:        "`/speckit.clarify` to address the findings",
+			openspec:       "artifacts under `openspec/changes/<name>/` to\n    address the findings",
+			requiresReread: true,
+		},
+		{
+			name:     "demo next steps",
+			content:  between(t, command, "5. **Next Steps**:", "Format the output as:"),
+			speckit:  "`/speckit.clarify` to refine and iterate",
+			openspec: "artifacts under `openspec/changes/<name>/` to\n     refine and iterate",
+		},
+	}
+
+	for _, section := range sections {
+		t.Run(section.name, func(t *testing.T) {
+			speckitBlock := between(t, section.content, "**If `WORKFLOW_TIER = speckit`**", "**If `WORKFLOW_TIER = openspec`**")
+			openspecBlock := between(t, section.content, "**If `WORKFLOW_TIER = openspec`**", "\n\n")
+
+			if !strings.Contains(speckitBlock, section.speckit) {
+				t.Errorf("speckit branch missing guidance %q", section.speckit)
+			}
+			if strings.Contains(speckitBlock, "openspec/changes/") {
+				t.Error("speckit branch contains OpenSpec guidance")
+			}
+			if !strings.Contains(openspecBlock, section.openspec) {
+				t.Errorf("openspec branch missing guidance %q", section.openspec)
+			}
+			if strings.Contains(openspecBlock, "/speckit.clarify") {
+				t.Error("openspec branch contains Speckit guidance")
+			}
+			if section.requiresReread && !strings.Contains(section.content, "Before composing this exit message, re-read the") {
+				t.Error("spec review exit missing JIT re-read instruction")
+			}
+		})
 	}
 }
 
