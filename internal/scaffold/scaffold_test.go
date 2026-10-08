@@ -93,6 +93,27 @@ func TestEmbeddedAssets_MatchSource(t *testing.T) {
 	}
 }
 
+func TestUnleashCommand_WorkflowTierBranching(t *testing.T) {
+	content, err := assetContent("opencode/commands/uf.unleash.md")
+	if err != nil {
+		t.Fatalf("read embedded unleash command: %v", err)
+	}
+
+	command := string(content)
+	want := []string{
+		"`/speckit.clarify` to address the findings, then",
+		"artifacts under `openspec/changes/<name>/` to\n    address the findings",
+		"`/speckit.clarify` to refine and iterate",
+		"artifacts under `openspec/changes/<name>/` to\n     refine and iterate",
+		"Before composing this exit message, re-read the\n  `WORKFLOW_TIER` branch instructions",
+	}
+	for _, expected := range want {
+		if !strings.Contains(command, expected) {
+			t.Errorf("unleash command missing workflow-tier guidance %q", expected)
+		}
+	}
+}
+
 // TestEmbeddedAssets_SingleMarker verifies that no embedded
 // Markdown asset contains more than one scaffold provenance
 // marker line. This prevents marker accumulation through the

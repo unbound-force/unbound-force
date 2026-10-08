@@ -79,7 +79,8 @@ least one learning, and presents demo instructions.
    and the options `/finale` and a
    WORKFLOW_TIER-specific refinement option
    (`/speckit.clarify` for speckit; artifact update
-   path for openspec, as specified in spec 031).
+   path for openspec, using the artifact directory
+   defined in spec 031).
 
 ---
 
@@ -429,8 +430,9 @@ and plan (both exist) and resumes at tasks.
 - **FR-016**: The demo step MUST present: what was
   built, how to verify, key files changed, test
   results summary, and next-step options (`/finale`
-  and a WORKFLOW_TIER-specific refinement option per
-  spec 031).
+  and a WORKFLOW_TIER-specific refinement option using
+  the artifact directory defined in spec 031 for
+  openspec).
 - **FR-017**: `/unleash` MUST gracefully degrade when
   optional tools are unavailable: Dewey (fall back to
   human questions), Gaze (skip quality analysis),

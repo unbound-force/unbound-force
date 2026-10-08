@@ -383,12 +383,16 @@ analysis + quality validation) in a single pass.
   LOW/MEDIUM: **EXIT** with the findings. Use
   `WORKFLOW_TIER` to select the "What to do next"
   recovery guidance:
-  - **If `WORKFLOW_TIER = openspec`**: "Update the
-    artifacts under `openspec/changes/<name>/` to
-    address the findings, then re-run `/uf.unleash`."
   - **If `WORKFLOW_TIER = speckit`**: "Run
     `/speckit.clarify` to address the findings, then
     re-run `/uf.unleash`."
+  - **If `WORKFLOW_TIER = openspec`**: "Update the
+    artifacts under `openspec/changes/<name>/` to
+    address the findings, then re-run `/uf.unleash`."
+
+  Before composing this exit message, re-read the
+  `WORKFLOW_TIER` branch instructions immediately above
+  to select the correct recovery guidance.
 
   ```
   ## /uf.unleash paused at: spec review

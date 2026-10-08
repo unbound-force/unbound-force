@@ -187,10 +187,12 @@ artifact paths and workflow tier to the review council.
   `<!-- spec-review: passed -->` and
   `<!-- code-review: passed -->` markers for OpenSpec
   resumability.
-- **FR-007**: Steps 4-8 (spec review, implement, code
-  review, retrospective, demo) MUST work identically
-  for both Speckit and OpenSpec modes, using the
-  detected feature directory.
+- **FR-007**: The pipeline stages and quality gates in
+  Steps 4-8 (spec review, implement, code review,
+  retrospective, demo) MUST work identically for both
+  Speckit and OpenSpec modes, using the detected feature
+  directory. Pause and demo guidance MUST vary by the
+  detected workflow tier.
 - **FR-008**: The Speckit pipeline MUST remain unchanged
   for `NNN-*` branches (backward compatible).
 - **FR-009**: The scaffold asset copy of `unleash.md`
@@ -241,6 +243,8 @@ artifact paths and workflow tier to the review council.
 - The review council can determine review scope from
   the feature directory path — `openspec/changes/` vs
   `specs/` is sufficient to identify the workflow tier.
-- The demo step works identically for both workflows —
-  it reads the spec/proposal for "What Was Built" and
-  the acceptance scenarios for "How to Verify."
+- The demo step uses the same processing for both
+  workflows: it reads the spec/proposal for "What Was
+  Built" and the acceptance scenarios for "How to
+  Verify." Its Next Steps guidance varies by workflow
+  tier.
