@@ -48,17 +48,17 @@ off on re-run.
 **Execution Checklist** -- update in-place with Edit tool:
 
 ```
-- [ ] Step 0: Startup Cleanup
-- [ ] Step 1: Branch Safety Gate
-- [ ] Step 2: Resumability Detection
-- [ ] Step 3: Clarify (Step 1)
-- [ ] Step 4: Plan (Step 2)
-- [ ] Step 5: Tasks (Step 3)
-- [ ] Step 6: Spec Review (Step 4) -- iteration: 0/3
-- [ ] Step 7: Implement (Step 5) -- phase: 0/N, batch: 0/N, workers: 0/N
-- [ ] Step 8: Code Review (Step 6) -- iteration: 0/3
-- [ ] Step 9: Retrospective (Step 7)
-- [ ] Step 10: Demo (Step 8)
+- [x] Step 0: Startup Cleanup
+- [x] Step 1: Branch Safety Gate
+- [x] Step 2: Resumability Detection
+- [x] Step 3: Clarify (Step 1)
+- [x] Step 4: Plan (Step 2)
+- [x] Step 5: Tasks (Step 3)
+- [x] Step 6: Spec Review (Step 4) -- iteration: 3/3 PASSED
+- [x] Step 7: Implement (Step 5) -- all 5 phases complete, make check PASS
+- [x] Step 8: Code Review (Step 6) -- iteration: 2/3 PASSED (APPROVE)
+- [x] Step 9: Retrospective (Step 7) -- 3 learnings stored
+- [x] Step 10: Demo (Step 8)
 ```
 
 ### TodoWrite Progress Tracking
@@ -680,6 +680,12 @@ memory.
    Display the learnings in the output so they are not
    lost.
 
+> POLICY NOTE: Learnings stored via `dewey_store_learning`
+> produce files (`.uf/dewey/learnings/*.md`,
+> `.uf/dewey/compiled/*.md`) that are part of the feature
+> PR scope and MUST be committed on the feature branch.
+> See the Commit scope rule in `AGENTS.md`.
+
 > CHECKPOINT: Mark Step 9 complete in the execution
 > checklist before proceeding. Proceed immediately to
 > Step 10. Do NOT ask for confirmation.
@@ -714,17 +720,12 @@ Present structured demo instructions to the developer.
      in `FEATURE_DIR/tasks.md`. OpenSpec changes do not
      have a `quickstart.md`.
 
-3. **Key Files Changed**: run:
-   ```bash
-   git diff --name-only main...HEAD
-   ```
-   List the changed files grouped by directory.
-
-4. **Test Results**: summarize the test output from the
+3. **Test Results**: summarize the test output from the
    most recent build/test checkpoint.
 
-5. **Next Steps**: always present exactly these two
-   options — do not add or remove options. Use
+4. **Next Steps**: always present exactly these two
+   options as shown in the format block below — do not
+   paraphrase, add, or remove options. Use
    `WORKFLOW_TIER` to select the second option:
    - **If `WORKFLOW_TIER = speckit`**: "Run
      `/speckit.clarify` to refine and iterate"
@@ -749,10 +750,6 @@ Format the output as:
 [verification commands from quickstart.md or acceptance
  scenarios]
 
-## Key Files Changed
-
-[grouped file list from git diff]
-
 ## Test Results
 
 [pass/fail summary with counts]
@@ -760,7 +757,7 @@ Format the output as:
 ## Next Steps
 
 - Run `/uf.finale` to create PR and watch CI
-- [tier-specific refinement option from above]
+- [tier-specific refinement option selected above]
 ```
 
 > CHECKPOINT: Mark Step 10 complete in the execution

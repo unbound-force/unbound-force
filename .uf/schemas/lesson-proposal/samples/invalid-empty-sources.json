@@ -1,0 +1,7 @@
+{
+  "schema_version": "1.0.0",
+  "sibling": "gaze",
+  "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "sources": [],
+  "information": "Contract coverage should assert observable behavior."
+}

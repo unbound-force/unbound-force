@@ -1,0 +1,89 @@
+{
+  "command": "review-council",
+  "mode": "specs",
+  "full": true,
+  "input_context": {
+    "kind": "local",
+    "pr_number": null,
+    "base_ref": "main",
+    "base_sha": "3333333333333333333333333333333333333333",
+    "head_ref": "HEAD",
+    "head_sha": "4444444444444444444444444444444444444444"
+  },
+  "change_profile": {
+    "kind": "diff",
+    "lines": 10,
+    "files": 1,
+    "components": 1,
+    "security_sensitive": false,
+    "user_facing": false,
+    "categories": ["standard"],
+    "tier": "lightweight"
+  },
+  "plan_version": 1,
+  "plan": [
+    {
+      "agent": "divisor-adversary",
+      "decision": "include",
+      "reason_code": "host-fallback",
+      "reason": "Use the active host model",
+      "source": "host",
+      "sequence": 1,
+      "read_only": true,
+      "tier": null,
+      "model": null,
+      "variant": null,
+      "validation_errors": []
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "22222222-2222-4222-8222-222222222222",
+      "agent": "divisor-adversary",
+      "source": "host",
+      "requested_model": null,
+      "provider": null,
+      "model_id": null,
+      "variant": null,
+      "resolved_parent_model": null,
+      "resolved_parent_variant": null,
+      "sequence": 1,
+      "status": "failed",
+      "started_at": "2026-10-01T12:01:00Z",
+      "finished_at": "2026-10-01T12:01:01Z",
+      "usage": null,
+      "error": {
+        "code": "host_model_unavailable",
+        "message": "The active host model is unavailable.",
+        "retryable": true
+      },
+      "reported_model": null,
+      "model_mismatch": false,
+      "workflow_verdict": null,
+      "findings": []
+    }
+  ],
+  "coverage": {
+    "preflight_verdict": "NOT_RUN",
+    "checks_total": 0,
+    "checks_passed": 0
+  },
+  "findings": [],
+  "advisories": [],
+  "verdict": "UNAVAILABLE",
+  "verdict_reason": "Every blocking cause was model availability.",
+  "run_counts": {
+    "total": 1,
+    "success": 0,
+    "failed": 1,
+    "skipped": 0,
+    "budget_skipped": 0,
+    "limit_skipped": 0,
+    "cancelled": 0
+  },
+  "workflow_result": {
+    "kind": "council",
+    "value": "UNAVAILABLE"
+  },
+  "correlation_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+}

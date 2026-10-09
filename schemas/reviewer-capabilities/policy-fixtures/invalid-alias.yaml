@@ -1,0 +1,8 @@
+version: 1
+reviewers:
+  - &testing
+    agent: divisor-testing
+    capability: review
+    scopes:
+      - test-quality
+  - *testing

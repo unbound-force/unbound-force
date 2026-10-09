@@ -31,6 +31,8 @@ uf init [flags]
 | `--force` | bool | `false` | Overwrite all existing files |
 | `--divisor` | bool | `false` | Deploy only Divisor review agents and convention packs |
 | `--lang` | string | `""` | Project language for convention pack (auto-detected from go.mod, package.json, etc. if omitted) |
+| `--stealth` | bool | `false` | Scaffold locally without modifying tracked files or dirtying git (local-only; hidden files are not preserved on re-clone, re-run `uf init --stealth` to restore) |
+| `--check` | bool | `false` | Verify git-cleanliness without writing (requires `--stealth`) |
 
 > **Note:** Dewey indexing during init uses `--no-embeddings` for
 > fast metadata-only indexing. Run `dewey index` separately to

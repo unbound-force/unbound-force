@@ -8,214 +8,422 @@ depends_on:
   - "[[specs/002-hero-interface-contract/spec]]"
 ---
 
-# Feature Specification: The Divisor Architecture (PR Reviewer Council)
+# Feature Specification: The Divisor Architecture
 
 **Feature Branch**: `005-the-divisor-architecture`
 **Created**: 2026-02-24
 **Status**: Complete
-**Input**: User description: "Design the architecture for The Divisor, the PR Reviewer Council hero. The Divisor is the Architectural Conscience and Code Integrity Guardian, realized by a council of three personas: The Guard (intent and cohesion), The Architect (structure and sustainability), and The Adversary (resilience and security). The Gaze repository contains a prototype deployment of The Divisor's review agents. The Divisor must be a standalone, reusable framework that produces project-specific deployments like the Gaze prototype." *(Note: Since clarified to five canonical personas — Guard, Architect, Adversary, SRE, Testing — with dynamic discovery. See Session 2026-03-19 clarifications.)*
+**Input**: User description: "Design the architecture for The
+Divisor, the PR Reviewer Council hero. The Divisor is the
+Architectural Conscience and Code Integrity Guardian, realized by
+a council of three personas: The Guard, The Architect, and The
+Adversary. The Gaze repository contains a prototype deployment.
+The Divisor must be a standalone, reusable framework that produces
+project-specific deployments like the Gaze prototype."
+
+The original three-persona intent remains historical context. The
+March 2026 design expanded the council to five review personas. The
+current contract recognizes nine known personas: six review-capable
+personas and three content-only personas.
 
 ## Clarifications
 
 ### Session 2026-02-24
 
-- Q: The Gaze repo has reviewer agents (`reviewer-guard.md`, `reviewer-architect.md`, `reviewer-adversary.md`) and a `/review-council` command. Are these The Divisor project or a deployment of it? A: These are a prototype deployment of The Divisor. The Divisor project defines the framework; the Gaze agents are an instance configured for a Go static analysis tool.
-- Q: How should The Divisor handle project-specific coding conventions? The Gaze deployment hardcodes Go-specific checks (gofmt, GoDoc, Go error wrapping). A: The Divisor framework must define convention packs — pluggable sets of language/framework-specific rules that are injected into the review personas. The Gaze Go convention pack is the first implementation.
-- Q: Should The Divisor be a CLI tool, an OpenCode plugin, or agent configurations? A: Primarily agent configurations with a CLI tool for generating project-specific deployments (similar to `gaze init`). The CLI generates the agent files configured for the target project.
+- Q: Are the Gaze reviewer agents The Divisor project? A: They are
+  a prototype deployment. The Divisor defines the reusable
+  framework; Gaze is a project-specific instance.
+- Q: How does The Divisor handle project-specific conventions?
+  A: It uses pluggable language and framework convention packs.
+- Q: Is The Divisor a CLI, plugin, or agent configuration? A: It is
+  primarily agent configuration with CLI deployment support.
 
 ### Session 2026-03-19
 
-- Q: How should The Divisor CLI be structured for distribution? A: The Divisor is distributed through the existing `unbound` binary, not a standalone repo or binary. `unbound init` deploys everything (speckit + openspec + Divisor agents). `unbound init --divisor` deploys only Divisor agents and commands (subset deployment). No separate `unbound-force/the-divisor` repo is needed.
-- Q: What file pattern should the review-council command scan for to discover Divisor personas? A: Scan for `divisor-*.md` in `.opencode/agents/`. The existing `reviewer-*` prototype files will be renamed to `divisor-*` as part of implementation. This cleanly separates Divisor personas from other agents.
-- Q: When should convention pack content be injected into persona agents? A: Review-time (dynamic). Agents reference a convention pack file path and load it at review time. This keeps agents thin and allows pack updates without re-scaffolding. Convention packs are deployed as separate files alongside the agents.
-- Q: Should this spec define the `review-verdict` JSON schema or defer to Spec 009? A: Produce a Markdown report now. Defer JSON artifact envelope to Spec 009 (Shared Data Model). FR-017 becomes SHOULD until Spec 009 is complete.
-- Q: How should the `reviewer-*` to `divisor-*` migration be handled? A: Deploy `divisor-*` files alongside existing `reviewer-*` files. Old files are left in place for manual cleanup (the scaffold engine does not delete files). Migration is documented in release notes.
+- Q: How is The Divisor distributed? A: The existing `unbound`
+  binary distributes it. `unbound init` deploys all assets, while
+  `unbound init --divisor` deploys the Divisor subset.
+- Q: Which pattern discovers Divisor personas? A: The command scans
+  `.opencode/agents/divisor-*.md`.
+- Q: When are convention packs loaded? A: Personas load them at
+  review time so pack updates do not require re-scaffolding.
+- Q: Where is the JSON decision contract defined? A: Spec 009 owns
+  the shared schema. This spec owns its production semantics.
+- Q: How is the old `reviewer-*` naming migrated? A: New
+  `divisor-*` files deploy alongside old files. Users remove old
+  files after verification because the scaffold does not delete.
+
+### Session 2026-10-02
+
+- Q: Which known personas can review? A: Adversary, Architect,
+  Curator, Guard, SRE, and Testing are review-capable. Envoy,
+  Herald, and Scribe are content-only.
+- Q: What determines eligibility? A: The closed
+  `.uf/reviewer-capabilities.yaml` manifest is authoritative.
+- Q: Can a persona have multiple model runs? A: Yes. A validated
+  dynamic plan MAY include one or more runs per included persona.
+- Q: Which artifact drives downstream decisions? A:
+  `review-verdict` version 2 is canonical. `review-dispatch` adds
+  execution and provenance data and does not replace it.
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Framework Core: Dynamic Review Protocol (Priority: P1)
+### User Story 1 - Dynamic Review Protocol (Priority: P1)
 
-The Divisor defines a formal review protocol with dynamic persona discovery that any project can deploy. The `/review-council` command discovers personas at runtime by scanning for `divisor-*.md` files in `.opencode/agents/`. Five canonical personas ship as defaults — Guard (intent), Architect (structure), Adversary (resilience), SRE (operations), Testing (test quality) — but users may add or remove personas freely. The protocol specifies how discovered personas each evaluate a code change, how their individual verdicts are combined into a council decision, and how iteration works when changes are requested.
+The Divisor defines a project-agnostic review protocol. The council
+discovers `divisor-*.md` files, classifies them through the closed
+reviewer-capabilities manifest, creates a deterministic review plan,
+and executes every included run. The known persona set contains six
+review-capable personas and three content-only personas.
 
-**Why this priority**: P1 because the review protocol is the core intellectual property of The Divisor. Without a formal, project-agnostic protocol, each deployment would reinvent the review process.
+Review-capable personas are Adversary, Architect, Curator, Guard,
+SRE, and Testing. Content-only personas are Envoy, Herald, and
+Scribe. Content-only personas remain discoverable but never dispatch
+as reviewers.
 
-**Independent Test**: Can be tested by presenting a sample code change to each persona template and verifying the protocol produces structured verdicts that can be combined into a council decision.
+**Why this priority**: The protocol is the core intellectual
+property of The Divisor. Without a formal protocol, each deployment
+would reinvent discovery, eligibility, dispatch, and decisions.
+
+**Independent Test**: Present a sample change to a validated plan
+and verify that every included run produces structured output that
+can be consolidated into one council decision.
 
 **Acceptance Scenarios**:
 
-1. **Given** the review protocol specification, **When** a reviewer inspects it, **Then** it defines: dynamic persona discovery via `divisor-*.md` file scanning, five canonical persona roles (Guard, Architect, Adversary, SRE, Testing), their distinct focus areas, verdict format (APPROVE/REQUEST CHANGES/COMMENT), and the council decision rules.
-2. **Given** a code change, **When** all discovered personas review it, **Then** each produces a structured verdict containing: persona name, verdict, findings[] (each with severity, category, file, line, description, recommendation), and a summary.
-3. **Given** the individual verdicts from all discovered personas, **When** the council decision is computed, **Then** the change is APPROVED only if no discovered persona has issued REQUEST CHANGES. Any REQUEST CHANGES verdict blocks the merge. Absent personas do not affect the verdict.
-4. **Given** a REQUEST CHANGES verdict, **When** the developer addresses the findings, **Then** the iteration protocol re-runs only the persona(s) that issued REQUEST CHANGES (up to a configurable maximum of iterations, default 3).
-5. **Given** the maximum iteration count is reached, **When** unresolved findings remain, **Then** the council escalates to manual review with a summary of all unresolved findings.
+1. **Given** the protocol specification, **When** a reviewer
+   inspects it, **Then** it defines dynamic discovery, all nine known
+   personas, their capabilities and scopes, verdict format, and
+   council decision rules.
+2. **Given** a code change, **When** included plan runs review it,
+   **Then** each successful run produces a structured verdict with
+   persona, model provenance, findings, and summary.
+3. **Given** successful included runs, **When** the council decision
+   is computed, **Then** any blocking verdict blocks approval and
+   absent or skipped personas do not vote.
+4. **Given** confirmed fixes, **When** the next iteration begins,
+   **Then** the council recomputes and validates the plan and reruns
+   every included plan run, including runs that did not previously
+   block.
+5. **Given** the three-iteration limit is reached, **When** findings
+   remain, **Then** the council escalates to human review with all
+   unresolved findings.
+6. **Given** a content-only persona is discovered, **When** planning
+   occurs, **Then** it is reported but no review run is created.
+7. **Given** a change has no documentation or user-facing scope,
+   **When** planning occurs, **Then** Curator MAY be pruned with a
+   deterministic reason.
 
 ---
 
-### User Story 2 - Convention Packs: Language and Framework Adaptation (Priority: P1)
+### User Story 2 - Convention Packs (Priority: P1)
 
-The Divisor supports convention packs — pluggable configurations that define language-specific and framework-specific coding conventions, architectural patterns, and security checks. Convention packs are deployed as separate files to `.opencode/unbound/packs/` and loaded dynamically at review time by each persona, allowing the same review protocol to evaluate Go code, TypeScript code, Python code, or any other stack.
+The Divisor supports pluggable convention packs for language and
+framework conventions, architectural patterns, security checks,
+testing practices, and documentation requirements. Packs deploy as
+separate files and load at review time.
 
-**Why this priority**: P1 because the Gaze prototype is hardcoded for Go. Without convention packs, The Divisor cannot be deployed to non-Go projects, making it a single-project tool rather than a framework.
+**Why this priority**: The Gaze prototype is Go-specific. Packs make
+the framework reusable across languages and projects.
 
-**Independent Test**: Can be tested by creating two convention packs (Go and TypeScript), deploying The Divisor with each, and verifying that the Architect persona checks for the correct language-specific conventions in each deployment.
+**Independent Test**: Deploy Go and TypeScript packs, then verify
+that Architect evaluates each project against its active pack.
 
 **Acceptance Scenarios**:
 
-1. **Given** a Go convention pack deployed at `.opencode/unbound/packs/go.md`, **When** The Architect reviews a Go PR, **Then** it dynamically loads the pack and checks for: gofmt compliance, GoDoc on exported symbols, error wrapping with `%w`, import grouping (stdlib/external/internal), and no global mutable state.
-2. **Given** a convention pack for TypeScript, **When** The Architect reviews a TypeScript PR, **Then** it checks for: ESLint compliance, JSDoc on exported functions, proper error handling, import organization, and no `any` type usage.
-3. **Given** a project with no convention pack configured, **When** The Divisor is deployed, **Then** the personas use a language-agnostic default pack that checks universal principles (SOLID, DRY, error handling, test coverage).
-4. **Given** a convention pack file at `.opencode/unbound/packs/{language}.md`, **When** a maintainer inspects its structure, **Then** it is a structured document (Markdown or YAML) with sections for: coding_style, architectural_patterns, security_checks, testing_conventions, and documentation_requirements.
-5. **Given** a convention pack, **When** a project needs a custom rule not in the pack, **Then** the pack supports a `custom_rules[]` extension section where project-specific checks can be added without modifying the pack itself.
+1. **Given** a Go convention pack, **When** Architect reviews Go,
+   **Then** it checks formatting, GoDoc, wrapped errors, imports, and
+   mutable global state.
+2. **Given** a TypeScript pack, **When** Architect reviews
+   TypeScript, **Then** it checks ESLint, JSDoc, errors, imports, and
+   prohibited `any` usage.
+3. **Given** no language pack, **When** review begins, **Then** the
+   personas use the language-agnostic default pack.
+4. **Given** a convention pack, **When** a maintainer inspects it,
+   **Then** it contains coding, architecture, security, testing, and
+   documentation sections.
+5. **Given** a project-specific rule, **When** the pack is extended,
+   **Then** the custom rule does not require changing the canonical
+   pack.
 
 ---
 
-### User Story 3 - Project-Aware Review Context (Priority: P2)
+### User Story 3 - Project-Aware Context (Priority: P2)
 
-The Divisor personas are project-aware: they read the target project's constitution, active spec, and AGENTS.md to inform their review criteria. The Guard validates intent alignment against the spec. The Architect validates structural compliance against the constitution and AGENTS.md conventions. The Adversary validates security and resilience against the spec's edge cases and the constitution's constraints.
+Review personas read the target constitution, active spec, and
+`AGENTS.md` when available. Guard validates intent. Architect
+validates structure. Adversary validates security and resilience.
 
-**Why this priority**: P2 because project awareness transforms The Divisor from a generic linter into a context-sensitive reviewer that understands what the code is supposed to do, not just how it's structured.
+**Why this priority**: Project context lets the council assess what
+the code should do, not only how it is written.
 
-**Independent Test**: Can be tested by deploying The Divisor in a project with a spec and constitution, submitting a PR that violates a spec acceptance criterion, and verifying The Guard detects the intent drift.
+**Independent Test**: Review a change that violates an acceptance
+criterion and verify that Guard reports the intent drift.
 
 **Acceptance Scenarios**:
 
-1. **Given** a project with an active spec containing acceptance criteria, **When** The Guard reviews a PR, **Then** it verifies the PR's changes are aligned with the spec's user stories and flags changes that appear unrelated to the active spec ("intent drift").
-2. **Given** a project with a ratified constitution, **When** The Architect reviews a PR, **Then** it verifies the code adheres to the principles defined in the constitution (e.g., if the constitution says "Library-First," it checks that new code is structured as a library).
-3. **Given** a project with edge cases defined in the spec, **When** The Adversary reviews a PR, **Then** it verifies the implementation handles the documented edge cases and flags any that appear unaddressed.
-4. **Given** a project with no constitution or spec, **When** The Divisor reviews a PR, **Then** it falls back to convention-pack-only review and notes that project context was unavailable.
+1. **Given** an active spec, **When** Guard reviews a change,
+   **Then** it checks alignment with user stories and criteria.
+2. **Given** a ratified constitution, **When** Architect reviews,
+   **Then** it checks the implementation against its principles.
+3. **Given** documented edge cases, **When** Adversary reviews,
+   **Then** it reports unhandled cases.
+4. **Given** no constitution or spec, **When** review begins,
+   **Then** the council falls back to convention packs and reports
+   the missing context.
 
 ---
 
 ### User Story 4 - Deployment via `unbound init` (Priority: P2)
 
-The Divisor is distributed through the existing `unbound` binary. `unbound init` deploys all scaffold files including Divisor agents, the `/review-council` command, and the appropriate convention pack file. `unbound init --divisor` deploys only Divisor-specific files as a subset. The scaffold engine auto-detects the project language and deploys the matching convention pack to `.opencode/unbound/packs/`.
+The existing `unbound` binary deploys The Divisor. Full setup
+deploys all scaffold assets. `unbound init --divisor` deploys only
+Divisor assets. Language detection selects the convention pack.
 
-**Why this priority**: P2 because the deployment mechanism depends on the protocol (US1) and convention packs (US2) being defined first.
+**Why this priority**: Deployment depends on the protocol and packs
+being defined first.
 
-**Independent Test**: Can be tested by running `unbound init --divisor` in a Go project and verifying it produces agent files that match (or improve upon) the existing Gaze prototype agents.
+**Independent Test**: Run `unbound init --divisor` in a Go project
+and verify that it deploys the expected agents, command, manifest,
+and convention pack.
 
 **Acceptance Scenarios**:
 
-1. **Given** a Go project with a constitution, **When** `unbound init` is run, **Then** it creates `.opencode/agents/divisor-guard.md`, `.opencode/agents/divisor-architect.md`, `.opencode/agents/divisor-adversary.md`, `.opencode/agents/divisor-sre.md`, `.opencode/agents/divisor-testing.md`, `.opencode/command/review-council.md`, and `.opencode/unbound/packs/go.md` (among all other scaffold files).
-2. **Given** a Go project, **When** `unbound init --divisor` is run, **Then** it creates only the Divisor agent and command files (not speckit templates, openspec schema, etc.).
-3. **Given** a TypeScript project, **When** `unbound init --divisor --lang typescript` is run, **Then** it deploys the same persona agents plus `.opencode/unbound/packs/typescript.md` containing TypeScript-specific convention checks.
-4. **Given** a project with an existing Divisor deployment, **When** `unbound init --divisor` is run without `--force`, **Then** existing Divisor files are skipped with a warning.
-5. **Given** the generated agents, **When** a developer compares them to the Gaze prototype agents, **Then** the generated agents follow the same structural pattern but with convention-pack-driven content instead of hardcoded Go checks.
+1. **Given** a Go project, **When** full initialization runs,
+   **Then** all known Divisor agents, the review command, the closed
+   reviewer manifest, and the Go pack are deployed.
+2. **Given** a Go project, **When** Divisor-only initialization runs,
+   **Then** only the Divisor subset is deployed.
+3. **Given** a TypeScript project, **When** initialization specifies
+   TypeScript, **Then** the TypeScript pack is deployed.
+4. **Given** an existing deployment, **When** initialization runs
+   without `--force`, **Then** user-owned files are skipped with a
+   warning.
+5. **Given** generated agents, **When** compared with the Gaze
+   prototype, **Then** they preserve the structural intent while
+   loading project conventions dynamically.
 
 ---
 
-### User Story 5 - Review Report Artifact (Priority: P3)
+### User Story 5 - Review Decision Artifacts (Priority: P3)
 
-The Divisor produces a standardized review report artifact (conforming to the inter-hero artifact envelope from Spec 002) that other heroes can consume. Mx F uses review reports for metrics. Muti-Mind uses them to understand implementation quality. Cobalt-Crush uses past reports to avoid repeating mistakes.
+The Divisor produces a canonical `review-verdict` version 2
+artifact under the Hero Interface Contract. It also produces an
+additive `review-dispatch` artifact containing the validated plan,
+model runs, execution outcomes, and provenance.
 
-**Why this priority**: P3 because the review report artifact enables swarm integration. The core review functionality works without it, but cross-hero learning requires structured output.
+Mx F uses canonical verdicts for metrics. Muti-Mind uses them for
+acceptance decisions. Cobalt-Crush uses them to address findings and
+avoid repeated mistakes. Version 1 verdicts remain readable as
+historical data.
 
-**Independent Test**: Can be tested by running a review council session and verifying the structured Markdown report contains all required sections (persona verdicts, discovery summary, council decision). JSON artifact validation is deferred to Spec 009.
+**Why this priority**: Structured decisions enable cross-hero
+integration. Additive dispatch data makes execution auditable
+without changing which artifact controls downstream decisions.
+
+**Independent Test**: Complete a council review and validate the
+Markdown report, `review-verdict` version 2 artifact, and additive
+`review-dispatch` artifact against their schemas.
 
 **Acceptance Scenarios**:
 
-1. **Given** a completed review council session, **When** the report is generated, **Then** it conforms to the artifact envelope: `hero: "the-divisor"`, `artifact_type: "review-verdict"`, `payload` containing all discovered persona verdicts, discovery summary, and the council decision.
-2. **Given** a review report, **When** Mx F parses it, **Then** it can extract: number of findings per severity, categories of findings, iteration count, and final verdict.
-3. **Given** a history of review reports, **When** Mx F analyzes trends, **Then** it can identify recurring finding categories (e.g., "The Architect frequently requests error wrapping improvements" -> suggests training or convention enforcement).
+1. **Given** a completed council session, **When** artifacts are
+   emitted, **Then** `review-verdict` version 2 contains the canonical
+   downstream decision and `review-dispatch` contains additive
+   execution and provenance data.
+2. **Given** a version 1 verdict, **When** a migrated consumer reads
+   it, **Then** historical reading remains supported.
+3. **Given** no successful review run, **When** canonical output is
+   produced, **Then** version 2 records `INCONCLUSIVE` or
+   `UNAVAILABLE` and downstream automation remains blocked.
+4. **Given** a review history, **When** Mx F analyzes it, **Then** it
+   can identify recurring categories, iteration counts, and final
+   decisions without treating dispatch data as canonical.
 
 ---
 
 ### Edge Cases
 
-- What happens when `unbound init --divisor` is run and the project language cannot be auto-detected? The CLI MUST prompt the user to specify the language or use `--lang` flag. If neither is provided, it falls back to the language-agnostic default pack.
-- What happens when a persona's review takes too long (e.g., very large PR)? The review protocol SHOULD define a timeout per persona (configurable, default 5 minutes for agent execution) and report partial results if a timeout occurs.
-- What happens when two personas produce contradictory findings? The council report MUST include both findings. The protocol does not resolve contradictions — the developer addresses each finding independently.
-- What happens when a convention pack has no security checks? The Adversary MUST still perform universal security checks (hardcoded secrets, SQL injection patterns, etc.) regardless of the convention pack content.
-- What happens when the target project has no tests and The Adversary checks for test coverage? The Adversary MUST flag the absence of tests as a finding but MUST NOT block the review solely for missing tests (that is Gaze's domain).
-- What happens when the `/review-council` command is run on a draft PR? The protocol MUST still execute but the report SHOULD note it is a draft review and the final review will occur when the PR is marked ready.
-- What happens when `unbound init --divisor` is run in a project that already has non-Divisor review agents? The Divisor MUST NOT overwrite or interfere with existing agents from other heroes. Its agents use the `divisor-` prefix to avoid collisions.
-- What happens when a project has existing `reviewer-*.md` files from a previous `unbound init`? The new `divisor-*.md` files are deployed alongside the old `reviewer-*` files. The scaffold engine MUST NOT delete the old files. The `/review-council` command scans only for `divisor-*.md`, so the old `reviewer-*` files become inert. Migration documentation MUST note that users should manually remove old `reviewer-*` files after verifying `divisor-*` equivalents work correctly.
+- If project language detection fails, the CLI MUST prompt for a
+  language or use the default pack.
+- Each run SHOULD have a configurable timeout. Partial successful
+  results MUST remain available when another run times out.
+- Contradictory findings MUST remain visible with their provenance.
+- Adversary MUST perform universal security checks even when the
+  active convention pack has no security section.
+- Missing tests alone MUST NOT block solely through Adversary; test
+  quality belongs to Testing and Gaze.
+- Draft pull requests MUST still run, and the report SHOULD note the
+  draft state.
+- Existing non-Divisor agents MUST NOT be overwritten or invoked as
+  Divisor personas.
+- Legacy `reviewer-*` files MUST remain inert because discovery uses
+  only `divisor-*`.
+- Curator child runs MUST NOT create issues or perform curation
+  actions. Only the parent MAY perform one deduplicated action after
+  consolidation and an explicit human gate.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: The Divisor MUST define a formal review protocol with dynamic persona discovery. The `/review-council` command MUST scan `.opencode/agents/` for files matching `divisor-*.md` at runtime. Five canonical personas ship as defaults: Guard (intent/cohesion), Architect (structure/sustainability), Adversary (resilience/security), SRE (operational readiness), and Testing (test quality/testability). Users MAY add or remove personas freely.
-- **FR-002**: Each persona MUST produce a structured verdict: persona_name, verdict (APPROVE/REQUEST_CHANGES/COMMENT), findings[], summary.
-- **FR-003**: Each finding MUST include: severity (critical/major/minor/info), category (string), file (path), line (number, optional), description, recommendation.
-- **FR-004**: The council decision MUST be APPROVE only when no discovered persona has issued REQUEST_CHANGES. Absent personas (not present as `divisor-*.md` files) MUST NOT affect the verdict.
-- **FR-005**: The iteration protocol MUST re-run only personas that issued REQUEST_CHANGES, up to a configurable maximum (default 3 iterations).
-- **FR-006**: The Divisor MUST support convention packs — pluggable configurations defining language/framework-specific review criteria. Convention packs are loaded dynamically at review time, not baked into agent files at scaffold time.
-- **FR-007**: Convention packs MUST be structured documents (Markdown or YAML) deployed to `.opencode/unbound/packs/` with sections: coding_style, architectural_patterns, security_checks, testing_conventions, documentation_requirements, and custom_rules[]. Each persona agent MUST reference the active pack file path and load it when invoked.
-- **FR-008**: The Divisor MUST ship with at least two convention packs: Go (matching the Gaze prototype) and a language-agnostic default. `unbound init` deploys the appropriate pack to `.opencode/unbound/packs/` based on language detection.
-- **FR-009**: The Divisor MUST be project-aware: personas MUST read the target project's constitution, active spec, and AGENTS.md when available.
-- **FR-010**: The Guard MUST validate PR changes against the active spec's user stories and acceptance criteria ("intent drift detection").
-- **FR-011**: The Architect MUST validate code structure against the project's constitution principles and the convention pack's architectural patterns.
-- **FR-012**: The Adversary MUST check for: security vulnerabilities, performance anti-patterns, error handling gaps, and resilience issues, informed by the spec's edge cases and the convention pack's security checks.
-- **FR-013**: The Divisor MUST be distributed through the `unbound` binary. `unbound init` deploys all scaffold files including Divisor agents. `unbound init --divisor` deploys only Divisor agents and commands as a subset.
-- **FR-014**: `unbound init --divisor` MUST auto-detect the project language (from go.mod, package.json, pyproject.toml, etc.) or accept a `--lang` flag.
-- **FR-015**: Generated agent files MUST follow the `divisor-{function}.md` naming convention. The five canonical files are: `divisor-guard.md`, `divisor-architect.md`, `divisor-adversary.md`, `divisor-sre.md`, `divisor-testing.md`.
-- **FR-016**: The generated `/review-council` command MUST discover all `divisor-*.md` agents dynamically, orchestrate them in parallel, collect verdicts, compute the council decision, and handle iteration.
-- **FR-017**: The Divisor MUST produce a structured Markdown review report. The Divisor SHOULD produce a `review-verdict` JSON artifact conforming to the inter-hero artifact envelope (Spec 002) once Spec 009 (Shared Data Model) defines the envelope schema. JSON artifact output is deferred to Spec 009.
-- **FR-018**: The review report MUST include: all discovered persona verdicts, the council decision, a discovery summary (invoked and absent personas), iteration history, and metadata (PR URL, review timestamp, convention pack used).
-- **FR-019**: The Divisor MUST conform to the Hero Interface Contract (Spec 002) as an embedded hero: OpenCode agent/command standards and artifact envelope compliance. The Divisor does not require a standalone repo; it is distributed as part of the `unbound` binary's scaffold assets. A formal hero manifest JSON file is deferred to Spec 009 (Shared Data Model), which will define the schema for embedded heroes that lack standalone repos.
-- **FR-020**: The Adversary MUST perform universal security checks (hardcoded secrets, injection patterns) regardless of the convention pack.
-- **FR-021**: The Guard MUST enforce the Zero-Waste Mandate: PRs should not introduce code that is not connected to the active spec or a documented backlog item.
-- **FR-022**: The Architect MUST enforce the Neighborhood Rule: changes must not negatively impact adjacent modules not covered by the PR's scope.
+- **FR-001**: The Divisor MUST discover `divisor-*.md` files at
+  runtime. The nine known personas MUST be Adversary, Architect,
+  Curator, Envoy, Guard, Herald, Scribe, SRE, and Testing. Adversary,
+  Architect, Curator, Guard, SRE, and Testing MUST be review-capable.
+  Envoy, Herald, and Scribe MUST be content-only.
+- **FR-002**: Each successful run MUST produce a structured verdict
+  containing persona, verdict, findings, and summary.
+- **FR-003**: Each finding MUST include severity, category, file,
+  optional line, description, and recommendation.
+- **FR-004**: The council MUST approve only when no successful
+  included run requests changes. Absent, skipped, content-only, and
+  unsuccessful runs MUST NOT vote. A no-success result MUST NOT
+  become approval.
+- **FR-005**: After the human confirms fixes, each iteration MUST
+  recompute and validate the plan and rerun every included plan run.
+  It MUST NOT rerun only previously blocking personas. The existing
+  human fix gate and maximum of three iterations MUST remain.
+- **FR-006**: The Divisor MUST support pluggable convention packs
+  loaded dynamically at review time.
+- **FR-007**: Convention packs MUST be structured documents in
+  `.opencode/unbound/packs/`. They MUST cover coding, architecture,
+  security, testing, documentation, and custom rules.
+- **FR-008**: The Divisor MUST ship at least Go and default packs.
+  Initialization MUST deploy the pack selected by language
+  detection.
+- **FR-009**: Review personas MUST read the target constitution,
+  active spec, and `AGENTS.md` when available.
+- **FR-010**: Guard MUST detect intent drift against active stories
+  and acceptance criteria.
+- **FR-011**: Architect MUST validate structure against the
+  constitution and active convention packs.
+- **FR-012**: Adversary MUST assess security, performance, error
+  handling, and resilience against project context.
+- **FR-013**: The existing `unbound` binary MUST distribute The
+  Divisor. Full initialization and `--divisor` subset deployment
+  MUST remain supported.
+- **FR-014**: Divisor initialization MUST detect project language or
+  accept a language flag.
+- **FR-015**: Generated known persona files MUST use the
+  `divisor-{function}.md` naming convention. The generated set MUST
+  contain adversary, architect, curator, envoy, guard, herald,
+  scribe, SRE, and testing files.
+- **FR-016**: The review command MUST discover agents, obtain and
+  validate a dynamic plan, execute every included run, consolidate
+  findings, compute the decision, and handle iteration. A plan MAY
+  contain one or more model runs for each included persona.
+- **FR-017**: The Divisor MUST produce a structured Markdown report
+  and a canonical `review-verdict` version 2 artifact. Producers MUST
+  preserve version 1 historical reads. Version 2 MUST support
+  `INCONCLUSIVE` and `UNAVAILABLE` no-success decisions.
+- **FR-018**: The report MUST include discovered capabilities,
+  included and skipped plan entries, run provenance, persona
+  verdicts, decision, iteration history, PR metadata, and the active
+  convention pack.
+- **FR-019**: The Divisor MUST conform to the Hero Interface
+  Contract as an embedded hero. It MUST use standard OpenCode agents,
+  commands, and artifact envelopes.
+- **FR-020**: Adversary MUST perform universal security checks
+  regardless of convention-pack contents.
+- **FR-021**: Guard MUST enforce the Zero-Waste Mandate.
+- **FR-022**: Architect MUST enforce the Neighborhood Rule.
+- **FR-023**: The closed reviewer-capabilities manifest MUST be the
+  only reviewer eligibility source. Content-only personas MUST NOT
+  dispatch. Adversary and Guard MUST always be eligible. Other
+  review personas MUST require deterministic scope intersection.
+  Curator MUST require documentation or user-facing scope and MAY be
+  pruned otherwise. Unknown agents MUST require an explicit valid
+  review entry with intersecting scope.
+- **FR-024**: `review-dispatch` MUST remain additive execution and
+  provenance data. It MUST NOT replace or become the canonical
+  downstream decision artifact. Child Curator runs MUST NOT create
+  issues. Only the parent MAY perform one deduplicated curation
+  action after consolidation and an explicit human gate.
 
 ### Key Entities
 
-- **Review Protocol**: The formal process governing a review council session. Attributes: discovery_pattern (`divisor-*.md`), canonical_personas[] (5: guard, architect, adversary, sre, testing), voting_rules, iteration_max (int), timeout_per_persona (duration), escalation_policy.
-- **Convention Pack**: Pluggable review criteria for a specific language/framework, deployed to `.opencode/unbound/packs/` and loaded dynamically at review time. Attributes: pack_id, language, framework (optional), coding_style{}, architectural_patterns{}, security_checks{}, testing_conventions{}, documentation_requirements{}, custom_rules[]. File path: `.opencode/unbound/packs/{language}.md` (e.g., `go.md`, `typescript.md`, `default.md`).
-- **Persona Verdict**: One reviewer persona's evaluation of a PR. Attributes: persona (guard/architect/adversary/sre/testing or any dynamically discovered persona), verdict (APPROVE/REQUEST_CHANGES/COMMENT), findings[], summary, reviewed_at, iteration_number.
-- **Review Finding**: A single issue identified during review. Attributes: id (F-NNN), severity (critical/major/minor/info), category, file, line (optional), description, recommendation, persona_source.
-- **Council Decision**: The aggregate outcome of a review session. Attributes: decision (APPROVED/CHANGES_REQUESTED/ESCALATED), discovered_personas[], absent_personas[], persona_verdicts[], iteration_count, unresolved_findings[], reviewed_at, convention_pack_used, pr_url.
-- **Deployment Configuration**: Settings for a project-specific Divisor deployment via `unbound init --divisor`. Attributes: target_dir, language, framework, convention_pack_id, project_constitution_path, project_spec_path, force_overwrite (bool), divisor_only (bool, true when `--divisor` flag used).
+- **Review Protocol**: Discovery, manifest eligibility, planning,
+  model runs, consolidation, iteration, and escalation.
+- **Reviewer Capabilities Manifest**: Closed eligibility source with
+  persona capability and ordered scopes.
+- **Dispatch Plan**: Validated ordered entries that MAY contain one
+  or more model runs for each included review persona.
+- **Convention Pack**: Dynamically loaded language and project
+  review rules.
+- **Persona Verdict**: A consolidated persona assessment with all
+  contributing run provenance.
+- **Review Finding**: A severity-graded issue with location, cause,
+  recommendation, and contributing runs.
+- **Council Decision**: `APPROVED`, `CHANGES_REQUESTED`,
+  `ESCALATED`, `INCONCLUSIVE`, or `UNAVAILABLE` in canonical
+  `review-verdict` version 2.
+- **Review Dispatch**: Additive execution and provenance data that
+  does not replace the canonical verdict.
+- **Deployment Configuration**: Project language, pack, context,
+  force behavior, and Divisor-only selection.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: The review protocol is formally documented and covers: dynamic persona discovery, five canonical personas, verdict format, council decision rules, iteration protocol, and escalation.
-- **SC-002**: The Go convention pack produces review behavior equivalent to the existing Gaze prototype agents (verified by comparing review findings on the same sample PR).
-- **SC-003**: The language-agnostic default pack produces meaningful findings on a project in any language (verified by reviewing a Python or TypeScript PR).
-- **SC-004**: `unbound init --divisor` in a Go project produces agent files structurally equivalent to the Gaze prototype (same sections, same behavioral constraints, convention-pack-driven content).
-- **SC-005**: `unbound init --divisor --lang typescript` produces agent files with TypeScript-specific convention checks.
-- **SC-006**: The review report Markdown is structured and machine-parseable. JSON artifact validation against the `review-verdict` schema is deferred to Spec 009.
-- **SC-007**: The iteration protocol correctly re-runs only the requesting personas and terminates after the maximum iteration count.
-- **SC-008**: Project-aware review (with constitution and spec available) produces more targeted findings than convention-pack-only review (measured by relevance of findings on a sample PR).
+- **SC-001**: The protocol documents all nine known personas, six
+  review capabilities, three content-only capabilities, manifest
+  eligibility, planning, decisions, iteration, and escalation.
+- **SC-002**: The Go pack produces behavior equivalent to or better
+  than the Gaze prototype on the same sample change.
+- **SC-003**: The default pack produces meaningful findings in a
+  project whose language has no dedicated pack.
+- **SC-004**: Divisor-only Go initialization produces the expected
+  agents, manifest, command, and convention pack.
+- **SC-005**: TypeScript initialization deploys TypeScript-specific
+  convention checks.
+- **SC-006**: Markdown, canonical `review-verdict` version 2, and
+  additive `review-dispatch` outputs validate. Version 1 verdicts
+  remain readable, and no-success decisions block automation.
+- **SC-007**: After confirmed fixes, iteration reruns every included
+  validated plan run and stops at the unchanged three-iteration
+  limit unless a human explicitly resolves the escalation.
+- **SC-008**: Project-aware review produces more relevant findings
+  than convention-pack-only review on the same sample change.
 
 ## Dependencies
 
 ### Prerequisites
 
-- **Spec 001** (Org Constitution): The Divisor must align with org principles.
-- **Spec 002** (Hero Interface Contract): The Divisor must conform to the hero manifest, artifact envelope, and naming conventions.
+- **Spec 001**: The Divisor MUST align with org principles.
+- **Spec 002**: The Divisor MUST conform to artifact and naming
+  contracts.
 
 ### Downstream Dependents
 
-- **Spec 006** (Cobalt-Crush Architecture): Cobalt-Crush consumes Divisor review feedback.
-- **Spec 007** (Mx F Architecture): Mx F consumes review-verdict artifacts for metrics.
-- **Spec 008** (Swarm Orchestration): The Divisor is a gate in the "feature to deployment" workflow.
-- **Spec 009** (Shared Data Model): Defines the `review-verdict` JSON schema.
+- **Spec 006**: Cobalt-Crush consumes canonical review decisions.
+- **Spec 007**: Mx F consumes canonical review decisions.
+- **Spec 008**: The Divisor acts as an orchestration gate.
+- **Spec 009**: The shared model defines artifact schemas and
+  compatibility.
+- **Spec 026**: Curator owns documentation and content opportunity
+  assessment under manifest-based eligibility.
 
 ### Reference Implementation
 
-- **Gaze Prototype**: The agents in the Gaze repo at `.opencode/agents/` (`reviewer-guard.md`, `reviewer-architect.md`, `reviewer-adversary.md`) and the `/review-council` command (`review-council.md`) serve as the prototype deployment (see [github.com/unbound-force/gaze](https://github.com/unbound-force/gaze)). The Divisor framework must produce equivalent (or improved) output for Go projects.
+The Gaze prototype agents and review command remain the historical
+reference. The Divisor framework MUST preserve or improve their Go
+review behavior while using dynamic convention packs, manifest
+eligibility, and validated review plans.
 
-```
+```text
 The Divisor Framework (embedded in unbound binary)
-┌────────────────────────────────────────────────┐
-│ Review Protocol (formal spec)                  │
-│ Convention Packs (Go, TS, Python, default)     │
-│ Scaffold Assets (embed.FS in unbound binary)   │
-│ Artifact Producer (review-verdict envelope)    │
-└───────────┬──────────────────────┬─────────────┘
-            │ unbound init         │ unbound init
-            │                      │ --divisor --lang ts
-            ▼                      ▼
-┌───────────────────┐  ┌────────────────────────┐
-│ Go Project        │  │ TS Project             │
-│ (Go convention)   │  │ (TS convention)        │
-│ divisor-guard.md  │  │ divisor-guard.md       │
-│ divisor-arch.md   │  │ divisor-arch.md        │
-│ divisor-adv.md    │  │ divisor-adv.md         │
-│ + SRE, testing    │  │ + SRE, testing         │
-│ review-council.md │  │ review-council.md      │
-└───────────────────┘  └────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│ Review protocol and closed reviewer manifest        │
+│ Convention packs and validated dispatch plans       │
+│ Canonical review-verdict and additive dispatch data │
+└──────────────────────────┬───────────────────────────┘
+                           │ unbound init
+                           ▼
+┌──────────────────────────────────────────────────────┐
+│ Project deployment                                  │
+│ Six review-capable and three content-only personas  │
+│ Review command, manifest, packs, and artifact rules │
+└──────────────────────────────────────────────────────┘
 ```

@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "reviewers": [
+    {
+      "agent": "divisor-testing",
+      "capability": "review",
+      "scopes": ["test-quality"]
+    }
+  ]
+}

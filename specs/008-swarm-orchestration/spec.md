@@ -34,7 +34,10 @@ A product team uses the Unbound Force swarm to take a feature from initial idea 
 1. **Given** Muti-Mind has a prioritized backlog item "Add health check endpoint" (BI-042), **When** the workflow begins, **Then** Muti-Mind initiates the speckit pipeline: `/specify` produces a spec, `/clarify` resolves ambiguities, `/plan` produces a plan, `/tasks` produces a task list.
 2. **Given** a completed spec with tasks.md, **When** Cobalt-Crush begins implementation, **Then** it consumes the tasks.md, implements code phase by phase, and produces code artifacts (source files, tests) while consuming Gaze feedback after each phase.
 3. **Given** Cobalt-Crush submits a PR, **When** Gaze runs, **Then** it produces a `quality-report` artifact with CRAP scores, contract coverage, and test results. The PR description references the originating backlog item (BI-042).
-4. **Given** Gaze's quality-report shows acceptable quality, **When** The Divisor runs, **Then** it produces a `review-verdict` artifact. If APPROVED, the PR is ready to merge. If REQUEST_CHANGES, Cobalt-Crush addresses findings and iterates.
+4. **Given** Gaze reports acceptable quality, **When** The Divisor
+   runs, **Then** it produces a `review-verdict` artifact. Only
+   `APPROVED` permits automated progression. A blocking decision
+   keeps the existing iteration or escalation path active.
 5. **Given** the PR is merged, **When** Muti-Mind reviews the increment, **Then** it produces an `acceptance-decision` artifact (accept/reject/conditional) based on the backlog item's acceptance criteria.
 6. **Given** the workflow completes, **When** Mx F collects data, **Then** it records the full lifecycle metrics: time in each stage, iteration counts, quality scores, and updates the sprint state.
 
@@ -111,6 +114,20 @@ The swarm handles failures gracefully: a hero being unavailable, producing unexp
 4. **Given** Mx F's metrics collection fails for one data source, **When** reporting occurs, **Then** Mx F reports metrics from available sources and notes which sources are missing.
 5. **Given** two heroes produce contradictory guidance (e.g., Muti-Mind says "ship quickly" and Gaze says "quality is insufficient"), **When** the conflict occurs, **Then** the orchestration does not auto-resolve — it surfaces the conflict to the human operator with both perspectives and supporting data.
 
+#### Scenario: Inconclusive review blocks progression
+
+- **Given** `review-verdict` 2.0.0 records `INCONCLUSIVE`
+- **When** orchestration evaluates review-stage progression
+- **Then** automated progression remains blocked
+- **And** a successful rerun or explicit human resolution is required
+
+#### Scenario: Unavailable review blocks progression
+
+- **Given** `review-verdict` 2.0.0 records `UNAVAILABLE`
+- **When** orchestration evaluates review-stage progression
+- **Then** automated progression remains blocked
+- **And** a successful rerun or explicit human resolution is required
+
 ---
 
 ### Edge Cases
@@ -140,6 +157,13 @@ The swarm handles failures gracefully: a hero being unavailable, producing unexp
 - **FR-012**: The workflow MUST be executable both through the Swarm plugin (automated routing via `/swarm "task"`) and manually (hero-by-hero invocation via individual `/commands`). OpenCode commands `/workflow start`, `/workflow status`, and `/workflow list` provide the hero lifecycle orchestration interface. `/swarm` and `/workflow` are complementary — Swarm decomposes and parallelizes, `/workflow` manages hero stage sequencing.
 - **FR-013**: The orchestration MUST produce a `workflow-record` artifact that captures the complete lifecycle of a feature: all stages, all artifacts produced, all decisions made, total elapsed time.
 - **FR-014**: The workflow-record MUST be consumable by Mx F for lifecycle metrics and by Muti-Mind for velocity tracking.
+- **FR-015**: Review-stage orchestration MUST consume version 2
+  `review-verdict` decisions. Only `APPROVED` MUST permit automated
+  progression. `CHANGES_REQUESTED`, `ESCALATED`, `INCONCLUSIVE`, and
+  `UNAVAILABLE` MUST block automated progression. `INCONCLUSIVE` and
+  `UNAVAILABLE` MUST remain blocked until a successful rerun or
+  explicit human resolution. This gate MUST preserve existing
+  iteration, escalation, and workflow-state semantics.
 
 ### Key Entities
 
@@ -161,6 +185,9 @@ The swarm handles failures gracefully: a hero being unavailable, producing unexp
 - **SC-006**: The workflow-record artifact captures the complete lifecycle and is parseable by Mx F for metrics.
 - **SC-007**: Concurrent workflows on different branches produce isolated artifacts with no cross-contamination.
 - **SC-008**: The orchestration handles the acceptance-rejection failure mode correctly: creates a new backlog item, preserves the original item state.
+- **SC-009**: Contract tests independently verify that `INCONCLUSIVE`
+  and `UNAVAILABLE` block automated review-stage progression until a
+  successful rerun or explicit human resolution.
 
 ## Clarifications
 

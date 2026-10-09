@@ -1,0 +1,20 @@
+{
+  "version": 3,
+  "profiles": {
+    "lightweight": {
+      "model": "opencode-go/qwen3.8-flash"
+    },
+    "standard": {
+      "model": "opencode-go/deepseek-v4-pro"
+    },
+    "heavy": {
+      "model": "opencode-go/grok-4.7"
+    }
+  },
+  "defaults": {
+    "code": "standard",
+    "spec": "standard",
+    "triage": "standard",
+    "feedback": "standard"
+  }
+}

@@ -241,6 +241,14 @@ The user MAY edit or remove the attribution during
 the approval step. If the user removes it, use their
 edited message without re-adding attribution.
 
+**VISIBILITY DIRECTIVE**: Before invoking the question
+tool below, the agent MUST print the full proposed
+commit message (summary, body, and attribution footer)
+as plain assistant output. This ensures the complete
+text appears in the transcript regardless of context
+compression. The printed text MUST be identical to the
+content presented to the question tool.
+
 Use the **question tool** with options
 `["Approve and commit", "Edit commit message",
 "Provide my own message"]`.
@@ -410,6 +418,34 @@ gh pr view --json number,url 2>/dev/null
   sections SHOULD contain a brief explanatory note
   rather than fabricated content.
 
+  d2. **Originating issue trailer**: After generating
+  the PR body sections, detect the change directory
+  from the branch name and read the
+  `originating_issue` field:
+
+  - `opsx/<name>` → read
+    `openspec/changes/<name>/.openspec.yaml`
+  - `NNN-*` → read the Speckit spec's
+    `proposal.md` frontmatter
+
+  Parse the YAML with a shell-friendly approach
+  (e.g., `grep` + `sed` or `yq` if available).
+
+  When `originating_issue` is present, insert
+  `Closes #<N>` immediately after the `## Summary`
+  section (before `## How to Test`). When absent,
+  emit no `Closes` line.
+
+  If on an `opsx/*` branch with no
+  `originating_issue` set, emit a soft warning:
+
+  > "Note: no `originating_issue` found in
+  > `.openspec.yaml`. Consider adding it manually
+  > to enable automatic `Closes #N` in the PR body."
+
+  This is a soft warning, not a hard gate. Proceed
+  regardless.
+
   Append the attribution footer as the last line of
   the PR body:
 
@@ -460,6 +496,13 @@ gh pr view --json number,url 2>/dev/null
   > ```
   > <body>
   > ```
+
+  **VISIBILITY DIRECTIVE**: Before invoking the question
+  tool below, the agent MUST print the full proposed PR
+  title and body as plain assistant output. This ensures
+  the complete text appears in the transcript regardless
+  of context compression. The printed text MUST be
+  identical to the content presented to the question tool.
 
   Use the **question tool** with options
   `["Approve — create PR", "Edit title or body",
@@ -945,6 +988,16 @@ ls .github/workflows/*.yml .github/workflows/*.yaml \
 
 **Checkpoint**: Update the execution checklist (mark
 Step 6 `[x]`) before proceeding.
+
+**POST-CI MOMENTUM CHECKPOINT**: After marking Step 6
+complete, the agent MUST proceed immediately to Step 7
+(Return to Main) WITHOUT producing any user-facing
+output about CI results. The agent MUST NOT pause,
+summarize, or report CI status at this point. All CI
+result reporting is deferred until Step 8 (Summary)
+is reached. This checkpoint prevents the natural
+"report CI results" moment from breaking the workflow
+chain.
 
 ### 7. Return to Main
 

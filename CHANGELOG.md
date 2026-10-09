@@ -5,6 +5,65 @@ Each entry follows the format: `- <change-name>: <summary>`.
 
 ## Unreleased
 
+### Changed
+- move-schemas-to-uf: Scaffold schema assets relocated from
+  `schemas/` to `uf/schemas/`. The `schemas/` prefix no longer
+  has a dedicated mapping in `mapAssetPath`; schemas/ paths now
+  use the default pass-through branch. (Spec:
+  openspec/changes/move-schemas-to-uf/, Fixes: #649)
+
+### Fixed
+- fix-stale-base-ref: New `resolve_base_ref` tool in uf-workflow
+  plugin with three-level fallback (`upstream/main` → `origin/main`
+  → `main`) replaces hardcoded `main` ref in review-council local
+  path. Prevents phantom files in diffs when local `main` is stale.
+  Also removes token-wasting Key Files Changed block from
+  uf.unleash demo output. (Spec:
+  openspec/changes/fix-stale-base-ref/, Closes: #687)
+
+### Added
+- uf-workflow-scaffold: New `uf-workflow` plugin scaffold with
+  `ToolSuccess<T>`, `ToolFailure`, `ToolResult<T>` result envelope
+  types and `success()`/`failure()` helper functions. Includes plugin
+  entry point, canonical scaffold copies, opencode.json registration,
+  activation gating, and vitest test harness. (Spec:
+  openspec/changes/uf-workflow-scaffold/, Closes: #682)
+- tier-gated-agent-count: Review dispatch now enforces tier-based
+  agent count caps. Lightweight diffs cap at 2 agents by default;
+  standard and heavy remain uncapped. Always-required agents
+  survive caps via floor enforcement. A HIGH severity advisory
+  warns when a custom heavy cap is applied to security-sensitive
+  diffs. The `--full` flag bypasses all caps. Caps are
+  configurable via `limits.tier_caps` in the review matrix.
+  (Spec: openspec/changes/tier-gated-agent-count/, Closes: #654)
+- optional-profile-models: Review matrix profile `model` fields
+  are now optional — profiles without a model fall back to host
+  model resolution at invocation time. Added
+  `.uf/review-matrix.override.yaml` for per-developer model and
+  variant customization with a whitelist constraint (only
+  `profiles.<tier>.[model, variant]` paths permitted). Bumped
+  review-matrix schema to version 3. (Spec:
+  openspec/changes/optional-profile-models/, Fixes: #636)
+- issue-pr-traceability: OpenSpec changes now support an
+  optional `originating_issue` field in `.openspec.yaml`.
+  `/uf.finale` reads the field and emits `Closes #<N>`
+  after `## Summary` in the PR body when present. Absence
+  of the field is backward compatible (no `Closes` line
+  emitted). (Spec: openspec/changes/issue-pr-traceability/,
+  Closes: #554)
+- uf-init-protect-block: `/uf.init` slash command and scaffold asset
+  now wrap core instructions in `<protect>` blocks to prevent
+  context-compaction-induced instruction loss. Updated insertion
+  logic to respect existing `<protect>` blocks in target files.
+  (Spec: openspec/changes/uf-init-protect-block/, Closes: #540)
+- run-pipeline-plan: New `/uf.run-pipeline-plan` slash command
+  that orchestrates a prioritized work plan through the full
+  Unbound Force pipeline (`/opsx-propose` → `/uf.unleash` →
+  `/uf.finale`) with fresh subagent isolation per phase,
+  human gate relay, and per-item progress tracking. Supports
+  plan file and GitHub issue-ref input modes. (Spec:
+  openspec/changes/run-plan-command/)
+
 ### Fixed
 - content-portability-guardrails: Add Content Portability
   rules (CP-001, CP-002, CP-003) to the default convention
@@ -129,6 +188,34 @@ Each entry follows the format: `- <change-name>: <summary>`.
   Fixes: #428)
 
 ### Added
+- review-council-multi-model-fanout: Replace single-host
+  Divisor delegation with explicit-first multi-model fan-out
+  via two OpenCode plugins registered in `opencode.json`
+  (`.opencode/plugins/invoke-agent` and `review-dispatch`)
+  driven by a closed reviewer manifest
+  (`.uf/reviewer-capabilities.yaml`) and an explicit-first
+  hybrid matrix (`.uf/review-matrix.yaml`). Adds bounded
+  sibling-repository evidence (`.uf/sibling-repos.yaml`),
+  source-grounded lesson-proposal provenance, staged
+  reproducible plugin activation in `uf init`, `uf doctor`
+  review-plugin checks, a new scope-based Go coverage gate
+  (`internal/coveragegate`, `cmd/coverage-gate`,
+  `coverage-gate.json`), and `make plugin-test` and
+  `make coverage-gate` targets (both wired into `make check`
+  and `ci_local.yml`). Emits a Hero Interface Contract
+  review-dispatch envelope and versions the canonical
+  review-verdict artifact to 2.0.0 with native
+  `INCONCLUSIVE` and `UNAVAILABLE` decisions.
+  (Spec: openspec/changes/review-council-multi-model-fanout/,
+  Fixes: #635)
+- uf-init-stealth-mode: `uf init` gains a `--stealth` flag for
+  local-only scaffolding that leaves the working tree git-clean
+  and tracked files (`.gitignore`, `AGENTS.md`) unmodified. Uses
+  `.git/info/exclude` for exclusion, snapshots and restores all
+  tracked files (bytes and mode/permission bits), and provides a
+  `--check` flag for verifying git-cleanliness without writing.
+  (Spec: openspec/changes/uf-init-stealth-mode/, Fixes: #638,
+  Website issue: unbound-force/website#292)
 - add-speckit-ref-assertion-test: Add red-first
   content-assertion test `TestSpeckitTemplates_RequiredReferences`
   (internal/scaffold) that verifies Step 6 of the embedded

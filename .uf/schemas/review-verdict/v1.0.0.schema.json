@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/unbound-force/unbound-force/internal/schemas/review-verdict-payload",
+  "properties": {
+    "persona_verdicts": {
+      "items": {
+        "properties": {
+          "persona": {
+            "type": "string",
+            "description": "Reviewer persona name (guard/architect/adversary/sre/testing)"
+          },
+          "verdict": {
+            "type": "string",
+            "description": "Persona verdict (APPROVED/CHANGES_REQUESTED)"
+          },
+          "findings": {
+            "items": {
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "description": "Finding severity (CRITICAL/HIGH/MEDIUM/LOW)"
+                },
+                "category": {
+                  "type": "string",
+                  "description": "Finding category"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Detailed finding description"
+                },
+                "file": {
+                  "type": "string",
+                  "description": "Affected file path"
+                },
+                "line": {
+                  "type": "integer",
+                  "description": "Affected line number"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "severity",
+                "category",
+                "description"
+              ]
+            },
+            "type": "array",
+            "description": "Specific findings from this persona"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Persona review summary"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "persona",
+          "verdict",
+          "findings",
+          "summary"
+        ]
+      },
+      "type": "array",
+      "description": "Individual persona review verdicts"
+    },
+    "council_decision": {
+      "type": "string",
+      "description": "Overall council decision (APPROVED/CHANGES_REQUESTED/ESCALATED)"
+    },
+    "iteration_count": {
+      "type": "integer",
+      "description": "Number of review iterations"
+    },
+    "unresolved_findings": {
+      "items": {
+        "properties": {
+          "severity": {
+            "type": "string",
+            "description": "Finding severity (CRITICAL/HIGH/MEDIUM/LOW)"
+          },
+          "category": {
+            "type": "string",
+            "description": "Finding category"
+          },
+          "description": {
+            "type": "string",
+            "description": "Detailed finding description"
+          },
+          "file": {
+            "type": "string",
+            "description": "Affected file path"
+          },
+          "line": {
+            "type": "integer",
+            "description": "Affected line number"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "severity",
+          "category",
+          "description"
+        ]
+      },
+      "type": "array",
+      "description": "Findings not yet addressed"
+    },
+    "pr_url": {
+      "type": "string",
+      "description": "Pull request URL"
+    },
+    "convention_pack_used": {
+      "type": "string",
+      "description": "Convention pack ID used for review"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "persona_verdicts",
+    "council_decision",
+    "iteration_count",
+    "pr_url",
+    "convention_pack_used"
+  ]
+}

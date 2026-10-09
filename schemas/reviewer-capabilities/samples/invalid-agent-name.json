@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "reviewers": [
+    {
+      "agent": "reviewer-testing",
+      "capability": "review",
+      "scopes": ["test-quality"]
+    }
+  ]
+}

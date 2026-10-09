@@ -33,6 +33,7 @@ func main() {
 	root.AddCommand(newSandboxCmd())
 	root.AddCommand(newGatewayCmd())
 	root.AddCommand(newConfigCmd())
+	root.AddCommand(newHomebrewCaskCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -43,6 +44,8 @@ type initParams struct {
 	targetDir   string
 	force       bool
 	divisorOnly bool
+	stealth     bool
+	check       bool
 	lang        string
 	version     string
 	stdout      io.Writer
@@ -61,6 +64,8 @@ func runInit(p initParams) error {
 		TargetDir:   p.targetDir,
 		Force:       p.force,
 		DivisorOnly: p.divisorOnly,
+		Stealth:     p.stealth,
+		Check:       p.check,
 		Lang:        lang,
 		Version:     p.version,
 		Stdout:      p.stdout,
@@ -96,16 +101,26 @@ commands, OpenSpec schema, convention packs) are updated if
 their content has changed.
 
 Use --divisor to deploy only The Divisor review agents,
-the /review-council command, and convention packs.
+the /uf.review-council command, and convention packs.
 
 Use --lang to specify the project language for convention
 pack selection (auto-detected from go.mod, package.json,
 etc. if not provided).
 
-Use --force to overwrite all files regardless of ownership.`,
+Use --force to overwrite all files regardless of ownership.
+
+Use --stealth to scaffold locally without modifying tracked files or
+leaving the working tree dirty: scaffolded files are hidden from git via
+.git/info/exclude instead of .gitignore. This exclusion is local-only and
+is not preserved on re-clone; re-run uf init --stealth to restore it.
+
+Use --check (with --stealth) to verify the git-cleanliness invariant
+without writing any files.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			force, _ := cmd.Flags().GetBool("force")
 			divisorOnly, _ := cmd.Flags().GetBool("divisor")
+			stealth, _ := cmd.Flags().GetBool("stealth")
+			check, _ := cmd.Flags().GetBool("check")
 			lang, _ := cmd.Flags().GetString("lang")
 			cwd, err := os.Getwd()
 			if err != nil {
@@ -115,6 +130,8 @@ Use --force to overwrite all files regardless of ownership.`,
 				targetDir:   cwd,
 				force:       force,
 				divisorOnly: divisorOnly,
+				stealth:     stealth,
+				check:       check,
 				lang:        lang,
 				version:     version,
 				stdout:      cmd.OutOrStdout(),
@@ -123,6 +140,8 @@ Use --force to overwrite all files regardless of ownership.`,
 	}
 	cmd.Flags().Bool("force", false, "Overwrite all existing files")
 	cmd.Flags().Bool("divisor", false, "Deploy only Divisor review agents and convention packs")
+	cmd.Flags().Bool("stealth", false, "Scaffold locally without modifying tracked files or dirtying git (local-only)")
+	cmd.Flags().Bool("check", false, "Verify git-cleanliness without writing (requires --stealth)")
 	cmd.Flags().String("lang", "", "Project language for convention pack (auto-detected if omitted)")
 	return cmd
 }

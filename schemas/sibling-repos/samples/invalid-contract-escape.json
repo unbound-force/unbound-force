@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "siblings": [
+    {
+      "name": "gaze",
+      "url": "https://github.com/unbound-force/gaze",
+      "default_branch": "main",
+      "role": "sibling",
+      "fetch": "contract-only",
+      "contracts": [
+        "../README.md"
+      ]
+    }
+  ]
+}

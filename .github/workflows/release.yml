@@ -49,7 +49,7 @@ jobs:
       tag: ${{ inputs.tag }}
       allow_prerelease: true
       # Check names from ci_local.yml, ci_checks.yml, ci_security.yml
-      ci_checks: '["Build and Test", "Standardized CI / Run linters", "OSV-Scanner / Trivy Source Scan"]'
+      ci_checks: '["Build and Test", "Standardized CI / Run linters", "OSV-Scanner / Trivy Source Scan", "Plugin Tests"]'
       skip_semver_check: ${{ inputs.skip_semver_check }}
       skip_ci_checks: ${{ inputs.skip_ci_checks }}
       skip_unreleased_check: ${{ inputs.skip_unreleased_check }}
@@ -248,17 +248,20 @@ jobs:
           patch_checksums() {
             local input="$1" output="${1}.patched"
             awk -v amd64="$AMD64_SHA" -v arm64="$ARM64_SHA" '
-              /darwin_amd64/ { found_amd64=1 }
-              /darwin_arm64/ { found_arm64=1 }
-              /sha256/ && found_amd64 {
-                sub(/sha256 "[^"]*"/, "sha256 \"" amd64 "\"")
-                found_amd64=0
+              { lines[NR]=$0 }
+              END {
+                for (i=1; i<=NR; i++) {
+                  if (lines[i] ~ /darwin_amd64/) {
+                    checksum_line=(lines[i+1] ~ /sha256/) ? i+1 : i-1
+                    sub(/sha256 "[^"]*"/, "sha256 \"" amd64 "\"", lines[checksum_line])
+                  }
+                  if (lines[i] ~ /darwin_arm64/) {
+                    checksum_line=(lines[i+1] ~ /sha256/) ? i+1 : i-1
+                    sub(/sha256 "[^"]*"/, "sha256 \"" arm64 "\"", lines[checksum_line])
+                  }
+                }
+                for (i=1; i<=NR; i++) print lines[i]
               }
-              /sha256/ && found_arm64 {
-                sub(/sha256 "[^"]*"/, "sha256 \"" arm64 "\"")
-                found_arm64=0
-              }
-              { print }
             ' "$input" > "$output"
             mv "$output" "$input"
           }
@@ -266,8 +269,120 @@ jobs:
           patch_checksums "$CASK_FILE"
           patch_checksums "$FORMULA_FILE"
 
-          # Push both cask and formula to the Homebrew tap
+          # Transform the generated legacy hook before the Cask enters the tap.
+          case "$(uname -m)" in
+            arm64) TRANSFORMER_ARCH=arm64 ;;
+            x86_64) TRANSFORMER_ARCH=amd64 ;;
+            *)
+              echo "::error::Unsupported runner architecture"
+              exit 1
+              ;;
+          esac
+          TRANSFORMER_DIR="$(mktemp -d)"
+          TRANSFORMER_ARCHIVE="./signed/unbound-force_${VERSION}_darwin_${TRANSFORMER_ARCH}.tar.gz"
+          STAGED_TAP=""
+          BREW_PREFIX=""
+          SMOKE_TEST_CASK_INSTALLED=false
+          DEWEY_CASK_WAS_INSTALLED=false
+          OLLAMA_APP_CASK_WAS_INSTALLED=false
+          remove_smoke_test_casks() {
+            local cleanup_status=0
+            brew uninstall --cask --force unbound-force || cleanup_status=$?
+            rm -f "$BREW_PREFIX/bin/uf" || cleanup_status=$?
+            if [ "$DEWEY_CASK_WAS_INSTALLED" = false ] && brew list --cask dewey >/dev/null 2>&1; then
+              brew uninstall --cask --force dewey || cleanup_status=$?
+            fi
+            if [ "$OLLAMA_APP_CASK_WAS_INSTALLED" = false ] && brew list --cask ollama-app >/dev/null 2>&1; then
+              brew uninstall --cask --force ollama-app || cleanup_status=$?
+            fi
+            return "$cleanup_status"
+          }
+          cleanup() {
+            local status=$? cleanup_status=0
+            if [ "$SMOKE_TEST_CASK_INSTALLED" = true ]; then
+              remove_smoke_test_casks || cleanup_status=$?
+            fi
+            brew untap unbound-force/staging 2>/dev/null || true
+            rm -rf "$STAGED_TAP" "$TRANSFORMER_DIR" || cleanup_status=$?
+            if [ "$status" -ne 0 ]; then
+              return "$status"
+            fi
+            return "$cleanup_status"
+          }
+          trap cleanup EXIT
+          TRANSFORMER_SHA=$(awk -v filename="$(basename "$TRANSFORMER_ARCHIVE")" '$2 == filename { print $1 }' checksums.txt)
+          TRANSFORMER_ACTUAL_SHA=$(shasum -a 256 "$TRANSFORMER_ARCHIVE" | awk '{print $1}')
+          if [ -z "$TRANSFORMER_SHA" ] || [ "$TRANSFORMER_SHA" != "$TRANSFORMER_ACTUAL_SHA" ]; then
+            echo "::error::Transformer archive checksum verification failed"
+            exit 1
+          fi
+          tar -xzf "$TRANSFORMER_ARCHIVE" -C "$TRANSFORMER_DIR"
+          "$TRANSFORMER_DIR/unbound-force" transform-homebrew-cask \
+            --input "$CASK_FILE" \
+            --output "$CASK_FILE"
+
+          # Reject unexpected transformed Cask content before tap publication.
+          postflight_steps_count=$(grep -Fxc '  postflight_steps do' "$CASK_FILE" || true)
+          if [ "$postflight_steps_count" -ne 1 ]; then
+            echo "::error::Expected exactly one postflight_steps stanza"
+            exit 1
+          fi
+          if grep -Fqx '  postflight do' "$CASK_FILE"; then
+            echo "::error::Deprecated postflight stanza remains in Cask"
+            exit 1
+          fi
+          if ! grep -Fqx '      run "/usr/bin/xattr",' "$CASK_FILE" || \
+             ! grep -Fqx '        args: ["-dr", "com.apple.quarantine", "{{staged_path}}/unbound-force"]' "$CASK_FILE" || \
+             ! grep -Fqx '      symlink "unbound-force", "{{HOMEBREW_PREFIX}}/bin/uf", overwrite: true' "$CASK_FILE"; then
+            echo "::error::Required Homebrew install operations are missing"
+            exit 1
+          fi
+          # Stage the Cask into a disposable tap copy for audit and smoke test.
           git clone "https://x-access-token:${HOMEBREW_TAP_GITHUB_TOKEN}@github.com/unbound-force/homebrew-tap.git" tap
+          STAGED_TAP="$(mktemp -d)"
+          cp -R tap/. "$STAGED_TAP"
+          cp "$CASK_FILE" "$STAGED_TAP/Casks/unbound-force.rb"
+
+          # brew tap clones the local repository, so commit the candidate Cask
+          # before registering it or Homebrew will read the previous revision.
+          git -C "$STAGED_TAP" add Casks/unbound-force.rb
+          git -C "$STAGED_TAP" \
+            -c user.name="github-actions[bot]" \
+            -c user.email="github-actions[bot]@users.noreply.github.com" \
+            commit -m "test: stage release candidate Cask"
+
+          # Homebrew requires cask operations to use a registered tap (not
+          # filesystem paths).  Register the staged copy once, run audit and
+          # smoke test through the tap, then untap.
+          brew tap unbound-force/staging "$STAGED_TAP"
+          REGISTERED_CASK="$(brew --repository unbound-force/staging)/Casks/unbound-force.rb"
+          cmp "$CASK_FILE" "$REGISTERED_CASK"
+          brew trust unbound-force/staging
+          brew audit --cask --strict unbound-force/staging/unbound-force
+
+          BREW_PREFIX="$(brew --prefix)"
+          if brew list --cask unbound-force >/dev/null 2>&1 || \
+             [ -e "$BREW_PREFIX/bin/unbound-force" ] || \
+             [ -e "$BREW_PREFIX/bin/uf" ]; then
+            echo "::error::Smoke test requires no existing unbound-force Cask or aliases"
+            exit 1
+          fi
+          if brew list --cask dewey >/dev/null 2>&1; then
+            DEWEY_CASK_WAS_INSTALLED=true
+          fi
+          if brew list --cask ollama-app >/dev/null 2>&1; then
+            OLLAMA_APP_CASK_WAS_INSTALLED=true
+          fi
+          SMOKE_TEST_CASK_INSTALLED=true
+          brew install --cask unbound-force/staging/unbound-force
+          test -x "$BREW_PREFIX/bin/unbound-force"
+          test -L "$BREW_PREFIX/bin/uf"
+          test -x "$BREW_PREFIX/bin/uf"
+          remove_smoke_test_casks
+          SMOKE_TEST_CASK_INSTALLED=false
+          brew untap unbound-force/staging
+
+          # Push both cask and formula to the Homebrew tap
           cp "$CASK_FILE" tap/Casks/unbound-force.rb
           mkdir -p tap/Formula
           cp "$FORMULA_FILE" tap/Formula/unbound-force.rb

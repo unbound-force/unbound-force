@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "siblings": [
+    {
+      "name": "gaze",
+      "url": "https://github.com/unbound-force/gaze.git",
+      "local_paths": [
+        ".uf/sibling-cache/gaze"
+      ],
+      "clone_path": ".uf/sibling-clones/gaze",
+      "cache_path": ".uf/sibling-cache/gaze",
+      "default_branch": "main",
+      "role": "sibling",
+      "fetch": "clone-on-review",
+      "contracts": [
+        "AGENTS.md",
+        "README.md",
+        "docs/porting/*.md"
+      ],
+      "notes": "Quality and analyzer contracts used by review workflows."
+    }
+  ]
+}

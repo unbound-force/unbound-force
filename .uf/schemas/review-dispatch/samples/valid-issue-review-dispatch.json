@@ -1,0 +1,81 @@
+{
+  "command": "triage-issue",
+  "mode": "triage",
+  "full": false,
+  "input_context": {
+    "kind": "issue",
+    "issue_number": 635,
+    "issue_url": "https://github.com/unbound-force/unbound-force/issues/635",
+    "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "change_profile": {
+    "kind": "issue",
+    "text_bytes": 19,
+    "comment_count": 0,
+    "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "matched_rules": ["test-quality:coverage"],
+    "security_sensitive": false,
+    "user_facing": false,
+    "categories": ["test-quality"],
+    "tier": "lightweight"
+  },
+  "plan_version": 1,
+  "plan": [
+    {
+      "agent": "divisor-testing",
+      "decision": "include",
+      "reason_code": "advisor-run",
+      "reason": "Advisor selected lightweight profile",
+      "source": "advisor",
+      "sequence": 1,
+      "read_only": true,
+      "tier": "lightweight",
+      "model": "opencode-go/qwen3.8-flash",
+      "variant": null,
+      "validation_errors": []
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "33333333-3333-4333-8333-333333333333",
+      "agent": "divisor-testing",
+      "source": "advisor",
+      "requested_model": "opencode-go/qwen3.8-flash",
+      "provider": "opencode-go",
+      "model_id": "qwen3.8-flash",
+      "variant": null,
+      "resolved_parent_model": null,
+      "resolved_parent_variant": null,
+      "sequence": 1,
+      "status": "success",
+      "started_at": "2026-10-01T12:02:00Z",
+      "finished_at": "2026-10-01T12:02:02Z",
+      "usage": { "cost_usd": null, "tokens": null },
+      "error": null,
+      "reported_model": "opencode-go/qwen3.8-flash",
+      "model_mismatch": false,
+      "workflow_verdict": "VALID",
+      "findings": []
+    }
+  ],
+  "coverage": {
+    "preflight_verdict": "SOFT_GATE",
+    "checks_total": 2,
+    "checks_passed": 1
+  },
+  "findings": [],
+  "advisories": [],
+  "verdict": "APPROVE",
+  "verdict_reason": "The successful triage assessment was valid.",
+  "run_counts": {
+    "total": 1,
+    "success": 1,
+    "failed": 0,
+    "skipped": 0,
+    "budget_skipped": 0,
+    "limit_skipped": 0,
+    "cancelled": 0
+  },
+  "workflow_result": { "kind": "triage", "value": "VALID" },
+  "correlation_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+}

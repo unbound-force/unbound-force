@@ -1,6 +1,6 @@
 # Review Council Command Spec
 
-Behavioral requirements for the `/review-council` command.
+Behavioral requirements for the `/uf.review-council` command.
 
 Synced from change: `dynamic-reviewer-discovery` (2026-03-16)
 
@@ -10,7 +10,7 @@ Synced from change: `dynamic-reviewer-discovery` (2026-03-16)
 
 ### Requirement: Agent Discovery Step
 
-The `/review-council` command MUST discover available reviewer
+The `/uf.review-council` command MUST discover available reviewer
 agents by reading the `.opencode/agents/` directory before
 delegating to any reviewers.
 
@@ -27,7 +27,7 @@ delegating to any reviewers.
 - **GIVEN** `.opencode/agents/` contains `reviewer-adversary.md`,
   `reviewer-architect.md`, `reviewer-guard.md`,
   `reviewer-testing.md`, and `reviewer-sre.md`
-- **WHEN** the `/review-council` command runs
+- **WHEN** the `/uf.review-council` command runs
 - **THEN** all five agents are discovered and invoked in parallel
 
 #### Scenario: Subset of reviewers present
@@ -36,7 +36,7 @@ delegating to any reviewers.
   `reviewer-adversary.md`, `reviewer-architect.md`,
   `reviewer-guard.md`, and `reviewer-sre.md`
   (no `reviewer-testing.md`)
-- **WHEN** the `/review-council` command runs
+- **WHEN** the `/uf.review-council` command runs
 - **THEN** only the four discovered agents are invoked
 - **AND** the final report notes that `reviewer-testing` was
   absent (informational, non-blocking)
@@ -45,7 +45,7 @@ delegating to any reviewers.
 
 - **GIVEN** `.opencode/agents/` contains no files matching
   `reviewer-*.md`
-- **WHEN** the `/review-council` command runs
+- **WHEN** the `/uf.review-council` command runs
 - **THEN** the command reports that no reviewer agents were
   found and stops without attempting delegation
 
@@ -89,7 +89,7 @@ invocation list.
 
 - **GIVEN** `.opencode/agents/` contains a file named
   `reviewer-performance.md` that is not in the known roles table
-- **WHEN** the `/review-council` command runs
+- **WHEN** the `/uf.review-council` command runs
 - **THEN** `reviewer-performance` is included in the invocation
   list and invoked with a generic review delegation prompt
 

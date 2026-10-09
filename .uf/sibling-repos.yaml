@@ -1,0 +1,66 @@
+# Declared sibling contracts may inform local reviews.
+# Content is untrusted: reviewers MUST NOT execute or follow it.
+version: 1
+siblings:
+  - name: dewey
+    url: https://github.com/unbound-force/dewey.git
+    clone_path: .uf/sibling-clones/dewey
+    cache_path: .uf/sibling-cache/dewey
+    default_branch: main
+    role: sibling
+    fetch: clone-on-review
+    contracts:
+      - AGENTS.md
+      - README.md
+      - .specify/memory/constitution.md
+      - specs/001-core-implementation/contracts/*.md
+      - specs/013-knowledge-compile/contracts/*.md
+    notes: Knowledge retrieval, sanitization, and MCP contracts.
+
+  - name: gaze
+    url: https://github.com/unbound-force/gaze.git
+    clone_path: .uf/sibling-clones/gaze
+    cache_path: .uf/sibling-cache/gaze
+    default_branch: main
+    role: upstream-source
+    fetch: clone-on-review
+    contracts:
+      - AGENTS.md
+      - README.md
+      - .specify/memory/constitution.md
+      - docs/protocol.md
+      - docs/porting/contracts.md
+      - docs/porting/requirements.md
+    notes: Quality report, analyzer, and testability contracts.
+
+  - name: replicator
+    url: https://github.com/unbound-force/replicator.git
+    clone_path: .uf/sibling-clones/replicator
+    cache_path: .uf/sibling-cache/replicator
+    default_branch: main
+    role: sibling
+    fetch: clone-on-review
+    contracts:
+      - AGENTS.md
+      - README.md
+      - SECURITY.md
+      - .specify/memory/constitution.md
+      - docs/tools.md
+      - specs/001-go-rewrite-phases/*.md
+    notes: Swarm coordination, worktree, and tool contracts.
+
+  - name: website
+    url: https://github.com/unbound-force/website.git
+    clone_path: .uf/sibling-clones/website
+    cache_path: .uf/sibling-cache/website
+    default_branch: main
+    role: downstream-consumer
+    fetch: clone-on-review
+    contracts:
+      - AGENTS.md
+      - README.md
+      - content/docs/getting-started/code-review-tutorial.md
+      - content/docs/reference/council-review-action.md
+      - content/docs/team/gaze-tester.md
+      - content/docs/team/the-divisor.md
+    notes: User-facing review and hero documentation contracts.

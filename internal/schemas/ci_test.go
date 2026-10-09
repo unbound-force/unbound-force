@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/unbound-force/unbound-force/internal/schemas"
+	"gopkg.in/yaml.v3"
 )
 
 // repoSchemasDir returns the path to the repo's schemas/ directory
@@ -168,33 +169,70 @@ func TestSchemaRegistry_NoDrift(t *testing.T) {
 	}
 }
 
-// handAuthoredSchemas lists schema types that are hand-authored
-// (not generated from Go structs). These need dedicated validation
-// tests since they are not covered by the registry-based tests.
-var handAuthoredSchemas = []string{
-	"feedback-triage",
-	"issue-triage",
+// handAuthoredSchema identifies a schema that is maintained independently of
+// the Go schema generator.
+type handAuthoredSchema struct {
+	typeName   string
+	schemaFile string
+	samplesDir string
 }
 
-// TestHandAuthoredSchemas_SampleValidates validates the positive
-// sample for each hand-authored schema against its schema file.
-func TestHandAuthoredSchemas_SampleValidates(t *testing.T) {
+// handAuthoredSchemas lists schemas that need dedicated fixture validation
+// because they are not generated from Go structs.
+var handAuthoredSchemas = []handAuthoredSchema{
+	{typeName: "feedback-triage", schemaFile: "v1.0.0.schema.json"},
+	{typeName: "issue-triage", schemaFile: "v1.0.0.schema.json"},
+	{typeName: "lesson-proposal", schemaFile: "v1.0.0.schema.json"},
+	{typeName: "review-matrix", schemaFile: "v3.schema.json"},
+	{typeName: "reviewer-capabilities", schemaFile: "v1.0.0.schema.json"},
+	{typeName: "review-dispatch", schemaFile: "v1.0.0.schema.json"},
+	{typeName: "sibling-repos", schemaFile: "v1.0.0.schema.json"},
+	{
+		typeName:   "review-verdict-v2",
+		schemaFile: filepath.Join("review-verdict", "v2.0.0.schema.json"),
+		samplesDir: filepath.Join("review-verdict", "samples", "v2"),
+	},
+}
+
+func handAuthoredPaths(schemasDir string, handAuthored handAuthoredSchema) (string, string) {
+	typeDir := filepath.Join(schemasDir, handAuthored.typeName)
+	schemaPath := filepath.Join(typeDir, handAuthored.schemaFile)
+	samplesDir := filepath.Join(typeDir, "samples")
+	if handAuthored.samplesDir != "" {
+		schemaPath = filepath.Join(schemasDir, handAuthored.schemaFile)
+		samplesDir = filepath.Join(schemasDir, handAuthored.samplesDir)
+	}
+	return schemaPath, samplesDir
+}
+
+// TestHandAuthoredSchemas_PositiveFixturesValidate validates every positive
+// fixture for each hand-authored schema against its schema file.
+func TestHandAuthoredSchemas_PositiveFixturesValidate(t *testing.T) {
 	schemasDir := repoSchemasDir()
 
-	for _, typeName := range handAuthoredSchemas {
-		t.Run(typeName, func(t *testing.T) {
-			schemaPath := filepath.Join(schemasDir, typeName, "v1.0.0.schema.json")
-			samplePath := filepath.Join(schemasDir, typeName, "samples", "sample-"+typeName+".json")
+	for _, handAuthored := range handAuthoredSchemas {
+		t.Run(handAuthored.typeName, func(t *testing.T) {
+			schemaPath, samplesDir := handAuthoredPaths(schemasDir, handAuthored)
 
-			if _, err := os.Stat(schemaPath); err != nil {
-				t.Fatalf("schema file missing: %v", err)
-			}
-			if _, err := os.Stat(samplePath); err != nil {
-				t.Fatalf("sample file missing: %v", err)
+			entries, err := os.ReadDir(samplesDir)
+			if err != nil {
+				t.Fatalf("read samples directory: %v", err)
 			}
 
-			if err := schemas.ValidateArtifact(schemaPath, samplePath); err != nil {
-				t.Errorf("positive sample validation failed: %v", err)
+			var positiveCount int
+			for _, entry := range entries {
+				if entry.IsDir() || strings.HasPrefix(entry.Name(), "invalid-") || filepath.Ext(entry.Name()) != ".json" {
+					continue
+				}
+				positiveCount++
+				fixturePath := filepath.Join(samplesDir, entry.Name())
+				if err := schemas.ValidateArtifact(schemaPath, fixturePath); err != nil {
+					t.Errorf("positive fixture %s failed validation: %v", entry.Name(), err)
+				}
+			}
+
+			if positiveCount == 0 {
+				t.Error("no positive JSON fixtures found")
 			}
 		})
 	}
@@ -205,17 +243,16 @@ func TestHandAuthoredSchemas_SampleValidates(t *testing.T) {
 func TestHandAuthoredSchemas_NegativeFixturesRejected(t *testing.T) {
 	schemasDir := repoSchemasDir()
 
-	for _, typeName := range handAuthoredSchemas {
-		samplesDir := filepath.Join(schemasDir, typeName, "samples")
-		schemaPath := filepath.Join(schemasDir, typeName, "v1.0.0.schema.json")
+	for _, handAuthored := range handAuthoredSchemas {
+		schemaPath, samplesDir := handAuthoredPaths(schemasDir, handAuthored)
 
 		if _, err := os.Stat(schemaPath); err != nil {
-			t.Fatalf("schema file missing for %s: %v", typeName, err)
+			t.Fatalf("schema file missing for %s: %v", handAuthored.typeName, err)
 		}
 
 		entries, err := os.ReadDir(samplesDir)
 		if err != nil {
-			t.Fatalf("read samples dir for %s: %v", typeName, err)
+			t.Fatalf("read samples dir for %s: %v", handAuthored.typeName, err)
 		}
 
 		var invalidCount int
@@ -225,7 +262,7 @@ func TestHandAuthoredSchemas_NegativeFixturesRejected(t *testing.T) {
 			}
 			invalidCount++
 
-			t.Run(typeName+"/"+entry.Name(), func(t *testing.T) {
+			t.Run(handAuthored.typeName+"/"+entry.Name(), func(t *testing.T) {
 				fixturePath := filepath.Join(samplesDir, entry.Name())
 				err := schemas.ValidateArtifact(schemaPath, fixturePath)
 				if err == nil {
@@ -235,9 +272,9 @@ func TestHandAuthoredSchemas_NegativeFixturesRejected(t *testing.T) {
 		}
 
 		if invalidCount == 0 {
-			t.Errorf("no invalid-* fixtures found for %s", typeName)
+			t.Errorf("no invalid-* fixtures found for %s", handAuthored.typeName)
 		}
-		t.Logf("validated %d negative fixtures for %s", invalidCount, typeName)
+		t.Logf("validated %d negative fixtures for %s", invalidCount, handAuthored.typeName)
 	}
 }
 
@@ -246,9 +283,12 @@ func TestHandAuthoredSchemas_NegativeFixturesRejected(t *testing.T) {
 func TestHandAuthoredSchemas_DirectoryStructure(t *testing.T) {
 	schemasDir := repoSchemasDir()
 
-	for _, typeName := range handAuthoredSchemas {
-		t.Run(typeName, func(t *testing.T) {
-			typeDir := filepath.Join(schemasDir, typeName)
+	for _, handAuthored := range handAuthoredSchemas {
+		t.Run(handAuthored.typeName, func(t *testing.T) {
+			typeDir := filepath.Join(schemasDir, handAuthored.typeName)
+			if handAuthored.samplesDir != "" {
+				typeDir = filepath.Join(schemasDir, "review-verdict")
+			}
 
 			info, err := os.Stat(typeDir)
 			if err != nil {
@@ -258,12 +298,11 @@ func TestHandAuthoredSchemas_DirectoryStructure(t *testing.T) {
 				t.Fatal("expected directory, got file")
 			}
 
-			schemaPath := filepath.Join(typeDir, "v1.0.0.schema.json")
+			schemaPath, samplesDir := handAuthoredPaths(schemasDir, handAuthored)
 			if _, err := os.Stat(schemaPath); err != nil {
 				t.Errorf("schema file missing: %v", err)
 			}
 
-			samplesDir := filepath.Join(typeDir, "samples")
 			if _, err := os.Stat(samplesDir); err != nil {
 				t.Errorf("samples directory missing: %v", err)
 			}
@@ -273,6 +312,120 @@ func TestHandAuthoredSchemas_DirectoryStructure(t *testing.T) {
 				t.Errorf("README.md missing: %v", err)
 			}
 		})
+	}
+}
+
+// TestReviewMatrixSchema_CanonicalPolicyValidates verifies the checked-in YAML
+// policy with the same schema used for JSON fixtures.
+func TestReviewMatrixSchema_CanonicalPolicyValidates(t *testing.T) {
+	schemasDir := repoSchemasDir()
+	schemaPath := filepath.Join(schemasDir, "review-matrix", "v3.schema.json")
+	matrixPath := filepath.Join(schemasDir, "..", ".uf", "review-matrix.yaml")
+
+	schemaData, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatalf("read review matrix schema: %v", err)
+	}
+	matrixData, err := os.ReadFile(matrixPath)
+	if err != nil {
+		t.Fatalf("read canonical review matrix: %v", err)
+	}
+
+	var matrix map[string]interface{}
+	if err := yaml.Unmarshal(matrixData, &matrix); err != nil {
+		t.Fatalf("parse canonical review matrix YAML: %v", err)
+	}
+	matrixJSON, err := json.Marshal(matrix)
+	if err != nil {
+		t.Fatalf("convert canonical review matrix to JSON: %v", err)
+	}
+	if err := schemas.ValidateBytes(schemaData, matrixJSON); err != nil {
+		t.Fatalf("canonical review matrix validation failed: %v", err)
+	}
+
+	profiles, ok := matrix["profiles"].(map[string]interface{})
+	if !ok {
+		t.Fatal("canonical profiles are not an object")
+	}
+	wantProfiles := []string{"lightweight", "standard", "heavy"}
+	for _, profileName := range wantProfiles {
+		profile, ok := profiles[profileName].(map[string]interface{})
+		if !ok {
+			t.Errorf("profile %q is not an object", profileName)
+			continue
+		}
+		gotModel := profile["model"]
+		switch gotModel.(type) {
+		case string:
+		case map[string]interface{}:
+		case nil:
+		default:
+			t.Errorf("profile %q model = %T (%v), want string, map, or nil", profileName, gotModel, gotModel)
+		}
+	}
+}
+
+// TestReviewMatrixSchema_ExplicitRunsAndHostAbsence verifies that positive
+// fixtures retain the contract scenarios they are intended to exercise.
+func TestReviewMatrixSchema_ExplicitRunsAndHostAbsence(t *testing.T) {
+	samplesDir := filepath.Join(repoSchemasDir(), "review-matrix", "samples")
+	explicitPath := filepath.Join(samplesDir, "sample-review-matrix.json")
+	explicitData, err := os.ReadFile(explicitPath)
+	if err != nil {
+		t.Fatalf("read explicit-runs fixture: %v", err)
+	}
+
+	var explicit struct {
+		Profiles map[string]struct {
+			Variant string `json:"variant"`
+		} `json:"profiles"`
+		Runs map[string]map[string][]struct {
+			Profile string `json:"profile"`
+			Model   string `json:"model"`
+			Variant string `json:"variant"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(explicitData, &explicit); err != nil {
+		t.Fatalf("parse explicit-runs fixture: %v", err)
+	}
+
+	runs := explicit.Runs["code"]["divisor-adversary"]
+	if len(runs) != 2 {
+		t.Fatalf("ordered explicit runs count = %d, want 2", len(runs))
+	}
+	if runs[0].Profile != "standard" || runs[0].Variant != "low" {
+		t.Errorf("first run = profile %q variant %q, want standard/low", runs[0].Profile, runs[0].Variant)
+	}
+	if runs[1].Model != "opencode-go/grok-4.7" || runs[1].Variant != "high" {
+		t.Errorf("second run = model %q variant %q, want opencode-go/grok-4.7/high", runs[1].Model, runs[1].Variant)
+	}
+	if got := explicit.Profiles["standard"].Variant; got != "high" || got == runs[0].Variant {
+		t.Errorf("profile variant = %q and run variant = %q, want high overridden by low", got, runs[0].Variant)
+	}
+
+	hostPath := filepath.Join(samplesDir, "valid-host-fallback-absence.json")
+	hostData, err := os.ReadFile(hostPath)
+	if err != nil {
+		t.Fatalf("read host-fallback fixture: %v", err)
+	}
+	var host struct {
+		Advisor map[string][]string         `json:"advisor"`
+		Runs    map[string]map[string][]any `json:"runs"`
+	}
+	if err := json.Unmarshal(hostData, &host); err != nil {
+		t.Fatalf("parse host-fallback fixture: %v", err)
+	}
+	for mode, agents := range host.Advisor {
+		for _, agent := range agents {
+			if agent == "divisor-testing" {
+				t.Errorf("host-fallback fixture unexpectedly configures divisor-testing in advisor mode %q", mode)
+			}
+		}
+	}
+	for mode, agentRuns := range host.Runs {
+		if _, configured := agentRuns["divisor-testing"]; configured {
+			t.Errorf("host-fallback fixture unexpectedly configures divisor-testing runs in mode %q", mode)
+		}
 	}
 }
 

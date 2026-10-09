@@ -1,0 +1,35 @@
+{
+  "persona_verdicts": [
+    {
+      "persona": "guard",
+      "verdict": "APPROVED",
+      "findings": [],
+      "summary": "No intent drift detected. Implementation aligns with spec."
+    },
+    {
+      "persona": "architect",
+      "verdict": "APPROVED",
+      "findings": [
+        {
+          "severity": "LOW",
+          "category": "documentation",
+          "description": "Consider adding GoDoc to helper function",
+          "file": "internal/schemas/generate.go",
+          "line": 42
+        }
+      ],
+      "summary": "Clean architecture. Minor documentation suggestion."
+    },
+    {
+      "persona": "adversary",
+      "verdict": "APPROVED",
+      "findings": [],
+      "summary": "No security or resilience concerns found."
+    }
+  ],
+  "council_decision": "APPROVED",
+  "iteration_count": 1,
+  "unresolved_findings": [],
+  "pr_url": "https://github.com/unbound-force/unbound-force/pull/42",
+  "convention_pack_used": "go"
+}

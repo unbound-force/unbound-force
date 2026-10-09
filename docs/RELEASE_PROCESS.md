@@ -84,8 +84,24 @@ If Apple Developer ID signing secrets are configured:
 4. Checksums are recomputed for signed archives
 5. Homebrew cask and formula are patched with signed
    checksums
-6. Both are pushed to the
+6. The release transformer archive checksum is verified
+7. The generated cask's legacy `postflight` hook is replaced
+   with declarative `postflight_steps`
+8. Semantic checks reject missing, duplicate, or deprecated
+   hooks and verify the quarantine removal and `uf` alias
+9. `brew audit --cask --strict` validates the cask via the
+   staging tap (name-based audit required by modern Homebrew)
+10. A staged tap installation verifies the executable and
+    `uf` alias, then uninstalls the cask
+11. The validated cask and formula are pushed to the
    [homebrew-tap](https://github.com/unbound-force/homebrew-tap)
+
+Any transformation, validation, audit, installation, or cleanup
+failure stops the job before tap publication. For a transient
+failure, inspect the failed step and re-run the workflow with the
+same tag. If GoReleaser changes the generated cask template, update
+and verify the transformer, then publish the correction under a new
+release tag; do not move an existing release tag.
 
 ### Fedora Packaging
 

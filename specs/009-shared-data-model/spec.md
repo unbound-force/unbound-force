@@ -50,7 +50,10 @@ The shared data model defines JSON Schemas for each registered artifact type. Ea
 **Acceptance Scenarios**:
 
 1. **Given** the `quality-report` schema, **When** Gaze produces a quality report payload, **Then** it validates against the schema and contains at minimum: `summary` (overall scores), `functions[]` (per-function metrics), `coverage` (aggregate coverage data), and `recommendations[]`.
-2. **Given** the `review-verdict` schema, **When** The Divisor produces a review verdict payload, **Then** it validates and contains: `persona_verdicts[]` (each with persona, verdict, findings[]), `council_decision`, `iteration_count`, and `pr_url`.
+2. **Given** the `review-verdict` 2.0.0 schema, **When** The Divisor
+   produces a current review verdict, **Then** it validates and uses
+   `APPROVED`, `CHANGES_REQUESTED`, `ESCALATED`, `INCONCLUSIVE`, or
+   `UNAVAILABLE` for `council_decision`.
 3. **Given** the `backlog-item` schema, **When** Muti-Mind produces a backlog item payload, **Then** it validates and contains: `id`, `title`, `type`, `priority`, `status`, `acceptance_criteria[]`, `sprint`, and `effort_estimate`.
 4. **Given** the `acceptance-decision` schema, **When** Muti-Mind produces an acceptance decision payload, **Then** it validates and contains: `item_id`, `decision`, `rationale`, `criteria_met[]`, `criteria_failed[]`, and `report_ref`.
 5. **Given** the `metrics-snapshot` schema, **When** Mx F produces a metrics snapshot payload, **Then** it validates and contains: `velocity`, `cycle_time`, `lead_time`, `defect_rate`, `review_iterations`, `ci_pass_rate`, `backlog_health`, and `health_indicators[]`.
@@ -65,7 +68,9 @@ The shared data model defines a versioning strategy for schemas. Schemas use sem
 
 **Why this priority**: P2 because version incompatibilities will inevitably arise as heroes evolve independently. Without a versioning strategy, schema changes break the swarm.
 
-**Independent Test**: Can be tested by creating a v1 artifact, bumping the schema to v2 with a new optional field, validating a v1 consumer can still parse the v2 artifact, and then bumping to v3 with a removed required field and verifying the v1 consumer rejects it.
+**Independent Test**: Validate historical v1 and current v2 verdicts.
+Verify that a migrated reader accepts both versions and later v2
+minor or patch releases. Verify that a v1-only reader rejects v2.
 
 **Acceptance Scenarios**:
 
@@ -73,6 +78,25 @@ The shared data model defines a versioning strategy for schemas. Schemas use sem
 2. **Given** a `quality-report` v1.0.0 artifact, **When** a consumer expects v2.0.0 (which renamed `functions[]` to `analysis_results[]`), **Then** the consumer detects the version mismatch and either applies a migration or reports "incompatible schema version."
 3. **Given** the versioning strategy, **When** a hero wants to add a required field to an artifact type, **Then** the strategy requires a MAJOR version bump and a migration guide for consumers.
 4. **Given** the versioning strategy, **When** a hero wants to add an optional field, **Then** a MINOR version bump suffices and no consumer changes are needed.
+
+#### Scenario: Historical review verdict remains readable
+
+- **Given** a migrated consumer receives `review-verdict` 1.0.0
+- **When** it checks the registered historical schema
+- **Then** it reads the artifact as historical data
+- **And** new producers continue to emit version 2
+
+#### Scenario: Same-major review verdict remains compatible
+
+- **Given** a migrated version 2 consumer receives version 2.1.0
+- **When** it checks schema compatibility
+- **Then** the artifact is accepted under the same-major rule
+
+#### Scenario: Version 1-only consumer receives version 2
+
+- **Given** an unmigrated version 1-only consumer receives version 2
+- **When** it checks schema compatibility
+- **Then** it rejects the artifact with a major-version warning
 
 ---
 
@@ -137,13 +161,25 @@ The shared data model defines the schema for convention packs — the pluggable 
 - **FR-013**: Artifact type names MUST be unique across the registry. Duplicate registrations MUST be rejected.
 - **FR-014**: The envelope MUST include an optional `correlation_id` field (UUID) for linking related artifacts across workflow stages.
 - **FR-015**: *(Deferred to future spec)* An event model for hero-to-hero notifications is not required for v1.1.0. Synchronous inter-hero communication is handled by the Swarm coordinator. Asynchronous handoff is handled by artifact polling via `FindArtifacts`. No gap exists in the current architecture.
+- **FR-016**: The registry MUST retain `review-verdict` 1.0.0 for
+  historical reads and MUST register `review-verdict` 2.0.0 for new
+  writes. Version 2 `council_decision` MUST be the closed enum
+  `APPROVED`, `CHANGES_REQUESTED`, `ESCALATED`, `INCONCLUSIVE`, and
+  `UNAVAILABLE`. Migrated consumers MUST read historical v1 and
+  current v2 artifacts. Consumers MUST accept minor and patch changes
+  within a supported major version. An unmigrated v1-only consumer
+  MUST reject v2 with a major-version compatibility warning.
 
 ### Key Entities
 
 - **Artifact Envelope**: Standard JSON wrapper. Fields: `hero` (string), `version` (semver), `timestamp` (ISO 8601), `artifact_type` (string), `schema_version` (semver), `context` ({branch, backlog_item_id, correlation_id}), `payload` (object).
 - **Schema Registry Entry**: One artifact type's schema collection. Attributes: artifact_type, current_version, versions[] (each with schema file, changelog, migration_guide if major), samples[], producing_heroes[], consuming_heroes[].
 - **Quality Report Payload**: Gaze's quality output. Fields: summary (crap_load, avg_crap, avg_coverage, total_functions), functions[] (name, crap_score, complexity, coverage, contract_coverage, classification), coverage (aggregate stats), recommendations[] (priority, description, target).
-- **Review Verdict Payload**: The Divisor's review output. Fields: persona_verdicts[] (persona, verdict, findings[], summary), council_decision (APPROVED/CHANGES_REQUESTED/ESCALATED), iteration_count, unresolved_findings[], pr_url, convention_pack_used.
+- **Review Verdict Payload**: The Divisor's review output. Fields:
+  persona_verdicts[] (persona, verdict, findings[], summary),
+  council_decision (`APPROVED`, `CHANGES_REQUESTED`, `ESCALATED`,
+  `INCONCLUSIVE`, or `UNAVAILABLE`), iteration_count,
+  unresolved_findings[], pr_url, and convention_pack_used.
 - **Backlog Item Payload**: Muti-Mind's backlog output. Fields: id, title, description, type, priority, status, acceptance_criteria[] (given, when, then), sprint, effort_estimate, dependencies[], related_specs[].
 - **Acceptance Decision Payload**: Muti-Mind's acceptance output. Fields: item_id, decision (accept/reject/conditional), rationale, criteria_met[], criteria_failed[], report_ref.
 - **Metrics Snapshot Payload**: Mx F's metrics output. Fields: velocity, cycle_time (avg, median, p90, p99), lead_time, defect_rate, review_iterations, ci_pass_rate, backlog_health (total, ready, stale), health_indicators[] (dimension, status, value, trend).
@@ -163,6 +199,9 @@ The shared data model defines the schema for convention packs — the pluggable 
 - **SC-006**: CI validation runs against all schemas and samples with 100% pass rate.
 - **SC-007**: The convention pack schema validates the Go convention pack and is parseable by both a hypothetical Cobalt-Crush consumer and a hypothetical Divisor consumer.
 - **SC-008**: A developer can generate Go and TypeScript type definitions from any schema using standard JSON Schema code generation tools.
+- **SC-009**: Review-verdict contract tests validate both no-success
+  decisions, historical v1 reads, same-major v2 compatibility, and
+  v2 rejection by an unmigrated v1-only consumer.
 
 ## Clarifications
 
@@ -202,8 +241,12 @@ schemas/
 │   └── README.md
 ├── review-verdict/
 │   ├── v1.0.0.schema.json      (Divisor payload)
+│   ├── v2.0.0.schema.json      (current Divisor payload)
 │   ├── samples/
-│   │   └── sample-review-verdict.json
+│   │   ├── sample-review-verdict.json
+│   │   └── v2/
+│   │       ├── sample-review-verdict.json
+│   │       └── valid-inconclusive-review-verdict.json
 │   └── README.md
 ├── backlog-item/
 │   ├── v1.0.0.schema.json      (Muti-Mind payload)

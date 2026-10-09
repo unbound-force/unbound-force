@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "sibling": "gaze",
+  "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "sources": [
+    {
+      "path": "README.md",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "excerpt": "Contract coverage measures observable behavior."
+    }
+  ],
+  "information": "Contract coverage should assert observable behavior.",
+  "tier": "validated"
+}
