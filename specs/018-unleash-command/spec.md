@@ -76,7 +76,11 @@ least one learning, and presents demo instructions.
    **When** demo instructions are presented,
    **Then** the instructions include: what was built,
    how to verify, key files changed, test results,
-   and the options `/finale` or `/speckit.clarify`.
+   and the options `/finale` and a
+   WORKFLOW_TIER-specific refinement option
+   (`/speckit.clarify` for speckit; artifact update
+   path for openspec, using the artifact directory
+   defined in spec 031).
 
 ---
 
@@ -150,8 +154,10 @@ after spec review with the findings.
    CRITICAL issues after plan and tasks generation,
    **When** `/unleash` reports the findings,
    **Then** it presents the issues with context and
-   suggests "/speckit.clarify to address the findings,
-   then re-run /unleash."
+   suggests a WORKFLOW_TIER-specific recovery action
+   (`/speckit.clarify` for speckit; artifact update
+   path for openspec) to address the findings, then
+   re-run `/unleash`.
 
 2. **Given** the spec review council finds only LOW
    and MEDIUM issues,
@@ -424,7 +430,9 @@ and plan (both exist) and resumes at tasks.
 - **FR-016**: The demo step MUST present: what was
   built, how to verify, key files changed, test
   results summary, and next-step options (`/finale`
-  or `/speckit.clarify`).
+  and a WORKFLOW_TIER-specific refinement option using
+  the artifact directory defined in spec 031 for
+  openspec).
 - **FR-017**: `/unleash` MUST gracefully degrade when
   optional tools are unavailable: Dewey (fall back to
   human questions), Gaze (skip quality analysis),

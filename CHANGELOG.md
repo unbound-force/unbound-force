@@ -330,6 +330,9 @@ Each entry follows the format: `- <change-name>: <summary>`.
   Demo now includes a JIT re-read guard ensuring
   prescribed Next Steps output is reproduced verbatim
   from the template, not improvised after compression.
+  Step 6 spec review exits now provide tier-aware
+  recovery guidance, directing OpenSpec users to update
+  change artifacts instead of running Speckit commands.
   Reconciles divergent Next Steps blocks into one
   canonical format. Adds anti-improvisation guardrail
   and Step 8 equivalence note (review council already
