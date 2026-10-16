@@ -151,6 +151,24 @@ Each entry follows the format: `- <change-name>: <summary>`.
   openspec/changes/move-schemas-to-uf/, Fixes: #649)
 
 ### Fixed
+- fix-tool-args-schema-mismatch: uf-workflow (8) and uf-finale
+  (3) tool factories now declare parameters via the
+  SDK-recognized zod `args` contract instead of plain
+  `parameters:` objects that @opencode-ai/plugin silently
+  ignored, restoring model-visible schemas and runtime
+  argument passing for 11 tools (checkpoint,
+  get_progress, clear_progress, normalize_model_name,
+  git_fetch, git_push, git_merge, git_rebase,
+  uf_finale_commit_context, uf_finale_create_pr,
+  uf_finale_ci_poll). Names, types, optionality, and
+  descriptions preserved exactly; execute bodies, result
+  envelopes, and runtime validation guards untouched
+  (defense-in-depth). Adds 12 schema-exposure regression
+  tests (sorted-args key equality, including
+  persist_unleash_summary as a future-regression guard)
+  and byte-identical scaffold mirrors. (Spec:
+  openspec/changes/fix-tool-args-schema-mismatch/,
+  Refs: #732, Docs: #740, unbound-force/website#310)
 - fix-tui-git-output-leak: Removed all 50 console.log/console.error
   calls per tree (100 total across `.opencode/plugins/` and the
   embedded `internal/scaffold/assets/opencode/` mirrors) from

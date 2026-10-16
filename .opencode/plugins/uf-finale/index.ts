@@ -9,6 +9,7 @@ import {
 import { resolve, join } from "node:path"
 import { tmpdir } from "node:os"
 import { tool, type PluginModule } from "@opencode-ai/plugin"
+import { z } from "zod"
 import {
   defaultGitExec,
   failure,
@@ -186,13 +187,11 @@ export function createUfFinaleCommitContextTool(exec: GitExec, cwd: string) {
     description:
       "Gather commit context: cached diff stat, recent log, and " +
       "normalized model name for commit message authorship.",
-    parameters: {
-      rawModelId: {
-        type: "string" as const,
-        description:
-          "Raw model identifier to normalize " +
+    args: {
+      rawModelId: z.string().describe(
+        "Raw model identifier to normalize " +
           "(e.g. google-vertex-anthropic/claude-sonnet-4-20250514@default)",
-      },
+      ),
     },
     execute: async (args: { rawModelId: string }) => {
       // Inner operations have their own error handling;
@@ -460,20 +459,12 @@ export function createUfFinaleCreatePrTool(exec: GitExec, cwd: string) {
     description:
       "Create a GitHub pull request. Uses a secure temp file for the PR " +
       "body to avoid shell injection. Optionally targets a fork parent repo.",
-    parameters: {
-      title: {
-        type: "string" as const,
-        description: "PR title",
-      },
-      body: {
-        type: "string" as const,
-        description: "PR body content (Markdown)",
-      },
-      targetRepo: {
-        type: "string" as const,
-        description:
-          "Optional target repository (owner/repo) for fork PRs",
-      },
+    args: {
+      title: z.string().describe("PR title"),
+      body: z.string().describe("PR body content (Markdown)"),
+      targetRepo: z.string().optional().describe(
+        "Optional target repository (owner/repo) for fork PRs",
+      ),
     },
     execute: async (args: {
       title: string
@@ -591,15 +582,11 @@ export function createUfFinaleCiPollTool(exec: GitExec, cwd: string) {
     description:
       "Poll CI checks for a PR until all complete or timeout. Reports " +
       "pass/fail/conflict status with failed check details.",
-    parameters: {
-      prNumber: {
-        type: "number" as const,
-        description: "PR number to poll CI checks for",
-      },
-      timeoutMinutes: {
-        type: "number" as const,
-        description: "Timeout in minutes (default: 15)",
-      },
+    args: {
+      prNumber: z.number().describe("PR number to poll CI checks for"),
+      timeoutMinutes: z.number().optional().describe(
+        "Timeout in minutes (default: 15)",
+      ),
     },
     execute: async (args: {
       prNumber: number

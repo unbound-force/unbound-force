@@ -1656,3 +1656,81 @@ describe("terminal-write regression (Requirement 1)", () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// Tool args schema exposure regression tests (fix-tool-args-schema-mismatch)
+// ---------------------------------------------------------------------------
+
+describe("tool args schema exposure", () => {
+  // The plugin SDK's tool() contract only recognizes `args` holding a
+  // zod raw shape; a legacy `parameters` key is silently ignored, which
+  // leaves `args` undefined — Object.keys() then throws and these tests
+  // fail. A dropped or renamed parameter fails the sorted comparison.
+  // Constructing a definition never invokes execute, so the injected
+  // exec stays unused.
+
+  it("exposes checkpoint as a zod-args tool definition", () => {
+    const definition = createCheckpointTool(branchExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual([
+      "command",
+      "data",
+      "key",
+      "step",
+    ])
+  })
+
+  it("exposes get_progress as a zod-args tool definition", () => {
+    const definition = createGetProgressTool(branchExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual(["command", "key"])
+  })
+
+  it("exposes clear_progress as a zod-args tool definition", () => {
+    const definition = createClearProgressTool(branchExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual(["command", "key"])
+  })
+
+  it("exposes normalize_model_name as a zod-args tool definition", () => {
+    const definition = createNormalizeModelNameTool()
+
+    expect(Object.keys(definition.args).sort()).toEqual(["rawModelId"])
+  })
+
+  it("exposes git_fetch as a zod-args tool definition", () => {
+    const definition = createGitFetchTool(branchExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual(["branch", "remote"])
+  })
+
+  it("exposes git_push as a zod-args tool definition", () => {
+    const definition = createGitPushTool(branchExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual(["branch", "setUpstream"])
+  })
+
+  it("exposes git_merge as a zod-args tool definition", () => {
+    const definition = createGitMergeTool(branchExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual(["ref"])
+  })
+
+  it("exposes git_rebase as a zod-args tool definition", () => {
+    const definition = createGitRebaseTool(branchExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual(["ref"])
+  })
+
+  // Declared via zod before this change — kept as a guard so this tool
+  // cannot regress to the legacy `parameters` key either.
+  it("exposes persist_unleash_summary as a zod-args tool definition (future-regression guard)", () => {
+    const definition = createPersistUnleashSummaryTool(branchExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual([
+      "howToVerify",
+      "testResults",
+      "whatWasBuilt",
+    ])
+  })
+})

@@ -102,6 +102,39 @@ describe("UfFinalePlugin", () => {
 })
 
 // ---------------------------------------------------------------------------
+// Tool definition args schema exposure (FR-004)
+// ---------------------------------------------------------------------------
+
+describe("uf_finale tool definition args schema exposure", () => {
+  const mockExec: GitExec = () => ""
+
+  it("exposes uf_finale_commit_context tool definition args: rawModelId", () => {
+    const definition = createUfFinaleCommitContextTool(mockExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual(["rawModelId"])
+  })
+
+  it("exposes uf_finale_create_pr tool definition args: title, body, targetRepo", () => {
+    const definition = createUfFinaleCreatePrTool(mockExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual([
+      "body",
+      "targetRepo",
+      "title",
+    ])
+  })
+
+  it("exposes uf_finale_ci_poll tool definition args: prNumber, timeoutMinutes", () => {
+    const definition = createUfFinaleCiPollTool(mockExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual([
+      "prNumber",
+      "timeoutMinutes",
+    ])
+  })
+})
+
+// ---------------------------------------------------------------------------
 // uf_finale_startup tests
 // ---------------------------------------------------------------------------
 

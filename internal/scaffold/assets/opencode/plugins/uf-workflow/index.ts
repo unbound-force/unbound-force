@@ -232,25 +232,15 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
       "Record a completed workflow step to persistent storage. " +
       "Creates or updates the progress state file with the step name, " +
       "merges optional data via shallow merge, and returns the updated state.",
-    parameters: {
-      command: {
-        type: "string",
-        description: "Command identifier (e.g. uf.unleash)",
-      },
-      step: {
-        type: "string",
-        description: "Step name to record as completed",
-      },
-      data: {
-        type: "string",
-        description:
-          "Optional JSON object string to merge into state data via Object.assign",
-      },
-      key: {
-        type: "string",
-        description:
-          "Optional state key override; defaults to sanitized current git branch",
-      },
+    args: {
+      command: z.string().describe("Command identifier (e.g. uf.unleash)"),
+      step: z.string().describe("Step name to record as completed"),
+      data: z.string().optional().describe(
+        "Optional JSON object string to merge into state data via Object.assign",
+      ),
+      key: z.string().optional().describe(
+        "Optional state key override; defaults to sanitized current git branch",
+      ),
     },
     execute: async (args: {
       command: string
@@ -315,16 +305,11 @@ export function createGetProgressTool(exec: GitExec, cwd: string) {
     description:
       "Read the current progress state for a command. " +
       "Returns the full state object or null if no prior state exists.",
-    parameters: {
-      command: {
-        type: "string",
-        description: "Command identifier (e.g. uf.unleash)",
-      },
-      key: {
-        type: "string",
-        description:
-          "Optional state key override; defaults to sanitized current git branch",
-      },
+    args: {
+      command: z.string().describe("Command identifier (e.g. uf.unleash)"),
+      key: z.string().optional().describe(
+        "Optional state key override; defaults to sanitized current git branch",
+      ),
     },
     execute: async (args: { command: string; key?: string }) => {
       try {
@@ -353,16 +338,11 @@ export function createClearProgressTool(exec: GitExec, cwd: string) {
     description:
       "Remove the progress state file for a command on successful " +
       "workflow completion. Idempotent — succeeds if no state exists.",
-    parameters: {
-      command: {
-        type: "string",
-        description: "Command identifier (e.g. uf.unleash)",
-      },
-      key: {
-        type: "string",
-        description:
-          "Optional state key override; defaults to sanitized current git branch",
-      },
+    args: {
+      command: z.string().describe("Command identifier (e.g. uf.unleash)"),
+      key: z.string().optional().describe(
+        "Optional state key override; defaults to sanitized current git branch",
+      ),
     },
     execute: async (args: { command: string; key?: string }) => {
       try {
@@ -593,13 +573,11 @@ export function createNormalizeModelNameTool() {
       "Normalize a raw model identifier to a canonical short name. " +
       "Strips provider prefixes, @-suffixes, date suffixes, and trailing " +
       "version digits. Returns {normalized} on success.",
-    parameters: {
-      rawModelId: {
-        type: "string",
-        description:
-          "Raw model identifier to normalize " +
-          "(e.g. google-vertex-anthropic/claude-sonnet-4-20250514@default)",
-      },
+    args: {
+      rawModelId: z.string().describe(
+        "Raw model identifier to normalize " +
+        "(e.g. google-vertex-anthropic/claude-sonnet-4-20250514@default)",
+      ),
     },
     execute: async (args: { rawModelId: string }) => {
       const raw = args.rawModelId ?? ""
@@ -642,15 +620,11 @@ export function createGitFetchTool(exec: GitExec, cwd: string) {
     description:
       "Fetch refs from a remote repository. " +
       "Accepts a remote name and optional branch to fetch.",
-    parameters: {
-      remote: {
-        type: "string",
-        description: "Remote name to fetch from (e.g. origin, upstream)",
-      },
-      branch: {
-        type: "string",
-        description: "Optional branch name to fetch",
-      },
+    args: {
+      remote: z.string().describe(
+        "Remote name to fetch from (e.g. origin, upstream)",
+      ),
+      branch: z.string().optional().describe("Optional branch name to fetch"),
     },
     execute: async (args: { remote: string; branch?: string }) => {
       try {
@@ -677,15 +651,13 @@ export function createGitPushTool(exec: GitExec, cwd: string) {
     description:
       "Push commits to the remote repository. " +
       "Optionally set upstream tracking for a branch.",
-    parameters: {
-      setUpstream: {
-        type: "boolean",
-        description: "Set upstream tracking (--set-upstream origin <branch>)",
-      },
-      branch: {
-        type: "string",
-        description: "Branch name (required when setUpstream is true)",
-      },
+    args: {
+      setUpstream: z.boolean().optional().describe(
+        "Set upstream tracking (--set-upstream origin <branch>)",
+      ),
+      branch: z.string().optional().describe(
+        "Branch name (required when setUpstream is true)",
+      ),
     },
     execute: async (args: { setUpstream?: boolean; branch?: string }) => {
       try {
@@ -738,11 +710,10 @@ export function createGitMergeTool(exec: GitExec, cwd: string) {
     description:
       "Merge a ref into the current branch. Returns conflict information " +
       "if the merge produces conflicts instead of failing.",
-    parameters: {
-      ref: {
-        type: "string",
-        description: "Git ref to merge (branch name, tag, or commit SHA)",
-      },
+    args: {
+      ref: z.string().describe(
+        "Git ref to merge (branch name, tag, or commit SHA)",
+      ),
     },
     execute: async (args: { ref: string }) => {
       try {
@@ -825,12 +796,10 @@ export function createGitRebaseTool(exec: GitExec, cwd: string) {
     description:
       "Rebase the current branch onto a ref. Returns conflict information " +
       "if the rebase produces conflicts instead of failing.",
-    parameters: {
-      ref: {
-        type: "string",
-        description:
-          "Git ref to rebase onto (branch name, tag, or commit SHA)",
-      },
+    args: {
+      ref: z.string().describe(
+        "Git ref to rebase onto (branch name, tag, or commit SHA)",
+      ),
     },
     execute: async (args: { ref: string }) => {
       try {
