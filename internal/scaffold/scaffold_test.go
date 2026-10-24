@@ -820,6 +820,25 @@ func TestUnleashCommand_ToolRoutingContracts(t *testing.T) {
 		}
 	})
 
+	// Pin: failing checks at blocking gates route through the
+	// build/test fix loop before any exit fires.
+	t.Run("blocking gates run the build/test fix loop before exiting", func(t *testing.T) {
+		if !strings.Contains(implementExecution, "build/test fix loop") {
+			t.Error("implement step missing the build/test fix loop")
+		}
+		for _, param := range []string{
+			"up to 3 total",
+			"If a check still fails after the loop's 3 iterations",
+		} {
+			if !strings.Contains(implementExecution, param) {
+				t.Errorf("implement fix loop missing %s parameter", param)
+			}
+		}
+		if !strings.Contains(codeReviewStep, "build/test fix loop") {
+			t.Error("code review preflight missing the build/test fix loop")
+		}
+	})
+
 	// Pin: the code-review preflight exit renders through the
 	// format_unleash_exit code-review-preflight variant.
 	t.Run("code-review preflight exit routes through format_unleash_exit", func(t *testing.T) {
