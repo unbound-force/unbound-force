@@ -356,6 +356,23 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/remove-mutimind-mxf-orchestration/, Fixes: #565, Fixes: #566)
 
 ### Changed
+- unleash-build-test-fix-loop: /uf.unleash no longer halts for a
+  human when a blocking gate reports a failing check. The quick-tier
+  pre-flight gate, the per-phase checkpoint, and Step 6's pre-flight
+  soft gate (branch-caused or unknown failures) now run a build/test
+  fix loop first: up to 3 iterations of delegating the diagnosis and
+  repair to cobalt-crush-dev via prompt-only uf_delegate_command
+  (task_classification declared per call), then deterministically
+  re-running the exact pre-flight commands in the calling gate's mode
+  and re-classifying remaining failures. A phase checkpoint whose
+  loop succeeds re-records its verdict as green (superseding the
+  failed record); the quick gate records quick-pre-flight; Step 6
+  proceeds to its dispatch. Pre-existing and environmental failures
+  never enter the loop. Each gate still exits through its unchanged
+  format_unleash_exit variant once checks persist past 3 iterations,
+  and the guardrails exit list now reads "build/test failures that
+  persist after the fix loop's 3 iterations". Scaffold pins cover
+  the loop in both the command and its mirrored scaffold asset.
 - spec-review-per-finding-gate: Replaced the bulk spec auto-fix
   consent gate and the HIGH/CRITICAL dead-stop in spec review
   with a per-finding decision gate. Each REQUEST CHANGES finding

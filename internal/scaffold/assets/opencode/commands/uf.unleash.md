@@ -778,10 +778,14 @@ from the pre-flight gate below):
 Run the `pre-flight` skill in `hard-gate` mode — the
 quick-tier equivalent of the phase checkpoint and the
 tier's only blocking build/test gate. If any check fails,
+run the build/test fix loop (defined below the
+classification contract in this step) before exiting.
+If a check still fails after the loop's 3 iterations,
 **EXIT** by calling `format_unleash_exit` with variant
 `implement-phase-checkpoint`, `phase: 1`, the failed
-command, and its output. On success, record the gate
-result durably by calling the `checkpoint` tool:
+command, and its output. On success (initially or after
+fix-loop repairs), record the gate result durably by
+calling the `checkpoint` tool:
 
 ```
 checkpoint
@@ -822,9 +826,10 @@ its Local Tool Detection phase to discover additional
 **Classify every delegated task**: before delegating, decide
    whether the work is deterministic or judgment. Every
    prompt-only `uf_delegate_command` call MUST declare the
-   answer -- the per-task implement calls below, the
-   quick-tier whole-change call above, and the code-fix calls
-   in Step 6; an unclassified prompt-only call fails input
+   answer -- the per-task implement calls and build/test
+   fix-loop call below, the quick-tier whole-change call
+   above, and the code-fix calls in Step 6; an
+   unclassified prompt-only call fails input
    validation. Command-path delegations may omit the
    classification: the command file is the procedure of
    record. Classification is judgment about the nature of the
@@ -870,6 +875,71 @@ its Local Tool Detection phase to discover additional
    `[P]` delegations carry the same classification through
    the spawned subtask description (see parallel execution
    below).
+
+**Build/test fix loop**: a failing check at a blocking
+gate is implement work the agent owns, not a human
+decision point -- code fixes proceed without a human
+choice, mirroring the Step 6 code-review fix loop. When
+the quick-tier pre-flight gate or a phase checkpoint
+below reports a failing check, or Step 6's pre-flight
+soft gate reports a branch-caused (or unknown) failure,
+run this loop before that gate takes its exit path. For
+each iteration (up to 3 total):
+
+1. Delegate the fix to the `cobalt-crush-dev` agent via
+   `uf_delegate_command`, prompt-only (omit
+   `command_path` and `checkpoint_step`; the calling
+   gate's checkpoint remains the durable record):
+
+   ```
+   uf_delegate_command
+     prompt: [the failing command, its full output, and
+       an instruction to diagnose and fix the failure on
+       the current branch, then verify by re-running the
+       exact failing command]
+     task_classification: [derived from the nature of the
+       fix -- "deterministic", with skill or
+       skill_absent_reason, when a repo skill or script
+       performs the fix end-to-end; "judgment" otherwise,
+       the usual case for diagnosing a broken test]
+     skill: [repo skill or script reference that performs
+       the fix end-to-end -- only when deterministic]
+     skill_absent_reason: [what was searched and what was
+       found -- only when deterministic and no repo skill
+       or script applies; never together with skill]
+     feature_dir: FEATURE_DIR
+   ```
+
+   Omit `feature_dir` for the quick tier, which carries
+   none. On failure, emit the envelope's error and
+   **STOP**.
+
+2. Re-run the `pre-flight` skill in the calling gate's
+   mode (`hard-gate` for both implement gates;
+   `soft-gate` with re-classification for Step 6).
+   Verification is deterministic: re-run the exact
+   detected commands, never paraphrased or substituted
+   ones, and re-classify any remaining failures (the
+   inventory match rule applies for phase checkpoints).
+
+3. If the gate now passes: the calling gate proceeds as
+   green -- a phase checkpoint re-records its verdict as
+   `"green"` (superseding the `"failed"` record, with
+   the inventory carrying forward), the quick gate
+   records its `quick-pre-flight` checkpoint, and Step 6
+   proceeds to its dispatch.
+
+4. If checks still fail: keep the iteration counter. At
+   3 iterations exhausted, the calling gate takes its
+   exit path unchanged (the `implement-phase-checkpoint`
+   exit for both implement gates, the
+   `code-review-preflight` exit for Step 6).
+
+Pre-existing and environmental failures never enter the
+loop. A recorded `phases["<N>"]` verdict of `"failed"`
+on resume means the loop re-enters -- the exit fires
+only at exhaustion, and the resume guard's never-re-run
+rule applies only to `"green"` verdicts.
 
 **For each phase in tasks.md**:
 
@@ -1097,8 +1167,13 @@ its Local Tool Detection phase to discover additional
      classified failure).
 
    - If green: proceed to the next phase.
-   - If failed: **EXIT** by calling
-     `format_unleash_exit` with:
+   - If failed: run the build/test fix loop (above)
+     before exiting. When the loop succeeds, re-record
+     the phase checkpoint with verdict `"green"`
+     (superseding the `"failed"` record; the inventory
+     carries forward) and proceed to the next phase.
+     When the loop exhausts its 3 iterations, **EXIT**
+     by calling `format_unleash_exit` with:
 
      ```
      format_unleash_exit
@@ -1160,7 +1235,11 @@ text.
      failure per its Phase 4b as `branch-caused`,
      `pre-existing`, or `unknown` (unknown is treated as
      branch-caused).
-   - **Branch-caused (or unknown) failures**: STOP
+   - **Branch-caused (or unknown) failures**: run the
+     build/test fix loop (defined in Step 5) before
+     stopping -- up to 3 iterations of delegated fix
+     plus soft-gate re-run with re-classification. If
+     the failures persist after 3 iterations, STOP
      before dispatching any reviewers. Report each
      failure as a CRITICAL finding with full output.
      Finalize the dispatch fail-closed with NO child
@@ -1567,9 +1646,10 @@ retains its no-artifact fallback.
   interaction. The valid reasons to exit the pipeline
   are: unanswerable clarification questions, unresolved
   spec findings after the per-finding gate (pause choice
-  or iteration cap), build/test failures, merge
-  conflicts, and 3 review iterations exhausted. All
-  other transitions are autonomous.
+  or iteration cap), build/test failures that persist
+  after the fix loop's 3 iterations, merge conflicts,
+  and 3 review iterations exhausted. All other
+  transitions are autonomous.
 - **NEVER modify content on `main`** -- tier routing may
   start on main, but the route decision tool creates the
   `quick/<name>` branch and the speckit/openspec entry
