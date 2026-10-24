@@ -540,6 +540,25 @@ Each entry follows the format: `- <change-name>: <summary>`.
   mirror
   `internal/scaffold/assets/opencode/commands/uf.address-feedback.md`
   synced byte-identical. (Fixes: #763)
+- address-feedback-diff-path-producer: `/uf.address-feedback` §1.4
+  "Fetch and Save the PR Diff" (new; former §1.4-§1.6 renumbered
+  §1.5-§1.7) gives the §2.3.4 `diff_path` input (documented by
+  address-feedback-diff-path-input) its producing step: one
+  intent-level call to the existing registered
+  `fetch_pr_review_context` tool (review-dispatch plugin) with the PR
+  number; the returned `diff_path` is the immutable diff reused for
+  every Tier 2 dispatch. Fetch failures report the tool's structured
+  error envelope verbatim and STOP (`rate_limited` / `timeout` /
+  `api_error`); oversized diffs surface at dispatch time as the
+  structured `prompt_size_exceeded` error rather than a command-text
+  size pre-check (determinism pack DE-001/DE-005). Hard-coded
+  uf.address-feedback.md line-number site labels in
+  `.opencode/test/golden-output-shape.test.ts` and
+  `.opencode/test/dispatch-review-runs.test.ts` recomputed from the
+  final template. Command markdown only, referencing an existing
+  registered tool; no tool behavior change. Scaffold mirror
+  `internal/scaffold/assets/opencode/commands/uf.address-feedback.md`
+  synced byte-identical. (Refs: #811)
 - fix-dispatch-verdict-derivation: `consolidate_dispatch` now
   derives `workflow_result.value` and `verdict` from
   `calculatedWorkflowValue` — the same vote-based derivation

@@ -1107,7 +1107,7 @@ describe("dispatch_review_runs", () => {
   // documented at three more sites with two more input variants: code
   // mode (uf.review-council.md:256 and uf.review-pr.md:372 — review-pr
   // also routes command review-council per its documented inputs) and
-  // feedback mode (uf.address-feedback.md:338). These goldens execute
+  // feedback mode (uf.address-feedback.md:363). These goldens execute
   // each remaining variant through the plugin tool registry with its
   // documented inputs and assert the same envelope, so all four
   // dispatch_review_runs sites are pinned under their documented input
@@ -1173,7 +1173,7 @@ describe("dispatch_review_runs", () => {
       })
     })
 
-    it("returns the seven documented envelope fields for documented feedback-mode inputs (uf.address-feedback.md:338)", async () => {
+    it("returns the seven documented envelope fields for documented feedback-mode inputs (uf.address-feedback.md:363)", async () => {
       await withBun(async () => {
         const { directory, diffPath } = await scratchProject()
         const hooks = await ReviewDispatchPlugin.server({
@@ -1196,7 +1196,7 @@ describe("dispatch_review_runs", () => {
           proposals: [{ information: "Pin every documented input variant with golden tests", tag: "feedback-triage" }],
         })
 
-        // Documented inputs per uf.address-feedback.md:338: mode feedback,
+        // Documented inputs per uf.address-feedback.md:363: mode feedback,
         // command address-feedback, diff_path, changed_files, input_context,
         // plan_entries, session_metadata, max_parallel_runs, budget_usd,
         // per_run_timeout_ms, and review_context.

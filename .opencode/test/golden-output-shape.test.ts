@@ -37,7 +37,7 @@ import { withBun } from "./helpers/bun-runtime.js"
 //
 // Coverage: 43 of the 47 documented sites. The four dispatch_review_runs
 // sites (uf.triage-issue.md:263, uf.review-council.md:276,
-// uf.review-pr.md:394, uf.address-feedback.md:358) belong to task 2.3
+// uf.review-pr.md:394, uf.address-feedback.md:363) belong to task 2.3
 // and are pinned in dispatch-review-runs.test.ts instead — one golden
 // per documented input variant (triage, code, feedback).
 //
@@ -51,7 +51,7 @@ import { withBun } from "./helpers/bun-runtime.js"
 //   (uf.unleash.md:515), scan_conflict_markers (uf.unleash.md:598),
 //   format_unleash_demo (uf.unleash.md:1010), resolve_base_ref
 //   (uf.review-council.md:126), normalize_model_name
-//   (uf.address-feedback.md:733)
+//   (uf.address-feedback.md:801)
 // - uf-finale: 8 sites -- uf_finale_startup (uf.finale.md:51),
 //   uf_finale_stage (71), uf_finale_commit_context (82),
 //   uf_finale_push_state (131), uf_finale_pr_context (154),
@@ -59,10 +59,10 @@ import { withBun } from "./helpers/bun-runtime.js"
 //   uf_finale_return_to_main (291)
 // - review-dispatch: 14 sites -- plan_review_dispatch x7 (uf.unleash.md:353
 //   and 799, uf.review-council.md:231, uf.review-pr.md:353,
-//   uf.triage-issue.md:190, uf.address-feedback.md:314,
+//   uf.triage-issue.md:190, uf.address-feedback.md:339,
 //   speckit.testreview.md:154), consolidate_dispatch x3
 //   (uf.review-council.md:361, uf.triage-issue.md:780,
-//   uf.address-feedback.md:473), finalize_review_dispatch x2
+//   uf.address-feedback.md:541), finalize_review_dispatch x2
 //   (uf.review-pr.md:442, speckit.testreview.md:278),
 //   acquire_sibling_evidence (speckit.testreview.md:134),
 //   prepare_lesson_learning (speckit.testreview.md:268)
@@ -758,7 +758,7 @@ describe("golden output shapes -- uf-workflow registry (21 documented sites)", (
     expect(data).toEqual({ ref: "origin/main", sha: SHA_A, source: "origin/main", head_sha: SHA_HEAD, diverged: false })
   })
 
-  it("normalize_model_name [uf.address-feedback.md:733] returns normalized and the unknown-model fallback", async () => {
+  it("normalize_model_name [uf.address-feedback.md:801] returns normalized and the unknown-model fallback", async () => {
     const directory = await makeScratch()
     const registry = await loadRegistry(UfWorkflowPlugin, directory)
 
@@ -1049,7 +1049,7 @@ const PLAN_SITES: ReadonlyArray<{ readonly site: string; readonly args: Record<s
     },
   },
   {
-    site: "uf.address-feedback.md:314",
+    site: "uf.address-feedback.md:339",
     args: {
       mode: "feedback",
       discovered_agents: ["divisor-adversary", "divisor-architect", "divisor-guard"],
@@ -1076,7 +1076,7 @@ const CONSOLIDATE_SITES: ReadonlyArray<{
 }> = [
   { site: "uf.review-council.md:361", command: "review-council", mode: "code", metadataOverrides: {} },
   { site: "uf.triage-issue.md:780", command: "triage-issue", mode: "triage", metadataOverrides: TRIAGE_METADATA_OVERRIDES },
-  { site: "uf.address-feedback.md:473", command: "address-feedback", mode: "feedback", metadataOverrides: {} },
+  { site: "uf.address-feedback.md:541", command: "address-feedback", mode: "feedback", metadataOverrides: {} },
 ]
 
 describe("golden output shapes -- review-dispatch registry (15 documented sites)", () => {

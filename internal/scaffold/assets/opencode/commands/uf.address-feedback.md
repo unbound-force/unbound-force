@@ -167,7 +167,32 @@ statistics from the local checkout or a different diff.
 **On API failure** (network error, HTTP 5xx, 403 rate limit): report the specific error and **STOP**. Do NOT proceed with partial data. If 403, suggest:
 > "GitHub API error (403): rate limit exceeded. Wait and retry."
 
-### 1.4 Determine Reviewer Authority
+### 1.4 Fetch and Save the PR Diff
+
+Call the registered `fetch_pr_review_context` tool with
+`pr_number: <PR_NUMBER>`. The tool fetches the PR diff, persists it
+with enforced file and directory permissions, and returns `diff_path`,
+`diff_bytes`, and `diff_lines` alongside the rest of the PR review
+context. Use the tool here for its diff outputs only — Sections 1.2
+and 1.3 remain the authoritative fetches for PR metadata and review
+feedback.
+
+Use the returned `diff_path` as the immutable diff file for the frozen
+input context from Section 1.2. Section 2.3.4 passes this exact path as
+`diff_path`; `dispatch_review_runs` path-validates and reads this exact
+file at runtime. Call the tool once during Phase 1 and reuse the
+returned path for every Tier 2 item — never re-fetch, regenerate, or
+substitute it later in the flow, even if the PR receives new commits.
+
+**On tool failure**: the tool returns a structured error envelope —
+`error: true` with `code` (e.g. `rate_limited`, `timeout`,
+`api_error`), `message`, and `retryable`. Report the error envelope
+verbatim and **STOP**. Do NOT proceed with a missing or incomplete
+diff. Diff size is not pre-checked here: the dispatch path enforces
+its read-time size limit and surfaces oversized diffs as the
+structured `prompt_size_exceeded` error.
+
+### 1.5 Determine Reviewer Authority
 
 For each reviewer, map `author_association` to authority tier:
 
@@ -181,7 +206,7 @@ For each reviewer, map `author_association` to authority tier:
 
 **Bot detection**: login ending in `[bot]` OR account `type` is `Bot`.
 
-### 1.5 Filter and Group
+### 1.6 Filter and Group
 
 **Filter out**:
 - Already-resolved review threads (check `isResolved` or thread state)
@@ -192,7 +217,7 @@ For each reviewer, map `author_association` to authority tier:
 
 **Detect**: GitHub suggestion blocks (` ```suggestion `) — preserve as structured data for the triage phase.
 
-### 1.6 Cache Check
+### 1.7 Cache Check
 
 Check local cache at `.uf/feedback/pr-<PR_NUMBER>/state.json`:
 
@@ -341,7 +366,8 @@ dispatches all included plan runs in parallel batches:
 
 - `mode`: `feedback`;
 - `command`: `address-feedback`;
-- `diff_path`: path to the saved immutable diff file;
+- `diff_path`: the `diff_path` returned by `fetch_pr_review_context`
+  in Section 1.4;
 - `changed_files`: pre-formatted list of changed file paths;
 - `input_context`: the frozen PR input context from Section 1.2;
 - `plan_entries`: the plan entries array from `plan_review_dispatch`;
