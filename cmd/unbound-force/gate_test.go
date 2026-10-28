@@ -110,17 +110,15 @@ func TestRunGate_InvalidPhase(t *testing.T) {
 	}
 }
 
-func TestRunGate_InvalidFormat(t *testing.T) {
+func TestRunGate_UnrecognizedFormat_FallsToText(t *testing.T) {
 	dir := t.TempDir()
 
 	var stdout, stderr bytes.Buffer
-	// Note: format validation moved to RunE (Cobra level).
-	// runGate now receives only validated formats, so passing
-	// "xml" here falls through to the default text formatter
-	// since gate.Run still accepts the options. This test
-	// verifies the internal error wrapping for invalid phase
-	// scenarios instead. The format validation is tested via
-	// the Cobra command in TestNewGateCmd_InvalidFormat.
+	// Note: format validation lives in RunE (Cobra level), covered
+	// by TestNewGateCmd_InvalidFormat. runGate accepts unvalidated
+	// formats, so "xml" here falls through to the default text
+	// formatter. With an empty dir the check fails (exit 1), not
+	// an internal error.
 	err := runGate(gateParams{
 		targetDir: dir,
 		phase:     "specify",
@@ -218,6 +216,19 @@ func TestNewGateCmd_InvalidFormat(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid format") {
 		t.Errorf("expected 'invalid format' in error, got: %v", err)
+	}
+}
+
+func TestNewGateCmd_MissingPhase(t *testing.T) {
+	cmd := newGateCmd()
+	cmd.SetArgs([]string{})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing phase")
+	}
+	if !strings.Contains(err.Error(), "--phase is required") {
+		t.Errorf("expected '--phase is required' in error, got: %v", err)
 	}
 }
 
