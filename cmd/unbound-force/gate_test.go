@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -217,5 +218,31 @@ func TestNewGateCmd_InvalidFormat(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid format") {
 		t.Errorf("expected 'invalid format' in error, got: %v", err)
+	}
+}
+
+func TestGateExitCode(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"nil error", nil, 0},
+		{"plain error", fmt.Errorf("check failed"), 1},
+		{"internal error", &gate.InternalError{
+			Err: fmt.Errorf("boom"),
+		}, 2},
+		{"wrapped internal error", fmt.Errorf(
+			"wrap: %w",
+			&gate.InternalError{Err: fmt.Errorf("boom")},
+		), 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := gateExitCode(tt.err); got != tt.want {
+				t.Errorf("gateExitCode() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }

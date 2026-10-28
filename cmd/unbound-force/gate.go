@@ -138,14 +138,6 @@ metadata (version, producer, timestamp, branch).`,
 				stderr:    cmd.ErrOrStderr(),
 			})
 
-			if gateExitCode(err) == 2 {
-				// Cobra prints the error; use os.Exit for
-				// exit code 2 since Cobra always returns 1.
-				fmt.Fprintf(cmd.ErrOrStderr(),
-					"Error: %v\n", err)
-				os.Exit(2)
-			}
-
 			return err
 		},
 	}
