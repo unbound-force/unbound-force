@@ -456,6 +456,10 @@ func TestCheckNotOnMain_OnMain(t *testing.T) {
 }
 
 func TestCheckNotOnMain_NonGitDir(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
 	dir := t.TempDir()
 
 	r := checkNotOnMain(dir)
@@ -690,6 +694,9 @@ func TestRun_Provenance(t *testing.T) {
 	}
 	if report.Phase != "specify" {
 		t.Errorf("expected phase specify, got %s", report.Phase)
+	}
+	if report.Branch != "" {
+		t.Errorf("expected empty branch for non-git dir, got %s", report.Branch)
 	}
 }
 
