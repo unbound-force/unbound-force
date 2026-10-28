@@ -100,6 +100,12 @@ Exit codes:
   1  One or more checks failed
   2  Internal error (unexpected filesystem failure)
 
+Coverage strategy detection (implement phase):
+  plan/tasks artifacts are scanned for a heading containing
+  'coverage' (case-insensitive), body text containing 'coverage
+  target', 'unit test', 'integration test', or 'e2e test', or a
+  line matching coverage.*%.
+
 Use --format json for machine-readable output with provenance
 metadata (version, producer, timestamp, branch).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
