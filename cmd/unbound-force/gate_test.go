@@ -132,12 +132,19 @@ func TestRunGate_UnrecognizedFormat_FallsToText(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for failing check")
 	}
+	if gateExitCode(err) != 1 {
+		t.Errorf("expected exit code 1 for check failure, got %d", gateExitCode(err))
+	}
+	if !strings.Contains(stdout.String(), "Gate: specify") {
+		t.Errorf("expected text formatter output, got: %s", stdout.String())
+	}
 }
 
 func TestRunGate_NonExistentDir(t *testing.T) {
+	dir := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	err := runGate(gateParams{
-		targetDir: "/tmp/nonexistent-gate-cli-test-dir-xyz",
+		targetDir: filepath.Join(dir, "nonexistent"),
 		phase:     "specify",
 		format:    "text",
 		stdout:    &stdout,
@@ -255,5 +262,37 @@ func TestGateExitCode(t *testing.T) {
 				t.Errorf("gateExitCode() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+// failingWriter always fails on Write, simulating a broken
+// stdout to exercise the format-failure internal error path
+// (FormatJSON propagates write errors; FormatText does not).
+type failingWriter struct{}
+
+func (failingWriter) Write(p []byte) (int, error) {
+	return 0, fmt.Errorf("simulated write failure")
+}
+
+func TestRunGate_FormatFailure_ExitCode2(t *testing.T) {
+	dir := t.TempDir()
+	scaffoldGateFixture(t, dir, map[string]string{
+		"proposal.md": "# Proposal",
+	})
+
+	var stderr bytes.Buffer
+	err := runGate(gateParams{
+		targetDir: dir,
+		phase:     "specify",
+		format:    "json",
+		stdout:    failingWriter{},
+		stderr:    &stderr,
+	})
+
+	if err == nil {
+		t.Fatal("expected error for format write failure")
+	}
+	if gateExitCode(err) != 2 {
+		t.Errorf("expected exit code 2 for internal error, got %d", gateExitCode(err))
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -185,7 +186,9 @@ func TestCheckTasksExist_Missing(t *testing.T) {
 func TestCheckCoverageStrategy_Heading(t *testing.T) {
 	dir := t.TempDir()
 	scaffoldOpenSpec(t, dir, map[string]string{
-		"tasks.md": "# Tasks\n\n## Coverage strategy\n\nUnit tests for all functions.",
+		// Heading-only fixture: no keyword or percentage match,
+		// so only heading detection can pass this test.
+		"tasks.md": "# Tasks\n\n## Test coverage plan\n\nTests are organized by package.",
 	})
 
 	r := checkCoverageStrategy(dir)
@@ -197,7 +200,9 @@ func TestCheckCoverageStrategy_Heading(t *testing.T) {
 func TestCheckCoverageStrategy_Keyword(t *testing.T) {
 	dir := t.TempDir()
 	scaffoldOpenSpec(t, dir, map[string]string{
-		"tasks.md": "# Tasks\n\ncoverage target: >= 80%\n",
+		// Keyword-only fixture: no percentage, so only keyword
+		// detection can pass this test.
+		"tasks.md": "# Tasks\n\ncoverage target: high\n",
 	})
 
 	r := checkCoverageStrategy(dir)
@@ -487,6 +492,21 @@ func TestCheckNotOnMain_DetachedHead(t *testing.T) {
 	}
 }
 
+func TestCheckNotOnMain_GitUnavailable(t *testing.T) {
+	dir := t.TempDir()
+	// Empty PATH so exec.LookPath("git") fails (FR-008
+	// "Git not available" scenario).
+	t.Setenv("PATH", t.TempDir())
+
+	r := checkNotOnMain(dir)
+	if r.Passed {
+		t.Error("expected fail when git is unavailable")
+	}
+	if !strings.Contains(r.Message, "uf doctor") {
+		t.Errorf("expected 'uf doctor' hint in message, got: %s", r.Message)
+	}
+}
+
 // --- Run() integration tests ---
 
 func TestRun_SpecifyPhase_Pass(t *testing.T) {
@@ -650,9 +670,10 @@ func TestRun_InvalidPhase(t *testing.T) {
 }
 
 func TestRun_NonExistentDir(t *testing.T) {
+	base := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	report, err := Run(Options{
-		TargetDir: "/tmp/nonexistent-gate-test-dir-xyz",
+		TargetDir: filepath.Join(base, "nonexistent"),
 		Phase:     "specify",
 		Stdout:    &stdout,
 		Stderr:    &stderr,
@@ -734,6 +755,24 @@ func TestFormatJSON_ValidOutput(t *testing.T) {
 	}
 	if decoded.Version != SchemaVersion {
 		t.Errorf("expected version %s, got %s", SchemaVersion, decoded.Version)
+	}
+	if decoded.Producer != ProducerName {
+		t.Errorf("expected producer %s, got %s", ProducerName, decoded.Producer)
+	}
+	if decoded.Branch != "opsx/test" {
+		t.Errorf("expected branch opsx/test, got %s", decoded.Branch)
+	}
+	if _, err := time.Parse(time.RFC3339, decoded.Timestamp); err != nil {
+		t.Errorf("expected RFC3339 timestamp %q, parse error: %v", decoded.Timestamp, err)
+	}
+	if decoded.Summary != (Summary{Total: 1, Passed: 1, Failed: 0}) {
+		t.Errorf("unexpected summary: %+v", decoded.Summary)
+	}
+	if len(decoded.Checks) != 1 {
+		t.Fatalf("expected 1 check, got %d", len(decoded.Checks))
+	}
+	if decoded.Checks[0].Name != "spec-exists" || !decoded.Checks[0].Passed || decoded.Checks[0].Message != "Spec found" {
+		t.Errorf("unexpected check: %+v", decoded.Checks[0])
 	}
 }
 
@@ -1083,6 +1122,23 @@ func TestRun_PRPhase_Pass(t *testing.T) {
 	}
 	if !report.Passed {
 		t.Error("expected PR phase to pass")
+	}
+	if report.Branch != "opsx/test-feature" {
+		t.Errorf("expected branch opsx/test-feature, got %s", report.Branch)
+	}
+	if report.Summary.Total != 2 || report.Summary.Failed != 0 {
+		t.Errorf("unexpected summary: %+v", report.Summary)
+	}
+	for _, want := range []string{"review-pass", "not-on-main"} {
+		found := false
+		for _, c := range report.Checks {
+			if c.Name == want && c.Passed {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected passing check %q, got: %+v", want, report.Checks)
+		}
 	}
 }
 
