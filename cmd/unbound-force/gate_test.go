@@ -265,6 +265,51 @@ func TestGateExitCode(t *testing.T) {
 	}
 }
 
+func TestNewGateCmd_Execute(t *testing.T) {
+	dir := t.TempDir()
+	scaffoldGateFixture(t, dir, map[string]string{
+		"proposal.md": "# Proposal",
+	})
+
+	cmd := newGateCmd()
+	var out, errBuf bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	cmd.SetArgs([]string{"--phase", "specify", "--dir", dir, "--format", "json"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var report gate.GateReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON output: %v\nraw: %s", err, out.String())
+	}
+	if !report.Passed {
+		t.Error("expected report.Passed=true")
+	}
+}
+
+func TestNewGateCmd_Execute_DefaultDir(t *testing.T) {
+	fixture := t.TempDir()
+	scaffoldGateFixture(t, fixture, map[string]string{
+		"proposal.md": "# Proposal",
+	})
+	t.Chdir(fixture)
+
+	cmd := newGateCmd()
+	var out, errBuf bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	cmd.SetArgs([]string{"--phase", "specify", "--format", "text"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "Gate: specify") {
+		t.Errorf("expected text output, got: %s", out.String())
+	}
+}
+
 // failingWriter always fails on Write, simulating a broken
 // stdout to exercise the format-failure internal error path
 // (FormatJSON propagates write errors; FormatText does not).
