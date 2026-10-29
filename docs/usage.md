@@ -242,6 +242,7 @@ outside of OpenCode:
 
 - `uf init` -- scaffold the framework into your project
 - `uf doctor` -- diagnose your development environment
+- `uf gate` -- enforce constitution compliance at phase boundaries
 - `uf setup` -- install the full toolchain
 - `uf sandbox` -- manage containerized dev sessions
 - `uf gateway` -- start/stop the LLM reverse proxy

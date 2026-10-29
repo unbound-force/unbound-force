@@ -95,6 +95,7 @@ unbound-force/
 │   ├── config/                       # Unified config loading
 │   ├── coveragegate/                 # Scope-based Go coverage gate
 │   ├── doctor/                       # Environment health checks
+│   ├── gate/                         # Constitution compliance gate checks
 │   ├── gateway/                      # LLM reverse proxy (Vertex/Bedrock/Anthropic)
 │   ├── homebrew/                     # Homebrew Cask release-publishing helpers
 │   ├── sandbox/                      # Containerized sessions (Podman/DevPod)

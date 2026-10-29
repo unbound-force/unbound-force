@@ -12,7 +12,8 @@
 //   - helper (80%): packages whose primary responsibility is I/O
 //     coordination, environment health, or scaffolding -- non-pure code that
 //     drives external systems or provides cross-cutting utilities. Today:
-//     internal/scaffold, internal/doctor, internal/artifacts, internal/schemas.
+//     internal/scaffold, internal/doctor, internal/artifacts,
+//     internal/schemas, internal/gate.
 //   - artifact (90%): pure envelope serialization, deserialization, and
 //     validation. No packages currently -- internal/artifacts is classified
 //     helper (80%) because it performs filesystem I/O (scanning, reading, and

@@ -104,6 +104,36 @@ uf doctor --format json
 uf doctor --dir /path/to/project
 ```
 
+### uf gate
+
+Run phase-specific constitution compliance checks. Designed
+for headless use in CI pipelines, validation loops, and
+pre-PR hooks.
+
+Exit code 0 when all checks pass. Exit code 1 when a check
+fails or an argument is invalid. Exit code 2 on internal
+error.
+
+```
+uf gate --phase <specify|plan|implement|review|pr> [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--phase` | string | `""` | Workflow phase to check (required) |
+| `--format` | string | `"text"` | Output format: `text` or `json` |
+| `--dir` | string | `"."` | Project root directory to check |
+
+**Example**
+
+```bash
+# Pre-PR hook check (code review passed, not on main)
+uf gate --phase pr
+
+# JSON output for CI pipelines
+uf gate --phase implement --format json
+```
+
 ### uf setup
 
 Install and configure the Unbound Force development tool chain.

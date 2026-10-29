@@ -105,8 +105,9 @@ them, and how to use the system effectively.
 `uf`). Available via Homebrew, dnf (Fedora/RHEL), or
 direct download from GitHub releases. See
 [QUICKSTART.md](../QUICKSTART.md) for installation
-options. Provides seven commands: `init`, `doctor`,
-`setup`, `sandbox`, `gateway`, `config`, and `version`.
+options. Provides eight commands: `init`, `doctor`,
+`gate`, `setup`, `sandbox`, `gateway`, `config`, and
+`version`.
 This is the primary distribution mechanism for the
 framework. When you run `uf init`, it scaffolds agents,
 commands, convention packs, and configuration into your

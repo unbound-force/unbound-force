@@ -33,10 +33,11 @@ func main() {
 	root.AddCommand(newSandboxCmd())
 	root.AddCommand(newGatewayCmd())
 	root.AddCommand(newConfigCmd())
+	root.AddCommand(newGateCmd())
 	root.AddCommand(newHomebrewCaskCmd())
 
 	if err := root.Execute(); err != nil {
-		os.Exit(1)
+		os.Exit(gateExitCode(err))
 	}
 }
 

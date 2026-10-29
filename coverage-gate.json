@@ -11,6 +11,7 @@
         "internal/artifacts",
         "internal/schemas",
         "internal/config",
+        "internal/gate",
         "internal/gateway",
         "internal/homebrew",
         "internal/sandbox",
