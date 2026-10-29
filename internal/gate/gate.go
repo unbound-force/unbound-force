@@ -25,7 +25,9 @@ type Options struct {
 	// Stdout is the writer for check results.
 	Stdout io.Writer
 
-	// Stderr is the writer for validation and internal errors.
+	// Stderr is reserved for future diagnostics; Run does not
+	// write to it. The CLI boundary routes error output to
+	// stderr via Cobra (design D7).
 	Stderr io.Writer
 }
 

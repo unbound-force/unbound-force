@@ -2,6 +2,7 @@ package gate
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -167,8 +168,16 @@ func checkCoverageStrategy(dir string) CheckResult {
 		}
 	}
 
+	var readErr error
 	for _, path := range candidates {
-		if hasCoverageStrategy(path) {
+		found, err := hasCoverageStrategy(path)
+		if err != nil {
+			if readErr == nil {
+				readErr = err
+			}
+			continue
+		}
+		if found {
 			rel, _ := filepath.Rel(dir, path)
 			return CheckResult{
 				Name:    "coverage-strategy",
@@ -178,19 +187,23 @@ func checkCoverageStrategy(dir string) CheckResult {
 		}
 	}
 
+	message := "No coverage strategy found in plan or tasks"
+	if readErr != nil {
+		message = fmt.Sprintf("%s (cannot read artifact: %v)", message, readErr)
+	}
 	return CheckResult{
 		Name:    "coverage-strategy",
 		Passed:  false,
-		Message: "No coverage strategy found in plan or tasks",
+		Message: message,
 	}
 }
 
 // hasCoverageStrategy scans a file for coverage strategy
 // indicators per FR-006.
-func hasCoverageStrategy(path string) bool {
+func hasCoverageStrategy(path string) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return false
+		return false, err
 	}
 	defer func() { _ = f.Close() }()
 
@@ -201,23 +214,27 @@ func hasCoverageStrategy(path string) bool {
 
 		// Heading containing "coverage" (case-insensitive).
 		if strings.HasPrefix(strings.TrimSpace(line), "#") && strings.Contains(lower, "coverage") {
-			return true
+			return true, nil
 		}
 
 		// Body text keywords.
 		for _, kw := range coverageKeywords {
 			if strings.Contains(lower, kw) {
-				return true
+				return true, nil
 			}
 		}
 
 		// Coverage percentage pattern.
 		if coveragePctRe.MatchString(line) {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	if err := scanner.Err(); err != nil {
+		return false, err
+	}
+
+	return false, nil
 }
 
 // checkTasksComplete scans tasks.md for unchecked task boxes
@@ -231,13 +248,14 @@ func checkTasksComplete(dir string) CheckResult {
 			Message: "No tasks.md found",
 		}
 	}
+	rel, _ := filepath.Rel(dir, path)
 
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return CheckResult{
 			Name:    "tasks-complete",
 			Passed:  false,
-			Message: fmt.Sprintf("Cannot read tasks.md: %v", err),
+			Message: fmt.Sprintf("Cannot read %s: %v", rel, err),
 		}
 	}
 
@@ -245,14 +263,14 @@ func checkTasksComplete(dir string) CheckResult {
 		return CheckResult{
 			Name:    "tasks-complete",
 			Passed:  false,
-			Message: "Incomplete tasks remain (unchecked checkboxes found)",
+			Message: fmt.Sprintf("Incomplete tasks remain in %s (unchecked checkboxes found)", rel),
 		}
 	}
 
 	return CheckResult{
 		Name:    "tasks-complete",
 		Passed:  true,
-		Message: "All task checkboxes are complete",
+		Message: fmt.Sprintf("All task checkboxes are complete in %s", rel),
 	}
 }
 
@@ -274,13 +292,14 @@ func checkReviewRun(dir string) CheckResult {
 			Message: "No tasks.md found",
 		}
 	}
+	rel, _ := filepath.Rel(dir, path)
 
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return CheckResult{
 			Name:    "review-run",
 			Passed:  false,
-			Message: fmt.Sprintf("Cannot read tasks.md: %v", err),
+			Message: fmt.Sprintf("Cannot read %s: %v", rel, err),
 		}
 	}
 
@@ -290,7 +309,7 @@ func checkReviewRun(dir string) CheckResult {
 			return CheckResult{
 				Name:    "review-run",
 				Passed:  true,
-				Message: "Review marker found in tasks.md",
+				Message: fmt.Sprintf("Review marker found in %s", rel),
 			}
 		}
 	}
@@ -298,7 +317,7 @@ func checkReviewRun(dir string) CheckResult {
 	return CheckResult{
 		Name:    "review-run",
 		Passed:  false,
-		Message: "No review has been recorded (no spec-review or code-review marker found)",
+		Message: fmt.Sprintf("No review has been recorded in %s (no spec-review or code-review marker found)", rel),
 	}
 }
 
@@ -318,13 +337,14 @@ func checkReviewPass(dir string) CheckResult {
 			Message: "No tasks.md found",
 		}
 	}
+	rel, _ := filepath.Rel(dir, path)
 
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return CheckResult{
 			Name:    "review-pass",
 			Passed:  false,
-			Message: fmt.Sprintf("Cannot read tasks.md: %v", err),
+			Message: fmt.Sprintf("Cannot read %s: %v", rel, err),
 		}
 	}
 
@@ -332,14 +352,14 @@ func checkReviewPass(dir string) CheckResult {
 		return CheckResult{
 			Name:    "review-pass",
 			Passed:  true,
-			Message: "Code review passed marker found",
+			Message: fmt.Sprintf("Code review passed marker found in %s", rel),
 		}
 	}
 
 	return CheckResult{
 		Name:    "review-pass",
 		Passed:  false,
-		Message: "No code-review passed marker found in tasks.md",
+		Message: fmt.Sprintf("No code-review passed marker found in %s", rel),
 	}
 }
 
@@ -360,10 +380,15 @@ func checkNotOnMain(dir string) CheckResult {
 				Message: "git is not available — run 'uf doctor' to check tool availability",
 			}
 		}
+		detail := err.Error()
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+			detail = strings.TrimSpace(string(exitErr.Stderr))
+		}
 		return CheckResult{
 			Name:    "not-on-main",
 			Passed:  false,
-			Message: fmt.Sprintf("Cannot determine git branch: %v (is this a git repository?)", err),
+			Message: fmt.Sprintf("Cannot determine git branch: %s (is this a git repository?)", detail),
 		}
 	}
 

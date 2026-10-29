@@ -97,14 +97,20 @@ Phases:
 
 Exit codes:
   0  All checks pass
-  1  One or more checks failed
+  1  One or more checks failed, or invalid arguments
   2  Internal error (unexpected filesystem failure)
 
 Coverage strategy detection (implement phase):
-  plan/tasks artifacts are scanned for a heading containing
-  'coverage' (case-insensitive), body text containing 'coverage
+  plan/tasks artifacts are scanned (case-insensitive) for a
+  heading containing 'coverage', body text containing 'coverage
   target', 'unit test', 'integration test', or 'e2e test', or a
   line matching coverage.*%.
+
+Artifact resolution:
+  Checks resolve artifacts from openspec/changes/* or
+  specs/* (first match, alphabetical). When multiple changes
+  exist, review and PR check messages name the resolved
+  tasks file.
 
 Use --format json for machine-readable output with provenance
 metadata (version, producer, timestamp, branch).`,
