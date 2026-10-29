@@ -32,7 +32,7 @@ output, but they answer different questions:
 - Modifying any artifacts or git state (read-only)
 - Checking tool availability (that is `doctor`'s job)
 - Enforcing code quality metrics (that is CI/Gaze's job)
-- Wiring into FullSend harnesses (separate change)
+- Wiring into FullSend harnesses (Tracked: #869)
 
 ## Decisions
 

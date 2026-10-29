@@ -60,7 +60,7 @@ checks derived from the constitution:
   by phase. Each check is a function returning a structured
   result.
 - **FullSend harnesses**: Will wire `uf gate --phase <phase>
-  --format json` as `validation_loop.script` (separate change)
+  --format json` as `validation_loop.script` (Tracked: #869)
 - **Pre-commit/pre-PR hooks**: Users can add `uf gate` to
   their hook scripts (documentation change)
 

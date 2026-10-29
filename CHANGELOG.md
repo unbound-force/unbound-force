@@ -1228,7 +1228,7 @@ Each entry follows the format: `- <change-name>: <summary>`.
   protection. JSON output includes provenance metadata
   per Constitution III. Three-tier exit codes (0/1/2).
   Follows the `internal/doctor/` package pattern.
-  (Spec: openspec/changes/uf-gate/, Part of: #514)
+  (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
 - fix-uf-finale-ci-poll-gh-schema: `uf_finale_ci_poll` now works
