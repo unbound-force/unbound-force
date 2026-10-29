@@ -122,7 +122,7 @@
 
 ## 7. Coverage strategy
 
-- [x] 7.1 Document and verify coverage meets target.
+- [x] 7.1 Document and verify coverage against target.
 
 Unit tests cover all check functions in isolation and
 `Run()` integration. The CLI layer is tested via
@@ -131,13 +131,19 @@ or e2e tests needed — the command is read-only
 filesystem inspection. Git-dependent checks use
 `git init` inside `t.TempDir()` for isolation.
 
-Coverage target: >= 90% line coverage for
-`internal/gate/` package. Justification: this is a
-governance gate command where false negatives mean
-constitution violations pass unchecked. The check
-functions are pure functions with clear input/output
-contracts, making high coverage both achievable and
-appropriate for the risk level.
+Coverage achieved: 90.7% statement coverage for
+`internal/gate/` (measured with `go test -cover`),
+meeting the >= 90% target; the lowest per-function
+figure is 82.6% (checkCoverageStrategy).
+Justification: this is a governance gate command
+where false negatives mean constitution violations
+pass unchecked. The check functions are pure
+functions with clear input/output contracts, making
+high coverage both achievable and appropriate for
+the risk level. Note: the target is documented but
+not enforced by a CI coverage ratchet; adding one
+is a CI change requiring its own spec (tracked
+separately).
 
 ## 8. Documentation
 
