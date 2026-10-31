@@ -53,7 +53,7 @@
   with null-model propagation; merged-result re-validation
   against the identical schema; empty and comments-only override
   no-ops; error messages name the whitelist.
-- [ ] 2.3 In the same module, implement `resolveSelection`
+- [x] 2.3 In the same module, implement `resolveSelection`
   (design D2, MM-FR-003): the fixed precedence chain — explicit
   `model` → explicit `profile` → explicit `pack` (validated:
   pack file exists AND is a `packs` key) → `agents:` pin →
