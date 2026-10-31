@@ -32,7 +32,7 @@
 
 ## 2. Model-matrix lib module — schema, loader, override, precedence
 
-- [ ] 2.1 Create `.opencode/lib/model-matrix.ts` (design D1):
+- [x] 2.1 Create `.opencode/lib/model-matrix.ts` (design D1):
   closed Zod schema for the v1 surface (`version`, `profiles`
   with optional `model`/`variant`, `packs`, `defaults` with the
   closed task-kind key set, `agents`, `classifier` structure
