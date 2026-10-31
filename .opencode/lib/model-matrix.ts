@@ -555,3 +555,402 @@ export async function loadModelMatrix(dependencies: ModelMatrixDependencies): Pr
 
   return { status: "ok", matrix }
 }
+
+// ── Selection precedence (design D2, MM-FR-003/MM-FR-004) ──────
+
+/** Default classifier confidence threshold when the matrix omits one (design D5). */
+export const DEFAULT_CONFIDENCE_THRESHOLD = 0.6
+
+/** Which classifier engine produced a winning cascade result (MM-FR-005 order). */
+export type ClassifierEngine = "agent" | "llm"
+
+/**
+ * Pre-computed classifier cascade outcome supplied to {@link resolveSelection}.
+ * Selection is a pure function (Constitution IV, design D5), so the cascade's
+ * engines — the hidden-subagent spawn and the LLM fetch — run before
+ * resolution and participate only as this value: the cascade (task 3.2)
+ * supplies the winning engine, pack, and confidence, or a not-run/failed
+ * state, and {@link resolveSelection} applies matrix-validity and threshold
+ * gating to whatever it receives.
+ */
+export type ClassifierOutcome =
+  /** The cascade did not run (static task kind, classifier disabled, or zero-config). */
+  | { readonly status: "not-run"; readonly reason?: string }
+  /** Every engine failed; `reason` names the engines attempted and why each failed. */
+  | { readonly status: "failed"; readonly reason: string }
+  /** A winning result: which engine produced it, its pack, and its confidence. */
+  | {
+      readonly status: "selected"
+      readonly engine: ClassifierEngine
+      readonly pack: string
+      readonly confidence: number
+    }
+
+/**
+ * Selection parameters as supplied by one delegation call (design D2).
+ * Parameter shapes are validated at the tool boundary (the delegation
+ * schema's model, variant, profile, and pack parameters); this module treats
+ * any non-undefined value as present.
+ */
+export interface SelectionInputs {
+  /** Explicit `model` parameter — a `provider/model` identity that wins outright (step 1). */
+  readonly model?: string
+  /** Explicit `variant` parameter, paired with `model` (step 1). */
+  readonly variant?: string
+  /** Explicit `profile` parameter naming a matrix capability (step 2). */
+  readonly profile?: string
+  /** Explicit `pack` parameter naming a `packs` key (step 3). */
+  readonly pack?: string
+  /** Delegation `checkpoint_step` task kind: `plan`, `tasks`, `implement`, or another/absent value. */
+  readonly checkpoint_step?: string
+  /** Delegated agent name, consulted for the `agents:` pin (step 4). */
+  readonly agent?: string
+}
+
+/** Stable failure codes for non-retryable selection validation failures (design D2). */
+export const SELECTION_FAILURE_CODES = ["MATRIX_NOT_CONFIGURED", "UNKNOWN_PROFILE", "INVALID_PACK"] as const
+
+/** Inferred union of the selection failure codes. */
+export type SelectionFailureCode = (typeof SELECTION_FAILURE_CODES)[number]
+
+/**
+ * Discriminated resolution outcome for one delegation's model selection: the
+ * resolved {@link SelectionResult} on success, or a non-retryable failure
+ * carrying a stable code and a message that names the offending value and its
+ * remediation — the `SKILL_NOT_FOUND` envelope pattern. Validation failures
+ * never resolve on retry, so the delegation tool fails the call pre-spawn
+ * with zero child sessions (design D2).
+ */
+export type SelectionResolution =
+  | { readonly ok: true; readonly selection: SelectionResult }
+  | {
+      readonly ok: false
+      readonly code: SelectionFailureCode
+      readonly error: string
+      readonly retryable: false
+    }
+
+/** Attempt outcome for a selected classifier result (internal to step 6). */
+type ClassifierAttempt =
+  | { readonly resolved: true; readonly result: SelectionResolution }
+  | { readonly resolved: false; readonly fallbackReason: string }
+
+/**
+ * Builds a host-fallback selection (MM-FR-003 step 7): no matrix model
+ * resolved, so the delegation tool introspects the parent session. The pack
+ * and capability stay recorded when a precedence step resolved them, keeping
+ * the fallback auditable (MM-FR-007).
+ * @param pack Selected or classified pack, when one participated.
+ * @param capability Resolved capability, when a step resolved one.
+ * @param fallbackReason Why host fallback occurred, when applicable.
+ * @param confidence Classifier confidence, when an accepted classifier
+ *   result resolved a model-less profile.
+ * @returns The host-fallback selection resolution.
+ */
+function hostSelection(
+  pack: string | null,
+  capability: string | null,
+  fallbackReason: string | null,
+  confidence: number | null = null,
+): SelectionResolution {
+  return {
+    ok: true,
+    selection: {
+      selection_source: "host",
+      pack,
+      capability,
+      model: null,
+      variant: null,
+      confidence,
+      fallback_reason: fallbackReason,
+    },
+  }
+}
+
+/**
+ * Resolves a capability through its profile (MM-FR-003: steps 2-6 resolve a
+ * capability first, then its profile). A profile carrying a model yields the
+ * given `source`; a model-less profile falls to host with the capability and
+ * pack still recorded for the audit trail. Closed-schema validation
+ * guarantees every mapped capability is an own property of `profiles`, so
+ * the lookup cannot miss.
+ * @param matrix The configured (non-empty) matrix.
+ * @param capability The capability a precedence step resolved.
+ * @param source The selection source recorded when the profile carries a model.
+ * @param pack The pack that produced the capability, when one participated.
+ * @param fallbackReason Prior fallback context (classifier failure) to
+ *   record alongside the profile outcome.
+ * @returns The resolved or host-fallback selection.
+ */
+function capabilitySelection(
+  matrix: ModelMatrix,
+  capability: string,
+  source: SelectionSource,
+  pack: string | null,
+  fallbackReason: string | null,
+): SelectionResolution {
+  const profile = matrix.profiles[capability]
+  if (profile.model !== undefined) {
+    return {
+      ok: true,
+      selection: {
+        selection_source: source,
+        pack,
+        capability,
+        model: profile.model,
+        variant: profile.variant ?? null,
+        confidence: null,
+        fallback_reason: fallbackReason,
+      },
+    }
+  }
+  const noModelReason = `profile "${capability}" carries no model`
+  return hostSelection(
+    pack,
+    capability,
+    fallbackReason !== null ? `${fallbackReason}; ${noModelReason}` : noModelReason,
+  )
+}
+
+/**
+ * Applies classifier gating to a selected cascade outcome (MM-FR-005): the
+ * pack must be a `packs` key of the configured matrix, and the confidence
+ * must meet the configured threshold (default 0.6). An accepted result
+ * resolves through the pack's profile — the same double duty as an explicit
+ * pack parameter; a discarded result reports the fallback reason for the
+ * static-default path so the fallback stays auditable (MM-FR-007).
+ * @param matrix The configured matrix supplying `packs` and the threshold.
+ * @param outcome The winning cascade outcome.
+ * @returns The resolved selection, or the fallback reason when discarded.
+ */
+function attemptClassifierSelection(
+  matrix: ModelMatrix,
+  outcome: Extract<ClassifierOutcome, { status: "selected" }>,
+): ClassifierAttempt {
+  const packs = matrix.packs ?? {}
+  if (!Object.hasOwn(packs, outcome.pack)) {
+    return {
+      resolved: false,
+      fallbackReason: `classifier pack "${outcome.pack}" is not a packs key in the configured matrix`,
+    }
+  }
+  const threshold = matrix.classifier?.confidence_threshold ?? DEFAULT_CONFIDENCE_THRESHOLD
+  if (outcome.confidence < threshold) {
+    return {
+      resolved: false,
+      fallbackReason: `classifier confidence ${outcome.confidence} is below the threshold ${threshold}`,
+    }
+  }
+  const capability = packs[outcome.pack]
+  const profile = matrix.profiles[capability]
+  if (profile.model !== undefined) {
+    return {
+      resolved: true,
+      result: {
+        ok: true,
+        selection: {
+          selection_source: outcome.engine === "agent" ? "classifier-agent" : "classifier-llm",
+          pack: outcome.pack,
+          capability,
+          model: profile.model,
+          variant: profile.variant ?? null,
+          confidence: outcome.confidence,
+          fallback_reason: null,
+        },
+      },
+    }
+  }
+  return {
+    resolved: true,
+    result: hostSelection(outcome.pack, capability, `profile "${capability}" carries no model`, outcome.confidence),
+  }
+}
+
+/**
+ * Renders the auditable fallback reason for a classifier outcome that did
+ * not yield a selection (MM-FR-007: fallbacks are recorded, never silent).
+ * @param outcome The not-run or failed cascade outcome.
+ * @returns The fallback reason recorded with the static fallback.
+ */
+function classifierFallbackReason(outcome: ClassifierOutcome): string {
+  if (outcome.status === "failed") {
+    return `classifier cascade failed: ${outcome.reason}`
+  }
+  if (outcome.status === "not-run" && outcome.reason !== undefined) {
+    return `classifier not run: ${outcome.reason}`
+  }
+  return "classifier not run"
+}
+
+/**
+ * Builds a non-retryable selection failure (design D2). The message names
+ * the offending value and its remediation — the `SKILL_NOT_FOUND` envelope
+ * pattern — so the delegation tool can fail the call pre-spawn with zero
+ * child sessions.
+ * @param code Stable failure code.
+ * @param error Message naming the failure and its remediation.
+ * @returns The discriminated failure resolution.
+ */
+function selectionFailure(code: SelectionFailureCode, error: string): SelectionResolution {
+  return { ok: false, code, error, retryable: false }
+}
+
+/**
+ * Renders a sorted, comma-joined name list for failure remediation text.
+ * @param names Capability or pack names to list.
+ * @returns The joined list, or "(none)" when empty.
+ */
+function nameList(names: readonly string[]): string {
+  return names.length > 0 ? [...names].sort().join(", ") : "(none)"
+}
+
+/**
+ * Resolves one delegation's model selection through the fixed precedence
+ * chain (design D2, MM-FR-003), stopping at the first step that yields:
+ *
+ * 1. an explicit `model` (with optional `variant`) — it needs no matrix;
+ * 2. an explicit `profile` naming a declared capability;
+ * 3. an explicit `pack` that is a `packs` key of the configured matrix;
+ * 4. an `agents:` pin for the delegated agent;
+ * 5. static `defaults:` by task kind — `plan`/`tasks` resolve statically
+ *    and never reach the classifier;
+ * 6. the classifier outcome for `implement` and unknown kinds, falling back
+ *    to the static `defaults` entry for the kind, else host;
+ * 7. host — a resolved profile without a model, or no matrix configured.
+ *
+ * Steps 2-6 resolve a capability first, then its profile; a resolved profile
+ * without a model falls to host (step 7) rather than continuing down the
+ * chain. Each step is validated only when reached, so parameters shadowed by
+ * a higher-precedence step are not validated. The function is pure — no
+ * filesystem, clock, network, or classifier invocation; the classifier
+ * participates only as the pre-computed {@link ClassifierOutcome}. An
+ * unknown explicit profile, an explicit pack that is not a `packs` key, or
+ * an explicit `profile`/`pack` with no matrix configured fails closed with
+ * a non-retryable error naming the remediation (MM-FR-003/MM-FR-004).
+ * @param matrix The loaded matrix, or null when none is configured. The
+ *   canonical no-op matrix (comments-only file) counts as not configured.
+ * @param inputs The delegation call's selection parameters.
+ * @param classifier The pre-computed classifier cascade outcome.
+ * @returns The discriminated selection resolution.
+ */
+export function resolveSelection(
+  matrix: ModelMatrix | null,
+  inputs: SelectionInputs,
+  classifier: ClassifierOutcome,
+): SelectionResolution {
+  // Step 1: an explicit model wins outright and needs no matrix (MM-FR-004).
+  if (inputs.model !== undefined) {
+    return {
+      ok: true,
+      selection: {
+        selection_source: "explicit-model",
+        pack: null,
+        capability: null,
+        model: inputs.model,
+        variant: inputs.variant ?? null,
+        confidence: null,
+        fallback_reason: null,
+      },
+    }
+  }
+
+  // Normalize the not-configured state (MM-FR-004): an absent matrix (null)
+  // and the canonical no-op matrix (comments-only file) behave identically,
+  // and the closed schema requires at least one profile for any other
+  // matrix — so an empty `profiles` map exactly identifies "no matrix is
+  // configured" regardless of which shape the caller passed.
+  const configured = matrix !== null && Object.keys(matrix.profiles).length > 0 ? matrix : null
+
+  // Step 2: an explicit profile must name a declared capability, or the call
+  // fails closed pre-spawn (one tool round-trip, zero child sessions).
+  if (inputs.profile !== undefined) {
+    if (configured === null) {
+      return selectionFailure(
+        "MATRIX_NOT_CONFIGURED",
+        `profile "${inputs.profile}" cannot be used: no model matrix is configured at ${MODEL_MATRIX_PATH}. ` +
+          `Remediation: declare the profile under profiles in ${MODEL_MATRIX_PATH}, or omit the profile parameter; ` +
+          "retrying will not fix this.",
+      )
+    }
+    if (!Object.hasOwn(configured.profiles, inputs.profile)) {
+      return selectionFailure(
+        "UNKNOWN_PROFILE",
+        `profile "${inputs.profile}" is not a capability declared in the model matrix. ` +
+          `Configured capabilities: ${nameList(Object.keys(configured.profiles))}. ` +
+          "Remediation: pass a declared capability name, or omit the profile parameter; retrying will not fix this.",
+      )
+    }
+    return capabilitySelection(configured, inputs.profile, "explicit-profile", null, null)
+  }
+
+  // Step 3: an explicit pack must be a `packs` key of the configured matrix.
+  // Pack-file existence was already enforced per key at load time (the
+  // loader's missingPackFiles check, MM-FR-001), so validation here reduces
+  // to the key-membership test against the passed matrix.
+  if (inputs.pack !== undefined) {
+    if (configured === null) {
+      return selectionFailure(
+        "MATRIX_NOT_CONFIGURED",
+        `pack "${inputs.pack}" cannot be used: no model matrix is configured at ${MODEL_MATRIX_PATH}. ` +
+          `Remediation: map the pack under packs in ${MODEL_MATRIX_PATH}, or omit the pack parameter; ` +
+          "retrying will not fix this.",
+      )
+    }
+    const packs = configured.packs ?? {}
+    if (!Object.hasOwn(packs, inputs.pack)) {
+      return selectionFailure(
+        "INVALID_PACK",
+        `pack "${inputs.pack}" is not a packs key in the model matrix. ` +
+          `Configured packs: ${nameList(Object.keys(packs))}. ` +
+          `Remediation: pass a pack mapped under packs in ${MODEL_MATRIX_PATH}, or omit the pack parameter; ` +
+          "retrying will not fix this.",
+      )
+    }
+    return capabilitySelection(configured, packs[inputs.pack], "explicit-pack", inputs.pack, null)
+  }
+
+  // Step 4: an `agents:` pin for the delegated agent.
+  if (configured !== null && inputs.agent !== undefined) {
+    const pins = configured.agents ?? {}
+    if (Object.hasOwn(pins, inputs.agent)) {
+      return capabilitySelection(configured, pins[inputs.agent], "agent-pin", null, null)
+    }
+  }
+
+  const kind = inputs.checkpoint_step
+
+  // Step 5: `plan`/`tasks` resolve statically from `defaults` and never
+  // reach the classifier (MM-FR-003 scenario: classifier not invoked).
+  if (kind === "plan" || kind === "tasks") {
+    if (configured !== null) {
+      const capability = configured.defaults?.[kind]
+      if (capability !== undefined) {
+        return capabilitySelection(configured, capability, "default-kind", null, null)
+      }
+    }
+    return hostSelection(null, null, null)
+  }
+
+  // Step 6: the classifier cascade for `implement` and unknown kinds
+  // (MM-FR-005). With no matrix there is no static default and no classifier
+  // participation — plain host, zero-config semantics (MM-FR-004).
+  if (configured === null) {
+    return hostSelection(null, null, null)
+  }
+  const attempt: ClassifierAttempt =
+    classifier.status === "selected"
+      ? attemptClassifierSelection(configured, classifier)
+      : { resolved: false, fallbackReason: classifierFallbackReason(classifier) }
+  if (attempt.resolved) {
+    return attempt.result
+  }
+  // Static fallback: the `defaults` entry for the kind when present (only
+  // `implement` can have one — unknown kinds are outside the closed key set).
+  if (kind === "implement") {
+    const staticCapability = configured.defaults?.implement
+    if (staticCapability !== undefined) {
+      return capabilitySelection(configured, staticCapability, "default-kind", null, attempt.fallbackReason)
+    }
+  }
+  return hostSelection(null, null, `${attempt.fallbackReason}; no static default for task kind "${kind ?? "unknown"}"`)
+}

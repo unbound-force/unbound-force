@@ -1,14 +1,16 @@
 /**
  * Tests for the model-matrix lib module (OpenSpec change
- * model-matrix-delegation, tasks 2.1 + 2.2 — MM-FR-001, MM-FR-002, and
- * MM-FR-004 scenarios, design D1/D3/D4/D8).
+ * model-matrix-delegation, tasks 2.1-2.3 — MM-FR-001 through MM-FR-004
+ * scenarios, design D1/D2/D3/D4/D8).
  *
  * Task 2.1 surface: the closed v1 Zod schema, the tristate loader with
  * injected read/parse/existence seams, and pack existence validation.
  * Task 2.2 surface: the override whitelist, nested-path merge, null-model
  * propagation, merged-result re-validation, and the loader override wiring.
- * The precedence-chain and classifier scenarios from task 2.4 land with
- * tasks 2.3+ and extend this file.
+ * Task 2.3 surface: the resolveSelection precedence chain — one proof test
+ * per chain step and failure mode.
+ * Task 2.4 extends this file with exhaustive MM-FR-003/MM-FR-004 scenario
+ * coverage and the classifier cascade tests (task 3.3+).
  */
 import { describe, expect, it } from "vitest"
 
@@ -22,7 +24,9 @@ import {
   loadModelMatrix,
   mergeOverride,
   parseModelMatrix,
+  resolveSelection,
   validateModelMatrixOverride,
+  type ClassifierOutcome,
   type ModelMatrixDependencies,
 } from "../lib/model-matrix.js"
 
@@ -673,5 +677,226 @@ describe("selection audit surface (design D7, MM-FR-007)", () => {
       "classifier-llm",
       "host",
     ])
+  })
+})
+
+describe("resolveSelection precedence chain (MM-FR-003/MM-FR-004, design D2)", () => {
+  /** Matrix with populated profiles, an agent pin, and the starter defaults and packs. */
+  const selectionMatrix = parse({
+    ...STARTER_MATRIX,
+    profiles: {
+      "spec-authoring": { model: "provider/spec-model" },
+      "code-writing": { model: "provider/code-model" },
+      "content-writing": { model: "provider/content-model" },
+      mechanical: {},
+    },
+    agents: { "cobalt-crush-dev": "content-writing" },
+  })
+
+  /** Cascade outcome for calls where no classifier participated. */
+  const notRun: ClassifierOutcome = { status: "not-run" }
+
+  it("should let an explicit model win outright over pins and defaults", () => {
+    const result = resolveSelection(
+      selectionMatrix,
+      { model: "provider/explicit-model", variant: "fast", checkpoint_step: "implement", agent: "cobalt-crush-dev" },
+      { status: "selected", engine: "agent", pack: "go", confidence: 0.9 },
+    )
+    expect(result).toEqual({
+      ok: true,
+      selection: {
+        selection_source: "explicit-model",
+        pack: null,
+        capability: null,
+        model: "provider/explicit-model",
+        variant: "fast",
+        confidence: null,
+        fallback_reason: null,
+      },
+    })
+  })
+
+  it("should let an explicit profile beat an explicit pack", () => {
+    const result = resolveSelection(selectionMatrix, { profile: "code-writing", pack: "content" }, notRun)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("explicit-profile")
+      expect(result.selection.capability).toBe("code-writing")
+      expect(result.selection.model).toBe("provider/code-model")
+      expect(result.selection.pack).toBeNull()
+    }
+  })
+
+  it("should resolve an explicit pack through its mapped profile", () => {
+    const result = resolveSelection(selectionMatrix, { pack: "go" }, notRun)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("explicit-pack")
+      expect(result.selection.pack).toBe("go")
+      expect(result.selection.capability).toBe("code-writing")
+      expect(result.selection.model).toBe("provider/code-model")
+    }
+  })
+
+  it("should let an agent pin beat the defaults for implement", () => {
+    const result = resolveSelection(
+      selectionMatrix,
+      { checkpoint_step: "implement", agent: "cobalt-crush-dev" },
+      { status: "selected", engine: "llm", pack: "go", confidence: 0.9 },
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("agent-pin")
+      expect(result.selection.capability).toBe("content-writing")
+      expect(result.selection.model).toBe("provider/content-model")
+    }
+  })
+
+  it("should resolve plan and tasks statically, never consulting the classifier", () => {
+    for (const checkpoint_step of ["plan", "tasks"] as const) {
+      const result = resolveSelection(
+        selectionMatrix,
+        { checkpoint_step },
+        { status: "selected", engine: "agent", pack: "go", confidence: 0.99 },
+      )
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.selection.selection_source).toBe("default-kind")
+        expect(result.selection.capability).toBe("spec-authoring")
+        expect(result.selection.model).toBe("provider/spec-model")
+        expect(result.selection.fallback_reason).toBeNull()
+      }
+    }
+  })
+
+  it("should resolve implement and unknown kinds through the classifier outcome", () => {
+    const agentEngine = resolveSelection(
+      selectionMatrix,
+      { checkpoint_step: "implement" },
+      { status: "selected", engine: "agent", pack: "go", confidence: 0.9 },
+    )
+    expect(agentEngine.ok).toBe(true)
+    if (agentEngine.ok) {
+      expect(agentEngine.selection.selection_source).toBe("classifier-agent")
+      expect(agentEngine.selection.pack).toBe("go")
+      expect(agentEngine.selection.capability).toBe("code-writing")
+      expect(agentEngine.selection.model).toBe("provider/code-model")
+      expect(agentEngine.selection.confidence).toBe(0.9)
+    }
+    const llmEngine = resolveSelection(
+      selectionMatrix,
+      { checkpoint_step: "analyze" },
+      { status: "selected", engine: "llm", pack: "typescript", confidence: 0.8 },
+    )
+    expect(llmEngine.ok).toBe(true)
+    if (llmEngine.ok) {
+      expect(llmEngine.selection.selection_source).toBe("classifier-llm")
+      expect(llmEngine.selection.pack).toBe("typescript")
+      expect(llmEngine.selection.model).toBe("provider/code-model")
+      expect(llmEngine.selection.confidence).toBe(0.8)
+    }
+  })
+
+  it("should fall back to the static default when the classifier is below threshold or not run", () => {
+    const belowThreshold = resolveSelection(
+      selectionMatrix,
+      { checkpoint_step: "implement" },
+      { status: "selected", engine: "agent", pack: "go", confidence: 0.4 },
+    )
+    expect(belowThreshold.ok).toBe(true)
+    if (belowThreshold.ok) {
+      expect(belowThreshold.selection.selection_source).toBe("default-kind")
+      expect(belowThreshold.selection.model).toBe("provider/code-model")
+      expect(belowThreshold.selection.fallback_reason).toContain("below the threshold 0.6")
+    }
+    const skipped = resolveSelection(selectionMatrix, { checkpoint_step: "implement" }, notRun)
+    expect(skipped.ok).toBe(true)
+    if (skipped.ok) {
+      expect(skipped.selection.selection_source).toBe("default-kind")
+      expect(skipped.selection.fallback_reason).toContain("classifier not run")
+    }
+  })
+
+  it("should fall back to host when the classifier fails with no static default for the kind", () => {
+    const minimal = parse({ version: 1, profiles: { "code-writing": { model: "provider/code-model" } } })
+    const result = resolveSelection(minimal, { checkpoint_step: "deploy" }, { status: "failed", reason: "agent timeout" })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("host")
+      expect(result.selection.model).toBeNull()
+      expect(result.selection.fallback_reason).toContain("classifier cascade failed: agent timeout")
+      expect(result.selection.fallback_reason).toContain('no static default for task kind "deploy"')
+    }
+  })
+
+  it("should fall to host with a fallback reason when the resolved profile carries no model", () => {
+    const result = resolveSelection(selectionMatrix, { profile: "mechanical" }, notRun)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("host")
+      expect(result.selection.capability).toBe("mechanical")
+      expect(result.selection.model).toBeNull()
+      expect(result.selection.fallback_reason).toContain('profile "mechanical" carries no model')
+    }
+  })
+
+  it("should fail closed naming the profile when it is not declared", () => {
+    const result = resolveSelection(selectionMatrix, { profile: "no-such-capability" }, notRun)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("UNKNOWN_PROFILE")
+      expect(result.retryable).toBe(false)
+      expect(result.error).toContain('profile "no-such-capability" is not a capability declared in the model matrix')
+      expect(result.error).toContain("Configured capabilities: code-writing, content-writing, mechanical, spec-authoring")
+      expect(result.error).toContain("retrying will not fix this")
+    }
+  })
+
+  it("should fail closed naming the pack when it is not a packs key", () => {
+    const result = resolveSelection(selectionMatrix, { pack: "no-such-pack" }, notRun)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("INVALID_PACK")
+      expect(result.retryable).toBe(false)
+      expect(result.error).toContain('pack "no-such-pack" is not a packs key in the model matrix')
+      expect(result.error).toContain("Configured packs: content, go, meta-prompt, python, typescript")
+    }
+  })
+
+  it("should fail closed stating no matrix is configured for explicit profile and pack", () => {
+    for (const matrix of [null, EMPTY_MODEL_MATRIX]) {
+      for (const inputs of [{ profile: "code-writing" }, { pack: "go" }]) {
+        const result = resolveSelection(matrix, inputs, notRun)
+        expect(result.ok).toBe(false)
+        if (!result.ok) {
+          expect(result.code).toBe("MATRIX_NOT_CONFIGURED")
+          expect(result.retryable).toBe(false)
+          expect(result.error).toContain("no model matrix is configured")
+          expect(result.error).toContain(MODEL_MATRIX_PATH)
+        }
+      }
+    }
+  })
+
+  it("should proceed on an explicit model without a matrix and host on zero params", () => {
+    const explicit = resolveSelection(null, { model: "provider/explicit-model" }, notRun)
+    expect(explicit.ok).toBe(true)
+    if (explicit.ok) {
+      expect(explicit.selection.selection_source).toBe("explicit-model")
+      expect(explicit.selection.model).toBe("provider/explicit-model")
+    }
+    const zeroParams = resolveSelection(null, {}, notRun)
+    expect(zeroParams.ok).toBe(true)
+    if (zeroParams.ok) {
+      expect(zeroParams.selection.selection_source).toBe("host")
+      expect(zeroParams.selection.model).toBeNull()
+      expect(zeroParams.selection.fallback_reason).toBeNull()
+    }
+    const noOpMatrix = resolveSelection(EMPTY_MODEL_MATRIX, {}, notRun)
+    expect(noOpMatrix.ok).toBe(true)
+    if (noOpMatrix.ok) {
+      expect(noOpMatrix.selection.selection_source).toBe("host")
+      expect(noOpMatrix.selection.fallback_reason).toBeNull()
+    }
   })
 })
