@@ -36,20 +36,37 @@ surface MUST comprise:
   entries — they are never the primary capability of a task;
 - `defaults` — a closed key set mapping task kind to capability
   (`plan` and `tasks` MUST map to the spec-authoring capability;
-  `implement` MAY map to a capability). Unknown task kinds MUST
-  fail validation;
+  `implement` MAY map to a capability — consulted only as the
+  classifier cascade's static fallback per MM-FR-003, never as
+  a short-circuit ahead of the classifier). Unknown task kinds
+  MUST fail validation;
 - `agents` — optional per-agent capability pins; every key MUST
   name a non-reviewer (non-`divisor-`) agent and every value MUST
   name a present profile;
 - `classifier` — structure only, no model strings in tracked
   config: `enabled`, `agent`, `agent_timeout_ms`, `llm`
-  (endpoint/model/apiKey structure — populated only via the
-  override file), and `confidence_threshold`.
+  (endpoint/model/apiKey/`request_timeout_ms` structure —
+  populated only via the override file), and
+  `confidence_threshold`.
 
 The starter capability set is `spec-authoring`, `code-writing`,
 `content-writing`, and `mechanical`; additional capabilities MUST
 be expressible by adding `profiles` and `packs` entries with no
 code changes.
+
+The loader MUST enforce the tracked-role population rule at
+load time, separately from schema validation: when the tracked
+file itself carries a populated `classifier.llm` value — any
+non-empty `endpoint`, `model`, `apiKey`, or `request_timeout_ms`
+entry — validation MUST fail closed with an error naming
+`.uf/model-matrix.override.yaml` as the remediation. The rule
+is role-aware by necessity: the identical schema accepts
+populated `classifier.llm` values in merged views (override
+values legitimately populate those paths, MM-FR-002), so the
+population check runs against the tracked file before the
+merge, never against the merged result — schema validation
+alone cannot distinguish a tracked file with committed
+credentials from a legitimate merged view.
 
 #### Scenario: Starter tracked matrix validates
 
@@ -92,6 +109,23 @@ code changes.
   new capability
 - **THEN** selection resolves through the new profile with no
   code changes
+
+#### Scenario: Tracked file with populated LLM credentials
+fails load
+
+- **GIVEN** a tracked `.uf/model-matrix.yaml` whose
+  `classifier.llm` carries a populated `endpoint`, `model`, or
+  `apiKey` value
+- **WHEN** the tracked file is loaded and validated
+- **THEN** validation fails closed naming
+  `.uf/model-matrix.override.yaml` as the remediation and no
+  merged configuration is produced
+
+#### Scenario: Profile count outside 1–32 fails
+
+- **GIVEN** a matrix declaring zero profiles or 33 profiles
+- **WHEN** the matrix is validated
+- **THEN** validation fails closed naming the 1–32 entry bound
 
 ### Requirement: Gitignored Override File
 
@@ -179,14 +213,23 @@ selection:
 1. an explicit `model` parameter (with optional `variant`);
 2. an explicit `profile` parameter naming a capability whose
    profile carries a model;
-3. an explicit `pack` parameter validated per MM-FR-004 whose
-   mapped profile carries a model;
+3. an explicit `pack` parameter (validated per the
+   pack-resolution contract in specs/unleash/spec.md,
+   UF-FR-002 — the pack file exists under
+   `.opencode/uf/packs/` and is a `packs` key in the loaded
+   matrix) whose mapped profile carries a model;
 4. an `agents:` pin for the delegated agent;
-5. static `defaults:` by task kind (`checkpoint_step` `plan` or
-   `tasks` resolves to the spec-authoring capability;
-   `implement` and unknown kinds proceed to step 6);
+5. static `defaults:` by task kind — `checkpoint_step` `plan`
+   or `tasks` resolves to the spec-authoring capability;
+   `implement` and unknown kinds proceed to step 6 (a
+   configured `defaults.implement` MUST NOT short-circuit the
+   cascade: it is consulted only as the cascade's static
+   fallback);
 6. the classifier cascade (MM-FR-005) for `implement` and
-   unknown task kinds;
+   unknown task kinds — a successful classification wins over
+   `defaults.implement`; a cascade that yields no selection
+   falls back to the static `defaults` entry for the task kind
+   when present, before step 7;
 7. the host model — the resolved profile lacks a model, or no
    matrix is present.
 
@@ -265,6 +308,30 @@ closed with a non-retryable error naming the remediation.
 - **THEN** the call fails with a non-retryable error naming the
   unknown profile and no child session is spawned
 
+#### Scenario: Classifier wins over a configured
+defaults.implement
+
+- **GIVEN** a loaded matrix whose `defaults` map `implement` to
+  `code-writing` and whose `packs` map `typescript` to
+  `code-writing`
+- **AND** the classifier returns a valid above-threshold result
+  naming `typescript`
+- **WHEN** an `implement` delegation executes
+- **THEN** the classifier's `typescript` pack wins — not the
+  static `defaults.implement` mapping — and `selection_source`
+  records `classifier-agent` or `classifier-llm`
+
+#### Scenario: defaults.implement serves as the classifier
+fallback
+
+- **GIVEN** a loaded matrix whose `defaults` map `implement` to
+  `code-writing`
+- **AND** both classifier engines fail
+- **WHEN** an `implement` delegation executes
+- **THEN** selection resolves through the `code-writing`
+  profile, `selection_source` records `default-kind`, and the
+  audit trail records the classifier fallback reason
+
 ### Requirement: Zero-Config No-Op
 
 **ID: MM-FR-004** This requirement MUST be satisfied.
@@ -273,9 +340,13 @@ When `.uf/model-matrix.yaml` is absent, delegation MUST behave
 identically to the pre-change tool: the child model resolves from
 the parent session via host introspection, no matrix-related
 errors or warnings are raised, no override file is read, and the
-classifier is not invoked. A present-but-empty matrix file
-(comments only) MUST be treated as a valid no-op matrix: the
-precedence chain falls through every step to the host model. An
+classifier is not invoked. A present file that parses to no keys
+— empty or comments-only — is the single documented exception to
+MM-FR-001's closed v1 surface: it MUST be treated as a valid
+no-op matrix and the precedence chain falls through every step
+to the host model. A present file carrying at least one key MUST
+satisfy MM-FR-001's closed surface in full and fails closed
+otherwise — a partial surface is not a no-op. An
 explicit `model`, `profile`, or `pack` parameter on a call with
 no matrix present MUST still validate: `model` proceeds (it needs
 no matrix); `profile` and `pack` fail closed with a non-retryable
@@ -323,7 +394,10 @@ result MUST fall back to the static default for the task kind
 audit trail MUST record the fallback. Classifier results MUST be
 cached keyed by the SHA-256 of the feature dir, prompt, and agent
 name, with a bounded cache size; a cache hit MUST NOT re-invoke
-either engine.
+either engine. The cache belongs to the cascade instance —
+constructed per delegation-tool plugin instance, never
+module-level state shared across instances — so concurrent
+sessions and tests share no mutable cache.
 
 The agent engine MUST be a hidden subagent
 (`.opencode/agents/model-matrix-classifier.md`, mode `subagent`,
@@ -333,7 +407,12 @@ existing code with tools, then responds with ONLY a JSON object
 `{"pack": "<name>", "confidence": <0.0-1.0>, "reasoning":
 "<optional>"}` — no markdown fences, no prose, never questions.
 The agent engine run MUST be bounded by the configured
-`agent_timeout_ms`. The child session inherits the session model
+`agent_timeout_ms`. When `agent_timeout_ms` is absent the bound
+MUST default to 45,000 ms; when `confidence_threshold` is
+absent the gate MUST default to 0.6; the result cache MUST be
+bounded at 128 entries (a named constant, not
+matrix-configurable in v1). The child session inherits the
+session model
 hierarchy (no endpoint configuration).
 
 #### Scenario: Agent engine selects an implement pack
@@ -360,6 +439,17 @@ hierarchy (no endpoint configuration).
 - **THEN** the LLM engine is consulted next, and if it also
   fails, the static default is used — delegation is never
   blocked
+
+#### Scenario: LLM engine result wins with classifier-llm
+provenance
+
+- **GIVEN** the agent engine times out and an LLM engine
+  configured via the override returns
+  `{"pack": "typescript", "confidence": 0.8}` above threshold
+- **WHEN** the cascade completes
+- **THEN** the `typescript` pack's profile model is used, the
+  pack directive renders, and `selection_source` records
+  `classifier-llm`
 
 #### Scenario: Classifier names a matrix-invalid pack
 
@@ -394,15 +484,33 @@ The classifier LLM engine MUST issue a chat-completions POST with
 `temperature: 0` and `response_format: {type: "json_object"}`,
 retrying once without the `response_format` field when the
 endpoint rejects it with HTTP 400. The request MUST be bounded by
-a timeout enforced via AbortSignal. The engine MUST interpolate
+a timeout enforced via AbortSignal — the configured
+`classifier.llm.request_timeout_ms`, defaulting to 10,000 ms
+when absent. The engine MUST interpolate
 the apiKey from an `{env:VAR}` reference (never a literal key)
-and MUST reject a configured literal apiKey. All LLM endpoint
-configuration (endpoint URL, model, apiKey reference) MUST live
+and MUST reject a configured literal apiKey. An `{env:VAR}`
+reference naming an unset variable MUST be treated as
+unconfigured for that invocation: the LLM engine is skipped (the
+cascade falls back statically), the skip reason is recorded in
+the audit trail, and the engine MUST NOT issue a request with an
+empty or placeholder credential. All LLM endpoint
+configuration (endpoint URL, model, apiKey reference,
+`request_timeout_ms`) MUST live
 only in the gitignored override file under `classifier.llm.*`;
 the tracked matrix carries `classifier.llm` structure only. When
 `classifier.llm` carries no endpoint configuration, the LLM
 engine MUST be skipped (agent engine result or static fallback
 applies).
+
+The classification prompt carries task and command descriptions
+— content that may embed untrusted issue text routed from tier
+routing — so issuing the request transmits that content to the
+configured endpoint, and the override configuration is the trust
+boundary for the destination. The endpoint MUST use the `https`
+scheme, or `http` with a loopback host (`localhost`,
+`127.0.0.1`, `[::1]` — local endpoints such as Ollama); any
+other `http` endpoint MUST fail endpoint validation with a
+non-retryable error before any request is issued.
 
 #### Scenario: Env-interpolated apiKey
 
@@ -434,6 +542,15 @@ applies).
 - **WHEN** the agent engine fails
 - **THEN** the cascade falls back statically without attempting
   any network call
+
+#### Scenario: Non-loopback http endpoint is rejected
+
+- **GIVEN** an override configuring
+  `classifier.llm.endpoint: "http://api.example.com/v1"`
+- **WHEN** the LLM engine validates its configuration
+- **THEN** it fails closed with a non-retryable error requiring
+  an `https` endpoint (or an `http` loopback host) and no
+  request is issued
 
 ### Requirement: Selection Audit Trail
 

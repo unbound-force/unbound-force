@@ -8,6 +8,13 @@
   parallel workers will cause merge conflicts.
   Tasks without [P] run sequentially first, then [P]
   tasks run in parallel.
+  Phase checkpoints (MP-018): every phase below is terminated
+  by the /uf.unleash implement-phase checkpoint — a hard-gate
+  pre-flight run of the full detected CI/local suite
+  (.opencode/commands/uf.unleash.md Step 5) — and the next
+  phase MUST NOT begin while that checkpoint fails. Tasks
+  whose text carries an explicit verification command express
+  the same gate in-plan.
 -->
 
 ## 1. Meta-prompt convention pack (#888)
@@ -29,6 +36,13 @@
   questions. This task precedes the tracked matrix (task 4.1)
   because the starter `packs:` mapping names `meta-prompt` and
   pack-existence validation (MM-FR-001) requires the file.
+  Landing the pack also carries its two test-registry ripples
+  (design D9 records the exemption decisions):
+  `internal/schemas/packvalidator_test.go` (skip meta-prompt.md
+  in TestValidateConventionPack_AllPacksValid, mirroring the
+  review-voice.md precedent) and
+  `internal/scaffold/scaffold_test.go` (knownNonEmbeddedFiles
+  entry, mirroring the determinism.md governance precedent).
 
 ## 2. Model-matrix lib module — schema, loader, override, precedence
 
@@ -64,25 +78,41 @@
   I/O. Unknown explicit profile, invalid explicit pack, or
   explicit profile/pack with no matrix configured fail closed
   with non-retryable errors naming the remediation.
-- [ ] 2.4 Create `.opencode/test/model-matrix.test.ts` unit
-  tests: schema closed-input rejection (unknown root/nested
-  keys, unknown `defaults` kind, `packs` key naming a
-  nonexistent pack, `packs` value naming an absent profile);
-  loader absent/ok/invalid tristate; override whitelist
-  violations fail closed naming the whitelist (structural
-  `classifier.enabled` rejected, `classifier.llm.*` accepted);
-  null-model propagation; empty/comments-only no-op; precedence
-  order scenarios incl. explicit-model-wins, profile-beats-pack,
+- [ ] 2.4 Reconcile `.opencode/test/model-matrix.test.ts` with
+  the plan of record: the file was created with tasks 2.1-2.3
+  and already carries most of the enumerated coverage — this
+  task verifies every enumerated case exists, corrects the
+  file-header task attribution to name task 2.4 (the classifier
+  tests live in task 3.3's separate file), and adds the missing
+  rows: boundary rows for the profile-count bound (0-profile
+  and 33-profile matrices rejected; 1 and 32 accepted),
+  tracked-role credential-population rejection (a tracked file
+  with populated `classifier.llm` values fails load naming the
+  override file), the comments-only tracked file as a valid
+  no-op, plus the enumerated coverage — schema closed-input
+  rejection (unknown root/nested keys, unknown `defaults` kind,
+  `packs` key naming a nonexistent pack, `packs` value naming
+  an absent profile); loader absent/ok/invalid tristate;
+  override whitelist violations fail closed naming the
+  whitelist (structural `classifier.enabled` rejected,
+  `classifier.llm.*` accepted); null-model propagation;
+  empty/comments-only override no-op; precedence order
+  scenarios incl. explicit-model-wins, profile-beats-pack,
   agent-pin-beats-defaults, plan/tasks static resolution,
-  profile-without-model → host, unknown profile fail-closed,
-  explicit profile with no matrix fail-closed (MM-FR-001
-  through MM-FR-004 scenarios).
-- [ ] 2.5 [P] Add the JSON-Schema cross-validation harness task
-  asset: a test that validates every `schemas/model-matrix/
+  classifier-wins-over-defaults.implement,
+  defaults.implement-as-fallback, profile-without-model → host,
+  unknown profile fail-closed, explicit profile with no matrix
+  fail-closed (MM-FR-001 through MM-FR-004 scenarios). Run the
+  file's tests via `make plugin-test`.
+- [ ] 2.5 Add the JSON-Schema cross-validation harness
+  `.opencode/test/model-matrix-schema.test.ts`: a test that
+  validates every `schemas/model-matrix/
   samples/` fixture against `v1.schema.json` AND against the
   Zod schema, asserting identical verdicts (design D3). The
   fixtures themselves land with task 4.2; this harness may land
-  first with the valid-matrix fixture only.
+  first with the valid-matrix fixture only. Not [P]: it
+  cross-validates against the Zod schema authored by task 2.1
+  in the same phase (MP-017 rule (b)).
 
 ## 3. Classifier cascade
 
@@ -103,8 +133,11 @@
   (default 45_000); an LLM engine with an injectable `fetch`
   issuing the chat-completions POST (`temperature: 0`,
   `response_format: {type: "json_object"}` with one 400-retry
-  without the field, AbortSignal request timeout, apiKey
-  interpolated from `{env:VAR}` with literal-key rejection,
+  without the field, AbortSignal request timeout
+  (`classifier.llm.request_timeout_ms`, default 10_000), apiKey
+  interpolated from `{env:VAR}` with literal-key rejection and
+  unset-variable skip (engine skipped, never an empty
+  credential), https-or-loopback endpoint validation,
   endpoint/model/apiKey read only from the override's
   `classifier.llm.*`, unconfigured = skipped); confidence
   threshold gating (default 0.6); matrix-validity check of the
@@ -113,7 +146,9 @@
   fences-wrapped JSON) → next engine or static fallback; and
   the in-process result cache keyed by SHA-256 of
   (feature_dir + prompt + agent), capped at a 128-entry named
-  constant, cache hit skips both engines. Classifier failure
+  constant, cache hit skips both engines, instantiated per
+  cascade instance (never module-level state) and injectable
+  for tests. Classifier failure
   never throws to the caller.
 - [ ] 3.3 Create `.opencode/test/model-matrix-classifier.test.ts`
   unit tests with mocked seams: agent engine success (valid
@@ -125,7 +160,9 @@
   matrix-invalid pack rejected; `{env:VAR}` interpolation and
   literal-key rejection; 400-retry without `response_format`;
   unconfigured `classifier.llm` skips the network entirely;
-  cache hit skips engines; cache cap eviction (MM-FR-005/006
+  cache hit skips engines; cache cap eviction — cache tests
+  construct isolated cascade instances sharing no module-level
+  state (TC-002/TC-004) (MM-FR-005/006
   scenarios).
 
 ## 4. Tracked matrix and schema registry
@@ -145,14 +182,17 @@
   whitelist, and the version history, and `samples/` fixtures —
   valid starter matrix, valid minimal matrix, and invalid
   fixtures (unknown root field, unknown `defaults` kind,
-  nonexistent pack, absent profile value, whitelist-violating
-  override with a structural key, whitelist-violating override
+  nonexistent pack, absent profile value, 33-profile count
+  violation, tracked matrix with populated `classifier.llm`
+  values, whitelist-violating override
+  with a structural key, whitelist-violating override
   with `classifier.enabled`). All fixtures must pass the task
   2.5 cross-validation harness.
-- [ ] 4.3 [P] Deploy the byte-identical registry copy at
+- [ ] 4.3 Deploy the byte-identical registry copy at
   `.uf/schemas/model-matrix/` and the embedded scaffold mirror
   at `internal/scaffold/assets/uf/schemas/model-matrix/`
-  (verify with `diff -rq`).
+  (verify with `diff -rq`). Not [P]: deploys content created by
+  task 4.2 in the same phase (MP-017 rule (b)).
 - [ ] 4.4 [P] Add `.uf/model-matrix.override.yaml` to the root
   `.gitignore` under the Unbound Force section.
 
@@ -160,8 +200,10 @@
 
 - [ ] 5.1 In `.opencode/plugins/uf-workflow/index.ts`, extend
   `DelegateCommandInputSchema` and the tool args with
-  `model` (provider/model identity, validated shape),
-  `variant`, `profile` (1–128 chars), and `pack` (1–128 chars),
+  `model` (provider/model identity, non-empty), `variant`,
+  `profile` (1–128 chars), and `pack` (1–128 chars) — the
+  validated shape is defined by the unleash delta (UF-FR-002);
+  this schema mirrors it —
   each with descriptions documenting the precedence order; add
   the mutual-independence refinement notes (selection params
   are orthogonal to classification params).
@@ -205,7 +247,20 @@
   records it (AC7); every selection records `selection_source`
   and the resolved model (AC8); matrix-model resolution
   proceeds when host introspection would fail (no
-  `HOST_MODEL_UNAVAILABLE`).
+  `HOST_MODEL_UNAVAILABLE`); input-shape boundary rows per
+  UF-FR-002 — `profile`/`pack` at exactly 1 and 128 chars
+  accepted, empty-string and 129-char values rejected
+  non-retryably pre-spawn.
+- [ ] 5.6 Seam verification (DE-007): write a test proving the
+  three layer surfaces stay in sync — (a) the registration
+  surface: `createDelegateCommandTool` advertises
+  model/profile/pack in its args and `DelegateCommandInputSchema`
+  accepts them; (b) the documented output shape: the audit
+  fields recorded by task 5.4 appear in the checkpoint data
+  exactly as documented in MM-FR-007; (c) write→read round-trips:
+  a matrix written by `schemas/model-matrix/samples/`-shaped
+  content loads through `loadModelMatrix` and round-trips its
+  selected capability into `resolveSelection` output.
 
 ## 6. Scaffold registration and mirrors
 
@@ -236,6 +291,16 @@
 - [ ] 6.5 Run the scaffold drift tests and `go test
   ./internal/scaffold/...`; fix any mirror or enumeration
   mismatch.
+- [ ] 6.6 Add the UF-FR-001 prose pin to
+  `internal/scaffold/scaffold_test.go`: a between()-span
+  assertion over `.opencode/commands/uf.unleash.md` (and its
+  mirror via the drift test) verifying the model-selection
+  guidance span exists verbatim — recommend `pack` when the
+  task clearly names one, the classifier covers the rest, the
+  selection parameter contract and precedence order
+  documented, no pack-content reconstruction — so removing the
+  guidance fails the suite (unleash delta, UF-FR-001 "Guidance
+  span is pin-tested" scenario).
 
 ## 7. Documentation
 
@@ -251,11 +316,40 @@
   Added`: capability-driven model selection for
   `uf_delegate_command`, the config pair, the classifier
   cascade, the pack directive, the audit trail, and the
-  meta-prompt pack.
+  meta-prompt pack. The entry footer MUST carry the verification
+  result: the `.opencode/` plugin suite's statements-coverage
+  figure under the unchanged governance-controlled 94 percent
+  floor (from task 8.1) and the constitution-alignment outcome
+  recorded by task 8.2 — follow the established footer
+  convention of prior entries (plugin-suite result under the
+  unchanged 94 percent statements coverage floor).
 - [ ] 7.3 File the documentation issue for this user-facing
   change against the current repo before PR merge (AGENTS.md
   documentation gate); record the issue number in the CHANGELOG
-  entry or the change notes.
+  entry or the change notes, and record the bookkeeping in
+  `proposal.md` (top comment) and the PR body — the PR closes
+  both #887 (model matrix) and the filed documentation issue,
+  via `Closes #887` and `Closes #<doc-issue>`.
+- [ ] 7.4 Update `AGENTS.md` (structure section): the new
+  `.uf/model-matrix.yaml` + `.uf/model-matrix.override.yaml`
+  config pair and `schemas/model-matrix/` registry in the
+  project structure tree; `.opencode/agents/` count 16 → 17
+  (model-matrix-classifier, hidden); `.opencode/` shared library
+  line naming `model-matrix.ts`; and a Convention Packs list
+  entry for `meta-prompt.md` (+ its `-custom.md` initial
+  deployment template). Keep the edits structural (structure,
+  counts, lists) — no behavioral-rule changes.
+- [ ] 7.5 File the cross-repo documentation issue against
+  `unbound-force/website` covering the model matrix: the config
+  pair, capability profiles, precedence chain, classifier
+  engines, override whitelist, and credential story — per the
+  org constitution v1.4.0 Cross-Repo Documentation rule
+  (user-facing hero-repo features get website docs; PR #744
+  precedent). Include the tutorial disposition in the issue:
+  the model matrix is configuration reference, not tutorial
+  material — it MAY be cited from existing delegation docs but
+  warrants no new tutorial below the multi-step feature
+  threshold. Record the issue link in the change notes.
 
 ## 8. Verification
 

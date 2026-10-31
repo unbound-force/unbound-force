@@ -2,16 +2,26 @@
      change: model-matrix-delegation
      originating_issue: 887 -->
 
-Requirement numbering: this delta modifies the existing "Command
-delegation tool" requirement (defined in
-delegation-skill-enforcement and its predecessors) and adds one
-requirement. The model-matrix selection semantics the tool
-consumes live in specs/model-matrix/spec.md (MM-FR-001 through
-MM-FR-008).
+Requirement numbering: this delta allocates UF-FR-001 (the
+added "Model-selection guidance" requirement) and UF-FR-002
+(retroactively allocated to the MODIFIED "Command delegation
+tool" requirement, which predates capability numbering).
+UF-FR-003 through UF-FR-018 are reserved for future unleash
+changes. Sibling capabilities: the model-matrix selection
+semantics the tool consumes live in specs/model-matrix/spec.md
+(MM-FR-001 through MM-FR-008); the scaffold asset surface
+lives in specs/scaffold/spec.md (SC-FR-007). Per OpenSpec
+replacement semantics a MODIFIED delta replaces its requirement
+wholesale — prose AND scenarios — so all sixteen predecessor
+scenarios (delegation-skill-enforcement/specs/unleash/spec.md)
+carry forward into the MODIFIED requirement below, joined by
+the new selection scenarios.
 
 ## MODIFIED Requirements
 
 ### Requirement: Command delegation tool
+
+**ID: UF-FR-002** This requirement MUST be satisfied.
 
 `uf_delegate_command` MUST accept a `task_classification`
 parameter with the values `deterministic` and `judgment`,
@@ -58,7 +68,11 @@ convention pack. Selection parameters MUST be mutually
 independent of the classification parameters; their validation
 and resolution MUST follow the model-matrix requirements
 (MM-FR-001 through MM-FR-008): `model` is a provider/model
-identity used verbatim; `profile` MUST name a profile present
+identity used verbatim after non-empty shape validation;
+`profile` and `pack` MUST each be at least 1 and at most 128
+characters — empty-string or over-length values MUST fail
+input validation at the same pre-spawn stage as skill
+resolution; `profile` MUST name a profile present
 in the loaded matrix (or fail closed when no matrix is
 configured); `pack` MUST name a pack whose file exists under
 `.opencode/uf/packs/` AND whose name is a `packs` key in the
@@ -131,6 +145,138 @@ directive, then extra prompt, and recorded classification and
 skill audit fields — with no model, profile, or pack
 parameters, no model matrix, no classifier, and no selection
 provenance.
+
+#### Scenario: Deterministic delegation carries a skill
+
+- **GIVEN** a per-task delegation classified
+  `task_classification: "deterministic"` with
+  `skill: "pre-flight"` and the skill exists at
+  `.opencode/skills/pre-flight/SKILL.md`
+- **WHEN** `uf_delegate_command` executes
+- **THEN** the composed prompt contains a tool-rendered
+  directive naming the skill, the checkpoint data records the
+  classification and resolved reference, and the run proceeds
+
+#### Scenario: Deterministic delegation skips the skill
+
+- **GIVEN** a per-task delegation classified
+  `task_classification: "deterministic"` supplying neither
+  `skill` nor `skill_absent_reason`
+- **WHEN** `uf_delegate_command` validates the input
+- **THEN** it returns a non-retryable `SKILL_REFERENCE_REQUIRED`
+  envelope naming the remediation and spawns no child session
+
+#### Scenario: Skill reference does not resolve
+
+- **GIVEN** a delegation supplies `skill: "does-not-exist"`
+- **WHEN** `uf_delegate_command` resolves the reference
+- **THEN** it returns a non-retryable `SKILL_NOT_FOUND`
+  envelope naming the searched locations and spawns no child
+  session
+
+#### Scenario: Skill-root collision resolves to the first root
+
+- **GIVEN** the same skill name exists at both
+  `.opencode/skills/<name>/SKILL.md` and
+  `.opencode/skill/<name>/SKILL.md`
+- **WHEN** `uf_delegate_command` resolves the reference
+- **THEN** the `.opencode/skills/` entry is used and is the
+  resolved reference recorded in the audit trail
+
+#### Scenario: No applicable skill, reason recorded
+
+- **GIVEN** a deterministic delegation supplies
+  `skill_absent_reason: "no repo script exists for this
+  one-off rename"`
+- **WHEN** `uf_delegate_command` executes
+- **THEN** the run proceeds and the checkpoint data and success
+  envelope record the classification and the reason
+
+#### Scenario: Judgment work passes through
+
+- **GIVEN** a delegation classified `task_classification:
+  "judgment"` with no `skill` or `skill_absent_reason`
+- **WHEN** `uf_delegate_command` validates the input
+- **THEN** the run proceeds with no skill requirement
+
+#### Scenario: Judgment-classified call supplying a skill is
+rejected
+
+- **GIVEN** a delegation classified `task_classification:
+  "judgment"` supplies `skill: "pre-flight"`
+- **WHEN** `uf_delegate_command` validates the input
+- **THEN** it returns an input-validation failure stating
+  that skill references apply to deterministic work only,
+  and spawns no child session
+
+#### Scenario: Prompt-only delegation without classification
+
+- **GIVEN** a delegation supplies `prompt` but no
+  `command_path` and no `task_classification`
+- **WHEN** `uf_delegate_command` validates the input
+- **THEN** it returns an input-validation failure instructing
+  the caller to classify the work as deterministic or judgment
+  before delegating
+
+#### Scenario: Over-length values are rejected
+
+- **GIVEN** a delegation supplies `skill` longer than 256
+  characters or `skill_absent_reason` longer than 512 characters
+- **WHEN** `uf_delegate_command` validates the input
+- **THEN** it returns an input-validation failure and spawns no
+  child session
+
+#### Scenario: Empty-string values are rejected
+
+- **GIVEN** a delegation supplies `skill: ""` or
+  `skill_absent_reason: ""`
+- **WHEN** `uf_delegate_command` validates the input
+- **THEN** it returns an input-validation failure instructing
+  the caller that absence is expressed by omitting the field or
+  recording a reason, and spawns no child session
+
+#### Scenario: Non-enum classification is rejected
+
+- **GIVEN** a delegation supplies `task_classification` with a
+  value other than `deterministic` or `judgment` (wrong case,
+  an unknown string, or a non-string value)
+- **WHEN** `uf_delegate_command` validates the input
+- **THEN** it returns an input-validation failure naming the
+  accepted values and spawns no child session
+
+#### Scenario: Quick-tier whole-change delegation is classified
+
+- **GIVEN** a quick-tier `/uf.unleash` run delegates the whole
+  routed change through prompt-only `uf_delegate_command`
+- **WHEN** the implement delegation is composed
+- **THEN** it declares `task_classification` derived from the
+  nature of the work -- `deterministic` with `skill` or
+  `skill_absent_reason` only when a repo skill or script
+  performs the change end-to-end, `judgment` otherwise (docs
+  authorship and prose-finding application are judgment work)
+  -- and an
+  unclassified quick-tier delegation fails closed like any
+  other prompt-only call
+
+#### Scenario: Skill reference is a script path
+
+- **GIVEN** a delegation supplies
+  `skill: ".specify/scripts/bash/check-prerequisites.sh"` and
+  the file exists
+- **WHEN** `uf_delegate_command` resolves the reference
+- **THEN** it is accepted as a traversal-protected
+  repo-relative path, the prompt directive instructs the child
+  to run the script, and no skill-directory lookup occurs
+
+#### Scenario: Command-path delegation is unaffected
+
+- **GIVEN** a Step 2 plan delegation supplies `command_path`
+  and no `task_classification`, `skill`, or
+  `skill_absent_reason`
+- **WHEN** `uf_delegate_command` validates the input
+- **THEN** the run proceeds without any classification
+  requirement — command-path delegation MAY omit the
+  classification parameters exactly as before this change
 
 #### Scenario: Explicit model parameter is used verbatim
 
@@ -239,7 +385,10 @@ The guidance MUST document the selection parameter contract
 NOT instruct the orchestrator to reconstruct or inline pack
 content — the pack directive is tool-rendered. The guidance is
 documentation-only: the tool enforces the contract; the
-classifier covers unmarked tasks.
+classifier covers unmarked tasks. Documentation-only does not
+mean unverifiable — the guidance span in the command file is
+pinned by a prose pin test, so silently removing the guidance
+fails the suite.
 
 #### Scenario: Implement delegation names its pack
 
@@ -255,6 +404,18 @@ classifier covers unmarked tasks.
 - **WHEN** `/uf.unleash` composes the delegation
 - **THEN** it omits `pack` and the classifier cascade
   (MM-FR-005) derives the selection
+
+#### Scenario: Guidance span is pin-tested
+
+- **GIVEN** `.opencode/commands/uf.unleash.md` and its
+  byte-identical scaffold mirror
+- **WHEN** the between()-span prose pin runs in the scaffold
+  test suite
+- **THEN** the guidance span — recommend `pack` when the task
+  clearly names one, the classifier covers the rest, the
+  selection parameter contract and precedence order documented,
+  no pack-content reconstruction — exists verbatim, so removing
+  the guidance from the command file fails the suite
 
 ## REMOVED Requirements
 
