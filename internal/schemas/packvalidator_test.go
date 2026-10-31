@@ -200,6 +200,15 @@ func TestValidateConventionPack_AllPacksValid(t *testing.T) {
 		if name == "review-voice.md" {
 			continue
 		}
+		// Skip meta-prompt pack — it's a spec/plan/tasks/command
+		// authoring governance pack with domain-specific
+		// sections (MP-NNN rules) per the determinism/content/ci
+		// format precedent, not a coding convention pack, and is
+		// therefore intentionally not schema-conformant with the
+		// coding-pack validator
+		if name == "meta-prompt.md" {
+			continue
+		}
 
 		t.Run(name, func(t *testing.T) {
 			packPath := filepath.Join(packsDir, name)

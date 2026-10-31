@@ -12,7 +12,7 @@
 
 ## 1. Meta-prompt convention pack (#888)
 
-- [ ] 1.1 Author `.opencode/uf/packs/meta-prompt.md`: MP-NNN
+- [x] 1.1 Author `.opencode/uf/packs/meta-prompt.md`: MP-NNN
   rule ids, `[MUST]/[SHOULD]/[MAY]` tags, matching the format
   and voice of `go.md`, `content.md`, and `determinism.md`.
   Content is consolidation, not invention: RFC 2119 language,
