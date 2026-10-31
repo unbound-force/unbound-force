@@ -1,23 +1,28 @@
 /**
  * Tests for the model-matrix lib module (OpenSpec change
- * model-matrix-delegation, task 2.1 — MM-FR-001 and MM-FR-004 scenarios,
- * design D1/D3/D8).
+ * model-matrix-delegation, tasks 2.1 + 2.2 — MM-FR-001, MM-FR-002, and
+ * MM-FR-004 scenarios, design D1/D3/D4/D8).
  *
- * Task 2.1 surface only: the closed v1 Zod schema, the tristate loader with
- * injected read/parse/existence seams, and pack existence validation. The
- * override whitelist, merge, null-model propagation, and precedence-chain
- * scenarios from task 2.4 land with tasks 2.2/2.3 and extend this file.
+ * Task 2.1 surface: the closed v1 Zod schema, the tristate loader with
+ * injected read/parse/existence seams, and pack existence validation.
+ * Task 2.2 surface: the override whitelist, nested-path merge, null-model
+ * propagation, merged-result re-validation, and the loader override wiring.
+ * The precedence-chain and classifier scenarios from task 2.4 land with
+ * tasks 2.3+ and extend this file.
  */
 import { describe, expect, it } from "vitest"
 
 import {
   DEFAULT_TASK_KINDS,
   EMPTY_MODEL_MATRIX,
+  MODEL_MATRIX_OVERRIDE_PATH,
   MODEL_MATRIX_PATH,
   PACKS_DIRECTORY,
   SELECTION_SOURCE_VALUES,
   loadModelMatrix,
+  mergeOverride,
   parseModelMatrix,
+  validateModelMatrixOverride,
   type ModelMatrixDependencies,
 } from "../lib/model-matrix.js"
 
@@ -75,32 +80,48 @@ type LoaderOverrides = {
   readonly absent?: boolean
   readonly readError?: unknown
   readonly packFiles?: readonly string[]
+  readonly overrideText?: string
+  readonly overrideReadError?: unknown
 }
 
 /**
- * Builds injectable loader dependencies plus the pack-probe log, so tests can
- * assert exactly which pack files were consulted.
+ * Builds injectable loader dependencies plus the pack-probe and file-read
+ * logs, so tests can assert exactly which pack files were consulted and
+ * which config paths were read. An undefined `overrideText` reports the
+ * override as absent (ENOENT); an empty string reports it present but empty.
  */
 function loaderDependencies(overrides: LoaderOverrides = {}): {
   readonly dependencies: ModelMatrixDependencies
   readonly probed: readonly string[]
+  readonly reads: readonly string[]
 } {
   const packFiles = new Set(
     (overrides.packFiles ?? STARTER_PACKS).map((pack) => `${PACKS_DIRECTORY}/${pack}.md`),
   )
   const probed: string[] = []
+  const reads: string[] = []
   const dependencies: ModelMatrixDependencies = {
     readText: async (relativePath: string): Promise<string> => {
-      if (relativePath !== MODEL_MATRIX_PATH) {
-        throw new Error(`unexpected read: ${relativePath}`)
+      reads.push(relativePath)
+      if (relativePath === MODEL_MATRIX_PATH) {
+        if (overrides.readError !== undefined) {
+          throw overrides.readError
+        }
+        if (overrides.absent === true) {
+          throw enoent(`open '${relativePath}'`)
+        }
+        return overrides.matrixText ?? JSON.stringify(STARTER_MATRIX)
       }
-      if (overrides.readError !== undefined) {
-        throw overrides.readError
+      if (relativePath === MODEL_MATRIX_OVERRIDE_PATH) {
+        if (overrides.overrideReadError !== undefined) {
+          throw overrides.overrideReadError
+        }
+        if (overrides.overrideText === undefined) {
+          throw enoent(`open '${relativePath}'`)
+        }
+        return overrides.overrideText
       }
-      if (overrides.absent === true) {
-        throw enoent(`open '${relativePath}'`)
-      }
-      return overrides.matrixText ?? JSON.stringify(STARTER_MATRIX)
+      throw new Error(`unexpected read: ${relativePath}`)
     },
     parseYaml: testParser,
     fileExists: (relativePath: string): boolean => {
@@ -108,7 +129,7 @@ function loaderDependencies(overrides: LoaderOverrides = {}): {
       return packFiles.has(relativePath)
     },
   }
-  return { dependencies, probed }
+  return { dependencies, probed, reads }
 }
 
 /** Parses a matrix document through the throwing parse boundary. */
@@ -245,6 +266,192 @@ describe("model matrix closed v1 schema (MM-FR-001)", () => {
   })
 })
 
+describe("override whitelist validation (MM-FR-002, design D4)", () => {
+  it("should accept null, undefined, and empty-object documents as no-ops", () => {
+    expect(() => validateModelMatrixOverride(null)).not.toThrow()
+    expect(() => validateModelMatrixOverride(undefined)).not.toThrow()
+    expect(() => validateModelMatrixOverride({})).not.toThrow()
+  })
+
+  it("should accept whitelisted profile model and variant leaves", () => {
+    expect(() =>
+      validateModelMatrixOverride({
+        profiles: { "code-writing": { model: "provider/model-id", variant: "high" } },
+      }),
+    ).not.toThrow()
+  })
+
+  it("should accept any nested key under classifier.llm", () => {
+    expect(() =>
+      validateModelMatrixOverride({
+        classifier: {
+          llm: { endpoint: "https://example.invalid/v1", model: "classifier-model", apiKey: "{env:KEY}", request_timeout_ms: 30_000 },
+        },
+      }),
+    ).not.toThrow()
+  })
+
+  it("should reject non-object documents naming the whitelist", () => {
+    expect(() => validateModelMatrixOverride("just-a-string")).toThrow(
+      "model matrix override must be an object — only profiles.*.model, profiles.*.variant, classifier.llm.* paths are allowed",
+    )
+    expect(() => validateModelMatrixOverride(["array"])).toThrow("model matrix override must be an object")
+  })
+
+  it("should reject unknown top-level keys naming the whitelist", () => {
+    expect(() => validateModelMatrixOverride({ defaults: { implement: "mechanical" } })).toThrow(
+      'model matrix override key "defaults" is not permitted — only profiles.*.model, profiles.*.variant, classifier.llm.* paths are allowed',
+    )
+  })
+
+  it("should reject structural classifier keys outside llm naming the whitelist", () => {
+    expect(() => validateModelMatrixOverride({ classifier: { enabled: false } })).toThrow(
+      'model matrix override key "classifier.enabled" is not permitted — only profiles.*.model, profiles.*.variant, classifier.llm.* paths are allowed',
+    )
+    expect(() => validateModelMatrixOverride({ classifier: { agent: "other-agent" } })).toThrow(
+      'model matrix override key "classifier.agent" is not permitted — only profiles.*.model, profiles.*.variant, classifier.llm.* paths are allowed',
+    )
+  })
+
+  it("should reject non-whitelisted profile leaf keys naming the whitelist", () => {
+    expect(() => validateModelMatrixOverride({ profiles: { "code-writing": { temperature: 0.2 } } })).toThrow(
+      'model matrix override key "profiles.code-writing.temperature" is not permitted — only profiles.*.model, profiles.*.variant, classifier.llm.* paths are allowed',
+    )
+  })
+
+  it("should reject non-object profiles, profile entries, classifier, and classifier.llm values", () => {
+    expect(() => validateModelMatrixOverride({ profiles: "nope" })).toThrow("model matrix override profiles must be an object")
+    expect(() => validateModelMatrixOverride({ profiles: { "code-writing": "nope" } })).toThrow(
+      "model matrix override profiles.code-writing must be an object",
+    )
+    expect(() => validateModelMatrixOverride({ classifier: "nope" })).toThrow("model matrix override classifier must be an object")
+    expect(() => validateModelMatrixOverride({ classifier: { llm: "nope" } })).toThrow(
+      "model matrix override classifier.llm must be an object",
+    )
+  })
+
+  it("should treat null profiles, profile entries, classifier, and classifier.llm as no-ops", () => {
+    expect(() => validateModelMatrixOverride({ profiles: null })).not.toThrow()
+    expect(() => validateModelMatrixOverride({ profiles: { "code-writing": null } })).not.toThrow()
+    expect(() => validateModelMatrixOverride({ classifier: null })).not.toThrow()
+    expect(() => validateModelMatrixOverride({ classifier: { llm: null } })).not.toThrow()
+  })
+})
+
+describe("override nested-path merge (MM-FR-002, design D4)", () => {
+  /** Base matrix with populated leaves so merges have something to replace. */
+  const populatedBase = parse({
+    ...STARTER_MATRIX,
+    profiles: {
+      "spec-authoring": {},
+      "code-writing": { model: "provider/base-model", variant: "base" },
+      "content-writing": {},
+      mechanical: {},
+    },
+    classifier: { enabled: true, llm: { endpoint: "https://base.invalid/v1" } },
+  })
+
+  it("should replace the overridden model leaf and fall through untouched profiles", () => {
+    const merged = mergeOverride(populatedBase, { profiles: { "spec-authoring": { model: "provider/override-model" } } })
+    expect(merged.profiles["spec-authoring"]).toEqual({ model: "provider/override-model" })
+    expect(merged.profiles["code-writing"]).toEqual({ model: "provider/base-model", variant: "base" })
+    expect(merged.defaults).toEqual(STARTER_MATRIX.defaults)
+    expect(merged.packs).toEqual(STARTER_MATRIX.packs)
+  })
+
+  it("should propagate an explicit null model as host fallback (absent key)", () => {
+    // Design D4: the matching null model leaf replaces its base counterpart
+    // (absent key → host fallback) while the variant leaf, absent from the
+    // override, falls through to the base — the review-dispatch mergeOverride
+    // precedent's exact semantics.
+    const merged = mergeOverride(populatedBase, { profiles: { "code-writing": { model: null } } })
+    expect(merged.profiles["code-writing"]).toEqual({ variant: "base" })
+    expect(merged.profiles["code-writing"]).not.toHaveProperty("model")
+  })
+
+  it("should propagate an explicit null variant as an absent key", () => {
+    const merged = mergeOverride(populatedBase, { profiles: { "code-writing": { variant: null } } })
+    expect(merged.profiles["code-writing"]).toEqual({ model: "provider/base-model" })
+  })
+
+  it("should preserve base profile leaves the override does not mention", () => {
+    const merged = mergeOverride(populatedBase, { profiles: { "code-writing": { variant: "override" } } })
+    expect(merged.profiles["code-writing"]).toEqual({ model: "provider/base-model", variant: "override" })
+  })
+
+  it("should skip null profile entries while re-validating the equivalent merge", () => {
+    const merged = mergeOverride(populatedBase, { profiles: { "code-writing": null } })
+    expect(merged).toEqual(populatedBase)
+  })
+
+  it("should merge classifier.llm leaves while preserving base llm keys and sibling fields", () => {
+    const merged = mergeOverride(populatedBase, {
+      classifier: { llm: { model: "provider/override-model", apiKey: "{env:KEY}" } },
+    })
+    expect(merged.classifier).toEqual({
+      enabled: true,
+      llm: { endpoint: "https://base.invalid/v1", model: "provider/override-model", apiKey: "{env:KEY}" },
+    })
+  })
+
+  it("should create classifier.llm when the base has no classifier section", () => {
+    const base = parse({ version: 1, profiles: { "code-writing": {} } })
+    const merged = mergeOverride(base, { classifier: { llm: { endpoint: "https://example.invalid/v1" } } })
+    expect(merged.classifier).toEqual({ llm: { endpoint: "https://example.invalid/v1" } })
+  })
+
+  it("should propagate an explicit null classifier.llm leaf as an absent key", () => {
+    const merged = mergeOverride(populatedBase, { classifier: { llm: { endpoint: null } } })
+    expect(merged.classifier).toEqual({ enabled: true, llm: {} })
+  })
+
+  it("should fail closed naming the path when the override names an absent capability", () => {
+    expect(() => mergeOverride(populatedBase, { profiles: { nonexistent: { model: "provider/model-id" } } })).toThrow(
+      "model matrix override profiles.nonexistent is not a defined capability in the base matrix",
+    )
+  })
+
+  it("should re-validate the merged result and fail closed on an invalid model string", () => {
+    expect(() => mergeOverride(populatedBase, { profiles: { "code-writing": { model: "not-a-model" } } })).toThrow(
+      "validate model matrix",
+    )
+  })
+
+  it("should re-validate the merged result and fail closed on an unknown classifier.llm key", () => {
+    expect(() => mergeOverride(populatedBase, { classifier: { llm: { bogus: true } } })).toThrow(
+      'Unrecognized key: "bogus"',
+    )
+  })
+
+  it("should fail closed when an override carries content against the no-op base matrix", () => {
+    // A comments-only tracked matrix declares "no structure"; an override
+    // carrying content contradicts that declaration. Fail closed rather
+    // than silently ignoring per-developer configuration (design D4 policy).
+    expect(() =>
+      mergeOverride(EMPTY_MODEL_MATRIX, { profiles: { "spec-authoring": { model: "provider/model-id" } } }),
+    ).toThrow("profiles.spec-authoring is not a defined capability")
+    expect(() =>
+      mergeOverride(EMPTY_MODEL_MATRIX, { classifier: { llm: { endpoint: "https://example.invalid/v1" } } }),
+    ).toThrow("at least one profile is required")
+  })
+
+  it("should return the base unchanged for overrides carrying no whitelisted entries", () => {
+    expect(mergeOverride(populatedBase, {})).toBe(populatedBase)
+    expect(mergeOverride(populatedBase, { profiles: null })).toBe(populatedBase)
+    expect(mergeOverride(populatedBase, { profiles: {} })).toBe(populatedBase)
+    expect(mergeOverride(populatedBase, { classifier: { llm: {} } })).toBe(populatedBase)
+  })
+
+  it("should not mutate the base matrix during the merge", () => {
+    const before = JSON.stringify(populatedBase)
+    mergeOverride(populatedBase, {
+      profiles: { "code-writing": { model: null } },
+      classifier: { llm: { model: "provider/override-model" } },
+    })
+    expect(JSON.stringify(populatedBase)).toBe(before)
+  })
+})
+
 describe("loadModelMatrix tristate (MM-FR-004, design D8)", () => {
   it("should return absent when the matrix file is missing, probing no pack files", async () => {
     const { dependencies, probed } = loaderDependencies({ absent: true })
@@ -333,6 +540,124 @@ describe("loadModelMatrix tristate (MM-FR-004, design D8)", () => {
       status: "invalid",
       error: `cannot read model matrix ${MODEL_MATRIX_PATH}: unknown error`,
     })
+  })
+})
+
+describe("loadModelMatrix override wiring (MM-FR-002, design D4/D8)", () => {
+  it("should not read the override when the matrix is absent (design D8 zero-config)", async () => {
+    const { dependencies, reads } = loaderDependencies({ absent: true })
+    await expect(loadModelMatrix(dependencies)).resolves.toEqual({ status: "absent" })
+    expect(reads).toEqual([MODEL_MATRIX_PATH])
+  })
+
+  it("should keep the base matrix when the override is absent", async () => {
+    const { dependencies, reads } = loaderDependencies()
+    const result = await loadModelMatrix(dependencies)
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      expect(result.matrix).toEqual(STARTER_MATRIX)
+    }
+    expect(reads).toEqual([MODEL_MATRIX_PATH, MODEL_MATRIX_OVERRIDE_PATH])
+  })
+
+  it("should merge an override model into the loaded matrix (scenario: override supplies a profile model)", async () => {
+    const { dependencies } = loaderDependencies({
+      overrideText: JSON.stringify({ profiles: { "spec-authoring": { model: "some-provider/some-model" } } }),
+    })
+    const result = await loadModelMatrix(dependencies)
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      expect(result.matrix.profiles["spec-authoring"]).toEqual({ model: "some-provider/some-model" })
+      expect(result.matrix.profiles["code-writing"]).toEqual({})
+    }
+  })
+
+  it("should treat an empty or comments-only override as a no-op (scenario: empty override)", async () => {
+    for (const overrideText of ["", "# comments only\n"]) {
+      const { dependencies } = loaderDependencies({ overrideText })
+      const result = await loadModelMatrix(dependencies)
+      expect(result.status).toBe("ok")
+      if (result.status === "ok") {
+        expect(result.matrix).toEqual(STARTER_MATRIX)
+      }
+    }
+  })
+
+  it("should return invalid naming the whitelist for a non-whitelisted key, producing no merged configuration", async () => {
+    const { dependencies } = loaderDependencies({
+      overrideText: JSON.stringify({ defaults: { implement: "mechanical" } }),
+    })
+    const result = await loadModelMatrix(dependencies)
+    expect(result.status).toBe("invalid")
+    if (result.status === "invalid") {
+      expect(result.error).toContain(MODEL_MATRIX_OVERRIDE_PATH)
+      expect(result.error).toContain('key "defaults" is not permitted')
+      expect(result.error).toContain("profiles.*.model, profiles.*.variant, classifier.llm.*")
+    }
+  })
+
+  it("should return invalid for a structural classifier override key (scenario: classifier.enabled)", async () => {
+    const { dependencies } = loaderDependencies({
+      overrideText: JSON.stringify({ classifier: { enabled: false } }),
+    })
+    const result = await loadModelMatrix(dependencies)
+    expect(result.status).toBe("invalid")
+    if (result.status === "invalid") {
+      expect(result.error).toContain('key "classifier.enabled" is not permitted')
+    }
+  })
+
+  it("should return invalid naming the capability when the override references an absent profile", async () => {
+    const { dependencies } = loaderDependencies({
+      overrideText: JSON.stringify({ profiles: { nonexistent: { model: "provider/model-id" } } }),
+    })
+    const result = await loadModelMatrix(dependencies)
+    expect(result.status).toBe("invalid")
+    if (result.status === "invalid") {
+      expect(result.error).toContain("profiles.nonexistent is not a defined capability")
+    }
+  })
+
+  it("should return invalid when the merged result fails re-validation", async () => {
+    const { dependencies } = loaderDependencies({
+      overrideText: JSON.stringify({ profiles: { "code-writing": { model: "not-a-model" } } }),
+    })
+    const result = await loadModelMatrix(dependencies)
+    expect(result.status).toBe("invalid")
+    if (result.status === "invalid") {
+      expect(result.error).toContain(MODEL_MATRIX_OVERRIDE_PATH)
+      expect(result.error).toContain("must match pattern")
+    }
+  })
+
+  it("should return invalid when the override read fails with a non-ENOENT error", async () => {
+    const overrideReadError = Object.assign(new Error("EISDIR: illegal operation on a directory"), { code: "EISDIR" })
+    const { dependencies } = loaderDependencies({ overrideReadError })
+    const result = await loadModelMatrix(dependencies)
+    expect(result.status).toBe("invalid")
+    if (result.status === "invalid") {
+      expect(result.error).toContain(`cannot read model matrix override ${MODEL_MATRIX_OVERRIDE_PATH}`)
+      expect(result.error).toContain("EISDIR")
+    }
+  })
+
+  it("should return invalid when the override document fails to parse", async () => {
+    const { dependencies } = loaderDependencies({ overrideText: "not-json" })
+    const result = await loadModelMatrix(dependencies)
+    expect(result.status).toBe("invalid")
+    if (result.status === "invalid") {
+      expect(result.error).toContain(`model matrix override ${MODEL_MATRIX_OVERRIDE_PATH} is invalid`)
+      expect(result.error).toContain("parse model matrix override")
+    }
+  })
+
+  it("should return invalid when the override parses to a non-object document", async () => {
+    const { dependencies } = loaderDependencies({ overrideText: JSON.stringify("just-a-string") })
+    const result = await loadModelMatrix(dependencies)
+    expect(result.status).toBe("invalid")
+    if (result.status === "invalid") {
+      expect(result.error).toContain("model matrix override must be an object")
+    }
   })
 })
 

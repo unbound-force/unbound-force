@@ -44,7 +44,7 @@
   injected `fileExists`; and the `SelectionResult` type
   (`selection_source`, pack, capability, model, variant,
   confidence, fallback reason).
-- [ ] 2.2 In the same module, implement the override handling
+- [x] 2.2 In the same module, implement the override handling
   (design D4): `validateModelMatrixOverride` constrained to the
   fail-closed whitelist `profiles.*.model`,
   `profiles.*.variant`, `classifier.llm.*` (any nested key under
