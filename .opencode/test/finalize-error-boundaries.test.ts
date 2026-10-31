@@ -141,7 +141,7 @@ describe("finalize run-model provenance boundaries", () => {
     expect((await errorsFor(data)).join(" ")).toContain("must retain null requested model provenance")
   })
 
-  it("rejects a successful host run without resolved parent provenance", async () => {
+  it("rejects a successful host run without a resolved parent model", async () => {
     const data = payload()
     data.plan[0]!.source = "host"
     data.plan[0]!.model = null
@@ -152,8 +152,71 @@ describe("finalize run-model provenance boundaries", () => {
     data.runs[0]!.model_id = null
     data.runs[0]!.variant = null
     data.runs[0]!.resolved_parent_model = null
-    data.runs[0]!.resolved_parent_variant = null
-    expect((await errorsFor(data)).join(" ")).toContain("requires resolved parent model and variant")
+    data.runs[0]!.resolved_parent_variant = "high"
+    expect(await errorsFor(data)).toContain(
+      "successful host run 11111111-1111-4111-8111-111111111111 requires resolved parent model",
+    )
+  })
+
+  it("accepts a successful host run whose parent model has no variant", async () => {
+    const data = payload()
+    data.plan[0]!.source = "host"
+    data.plan[0]!.model = null
+    data.plan[0]!.variant = null
+    data.runs[0]!.source = "host"
+    data.runs[0]!.requested_model = null
+    data.runs[0]!.provider = null
+    data.runs[0]!.model_id = null
+    data.runs[0]!.variant = null
+    data.runs[0]!.resolved_parent_model = "enmaas/rits/zai-org/glm-5-3"
+    data.runs[0]!.reported_model = "enmaas/rits/zai-org/glm-5-3"
+
+    const result = await finalizeReviewDispatch(
+      { payload: data, provenance: provenance() },
+      dependencies(await scratchDirectory()),
+    )
+
+    expect(result.status).toBe("success")
+    expect(result.errors).toEqual([])
+  })
+
+  it("rejects a successful host-resolved advisor run without a resolved parent model", async () => {
+    const data = payload()
+    data.plan[0]!.source = "advisor"
+    data.plan[0]!.model = null
+    data.plan[0]!.variant = null
+    data.runs[0]!.source = "advisor"
+    data.runs[0]!.requested_model = null
+    data.runs[0]!.provider = null
+    data.runs[0]!.model_id = null
+    data.runs[0]!.variant = null
+    data.runs[0]!.resolved_parent_model = null
+    data.runs[0]!.resolved_parent_variant = "high"
+    expect(await errorsFor(data)).toContain(
+      "successful host-resolved advisor run 11111111-1111-4111-8111-111111111111 requires resolved parent model",
+    )
+  })
+
+  it("accepts a successful host-resolved advisor run whose parent model has no variant", async () => {
+    const data = payload()
+    data.plan[0]!.source = "advisor"
+    data.plan[0]!.model = null
+    data.plan[0]!.variant = null
+    data.runs[0]!.source = "advisor"
+    data.runs[0]!.requested_model = null
+    data.runs[0]!.provider = null
+    data.runs[0]!.model_id = null
+    data.runs[0]!.variant = null
+    data.runs[0]!.resolved_parent_model = "enmaas/rits/zai-org/glm-5-3"
+    data.runs[0]!.reported_model = "enmaas/rits/zai-org/glm-5-3"
+
+    const result = await finalizeReviewDispatch(
+      { payload: data, provenance: provenance() },
+      dependencies(await scratchDirectory()),
+    )
+
+    expect(result.status).toBe("success")
+    expect(result.errors).toEqual([])
   })
 
   it("rejects an explicit run carrying resolved parent provenance", async () => {

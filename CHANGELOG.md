@@ -1936,6 +1936,23 @@ Each entry follows the format: `- <change-name>: <summary>`.
   helpers. `UF_PACKAGE_MANAGER=dnf` now forces the dnf
   install path. Fixes #214.
   (Spec: openspec/changes/setup-auto-native-fallback/)
+- accept-variantless-parent-model: review-dispatch finalization
+  (used by `/uf.review-pr`, `/uf.review-council`, and
+  `/uf.unleash` code review) now accepts successful host and
+  host-resolved advisor runs whose parent session model
+  legitimately carries no variant (e.g.
+  `enmaas/rits/zai-org/glm-5-3`); `validateRunModel` rejects
+  such runs only when `resolved_parent_model` is null, matching
+  the persistence layer's null-sanctioned
+  `resolved_parent_variant`. Previously both fields were
+  required, fail-closing real dispatches with "requires
+  resolved parent model and variant" and an INCONCLUSIVE
+  verdict (observed on unbound-force/dewey PR #135). Scaffold
+  mirror synced byte-identical; finalize error-boundary tests
+  cover null-model rejection and null-variant acceptance for
+  both run sources. Documentation gate filed as in-repo
+  issue #891. (Spec:
+  openspec/changes/accept-variantless-parent-model/)
 
 ## Recent Changes
 

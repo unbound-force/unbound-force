@@ -2319,8 +2319,8 @@ function validateRunModel(run: DispatchRun, plan: ReviewDispatchPayload["plan"][
     if (run.requested_model !== null || run.provider !== null || run.model_id !== null || run.variant !== null) {
       errors.push(`host run ${run.run_id} must retain null requested model provenance`)
     }
-    if (run.status === "success" && (run.resolved_parent_model === null || run.resolved_parent_variant === null)) {
-      errors.push(`successful host run ${run.run_id} requires resolved parent model and variant`)
+    if (run.status === "success" && run.resolved_parent_model === null) {
+      errors.push(`successful host run ${run.run_id} requires resolved parent model`)
     }
     expectedModel = run.resolved_parent_model
   } else if (run.source === "advisor" && run.requested_model === null) {
@@ -2328,8 +2328,8 @@ function validateRunModel(run: DispatchRun, plan: ReviewDispatchPayload["plan"][
     if (run.provider !== null || run.model_id !== null || run.variant !== null) {
       errors.push(`host-resolved advisor run ${run.run_id} must retain null requested model provenance`)
     }
-    if (run.status === "success" && (run.resolved_parent_model === null || run.resolved_parent_variant === null)) {
-      errors.push(`successful host-resolved advisor run ${run.run_id} requires resolved parent model and variant`)
+    if (run.status === "success" && run.resolved_parent_model === null) {
+      errors.push(`successful host-resolved advisor run ${run.run_id} requires resolved parent model`)
     }
     expectedModel = run.resolved_parent_model
   } else {
