@@ -10,7 +10,11 @@ deployment of the model matrix via `uf init` (pack templates,
 `alwaysDeployedPacks`, per-repo matrix provisioning) is slice 2
 (issue #889) and is NOT required by this requirement — this
 requirement covers the asset surface registration that slice 1
-needs so the mirrored plugin loads.
+needs so the mirrored plugin loads. Sibling capabilities: the
+registry conventions the embedded schema mirror follows are
+defined by MM-FR-008 in specs/model-matrix/spec.md; the
+delegation-tool integration that consumes these assets lives in
+specs/unleash/spec.md (UF-FR-001, UF-FR-002).
 
 ## ADDED Requirements
 
@@ -61,12 +65,18 @@ be blocked by this requirement.
 - **THEN** the tests fail and name the mismatched path
 
 #### Scenario: Mirrored plugin imports the mirrored lib
+(slice-1 verification)
 
-- **GIVEN** a scaffolded hero repo deployed with the uf-workflow
-  plugin and the model-matrix lib asset
-- **WHEN** the plugin loads
-- **THEN** the module import resolves without a missing-module
-  failure
+- **GIVEN** the canonical `.opencode/plugins/uf-workflow/
+  index.ts` imports `.opencode/lib/model-matrix.ts` and the
+  `.opencode/` plugin test suite exercises that import
+- **AND** both canonical files are byte-identical to their
+  embedded mirrors (drift-enforced above)
+- **WHEN** the plugin test suite and the canonical-assets drift
+  tests run
+- **THEN** both pass — the canonical import resolves and the
+  mirrors preserve it; import resolution inside a deployed hero
+  repo is slice 2 (issue #889) and is not asserted here
 
 #### Scenario: Matrix template maps to the runtime path
 

@@ -156,9 +156,13 @@ failures never block (D5). This split is the issue's contract
 (AC5 fail-closed override vs. AC7 classifier-never-blocks).
 
 `classifier.llm.*` admits any nested key under `classifier.llm`
-(endpoint, model, apiKey, request timeout) because that subtree
-is exclusively per-developer and carries no governance surface;
-everything else under `classifier` is structural and tracked.
+(endpoint, model, apiKey, `request_timeout_ms`) because that
+subtree is exclusively per-developer and carries no governance
+surface; everything else under `classifier` is structural and
+tracked. The endpoint MUST use the `https` scheme or `http`
+with a loopback host (`localhost`, `127.0.0.1`, `[::1]` —
+local endpoints such as Ollama); any other `http` endpoint
+fails validation before any request is issued (MM-FR-006).
 
 ### D5: Classifier cascade — agent engine, LLM engine, static fallback
 
@@ -178,10 +182,15 @@ contract, plus an LLM-engine fallback):
   inherits the session model hierarchy — no endpoint config.
 - **LLM engine**: chat-completions POST, `temperature: 0`,
   `response_format: {type: "json_object"}` with a single
-  400-retry without the field, request timeout via AbortSignal,
-  apiKey interpolated from `{env:VAR}` (literal keys rejected).
-  Endpoint/model/apiKey config lives only in the gitignored
-  override under `classifier.llm.*`; unconfigured means skipped.
+  400-retry without the field, request timeout via AbortSignal
+  (the configured `classifier.llm.request_timeout_ms`, default
+  10_000), apiKey interpolated from `{env:VAR}` (literal keys
+  rejected; a reference naming an unset variable skips the
+  engine for that invocation — never an empty credential — with
+  the skip reason recorded). The endpoint MUST be `https` or an
+  `http` loopback host. Endpoint/model/apiKey config lives only
+  in the gitignored override under `classifier.llm.*`;
+  unconfigured means skipped.
 - **Gating**: first valid JSON naming a matrix-valid pack (a
   `packs` key whose pack file exists) with confidence ≥
   `confidence_threshold` (default 0.6) wins. Below threshold,
@@ -194,7 +203,12 @@ contract, plus an LLM-engine fallback):
   constant, 128 — deliberately not matrix-configurable in v1,
   mirroring the derive-per-run-timeout D1 stance on keeping the
   new config surface minimal). Cache hits skip both engines.
-  In-process cache; no cross-session persistence in v1.
+  In-process cache; no cross-session persistence in v1. The
+  cache is instantiated per cascade instance — the cascade is
+  constructed per delegation-tool plugin instance, so the cache
+  is never module-level state shared across instances; tests
+  inject their own cache to assert hit/eviction behavior in
+  isolation (Constitution IV; TC-002/TC-004 isolation).
 
 A classifier-selected pack performs full pack double duty: its
 profile model is used AND the pack directive renders in the
@@ -243,7 +257,13 @@ read, no classifier, host model, `selection_source: "host"`,
 identical error semantics (including `HOST_MODEL_UNAVAILABLE`
 for structural introspection failures — preserved because the
 host path is the only path in that state). Present-but-invalid
-matrix or override fails closed with a clear error (D4). This
+matrix or override fails closed with a clear error (D4). A
+present file that parses to no keys — empty or comments-only —
+is the single documented exception to MM-FR-001's closed v1
+surface: it is a valid no-op matrix (every chain step falls
+through to host), whereas a present file carrying at least one
+key MUST satisfy the closed surface in full — a partial surface
+is not a no-op. This
 guarantees AC4 (missing matrix = behavior identical to today)
 by construction: the new code paths are unreachable without the
 file.
@@ -274,7 +294,15 @@ markers, checkbox discipline, determinism-first command prose),
 no literal clarification-marker syntax in the prose (a
 well-formed marker extracts as a question even inside
 documentation). It matches the format and voice of `go.md`,
-`content.md`, `determinism.md`.
+`content.md`, `determinism.md`. Two test-registry ripples are
+exemption decisions recorded here: `internal/schemas/
+packvalidator_test.go` skips meta-prompt.md in
+TestValidateConventionPack_AllPacksValid (mirroring the
+review-voice.md precedent for packs the validator's expectations
+do not cover), and `internal/scaffold/scaffold_test.go` gains a
+knownNonEmbeddedFiles entry for the pack (mirroring the
+governance precedent of determinism.md) — the pack is
+convention content, not a scaffold-deployed asset, in slice 1.
 
 ### D10: Scaffold registration surface
 
@@ -289,6 +317,20 @@ existing `TestEmbeddedAssets_MatchSource` drift test is extended
 to the new files). Deployment behavior of the new assets to
 hero repos is slice 2 (#889); this change only registers the
 surface so the mirrored plugin loads and drift stays enforced.
+
+Ownership classification (drift obligations follow from it):
+the embedded `uf/model-matrix.yaml` template and the
+`.uf/schemas/model-matrix/` registry mirror are tool-owned —
+byte-identical to their canonical sources, drift-enforced by
+the extended `TestEmbeddedAssets_MatchSource`; the lib and
+plugin mirrors are tool-owned the same way; the
+`.uf/model-matrix.override.yaml` file is user-owned —
+gitignored, never scaffolded beyond the gitignore entry, exempt
+from drift checks exactly like `*-custom.md` packs (the
+custom-pack ownership precedent); a deployed repo's tracked
+`.uf/model-matrix.yaml` is team-owned config once `uf init`
+writes it (slice 2), at which point it diverges from the
+template by design.
 
 ### D11: Command guidance is documentation-only
 
@@ -350,4 +392,9 @@ than blocking:
    host model (the chain's terminal step). `defaults.implement`
    maps to `code-writing` in the tracked starter config, so the
    fallback is reached only for unknown kinds or
-   unconfigured matrices.
+   unconfigured matrices. Clarification recorded during
+   iteration-2 review: a configured `defaults.implement` never
+   short-circuits the cascade — step 5 always proceeds to the
+   classifier (step 6), a successful classification wins, and
+   `defaults.implement` serves only as the cascade's static
+   fallback when both engines fail (MM-FR-003 steps 5–6).

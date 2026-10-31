@@ -1,5 +1,8 @@
 <!-- originating_issue: 887 is recorded in .openspec.yaml; /uf.finale
-     emits `Closes #887` in the PR body. -->
+     emits `Closes #887` in the PR body. The meta-prompt pack
+     (What Changes 6) closes #888 in the same PR: the PR body
+     carries both `Closes #887` and `Closes #888` (task 7.3
+     bookkeeping). -->
 
 ## Why
 
@@ -93,10 +96,16 @@ delegation behaves exactly as today (host model).
    gitignore block; root `.gitignore` gains the override entry.
 
 8. **Docs and guidance** — `docs/configuration.md` documents the
-   config pair; `CHANGELOG.md` gains an entry;
-   `.opencode/commands/uf.unleash.md` recommends passing `pack` on
-   implement delegation when the task clearly names one (the
-   classifier covers the rest).
+   config pair; `CHANGELOG.md` gains an entry carrying the
+   plugin-suite coverage result and constitution-alignment
+   outcome in its footer; `AGENTS.md` gains structural updates
+   (project tree, agent count, convention-pack list — task
+   7.4); `.opencode/commands/uf.unleash.md` recommends passing
+   `pack` on implement delegation when the task clearly names
+   one (the classifier covers the rest); a documentation issue
+   is filed against this repo (task 7.3) and a cross-repo
+   documentation issue against `unbound-force/website` per the
+   org constitution's Cross-Repo Documentation rule (task 7.5).
 
 Hero-repo deployment via `uf init` (#889) is slice 2 and out of
 scope; this change is the repo-first slice.
@@ -144,7 +153,11 @@ scope; this change is the repo-first slice.
   (lib asset enumeration, gitignore block);
   `internal/scaffold/assets/opencode/lib/` (new mirror);
   `.gitignore`; `docs/configuration.md`; `CHANGELOG.md`;
-  `.opencode/commands/uf.unleash.md` (documentation-only
+  `AGENTS.md` (structural updates — project tree, agent count,
+  convention-pack list); `internal/schemas/packvalidator_test.go`
+  (meta-prompt.md validation exemption); `internal/scaffold/
+  scaffold_test.go` (knownNonEmbeddedFiles entry + UF-FR-001
+  prose pin); `.opencode/commands/uf.unleash.md` (documentation-only
   guidance); `.opencode/test/unleash-delegate.test.ts` (extended).
 - **Unchanged**: `resolveHostModel` and `executeAgentSession` in
   `.opencode/lib/agent-executor.ts` (the executor already accepts
@@ -161,8 +174,21 @@ scope; this change is the repo-first slice.
 - **Gates**: no coverage floor, review limit, CI flag, or pinned
   dependency changes. The `.opencode/` suite must hold its
   governance-controlled 94% statement coverage floor.
-- **Documentation gate**: user-facing change — a documentation
-  issue must be filed before PR merge (task in tasks.md).
+- **Documentation gate**: user-facing change — two issues must
+  be filed before PR merge: the repo documentation issue
+  (AGENTS.md rule; task 7.3, closed by the PR alongside #887
+  and #888) and the cross-repo `unbound-force/website`
+  documentation issue (org constitution v1.4.0 Cross-Repo
+  Documentation rule; task 7.5).
+- **Content coverage**: the model matrix is a configuration
+  reference for an existing audience (agent-workflow operators
+  already reading `docs/configuration.md`) — below the
+  multi-step-feature threshold that warrants a blog post; the
+  tutorial bar is met by documenting it in
+  `docs/configuration.md` (task 7.1), with the website issue
+  (task 7.5) recording the tutorial disposition (configuration
+  reference, citable from existing delegation docs, no new
+  tutorial).
 
 ## Constitution Alignment
 
