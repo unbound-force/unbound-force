@@ -467,6 +467,29 @@ function missingPackFiles(matrix: ModelMatrix, fileExists: (relativePath: string
   return missing.sort()
 }
 
+/** `classifier.llm` leaves the tracked-role population rule governs (MM-FR-001). */
+const TRACKED_LLM_KEYS = ["endpoint", "model", "apiKey", "request_timeout_ms"] as const
+
+/**
+ * Collects populated `classifier.llm` leaves of a parsed matrix document for
+ * the tracked-role population rule (MM-FR-001): the tracked matrix carries
+ * `classifier.llm` structure only, so any populated value in the tracked
+ * file fails load with the override file named as the remediation. The
+ * check is role-aware by necessity — the identical schema accepts populated
+ * values in merged views (override values legitimately populate those
+ * paths, MM-FR-002), so it runs only against the pre-merge tracked
+ * document, never against a merged result.
+ * @param matrix The parsed tracked-file matrix, before any override merge.
+ * @returns Sorted names of populated `classifier.llm` leaves.
+ */
+function populatedTrackedLlmLeaves(matrix: ModelMatrix): readonly string[] {
+  const llm = matrix.classifier?.llm
+  if (llm === undefined) {
+    return []
+  }
+  return TRACKED_LLM_KEYS.filter((key) => llm[key] !== undefined).sort()
+}
+
 /** Injectable dependencies for loading the model matrix (the loadPolicies pattern). */
 export interface ModelMatrixDependencies {
   /** Reads a project-relative file; absence MUST reject with an ENOENT-coded error. */
@@ -487,7 +510,9 @@ export type ModelMatrixLoadResult =
  * Loads the tracked model matrix and applies the gitignored per-developer
  * override when one is present (design D4). An absent matrix resolves to the
  * zero-config `absent` state (host model, no override read, MM-FR-004); a
- * present matrix that fails the closed schema, names packs without pack
+ * present matrix that fails the closed schema, carries populated
+ * `classifier.llm` values in the tracked file (the tracked-role population
+ * rule, MM-FR-001), names packs without pack
  * files, or pairs with an override that violates the whitelist or fails
  * merged-result re-validation resolves to `invalid` with an error naming the
  * path, accepted key set, whitelist, or offending pack keys (fail-closed).
@@ -512,6 +537,25 @@ export async function loadModelMatrix(dependencies: ModelMatrixDependencies): Pr
     matrix = parseModelMatrix(text, dependencies.parseYaml)
   } catch (error: unknown) {
     return { status: "invalid", error: `model matrix ${MODEL_MATRIX_PATH} is invalid: ${errorText(error)}` }
+  }
+
+  // Tracked-role population rule (MM-FR-001, task 2.4): the tracked file
+  // carries `classifier.llm` structure only. The check runs against the
+  // tracked document BEFORE the override merge — merged views legitimately
+  // populate those paths (MM-FR-002) — and separately from Zod schema
+  // validation, which accepts populated values by design so the merged
+  // result can re-validate against the identical schema. The no-op matrix
+  // (comments-only file) resolves to the canonical empty classifier and
+  // stays valid (MM-FR-004).
+  const populatedLlm = populatedTrackedLlmLeaves(matrix)
+  if (populatedLlm.length > 0) {
+    return {
+      status: "invalid",
+      error:
+        `model matrix ${MODEL_MATRIX_PATH} is invalid: tracked classifier.llm carries populated values ` +
+        `(${populatedLlm.join(", ")}) — per-developer engine configuration belongs in ` +
+        `${MODEL_MATRIX_OVERRIDE_PATH}; keep the tracked file structure only`,
+    }
   }
 
   const missing = missingPackFiles(matrix, dependencies.fileExists)

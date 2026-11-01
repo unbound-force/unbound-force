@@ -78,7 +78,7 @@
   I/O. Unknown explicit profile, invalid explicit pack, or
   explicit profile/pack with no matrix configured fail closed
   with non-retryable errors naming the remediation.
-- [ ] 2.4 In `.opencode/lib/model-matrix.ts`, enforce the
+- [x] 2.4 In `.opencode/lib/model-matrix.ts`, enforce the
   tracked-role population rule (MM-FR-001) in `loadModelMatrix`:
   a load of the tracked `.uf/model-matrix.yaml` whose
   `classifier.llm` carries any populated value (a non-empty

@@ -665,6 +665,71 @@ describe("loadModelMatrix override wiring (MM-FR-002, design D4/D8)", () => {
   })
 })
 
+describe("tracked-role population rule (MM-FR-001, task 2.4)", () => {
+  it("should fail load naming the override file for each populated tracked classifier.llm leaf", async () => {
+    for (const [key, value] of [
+      ["endpoint", "https://example.invalid/v1"],
+      ["model", "provider/classifier-model"],
+      ["apiKey", "{env:CLASSIFIER_KEY}"],
+      ["request_timeout_ms", 30_000],
+    ] as const) {
+      const trackedLlm = parse({ ...STARTER_MATRIX, classifier: { llm: { [key]: value } } })
+      const { dependencies, reads } = loaderDependencies({ matrixText: JSON.stringify(trackedLlm) })
+      const result = await loadModelMatrix(dependencies)
+      expect(result.status).toBe("invalid")
+      if (result.status === "invalid") {
+        expect(result.error).toContain("tracked classifier.llm carries populated values")
+        expect(result.error).toContain(key)
+        expect(result.error).toContain(MODEL_MATRIX_OVERRIDE_PATH)
+      }
+      // Fail-closed before the merge (MM-FR-001 scenario): no merged
+      // configuration is produced, so the override is never read.
+      expect(reads).toEqual([MODEL_MATRIX_PATH])
+    }
+  })
+
+  it("should load the same classifier.llm values arriving via the override", async () => {
+    const { dependencies } = loaderDependencies({
+      overrideText: JSON.stringify({
+        classifier: {
+          llm: {
+            endpoint: "https://example.invalid/v1",
+            model: "provider/classifier-model",
+            apiKey: "{env:CLASSIFIER_KEY}",
+            request_timeout_ms: 30_000,
+          },
+        },
+      }),
+    })
+    const result = await loadModelMatrix(dependencies)
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      expect(result.matrix.classifier?.llm).toEqual({
+        endpoint: "https://example.invalid/v1",
+        model: "provider/classifier-model",
+        apiKey: "{env:CLASSIFIER_KEY}",
+        request_timeout_ms: 30_000,
+      })
+    }
+  })
+
+  it("should load a structure-only tracked classifier.llm and the comments-only tracked file", async () => {
+    const structureOnly = loaderDependencies({
+      matrixText: JSON.stringify({ ...STARTER_MATRIX, classifier: { llm: {} } }),
+    })
+    const structureOnlyResult = await loadModelMatrix(structureOnly.dependencies)
+    expect(structureOnlyResult.status).toBe("ok")
+
+    // The comments-only tracked file resolves to the canonical no-op matrix
+    // whose classifier carries no llm at all — the population rule leaves
+    // the MM-FR-004 no-op valid (covered for parse in the schema block; the
+    // loader row pins the full path).
+    const noOp = loaderDependencies({ matrixText: "# intentionally empty\n" })
+    const noOpResult = await loadModelMatrix(noOp.dependencies)
+    expect(noOpResult).toEqual({ status: "ok", matrix: EMPTY_MODEL_MATRIX })
+  })
+})
+
 describe("selection audit surface (design D7, MM-FR-007)", () => {
   it("should expose the eight-value selection source enum", () => {
     expect(SELECTION_SOURCE_VALUES).toEqual([
