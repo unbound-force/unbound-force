@@ -1934,8 +1934,9 @@ var expectedAssetPaths = []string{
 	"uf/review-matrix.yaml",
 	"uf/reviewer-capabilities.yaml",
 	"uf/sibling-repos.yaml",
-	// Multi-model review schemas (7)
+	// Multi-model review schemas (8)
 	"uf/schemas/lesson-proposal/v1.0.0.schema.json",
+	"uf/schemas/model-matrix/v1.schema.json",
 	"uf/schemas/review-dispatch/v1.0.0.schema.json",
 	"uf/schemas/review-matrix/v2.schema.json",
 	"uf/schemas/review-matrix/v3.schema.json",
