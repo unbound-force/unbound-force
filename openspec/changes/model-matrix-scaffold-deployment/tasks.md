@@ -189,7 +189,7 @@ sequentially, no `[P]`.
 
 ## 6. Bookkeeping and verification
 
-- [ ] 6.1 File the documentation issues (proposal Impact):
+- [x] 6.1 File the documentation issues (proposal Impact):
   one against this repo per the AGENTS.md documentation gate,
   and one against `unbound-force/website` per the org
   constitution's Cross-Repo Documentation rule, referencing
@@ -197,7 +197,7 @@ sequentially, no `[P]`.
   docs this deployment slice extends. Record both issue
   numbers for the PR body.
 
-- [ ] 6.2 Run the full CI-parity gate (MP-023):
+- [x] 6.2 Run the full CI-parity gate (MP-023):
   `make check` — lint, `go test -race -count=1 ./...`,
   build, the scope-based coverage gate, and the TypeScript
   plugin suite (including its 94% statement coverage floor).
@@ -206,7 +206,7 @@ sequentially, no `[P]`.
   modification — any gate conflict is a stop-and-report per
   the AGENTS.md gatekeeping rule.
 
-- [ ] 6.3 Verify constitution alignment against the proposal's
+- [x] 6.3 Verify constitution alignment against the proposal's
   assessments: the MP-001 through MP-024 rules are unchanged
   (task 1.1 was comment-only), no quality or governance gate
   was weakened (task 6.2 evidence), the classifier subagent
