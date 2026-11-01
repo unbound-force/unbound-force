@@ -789,6 +789,8 @@ var alwaysDeployedPacks = map[string]bool{
 	"ci-custom":           true,
 	"review-voice":        true,
 	"review-voice-custom": true,
+	"meta-prompt":         true,
+	"meta-prompt-custom":  true,
 }
 
 // shouldDeployPack returns true if the convention pack file
