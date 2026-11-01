@@ -6,6 +6,44 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- model-matrix-scaffold-deployment: `uf init` now deploys the
+  model-matrix configuration surface to hero repositories, so
+  every repo gets the same content-agent model-selection
+  capability the meta repo has and loads a valid matrix out of
+  the box. A full-mode deploy writes the tracked
+  `.uf/model-matrix.yaml` starter template (structure only --
+  no model identities), the `.uf/schemas/model-matrix/` schema
+  registry, the `meta-prompt` convention pack plus its
+  `meta-prompt-custom.md` initial-deployment template, and the
+  hidden `model-matrix-classifier` subagent behind the
+  classifier cascade's agent engine; DivisorOnly deployments
+  keep excluding the matrix and its registry (an absent matrix
+  is a valid no-op) but gain the meta-prompt packs, which
+  deploy with all convention packs in that mode. The deployed
+  `meta-prompt.md` is load-bearing: it resolves the starter
+  matrix's one previously-unmet `packs:` reference, and without
+  it the matrix loads invalid and every `uf_delegate_command`
+  invocation fails non-retryably with `MATRIX_INVALID` -- the
+  slice-1 gap this change closes. A new scaffold guard test
+  parses the embedded template and fails, naming the offending
+  pack, when any `packs:` key has no embedded pack file, so the
+  gap cannot silently recur. On re-init the deployed tracked
+  matrix is reclassified as a team-owned extension point,
+  following the `uf/review-matrix.yaml` init-survival
+  precedent (#884/#886): team profiles, `packs:` mapping,
+  `defaults:`, and `agents:` pins survive a plain re-run,
+  `--force` remains the replace path, and fresh deploys keep
+  seeding the template. The schema registry and canonical
+  packs (including `meta-prompt.md`) stay tool-owned and
+  refresh when content differs, while custom packs, the
+  classifier agent, and the gitignored override stay
+  user-owned and untouched. Repositories scaffolded during
+  the slice-1 window carry an invalid matrix (the matrix
+  names `meta-prompt` with no pack file); re-running `uf init`
+  heals them by deploying the pack as a new file regardless
+  of ownership. (Spec:
+  openspec/changes/model-matrix-scaffold-deployment/,
+  Fixes: #889)
 - model-matrix-delegation: Capability-driven model selection for
   `uf_delegate_command` -- delegated content-agent work (the tool
   behind `/uf.unleash` and `/uf.run-pipeline-plan`) now runs on
