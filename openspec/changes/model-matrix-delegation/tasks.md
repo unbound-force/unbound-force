@@ -346,7 +346,7 @@
 
 ## 7. Documentation
 
-- [ ] 7.1 [P] Update `docs/configuration.md`: add a
+- [x] 7.1 [P] Update `docs/configuration.md`: add a
   "Delegation Model Matrix" section (or extend the Review
   Council Configuration pattern) documenting
   `.uf/model-matrix.yaml` and `.uf/model-matrix.override.yaml`
