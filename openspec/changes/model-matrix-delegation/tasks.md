@@ -365,7 +365,7 @@
   recorded by task 8.2 — follow the established footer
   convention of prior entries (plugin-suite result under the
   unchanged 94 percent statements coverage floor).
-- [ ] 7.3 File the documentation issue for this user-facing
+- [x] 7.3 File the documentation issue for this user-facing
   change against the current repo before PR merge (AGENTS.md
   documentation gate); record the issue number in the CHANGELOG
   entry or the change notes, and record the bookkeeping in
