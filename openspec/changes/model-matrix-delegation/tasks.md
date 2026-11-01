@@ -398,12 +398,12 @@
 
 ## 8. Verification
 
-- [ ] 8.1 Run `make check` (lint, Go tests, build,
+- [x] 8.1 Run `make check` (lint, Go tests, build,
   coverage-gate, plugin-test) and confirm the `.opencode/`
   plugin suite stays at or above the governance-controlled 94
   percent statements coverage floor — CI parity with
   `ci_local.yml` (AC9).
-- [ ] 8.2 Verify constitution alignment and record the outcome
+- [x] 8.2 Verify constitution alignment and record the outcome
   in the CHANGELOG entry from task 7.2: standalone injectable
   lib module (II, IV), `selection_source` provenance on every
   delegation (I, III), credentials only in the gitignored
@@ -412,13 +412,13 @@
   bounded/cached/overridable and the pack directive
   tool-rendered (VI), and every behavior testable without
   external services (IV).
-- [ ] 8.3 Verify gatekeeping: `git diff` shows no coverage
+- [x] 8.3 Verify gatekeeping: `git diff` shows no coverage
   floor, CRAP, severity, CI-flag, review-limit, or
   pinned-dependency changes; the review-matrix trio,
   `agent-executor.ts`, and `resolveHostModel` are value-identical
   to the base branch. Stop and report per the gatekeeping rule
   if any check fails.
-- [ ] 8.4 Verify the acceptance criteria walkthrough against
+- [x] 8.4 Verify the acceptance criteria walkthrough against
   issue #887's ten criteria (AC1–AC10), citing the test or
   artifact that proves each; record gaps as findings, not
   silent omissions.
