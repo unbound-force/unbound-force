@@ -1951,7 +1951,7 @@ Each entry follows the format: `- <change-name>: <summary>`.
   mirror synced byte-identical; finalize error-boundary tests
   cover null-model rejection and null-variant acceptance for
   both run sources. Documentation gate filed as in-repo
-  issue #891. (Spec:
+  issue #891 and unbound-force/website#360. (Spec:
   openspec/changes/accept-variantless-parent-model/)
 
 ## Recent Changes

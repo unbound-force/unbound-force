@@ -38,11 +38,32 @@
   null; include the variantless-success scenarios and the
   corrected failure-message expectation.
 - [x] 2.2 Update the CHANGELOG.md Unreleased/Fixed entry to
-  reference documentation issue #891 recording the docs-gate
-  outcome.
+  reference documentation issues #891 (in-repo) and
+  unbound-force/website#360 recording the docs-gate outcome.
 - [x] 2.3 Run `openspec validate
   accept-variantless-parent-model --strict` and confirm the
   delta passes.
+- [x] 2.4 Apply the iteration-2 council remediations: record
+  the design decisions in design.md (D1 variant-only
+  relaxation, D2 supersession strategy plus the
+  archive-ordering constraint, D3 full RD-FR-008 restatement),
+  add the MODIFIED 'Review Dispatch Artifact' entry with the
+  corrected host-lookup provenance text, add the REMOVED
+  Requirements section, and cite both documentation-gate
+  issues in every artifact claiming gate completeness.
+- [x] 2.5 Apply the iteration-3 council remediation: reshape
+  'Finalization Model Validation' from MODIFIED to ADDED under
+  `## ADDED Requirements` (repo-wide no delta ever ADDs that
+  requirement, so a MODIFY could never apply — orphan abort),
+  carry the complete scenario set (both predecessor scenario
+  names with corrected bodies plus the three variantless
+  scenarios), keep the ADDED description within the
+  500-character budget, drop `advisor-host-model-fallback`
+  from the archive-ordering constraint everywhere it appears,
+  and verify mechanically: scratch-project archive rehearsal
+  (fanout archived first, then this change, both clean) plus
+  `openspec validate accept-variantless-parent-model
+  --strict` (exit 0).
 
 ## 3. Verification
 
