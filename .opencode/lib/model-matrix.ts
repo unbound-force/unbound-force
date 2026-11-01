@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+
 import { z } from "zod"
 
 import { parseYamlDocument, type YamlParser } from "./reviewer-manifest.js"
@@ -426,7 +428,10 @@ export function mergeOverride(base: ModelMatrix, override: Record<string, unknow
 
   if (llmOverrides !== null) {
     const baseClassifier = isRecord(base.classifier) ? base.classifier : {}
-    const baseLlm = isRecord(baseClassifier.llm) ? baseClassifier.llm : {}
+    // Explicit annotation: isRecord's guard intersects with the zod-inferred
+    // llm leaf type, whose specific keys would otherwise reject the string
+    // indexing below under typecheck (the merge walks it as an open record).
+    const baseLlm: Record<string, unknown> = isRecord(baseClassifier.llm) ? baseClassifier.llm : {}
     const mergedLlm: Record<string, unknown> = Object.create(null)
     for (const key of Object.keys(baseLlm)) {
       mergedLlm[key] = baseLlm[key]
@@ -1023,4 +1028,680 @@ export function resolveSelection(
     }
   }
   return hostSelection(null, null, `${attempt.fallbackReason}; no static default for task kind "${kind ?? "unknown"}"`)
+}
+
+// ── Classifier cascade (design D5, MM-FR-005/MM-FR-006) ────────
+
+/** Default hidden-subagent name for the agent engine when `classifier.agent` is absent (MM-FR-005). */
+export const DEFAULT_CLASSIFIER_AGENT = "model-matrix-classifier"
+
+/** Default agent-engine bound in milliseconds when `classifier.agent_timeout_ms` is absent (MM-FR-005). */
+export const DEFAULT_AGENT_TIMEOUT_MS = 45_000
+
+/** Default LLM-engine request bound in milliseconds when `classifier.llm.request_timeout_ms` is absent (MM-FR-006). */
+export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 10_000
+
+/** Maximum classifier response body in bytes: 50 MiB (MM-FR-006 unbounded-body guard). */
+export const MAX_LLM_RESPONSE_BYTES = 52_428_800
+
+/**
+ * Bounded result-cache capacity. A named constant, deliberately not
+ * matrix-configurable in v1 (design D5, mirroring the derive-per-run-timeout
+ * stance on keeping the new config surface minimal).
+ */
+export const CLASSIFIER_CACHE_CAPACITY = 128
+
+/** Loopback hosts an `http` classifier endpoint may target (design D4, MM-FR-006). */
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "[::1]"])
+
+/** The `{env:VAR}`-only apiKey reference form (MM-FR-006: never a literal key). */
+const ENV_API_KEY_PATTERN = /^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/
+
+/** A parsed classifier engine response — the agent contract's JSON object. */
+interface ClassifierResponse {
+  readonly pack: string
+  readonly confidence: number
+  readonly reasoning?: string
+}
+
+/** One engine's cascade attempt: a gated selection or the recorded failure reason. */
+type EngineAttempt =
+  | {
+      readonly selected: true
+      readonly engine: ClassifierEngine
+      readonly pack: string
+      readonly confidence: number
+    }
+  | { readonly selected: false; readonly reason: string }
+
+/** One LLM-engine HTTP attempt outcome: the bounded body text or the failure reason. */
+type LlmHttpResponse =
+  | { readonly ok: true; readonly content: string }
+  | { readonly ok: false; readonly status: number; readonly reason: string }
+
+/** The resolved apiKey state: an interpolated value or the recorded skip reason. */
+type InterpolatedApiKey =
+  | { readonly status: "ok"; readonly value: string }
+  | { readonly status: "skipped"; readonly reason: string }
+
+/** Whether the cascade runs for one delegation, carrying the configured matrix when it does. */
+type ClassifierRunState =
+  | { readonly run: false; readonly reason: string }
+  | { readonly run: true; readonly matrix: ModelMatrix }
+
+/** A cached winning classification — the `selected` outcome payload (design D5). */
+export interface ClassifierCacheEntry {
+  readonly engine: ClassifierEngine
+  readonly pack: string
+  readonly confidence: number
+}
+
+/**
+ * Injectable in-process classifier result cache (design D5). One instance
+ * belongs to exactly one cascade and is never module-level state, so
+ * concurrent sessions and tests share no mutable cache (Constitution IV;
+ * TC-002/TC-004 isolation). Only winning selections are cached: a failed
+ * cascade is not a result, and pinning a transient engine failure would
+ * prevent the next delegation from retrying classification.
+ */
+export interface ClassifierCache {
+  get(key: string): ClassifierCacheEntry | undefined
+  set(key: string, entry: ClassifierCacheEntry): void
+}
+
+/**
+ * Creates a bounded FIFO result cache. Insertion order (Map semantics)
+ * decides eviction: when the cache is at capacity, the oldest entry is
+ * dropped to admit the new one. Re-setting an existing key updates its
+ * value without refreshing its eviction position.
+ * @param capacity Maximum number of entries (defaults to {@link CLASSIFIER_CACHE_CAPACITY}).
+ * @returns The bounded cache.
+ */
+export function createClassifierCache(capacity: number = CLASSIFIER_CACHE_CAPACITY): ClassifierCache {
+  const entries = new Map<string, ClassifierCacheEntry>()
+  return {
+    get: (key: string): ClassifierCacheEntry | undefined => entries.get(key),
+    set: (key: string, entry: ClassifierCacheEntry): void => {
+      if (!entries.has(key) && entries.size >= capacity) {
+        const oldest = entries.keys().next().value
+        if (oldest !== undefined) {
+          entries.delete(oldest)
+        }
+      }
+      entries.set(key, entry)
+    },
+  }
+}
+
+/**
+ * Computes the classifier cache key: the SHA-256 of the feature dir,
+ * prompt, and delegated agent name (MM-FR-005). The JSON-array
+ * serialization keeps the three components unambiguously delimited, so
+ * no (feature_dir, prompt, agent) triple can collide with another.
+ * @param featureDir Feature directory of the delegated work, or null.
+ * @param prompt The delegated task's prompt text.
+ * @param agent The delegated agent name, when the call carried one.
+ * @returns The hex-encoded SHA-256 cache key.
+ */
+export function classifierCacheKey(featureDir: string | null, prompt: string, agent: string | undefined): string {
+  return createHash("sha256")
+    .update(JSON.stringify([featureDir ?? "", prompt, agent ?? ""]))
+    .digest("hex")
+}
+
+/** Task context for one classification request. */
+export interface ClassifierRequest {
+  /** Selection parameters of the delegation call (bypass predicate inputs; `agent` joins the cache key). */
+  readonly inputs: SelectionInputs
+  /** Feature directory of the delegated work, when one is active (cache key; engine prompt context). */
+  readonly feature_dir: string | null
+  /** The delegated task's prompt text (cache key; engine prompt input). */
+  readonly prompt: string
+}
+
+/**
+ * Injected seams for the classifier cascade (design D5; Constitution IV —
+ * every classifier behavior is testable without a network or a live
+ * subagent).
+ */
+export interface ClassifierCascadeDependencies {
+  /**
+   * Spawns the hidden classifier subagent and resolves its response text.
+   * Production wiring reuses the agent-executor session path with the
+   * configured classifier agent name and the signal as its parent abort;
+   * the child session inherits the session model hierarchy (no endpoint
+   * configuration, MM-FR-005).
+   */
+  readonly spawnAgent: (agent: string, prompt: string, signal: AbortSignal) => Promise<string>
+  /**
+   * Issues the LLM engine's chat-completions POST to the configured
+   * endpoint (production wiring uses the global fetch). The endpoint is
+   * the full chat-completions URL, configured only in the gitignored
+   * override under `classifier.llm.endpoint` (MM-FR-006).
+   */
+  readonly fetch: typeof fetch
+  /** Reads one environment variable for `{env:VAR}` apiKey interpolation (production wiring reads process.env). */
+  readonly readEnv: (name: string) => string | undefined
+  /** Result-cache override; defaults to a per-instance bounded cache. */
+  readonly cache?: ClassifierCache
+}
+
+/**
+ * The two-engine classifier cascade for `implement` and unknown task kinds
+ * (design D5, MM-FR-005/MM-FR-006): agent engine, then LLM engine, then
+ * static fallback. The cascade produces the {@link ClassifierOutcome} that
+ * {@link resolveSelection} consumes — selection stays a pure function, so
+ * the engines run before resolution and participate only as that value.
+ *
+ * Gating: the first valid JSON response naming a matrix-valid pack (a
+ * `packs` key of the configured matrix) with confidence at or above the
+ * configured threshold wins. Below-threshold, malformed (including
+ * fences-wrapped JSON), matrix-invalid, timed-out, or errored results fall
+ * to the next engine; when both engines fail, the cascade reports
+ * `failed` with each engine's reason and selection falls back statically.
+ * Classifier failure NEVER throws to the caller and never blocks
+ * delegation (MM-FR-005).
+ *
+ * Constructed once per delegation-tool plugin instance; the result cache
+ * therefore lives and dies with the instance and is never shared across
+ * cascades. All configuration (engine names, timeouts, threshold, LLM
+ * endpoint) is read from the loaded matrix per call, so merged-view
+ * override values govern exactly as they do for selection.
+ */
+export class ClassifierCascade {
+  private readonly cache: ClassifierCache
+
+  /**
+   * @param dependencies Injected spawn, fetch, environment, and cache seams.
+   */
+  constructor(private readonly dependencies: ClassifierCascadeDependencies) {
+    this.cache = dependencies.cache ?? createClassifierCache()
+  }
+
+  /**
+   * Runs the cascade for one delegation.
+   *
+   * The bypass predicate runs first (MM-FR-003): an explicit `model`,
+   * `profile`, or `pack` parameter, an `agents:` pin that yields before
+   * step 6, a static `plan`/`tasks` kind, `classifier.enabled: false`, or
+   * no configured matrix resolves to `not-run` without touching either
+   * engine or the cache. Otherwise the cache is consulted (a hit skips
+   * both engines), then the agent engine, then the LLM engine.
+   * @param matrix The loaded matrix, or null when none is configured.
+   * @param request The delegation's selection inputs, feature dir, and prompt.
+   * @returns The cascade outcome for {@link resolveSelection}. Never throws.
+   */
+  async classify(matrix: ModelMatrix | null, request: ClassifierRequest): Promise<ClassifierOutcome> {
+    const state = classifierRunState(matrix, request.inputs)
+    if (!state.run) {
+      return { status: "not-run", reason: state.reason }
+    }
+    const key = classifierCacheKey(request.feature_dir, request.prompt, request.inputs.agent)
+    const cached = this.cache.get(key)
+    if (cached !== undefined) {
+      return { status: "selected", engine: cached.engine, pack: cached.pack, confidence: cached.confidence }
+    }
+    const agentAttempt = await this.runAgentEngine(state.matrix, request)
+    if (agentAttempt.selected) {
+      this.cache.set(key, agentAttempt)
+      return {
+        status: "selected",
+        engine: agentAttempt.engine,
+        pack: agentAttempt.pack,
+        confidence: agentAttempt.confidence,
+      }
+    }
+    const llmAttempt = await this.runLlmEngine(state.matrix, request)
+    if (llmAttempt.selected) {
+      this.cache.set(key, llmAttempt)
+      return {
+        status: "selected",
+        engine: llmAttempt.engine,
+        pack: llmAttempt.pack,
+        confidence: llmAttempt.confidence,
+      }
+    }
+    return { status: "failed", reason: `agent engine: ${agentAttempt.reason}; llm engine: ${llmAttempt.reason}` }
+  }
+
+  /**
+   * Runs the agent engine: spawns the hidden classifier subagent through
+   * the injected session-spawn seam, bounded by the configured
+   * `agent_timeout_ms` (default 45,000). The bound is enforced by racing
+   * the spawn against a timer that aborts the signal — the production
+   * seam forwards that signal to the executor's parent-abort chain, so a
+   * timed-out child session is cancelled, and a seam that ignores the
+   * signal still cannot exceed the bound.
+   * @param matrix The configured matrix (agent name, timeout, packs, threshold).
+   * @param request The delegation context.
+   * @returns The gated engine attempt.
+   */
+  private async runAgentEngine(matrix: ModelMatrix, request: ClassifierRequest): Promise<EngineAttempt> {
+    const agentName = matrix.classifier?.agent ?? DEFAULT_CLASSIFIER_AGENT
+    const timeoutMs = matrix.classifier?.agent_timeout_ms ?? DEFAULT_AGENT_TIMEOUT_MS
+    const controller = new AbortController()
+    let timer: NodeJS.Timeout | undefined
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort(new Error(`classifier agent engine exceeded agent_timeout_ms ${timeoutMs}`))
+        reject(controller.signal.reason)
+      }, timeoutMs)
+    })
+    // The losing promise's late rejection must never surface unhandled:
+    // the race result is authoritative, and the spawn is cancellable only
+    // through the signal (Constitution III — no silent background failures).
+    const spawn = this.dependencies.spawnAgent(
+      agentName,
+      renderAgentEnginePrompt(request, sortedPackNames(matrix)),
+      controller.signal,
+    )
+    void spawn.catch(() => {})
+    try {
+      const text = await Promise.race([spawn, timeoutPromise])
+      return gateClassifierResponse(matrix, "agent", parseClassifierResponse(text))
+    } catch (error: unknown) {
+      return { selected: false, reason: errorText(error) }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /**
+   * Runs the LLM engine: a chat-completions POST to the endpoint
+   * configured under the merged matrix's `classifier.llm.*` (populated
+   * values arrive exclusively via the gitignored override, MM-FR-006).
+   * Unconfigured (no endpoint or model) skips the engine without any
+   * network call. Each request carries `temperature: 0` and
+   * `response_format: {type: "json_object"}`, with a single 400-retry
+   * without the `response_format` field; each attempt is bounded by
+   * `request_timeout_ms` (default 10,000) via AbortSignal, and the
+   * response body is capped at 50 MiB without buffering an oversized
+   * body.
+   * @param matrix The configured matrix (LLM config, packs, threshold).
+   * @param request The delegation context.
+   * @returns The gated engine attempt.
+   */
+  private async runLlmEngine(matrix: ModelMatrix, request: ClassifierRequest): Promise<EngineAttempt> {
+    const llm = matrix.classifier?.llm
+    if (llm === undefined || llm.endpoint === undefined || llm.model === undefined) {
+      return {
+        selected: false,
+        reason: "skipped — classifier.llm carries no endpoint configuration (endpoint and model arrive via the gitignored override)",
+      }
+    }
+    let url: URL
+    try {
+      url = validateLlmEndpoint(llm.endpoint)
+    } catch (error: unknown) {
+      return { selected: false, reason: `endpoint validation failed: ${errorText(error)}` }
+    }
+    const apiKey = llm.apiKey === undefined ? null : interpolateLlmApiKey(llm.apiKey, this.dependencies.readEnv)
+    if (apiKey !== null && apiKey.status !== "ok") {
+      return { selected: false, reason: `skipped — ${apiKey.reason}` }
+    }
+    const timeoutMs = llm.request_timeout_ms ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS
+    const baseBody: Record<string, unknown> = {
+      model: llm.model,
+      messages: [{ role: "user", content: renderLlmEnginePrompt(request, sortedPackNames(matrix)) }],
+      temperature: 0,
+    }
+    let attempt = await this.attemptLlmRequest(
+      url,
+      { ...baseBody, response_format: { type: "json_object" } },
+      apiKey,
+      timeoutMs,
+    )
+    if (!attempt.ok && attempt.status === 400) {
+      // Single retry without response_format: some endpoints reject the
+      // field (MM-FR-006). The retry is a fresh request with its own bound.
+      attempt = await this.attemptLlmRequest(url, baseBody, apiKey, timeoutMs)
+    }
+    if (!attempt.ok) {
+      return { selected: false, reason: attempt.reason }
+    }
+    const content = chatCompletionsContent(attempt.content)
+    if (content === null) {
+      return { selected: false, reason: "response is not a chat-completions choices[0].message.content string" }
+    }
+    return gateClassifierResponse(matrix, "llm", parseClassifierResponse(content))
+  }
+
+  /**
+   * Issues one LLM-engine HTTP attempt under a fresh AbortSignal bounded
+   * by the request timeout. The bound covers the request and the body
+   * read. A non-2xx response cancels its body without buffering the
+   * error payload; an ok response is read under the 50 MiB cap.
+   * @param url The validated endpoint URL.
+   * @param body The JSON request body.
+   * @param apiKey The interpolated apiKey state, or null for no header.
+   * @param timeoutMs The per-request timeout in milliseconds.
+   * @returns The bounded body text or the failure reason with the HTTP status.
+   */
+  private async attemptLlmRequest(
+    url: URL,
+    body: Record<string, unknown>,
+    apiKey: InterpolatedApiKey | null,
+    timeoutMs: number,
+  ): Promise<LlmHttpResponse> {
+    const controller = new AbortController()
+    const timer = setTimeout(
+      () => controller.abort(new Error(`classifier LLM request exceeded request_timeout_ms ${timeoutMs}`)),
+      timeoutMs,
+    )
+    try {
+      const response = await this.dependencies.fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey !== null && apiKey.status === "ok" ? { Authorization: `Bearer ${apiKey.value}` } : {}),
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        // The error body is never needed — cancel it best-effort so the
+        // connection is released without buffering an error payload.
+        void response.body?.cancel().catch(() => {})
+        return { ok: false, status: response.status, reason: `endpoint returned HTTP ${response.status}` }
+      }
+      const content = await readBoundedResponseBody(response)
+      if (content === null) {
+        return {
+          ok: false,
+          status: response.status,
+          reason: `response body exceeds the ${MAX_LLM_RESPONSE_BYTES}-byte cap (50 MiB) and is treated as malformed`,
+        }
+      }
+      return { ok: true, content }
+    } catch (error: unknown) {
+      if (controller.signal.aborted) {
+        return { ok: false, status: 0, reason: `request timed out after ${timeoutMs}ms (request_timeout_ms)` }
+      }
+      return { ok: false, status: 0, reason: `request failed: ${errorText(error)}` }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+}
+
+/**
+ * Decides whether the cascade runs for one delegation (MM-FR-003: only
+ * chains that reach step 6). An explicit `model`, `profile`, or `pack`
+ * parameter bypasses the classifier entirely; an `agents:` pin yields at
+ * step 4 before the classifier; `plan`/`tasks` resolve statically; an
+ * absent `classifier.enabled` defaults to enabled (only `false`
+ * disables); and a missing or no-op matrix has no classifier
+ * participation (MM-FR-004 zero-config).
+ * @param matrix The loaded matrix, or null.
+ * @param inputs The delegation call's selection parameters.
+ * @returns The run state with the configured matrix, or the not-run reason.
+ */
+function classifierRunState(matrix: ModelMatrix | null, inputs: SelectionInputs): ClassifierRunState {
+  if (inputs.model !== undefined || inputs.profile !== undefined || inputs.pack !== undefined) {
+    return { run: false, reason: "an explicit model, profile, or pack parameter bypasses the classifier" }
+  }
+  const configured = matrix !== null && Object.keys(matrix.profiles).length > 0 ? matrix : null
+  if (configured === null) {
+    return { run: false, reason: "no model matrix is configured" }
+  }
+  if (configured.classifier?.enabled === false) {
+    return { run: false, reason: "classifier is disabled (classifier.enabled: false)" }
+  }
+  const kind = inputs.checkpoint_step
+  if (kind === "plan" || kind === "tasks") {
+    return { run: false, reason: `task kind "${kind}" resolves statically and never reaches the classifier` }
+  }
+  if (inputs.agent !== undefined && Object.hasOwn(configured.agents ?? {}, inputs.agent)) {
+    return { run: false, reason: `agents pin for "${inputs.agent}" yields before the classifier` }
+  }
+  return { run: true, matrix: configured }
+}
+
+/** Sorted `packs` keys of a configured matrix — the classifier's candidate set. */
+function sortedPackNames(matrix: ModelMatrix): string[] {
+  return Object.keys(matrix.packs ?? {}).sort()
+}
+
+/**
+ * Renders the agent engine's spawn prompt. The subagent definition
+ * (`.opencode/agents/model-matrix-classifier.md`) carries the
+ * investigate-then-decide protocol; this prompt carries the task
+ * specifics — the candidate pack set and the delegated task text.
+ * @param request The delegation context.
+ * @param packs The sorted candidate pack names.
+ * @returns The spawn prompt text.
+ */
+function renderAgentEnginePrompt(request: ClassifierRequest, packs: readonly string[]): string {
+  const sections = ["Classify the delegated task below into exactly one UF convention pack."]
+  if (request.feature_dir !== null) {
+    sections.push(`Feature directory: ${request.feature_dir}`)
+  }
+  sections.push(`Candidate packs: ${packs.join(", ")}`)
+  sections.push(
+    'Investigate the feature directory\'s spec, plan, and tasks plus the relevant code, then respond with ONLY the JSON object ' +
+      '{"pack": "<name>", "confidence": <0.0-1.0>, "reasoning": "<optional>"} — no markdown fences, no prose, never ask questions.',
+  )
+  sections.push(`Delegated task:\n\n${request.prompt}`)
+  return sections.join("\n\n")
+}
+
+/**
+ * Renders the LLM engine's chat-completions message. Self-contained (the
+ * endpoint has no investigation tools), and it names JSON explicitly —
+ * endpoints enforcing `response_format: json_object` require the request
+ * to mention JSON.
+ * @param request The delegation context.
+ * @param packs The sorted candidate pack names.
+ * @returns The message content text.
+ */
+function renderLlmEnginePrompt(request: ClassifierRequest, packs: readonly string[]): string {
+  const sections = ["Classify the delegated task below into exactly one UF convention pack."]
+  if (request.feature_dir !== null) {
+    sections.push(`Feature directory: ${request.feature_dir}`)
+  }
+  sections.push(`Candidate packs: ${packs.join(", ")}`)
+  sections.push(
+    'Respond with ONLY a JSON object {"pack": "<name>", "confidence": <0.0-1.0>} — no markdown fences, no prose.',
+  )
+  sections.push(`Delegated task:\n\n${request.prompt}`)
+  return sections.join("\n\n")
+}
+
+/**
+ * Parses one engine's response under the strict JSON-only contract
+ * (MM-FR-005): the text must be a bare JSON object carrying a non-empty
+ * string `pack` and a finite `confidence` between 0 and 1, with an
+ * optional string `reasoning`. Markdown-fenced or prose-wrapped
+ * responses fail `JSON.parse` and are malformed by contract; extra keys
+ * are tolerated because the gates consume only `pack` and `confidence`.
+ * @param text The engine's response text.
+ * @returns The parsed response, or null when malformed.
+ */
+function parseClassifierResponse(text: string): ClassifierResponse | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null
+  }
+  const { pack, confidence, reasoning } = parsed as Record<string, unknown>
+  if (typeof pack !== "string" || pack.length === 0) {
+    return null
+  }
+  if (typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+    return null
+  }
+  if (reasoning !== undefined && typeof reasoning !== "string") {
+    return null
+  }
+  return reasoning === undefined ? { pack, confidence } : { pack, confidence, reasoning }
+}
+
+/**
+ * Applies the cascade gates to one parsed engine response (MM-FR-005):
+ * the named pack must be a `packs` key of the configured matrix (pack
+ * files were existence-checked at load time, so key membership is the
+ * matrix-validity test), and the confidence must meet the configured
+ * threshold (default 0.6). `resolveSelection` re-applies the identical
+ * gates to whatever outcome it receives — defense in depth for callers
+ * that present a pre-computed outcome the cascade never gated.
+ * @param matrix The configured matrix supplying `packs` and the threshold.
+ * @param engine The engine whose response is being gated.
+ * @param response The parsed response, or null when malformed.
+ * @returns The gated selection or the recorded failure reason.
+ */
+function gateClassifierResponse(
+  matrix: ModelMatrix,
+  engine: ClassifierEngine,
+  response: ClassifierResponse | null,
+): EngineAttempt {
+  if (response === null) {
+    return {
+      selected: false,
+      reason: 'malformed response — expected the bare JSON object {"pack": "...", "confidence": ...} without markdown fences or prose',
+    }
+  }
+  const packs = matrix.packs ?? {}
+  if (!Object.hasOwn(packs, response.pack)) {
+    return { selected: false, reason: `pack "${response.pack}" is not a packs key in the configured matrix` }
+  }
+  const threshold = matrix.classifier?.confidence_threshold ?? DEFAULT_CONFIDENCE_THRESHOLD
+  if (response.confidence < threshold) {
+    return { selected: false, reason: `confidence ${response.confidence} is below the threshold ${threshold}` }
+  }
+  return { selected: true, engine, pack: response.pack, confidence: response.confidence }
+}
+
+/**
+ * Validates the configured LLM endpoint (design D4, MM-FR-006): the URL
+ * must parse and use the `https` scheme, or `http` with a loopback host
+ * (`localhost`, `127.0.0.1`, `[::1]` — local endpoints such as Ollama).
+ * Any other `http` endpoint fails before a request is issued.
+ * @param endpoint The configured endpoint URL string.
+ * @returns The parsed endpoint URL.
+ * @throws When the endpoint is not a valid URL or violates the scheme rule.
+ */
+function validateLlmEndpoint(endpoint: string): URL {
+  let url: URL
+  try {
+    url = new URL(endpoint)
+  } catch {
+    throw new Error(`classifier.llm.endpoint "${endpoint}" is not a valid URL`)
+  }
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname))) {
+    throw new Error(
+      `classifier.llm.endpoint "${endpoint}" must use the https scheme or an http loopback host (localhost, 127.0.0.1, [::1])`,
+    )
+  }
+  return url
+}
+
+/**
+ * Interpolates the configured apiKey from its `{env:VAR}` reference
+ * (MM-FR-006). A literal key is rejected without echoing it — the value
+ * is a secret and must never land in a reason string or the audit trail
+ * (Constitution V); a reference naming an unset variable skips the
+ * engine for this invocation, never an empty credential.
+ * @param apiKey The configured apiKey string.
+ * @param readEnv Injected environment reader.
+ * @returns The interpolated value or the recorded skip reason.
+ */
+function interpolateLlmApiKey(apiKey: string, readEnv: (name: string) => string | undefined): InterpolatedApiKey {
+  const match = ENV_API_KEY_PATTERN.exec(apiKey)
+  if (match === null) {
+    return {
+      status: "skipped",
+      reason: "classifier.llm.apiKey is a literal key — an {env:VAR} reference is required; engine skipped",
+    }
+  }
+  const value = readEnv(match[1])
+  if (value === undefined || value === "") {
+    return {
+      status: "skipped",
+      reason: `environment variable ${match[1]} referenced by classifier.llm.apiKey is not set — engine skipped (never an empty credential)`,
+    }
+  }
+  return { status: "ok", value }
+}
+
+/**
+ * Reads a response body under the 50 MiB cap without buffering an
+ * oversized body (MM-FR-006): a declared `content-length` over the cap
+ * is rejected before a single byte is read; a streaming body is read
+ * incrementally and cancelled as soon as the running byte count exceeds
+ * the cap, discarding the bytes already held. A null body (mock and
+ * empty responses) falls back to `text()` with the same length check.
+ * @param response The ok HTTP response.
+ * @returns The body text, or null when the body exceeds the cap.
+ */
+async function readBoundedResponseBody(response: Response): Promise<string | null> {
+  const declared = response.headers.get("content-length")
+  if (declared !== null) {
+    const length = Number(declared)
+    if (Number.isFinite(length) && length > MAX_LLM_RESPONSE_BYTES) {
+      // Oversized by declaration — rejected before buffering anything.
+      void response.body?.cancel().catch(() => {})
+      return null
+    }
+  }
+  if (response.body === null) {
+    const text = await response.text()
+    return Buffer.byteLength(text, "utf8") > MAX_LLM_RESPONSE_BYTES ? null : text
+  }
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let received = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+    if (value === undefined) {
+      continue
+    }
+    received += value.byteLength
+    if (received > MAX_LLM_RESPONSE_BYTES) {
+      // Oversized mid-stream — cancel the reader without reading further;
+      // the already-buffered chunks are discarded with the result.
+      void reader.cancel().catch(() => {})
+      return null
+    }
+    chunks.push(value)
+  }
+  return Buffer.concat(chunks).toString("utf8")
+}
+
+/**
+ * Extracts the assistant message content from a chat-completions
+ * response body (`choices[0].message.content`).
+ * @param body The response body text.
+ * @returns The content string, or null when the shape is absent.
+ */
+function chatCompletionsContent(body: string): string | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    return null
+  }
+  const choices = (parsed as Record<string, unknown>).choices
+  if (!Array.isArray(choices) || choices.length === 0) {
+    return null
+  }
+  const first = choices[0]
+  if (typeof first !== "object" || first === null) {
+    return null
+  }
+  const message = (first as Record<string, unknown>).message
+  if (typeof message !== "object" || message === null) {
+    return null
+  }
+  const content = (message as Record<string, unknown>).content
+  return typeof content === "string" ? content : null
 }
