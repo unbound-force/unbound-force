@@ -1,7 +1,7 @@
 /**
  * Tests for the model-matrix lib module (OpenSpec change
- * model-matrix-delegation, tasks 2.1-2.3 — MM-FR-001 through MM-FR-004
- * scenarios, design D1/D2/D3/D4/D8).
+ * model-matrix-delegation — MM-FR-001 through MM-FR-004 scenarios,
+ * design D1/D2/D3/D4/D8).
  *
  * Task 2.1 surface: the closed v1 Zod schema, the tristate loader with
  * injected read/parse/existence seams, and pack existence validation.
@@ -9,8 +9,14 @@
  * propagation, merged-result re-validation, and the loader override wiring.
  * Task 2.3 surface: the resolveSelection precedence chain — one proof test
  * per chain step and failure mode.
- * Task 2.4 extends this file with exhaustive MM-FR-003/MM-FR-004 scenario
- * coverage and the classifier cascade tests (task 3.3+).
+ * Task 2.4 rows: the tracked-role population rule — loader rejection of
+ * populated tracked `classifier.llm` values naming the override file.
+ * Task 2.5 rows: the plan-of-record reconciliation — profile-count and
+ * agent-pin boundary rows, classifier timeout caps, cascade-bypass and
+ * selection-level gating coverage, and the tracked-matrix extensibility
+ * scenario (spec-review iteration-4 advisories 5, 7, 8, and 10). The
+ * classifier cascade engine tests live in task 3.3's separate file
+ * (model-matrix-classifier.test.ts), not here.
  */
 import { describe, expect, it } from "vitest"
 
@@ -234,6 +240,54 @@ describe("model matrix closed v1 schema (MM-FR-001)", () => {
       oversized[`capability-${index}`] = {}
     }
     expect(() => parse({ version: 1, profiles: oversized })).toThrow("at most 32 profiles are allowed")
+  })
+
+  it("should accept matrices at the profile-count bounds (1 and 32 profiles)", () => {
+    // Task 2.5 boundary row: the rejection test pins 0 and 33; the bounds
+    // themselves must also accept their boundary values.
+    const single = parse({ version: 1, profiles: { "code-writing": {} } })
+    expect(Object.keys(single.profiles)).toHaveLength(1)
+
+    const maximal: Record<string, unknown> = {}
+    for (let index = 0; index < 32; index += 1) {
+      maximal[`capability-${index}`] = {}
+    }
+    const bounded = parse({ version: 1, profiles: maximal })
+    expect(Object.keys(bounded.profiles)).toHaveLength(32)
+  })
+
+  it("should bound the agent-pin count at 32 while accepting an empty agents map", () => {
+    // Task 2.5 boundary row, reconciled with the landed schema per spec
+    // review iteration-4 advisory 5: the bound is upper-only by design —
+    // the tracked starter matrix ships `agents: {}` (design D9, task 4.1),
+    // so zero pins MUST parse; the task text's "0 pins rejected" wording
+    // was unimplementable as written and the landed semantics win.
+    const pins = (count: number): Record<string, string> => {
+      const map: Record<string, string> = {}
+      for (let index = 0; index < count; index += 1) {
+        map[`agent-${index}`] = "code-writing"
+      }
+      return map
+    }
+    const empty = parse({ ...STARTER_MATRIX, agents: {} })
+    expect(empty.agents).toEqual({})
+
+    const bounded = parse({ ...STARTER_MATRIX, agents: pins(32) })
+    expect(Object.keys(bounded.agents ?? {})).toHaveLength(32)
+
+    expect(() => parse({ ...STARTER_MATRIX, agents: pins(33) })).toThrow("at most 32 agent pins are allowed")
+  })
+
+  it("should bound classifier timeouts at their schema caps", () => {
+    // Task 2.5 rows for the numeric caps the closed schema enforces
+    // (spec-review iteration-4 advisory 6 records that the FR text states
+    // only the defaults; these rows pin the enforced surface).
+    expect(() => parse({ ...STARTER_MATRIX, classifier: { agent_timeout_ms: 1_800_000 } })).not.toThrow()
+    expect(() => parse({ ...STARTER_MATRIX, classifier: { agent_timeout_ms: 1_800_001 } })).toThrow("Too big")
+    expect(() => parse({ ...STARTER_MATRIX, classifier: { llm: { request_timeout_ms: 180_000 } } })).not.toThrow()
+    expect(() => parse({ ...STARTER_MATRIX, classifier: { llm: { request_timeout_ms: 180_001 } } })).toThrow(
+      "Too big",
+    )
   })
 
   it("should reject version values other than 1", () => {
@@ -949,6 +1003,119 @@ describe("resolveSelection precedence chain (MM-FR-003/MM-FR-004, design D2)", (
       expect(llmEngine.selection.pack).toBe("typescript")
       expect(llmEngine.selection.model).toBe("provider/code-model")
       expect(llmEngine.selection.confidence).toBe(0.8)
+    }
+  })
+
+  it("should not leak a classifier outcome when an explicit profile or pack resolves the chain", () => {
+    // Spec-review iteration-4 advisory 7 (lib level): an explicit model,
+    // profile, or pack bypasses the cascade entirely, so a synthetic
+    // selected outcome presented alongside explicit parameters must never
+    // leak a pack directive. The model case is pinned above; these rows
+    // pin profile and pack.
+    const selected: ClassifierOutcome = { status: "selected", engine: "agent", pack: "go", confidence: 0.99 }
+
+    const viaProfile = resolveSelection(
+      selectionMatrix,
+      { profile: "code-writing", checkpoint_step: "implement" },
+      selected,
+    )
+    expect(viaProfile.ok).toBe(true)
+    if (viaProfile.ok) {
+      expect(viaProfile.selection.selection_source).toBe("explicit-profile")
+      expect(viaProfile.selection.model).toBe("provider/code-model")
+      expect(viaProfile.selection.pack).toBeNull()
+    }
+
+    const viaPack = resolveSelection(selectionMatrix, { pack: "content", checkpoint_step: "implement" }, selected)
+    expect(viaPack.ok).toBe(true)
+    if (viaPack.ok) {
+      expect(viaPack.selection.selection_source).toBe("explicit-pack")
+      expect(viaPack.selection.pack).toBe("content")
+      expect(viaPack.selection.capability).toBe("content-writing")
+      expect(viaPack.selection.model).toBe("provider/content-model")
+    }
+  })
+
+  it("should discard a classifier outcome naming a matrix-invalid pack, falling back statically", () => {
+    // Spec-review iteration-4 advisory 8: the selection-level
+    // matrix-validity gate in resolveSelection (distinct from the cascade
+    // engine's own check) — a pack outside the configured `packs` map is
+    // discarded and the static default carries the auditable reason.
+    const result = resolveSelection(
+      selectionMatrix,
+      { checkpoint_step: "implement" },
+      { status: "selected", engine: "agent", pack: "no-such-pack", confidence: 0.99 },
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("default-kind")
+      expect(result.selection.model).toBe("provider/code-model")
+      expect(result.selection.fallback_reason).toContain('classifier pack "no-such-pack" is not a packs key')
+    }
+  })
+
+  it("should fall to host with the confidence recorded when a classifier-selected pack's profile carries no model", () => {
+    // Advisory 8's second untested branch: an accepted classifier result
+    // whose mapped profile is model-less resolves to host (step 7) with
+    // the capability, pack, and confidence still recorded for the audit
+    // trail (MM-FR-007).
+    const matrix = parse({ ...STARTER_MATRIX, packs: { ops: "mechanical" } })
+    const result = resolveSelection(
+      matrix,
+      { checkpoint_step: "implement" },
+      { status: "selected", engine: "llm", pack: "ops", confidence: 0.8 },
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("host")
+      expect(result.selection.model).toBeNull()
+      expect(result.selection.pack).toBe("ops")
+      expect(result.selection.capability).toBe("mechanical")
+      expect(result.selection.confidence).toBe(0.8)
+      expect(result.selection.fallback_reason).toContain('profile "mechanical" carries no model')
+    }
+  })
+
+  it("should resolve a non-starter capability added by matrix edit alone (MM-FR-001 extensibility scenario)", () => {
+    // Spec-review iteration-4 advisory 10: the "new capability without
+    // code changes" scenario — a fifth capability with its own pack
+    // mapping and agent pin resolves through profile, pack, and pin
+    // selections with no code changes. The override whitelist cannot add
+    // capabilities (fail-closed elsewhere), so this row exercises
+    // tracked-matrix extensibility specifically.
+    const extended = parse({
+      ...STARTER_MATRIX,
+      profiles: {
+        ...STARTER_MATRIX.profiles,
+        "data-pipeline": { model: "provider/pipeline-model" },
+      },
+      packs: { ...STARTER_MATRIX.packs, airflow: "data-pipeline" },
+      agents: { "data-worker-dev": "data-pipeline" },
+    })
+
+    const viaProfile = resolveSelection(extended, { profile: "data-pipeline" }, notRun)
+    expect(viaProfile.ok).toBe(true)
+    if (viaProfile.ok) {
+      expect(viaProfile.selection.selection_source).toBe("explicit-profile")
+      expect(viaProfile.selection.capability).toBe("data-pipeline")
+      expect(viaProfile.selection.model).toBe("provider/pipeline-model")
+    }
+
+    const viaPack = resolveSelection(extended, { pack: "airflow" }, notRun)
+    expect(viaPack.ok).toBe(true)
+    if (viaPack.ok) {
+      expect(viaPack.selection.selection_source).toBe("explicit-pack")
+      expect(viaPack.selection.pack).toBe("airflow")
+      expect(viaPack.selection.capability).toBe("data-pipeline")
+      expect(viaPack.selection.model).toBe("provider/pipeline-model")
+    }
+
+    const viaPin = resolveSelection(extended, { agent: "data-worker-dev", checkpoint_step: "implement" }, notRun)
+    expect(viaPin.ok).toBe(true)
+    if (viaPin.ok) {
+      expect(viaPin.selection.selection_source).toBe("agent-pin")
+      expect(viaPin.selection.capability).toBe("data-pipeline")
+      expect(viaPin.selection.model).toBe("provider/pipeline-model")
     }
   })
 
