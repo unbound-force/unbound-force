@@ -354,7 +354,7 @@
   `agents` pins, the classifier (agent + LLM engines,
   confidence threshold), the precedence chain, the override
   whitelist, and the gitignore semantics (AC10).
-- [ ] 7.2 Add the `CHANGELOG.md` entry under `Unreleased →
+- [x] 7.2 Add the `CHANGELOG.md` entry under `Unreleased →
   Added`: capability-driven model selection for
   `uf_delegate_command`, the config pair, the classifier
   cascade, the pack directive, the audit trail, and the
