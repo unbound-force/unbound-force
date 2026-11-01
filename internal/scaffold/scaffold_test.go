@@ -3789,6 +3789,92 @@ func TestSCFR009_DeploymentCompletenessGuard(t *testing.T) {
 	}
 }
 
+// TestSCFR008_FreshScaffoldDeploysModelMatrixSurface pins
+// scenario 1 of the fresh-deploy parity requirement (SC-FR-008,
+// issue #889): a full-mode Run() over an empty target directory
+// must report the entire model-matrix surface in its created
+// list. TestRun_CreatesFiles covers the same files in aggregate
+// through the expectedAssetPaths manifest; this test pins them
+// against the spec criterion itself, so dropping a manifest
+// entry fails here with the missing path named instead of
+// silently shrinking the deployed surface. The matrix and its
+// schema seed the tracked template and registry (design D1/D4);
+// the meta-prompt pair closes the slice-1 gap where the starter
+// matrix mapped a pack the scaffold never deployed (design D1);
+// the classifier subagent deploys as a user-owned agent asset
+// (design D3).
+func TestSCFR008_FreshScaffoldDeploysModelMatrixSurface(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	result, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	for _, path := range []string{
+		".uf/model-matrix.yaml",
+		".uf/schemas/model-matrix/v1.schema.json",
+		".opencode/uf/packs/meta-prompt.md",
+		".opencode/uf/packs/meta-prompt-custom.md",
+		".opencode/agents/model-matrix-classifier.md",
+	} {
+		if !containsPath(result.Created, path) {
+			t.Errorf("expected %s in result.Created", path)
+		}
+	}
+}
+
+// TestSCFR008_DivisorOnlyDeploysPacksNotMatrix pins scenario 3 of
+// SC-FR-008 (issue #889): DivisorOnly deployments receive the
+// meta-prompt pack pair — DivisorOnly deploys all convention packs
+// because Divisor personas load every pack at review time (design
+// D1) — while the model matrix and its schema registry stay out:
+// the matrix serves content-agent delegation
+// (uf_delegate_command), not review dispatch (design D7 /
+// slice-1 D10). The on-disk checks mirror the TestRun_DivisorSubset
+// exclusion pattern: a filtered asset must be neither reported as
+// created nor written.
+func TestSCFR008_DivisorOnlyDeploysPacksNotMatrix(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	result, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir:   dir,
+		DivisorOnly: true,
+		Version:     "1.0.0-test",
+		Stdout:      &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	for _, path := range []string{
+		".opencode/uf/packs/meta-prompt.md",
+		".opencode/uf/packs/meta-prompt-custom.md",
+	} {
+		if !containsPath(result.Created, path) {
+			t.Errorf("expected %s in result.Created", path)
+		}
+	}
+
+	for _, path := range []string{
+		".uf/model-matrix.yaml",
+		".uf/schemas/model-matrix/v1.schema.json",
+	} {
+		if containsPath(result.Created, path) {
+			t.Errorf("DivisorOnly should not create %s", path)
+		}
+		if _, err := os.Stat(filepath.Join(dir, path)); !os.IsNotExist(err) {
+			t.Errorf("DivisorOnly should not create %s on disk", path)
+		}
+	}
+}
+
 func TestRun_DivisorSubset(t *testing.T) {
 	dir := t.TempDir()
 	// Create a go.mod to trigger Go language detection

@@ -131,7 +131,7 @@ sequentially, no `[P]`.
   `main`): the guard fails naming `meta-prompt`; with the
   mirrors in place it passes.
 
-- [ ] 4.5 Add fresh-deploy parity assertions (SC-FR-008,
+- [x] 4.5 Add fresh-deploy parity assertions (SC-FR-008,
   scenario 1): a full-mode `Run()` over a temp dir must
   report `.uf/model-matrix.yaml`,
   `.uf/schemas/model-matrix/v1.schema.json`,
