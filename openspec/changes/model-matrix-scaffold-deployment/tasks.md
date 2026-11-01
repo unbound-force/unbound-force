@@ -43,7 +43,7 @@
 
 ## 2. Embedded mirrors
 
-- [ ] 2.1 Sync the three mirrors byte-identically (design
+- [x] 2.1 Sync the three mirrors byte-identically (design
   D1/D3): copy the revised
   `.opencode/uf/packs/meta-prompt.md` and the new
   `.opencode/uf/packs/meta-prompt-custom.md` to
@@ -61,17 +61,17 @@
 All three tasks modify `internal/scaffold/scaffold.go` —
 run sequentially, no `[P]`.
 
-- [ ] 3.1 Add `meta-prompt` and `meta-prompt-custom` entries
+- [x] 3.1 Add `meta-prompt` and `meta-prompt-custom` entries
   to `alwaysDeployedPacks` (design D1) so the pack deploys
   regardless of detected language, in full and DivisorOnly
   modes.
 
-- [ ] 3.2 Add `meta-prompt.md` and `meta-prompt-custom.md` to
+- [x] 3.2 Add `meta-prompt.md` and `meta-prompt-custom.md` to
   the `collectDeployedPacks` candidates list (design D5) so
   the scaffolded AGENTS.md Convention Packs section lists
   them. Do not refactor the list duplication.
 
-- [ ] 3.3 Flip `isToolOwned` for `uf/model-matrix.yaml` to
+- [x] 3.3 Flip `isToolOwned` for `uf/model-matrix.yaml` to
   false and rewrite the classification comment (design D4,
   SC-FR-010): the deployed tracked matrix is a project-owned
   extension point preserved across plain re-init (the
