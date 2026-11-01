@@ -19,7 +19,7 @@
 
 ## 1. Canonical pack assets
 
-- [ ] 1.1 Revise `.opencode/uf/packs/meta-prompt.md`
+- [x] 1.1 Revise `.opencode/uf/packs/meta-prompt.md`
   self-describing comments only (design D2): the header note
   that calls the pack repo-local and not a scaffold asset, and
   the Custom Rules note that says it ships no custom
