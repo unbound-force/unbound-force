@@ -97,7 +97,11 @@ load `.opencode/uf/packs/<pack>.md` before writing — the pack
 content MUST NOT be inlined and the directive MUST NOT be
 agent-reconstructed; its exact shape is golden-tested. A call
 carrying both a resolved skill reference and a selected pack
-renders both directives in that fixed order.
+renders both directives in that fixed order. An explicitly
+supplied pack that passes validation MUST render its directive
+even when a higher-precedence parameter (`model` or `profile`)
+supplies the child model — the directive duty is independent of
+the model-precedence outcome (MM-FR-003).
 
 The tool MUST record `task_classification`, the resolved skill
 reference, and any `skill_absent_reason` in the checkpoint data

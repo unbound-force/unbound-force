@@ -35,8 +35,7 @@ surface MUST comprise:
   determinism, review-voice, default) SHOULD NOT carry matrix
   entries — they are never the primary capability of a task;
 - `defaults` — a closed key set mapping task kind to capability
-  (`plan` and `tasks` MUST map to the spec-authoring capability;
-  `implement` MAY map to a capability — consulted only as the
+  (`implement` MAY map to a capability — consulted only as the
   classifier cascade's static fallback per MM-FR-003, never as
   a short-circuit ahead of the classifier). Unknown task kinds
   MUST fail validation;
@@ -52,7 +51,14 @@ surface MUST comprise:
 The starter capability set is `spec-authoring`, `code-writing`,
 `content-writing`, and `mechanical`; additional capabilities MUST
 be expressible by adding `profiles` and `packs` entries with no
-code changes.
+code changes. In the tracked starter matrix the `mechanical`
+capability is intentionally explicit-profile-only: no starter
+`packs` entry maps to it, no `defaults` kind resolves to it, and
+the classifier cascade selects through the `packs` mapping
+(MM-FR-005), so no implicit selection path reaches it — callers
+select it only via an explicit `profile: mechanical` parameter.
+Wiring or retiring an implicit path later is a matrix edit, not
+a code change.
 
 The loader MUST enforce the tracked-role population rule at
 load time, separately from schema validation: when the tracked
@@ -67,6 +73,16 @@ population check runs against the tracked file before the
 merge, never against the merged result — schema validation
 alone cannot distinguish a tracked file with committed
 credentials from a legitimate merged view.
+
+The tracked starter matrix carries one further role-aware
+conformance rule, enforced by the tracked-file verification
+test rather than by schema validation: its `defaults` MUST map
+`plan` and `tasks` to the spec-authoring capability (design
+D9), so meta-prompt authoring work runs on the meta-prompt
+model. This is a conformance obligation on the tracked starter
+file, not a constraint on arbitrary matrices — a conforming
+matrix MAY map `plan` and `tasks` to any present profile, and
+the loader MUST NOT reject such a mapping.
 
 #### Scenario: Starter tracked matrix validates
 
@@ -100,6 +116,17 @@ credentials from a legitimate merged view.
   kind
 - **WHEN** the matrix is validated
 - **THEN** validation fails closed naming the accepted key set
+
+#### Scenario: Starter plan/tasks mapping is pinned
+
+- **GIVEN** the tracked starter matrix whose `defaults` map
+  `plan` or `tasks` to a capability other than
+  `spec-authoring`
+- **WHEN** the tracked-file conformance check runs
+- **THEN** the check fails naming the drifted mapping and the
+  spec-authoring conformance rule, while the same document
+  still passes schema validation — the rule is a tracked-file
+  obligation, not a schema constraint
 
 #### Scenario: New capability without code changes
 
@@ -220,7 +247,9 @@ selection:
    matrix) whose mapped profile carries a model;
 4. an `agents:` pin for the delegated agent;
 5. static `defaults:` by task kind — `checkpoint_step` `plan`
-   or `tasks` resolves to the spec-authoring capability;
+   or `tasks` resolves through the matrix's `defaults` mapping
+   for that kind (the tracked starter matrix maps both to the
+   spec-authoring capability per MM-FR-001's conformance rule);
    `implement` and unknown kinds proceed to step 6 (a
    configured `defaults.implement` MUST NOT short-circuit the
    cascade: it is consulted only as the cascade's static
@@ -240,9 +269,27 @@ host introspection MUST be skipped entirely — the delegation MUST
 NOT fail with `HOST_MODEL_UNAVAILABLE` because the parent session
 could not be introspected. When no matrix file is present, the
 chain is a no-op and the host model is used exactly as before
-this change (MM-FR-004 zero-config scenario). An explicit
-parameter naming an unknown profile or an invalid pack MUST fail
-closed with a non-retryable error naming the remediation.
+this change (MM-FR-004 zero-config scenario).
+
+Validation of explicit selection parameters is unconditional,
+not reach-based: every explicit `profile` and `pack` parameter
+is validated in full, in chain order (profile, then pack),
+before the chain runs — regardless of which parameter yields
+the selection — so a higher-precedence parameter never shadows
+an invalid or unknown companion. An explicit parameter naming
+an unknown profile or an invalid pack MUST fail closed with a
+non-retryable error naming the remediation, including when the
+offending parameter accompanies a winning `model` or `profile`
+(`model` + unknown `profile`, `model` + invalid `pack`,
+`profile` + invalid `pack`). An explicitly supplied `pack` that
+passes validation is never silently dropped: its directive duty
+is independent of the model-precedence outcome (UF-FR-002), so
+the pack directive renders even when `model` or `profile`
+supplies the child model. An explicit `model`, `profile`, or
+`pack` parameter bypasses the classifier cascade entirely —
+the cascade runs only for chains that reach step 6 — so a
+classifier outcome never renders a pack directive alongside a
+higher-precedence explicit parameter.
 
 #### Scenario: Explicit model wins outright
 
@@ -262,6 +309,54 @@ closed with a non-retryable error naming the remediation.
 - **THEN** the `profile` parameter wins, the `code-writing`
   profile's model is used, and `selection_source` records
   `explicit-profile`
+- **AND** the explicitly supplied `go` pack is validated and
+  its directive renders — an explicitly supplied pack is never
+  silently dropped
+
+#### Scenario: Explicit model with a valid pack renders the
+pack directive
+
+- **GIVEN** a loaded matrix whose `packs` map `go` to
+  `code-writing`
+- **WHEN** a delegation supplies `model:
+  provider/explicit-model` and `pack: go`
+- **THEN** the child runs on the explicit model,
+  `selection_source` records `explicit-model`, and the `go`
+  pack directive renders — the pack's directive duty is
+  independent of the model-precedence outcome
+
+#### Scenario: Explicit model with an invalid pack fails
+closed
+
+- **GIVEN** a loaded matrix whose `packs` carry no
+  `no-such-pack` entry
+- **WHEN** a delegation supplies `model:
+  provider/explicit-model` and `pack: no-such-pack`
+- **THEN** the call fails with a non-retryable error naming
+  the invalid pack — validation is unconditional, not
+  reach-based — and no child session is spawned
+
+#### Scenario: Explicit model with an unknown profile fails
+closed
+
+- **GIVEN** a loaded matrix whose `profiles` carry no
+  `no-such-capability` entry
+- **WHEN** a delegation supplies `model:
+  provider/explicit-model` and `profile: no-such-capability`
+- **THEN** the call fails with a non-retryable error naming
+  the unknown profile — the winning model parameter never
+  shadows an invalid companion parameter
+
+#### Scenario: Explicit profile with an invalid pack fails
+closed
+
+- **GIVEN** a loaded matrix with a `code-writing` profile
+  whose `packs` carry no `no-such-pack` entry
+- **WHEN** a delegation supplies `profile: code-writing` and
+  `pack: no-such-pack`
+- **THEN** the call fails with a non-retryable error naming
+  the invalid pack — profile precedence never shadows pack
+  validation
 
 #### Scenario: plan and tasks resolve statically
 
@@ -372,6 +467,26 @@ error stating that no matrix is configured.
 - **THEN** the call fails with a non-retryable error stating no
   matrix is configured and no child session is spawned
 
+#### Scenario: Explicit model with a pack and no matrix fails
+closed
+
+- **GIVEN** no `.uf/model-matrix.yaml` in the repository
+- **WHEN** a delegation supplies `model:
+  provider/explicit-model` and `pack: go`
+- **THEN** the call fails with a non-retryable error stating
+  no matrix is configured — the pack parameter cannot validate
+  without a matrix, so the explicit model does not proceed
+  either
+
+#### Scenario: Explicit model with a profile and no matrix
+fails closed
+
+- **GIVEN** no `.uf/model-matrix.yaml` in the repository
+- **WHEN** a delegation supplies `model:
+  provider/explicit-model` and `profile: code-writing`
+- **THEN** the call fails with a non-retryable error stating
+  no matrix is configured and no child session is spawned
+
 ### Requirement: Classifier Cascade
 
 **ID: MM-FR-005** This requirement MUST be satisfied.
@@ -402,8 +517,12 @@ sessions and tests share no mutable cache.
 The agent engine MUST be a hidden subagent
 (`.opencode/agents/model-matrix-classifier.md`, mode `subagent`,
 hidden, described as internal to the model-matrix selection
-layer) that investigates the feature dir's spec/plan/tasks and
-existing code with tools, then responds with ONLY a JSON object
+layer) whose frontmatter carries an explicit least-privilege
+permission block — `edit: deny`, `bash: deny`, `webfetch: deny`,
+mirroring the divisor reviewer agents: the classifier only
+reads context and responds, never mutates. It investigates the
+feature dir's spec/plan/tasks and existing code with tools, then
+responds with ONLY a JSON object
 `{"pack": "<name>", "confidence": <0.0-1.0>, "reasoning":
 "<optional>"}` — no markdown fences, no prose, never questions.
 The agent engine run MUST be bounded by the configured
@@ -486,7 +605,11 @@ retrying once without the `response_format` field when the
 endpoint rejects it with HTTP 400. The request MUST be bounded by
 a timeout enforced via AbortSignal — the configured
 `classifier.llm.request_timeout_ms`, defaulting to 10,000 ms
-when absent. The engine MUST interpolate
+when absent — and the response body MUST be capped at 50 MiB
+(52,428,800 bytes): a body exceeding the cap is malformed, the
+engine is skipped without buffering it, and the cascade falls
+back statically (the unbounded-body denial-of-service guard).
+The engine MUST interpolate
 the apiKey from an `{env:VAR}` reference (never a literal key)
 and MUST reject a configured literal apiKey. An `{env:VAR}`
 reference naming an unset variable MUST be treated as
@@ -534,6 +657,15 @@ non-retryable error before any request is issued.
 - **WHEN** the LLM engine issues its request
 - **THEN** it retries once without the field and parses the
   response
+
+#### Scenario: Oversized response body is rejected
+
+- **GIVEN** an LLM engine endpoint whose response body exceeds
+  50 MiB
+- **WHEN** the engine reads the response
+- **THEN** the body is not buffered, the result is treated as
+  malformed, and the cascade falls back statically without
+  blocking delegation
 
 #### Scenario: Unconfigured LLM engine is skipped
 
@@ -624,6 +756,11 @@ surface as the schema.
 - **WHEN** each is validated against `v1.schema.json`
 - **THEN** every valid sample passes and every invalid sample
   fails for its documented reason
+
+## MODIFIED Requirements
+
+None. The model-matrix capability is new; no existing
+requirement is modified.
 
 ## REMOVED Requirements
 

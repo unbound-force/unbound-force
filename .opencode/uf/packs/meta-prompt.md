@@ -235,7 +235,9 @@ mark genuinely optional practice.
 
 ## Custom Rules
 
-<!-- This section is intentionally empty in the canonical
-     pack. Project-specific custom rules belong in
-     meta-prompt-custom.md alongside this file. Custom rules
-     use the CR-NNN identifier prefix. -->
+<!-- This section is intentionally empty. As a repo-local
+     governance pack (the determinism.md precedent), this pack
+     ships no `-custom.md` companion: project-specific
+     meta-prompt rules are incorporated by revising this pack
+     through a governance change, not by a sidecar custom-rules
+     file. -->
