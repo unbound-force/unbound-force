@@ -1,8 +1,9 @@
 <!-- originating_issue: 887 is recorded in .openspec.yaml; /uf.finale
      emits `Closes #887` in the PR body. The meta-prompt pack
-     (What Changes 6) closes #888 in the same PR: the PR body
-     carries both `Closes #887` and `Closes #888` (task 7.3
-     bookkeeping). -->
+     (What Changes 6) closes #888 in the same PR, and the
+     documentation issue filed per the AGENTS.md documentation
+     gate (task 7.3) is #893: the PR body carries `Closes #887`,
+     `Closes #888`, and `Closes #893` (task 7.3 bookkeeping). -->
 
 ## Why
 
