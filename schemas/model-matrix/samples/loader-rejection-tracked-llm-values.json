@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "profiles": {
+    "spec-authoring": {},
+    "code-writing": {},
+    "content-writing": {},
+    "mechanical": {}
+  },
+  "packs": {
+    "meta-prompt": "spec-authoring",
+    "go": "code-writing",
+    "typescript": "code-writing",
+    "python": "code-writing",
+    "content": "content-writing"
+  },
+  "defaults": {
+    "plan": "spec-authoring",
+    "tasks": "spec-authoring",
+    "implement": "code-writing"
+  },
+  "agents": {},
+  "classifier": {
+    "llm": {
+      "endpoint": "https://example.invalid/v1",
+      "model": "provider/classifier-model"
+    }
+  }
+}

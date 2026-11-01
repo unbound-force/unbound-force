@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "profiles": {
+    "code-writing": {}
+  },
+  "defaults": {
+    "deploy": "code-writing"
+  }
+}
