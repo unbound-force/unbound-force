@@ -294,6 +294,151 @@ fan-out.
 
 ---
 
+## Delegation Model Matrix
+
+Content-agent delegation -- the `uf_delegate_command` tool behind
+`/uf.unleash` and `/uf.run-pipeline-plan` -- selects each child
+session's model through a capability-driven matrix. The pattern
+mirrors the review council: a tracked file carries structure only,
+and a gitignored per-developer override carries model identities.
+
+| File | Purpose |
+|------|---------|
+| `.uf/model-matrix.yaml` | Capability-named profiles, the `packs` mapping (UF convention pack to capability), task-kind `defaults`, per-agent `agents` pins, and `classifier` structure. Model strings are optional everywhere -- a profile without a model falls back to the host model. |
+| `.uf/model-matrix.override.yaml` | Per-developer model identities and classifier LLM-engine values. Only `profiles.*.model`, `profiles.*.variant`, and `classifier.llm.*` paths are permitted (fail-closed whitelist). Gitignored -- each developer maintains their own. |
+
+Both files are optional. With no matrix present, delegation behaves
+exactly as before: the child session runs on the host model with no
+errors. A JSON Schema lives at `schemas/model-matrix/v1.schema.json`
+(with mirrors under `.uf/schemas/model-matrix/` and the scaffold
+assets), so invalid values fail closed at load time rather than
+silently misrouting delegation.
+
+### Tracked matrix
+
+```yaml
+version: 1
+profiles:            # capability-named model slots; model optional
+  spec-authoring: {} #   -- host fallback until the override fills it
+  code-writing: {}
+  content-writing: {}
+  mechanical: {}     # explicit-profile-only in the starter set
+packs:               # convention pack name -> capability
+  meta-prompt: spec-authoring
+  go: code-writing
+  typescript: code-writing
+  python: code-writing
+  content: content-writing
+defaults:            # closed task-kind key set
+  plan: spec-authoring
+  tasks: spec-authoring
+  implement: code-writing
+agents: {}           # optional per-agent capability pins
+classifier: {}       # structure only -- LLM values live in the override
+```
+
+Rules enforced at load time:
+
+- `profiles` may declare 1--32 capabilities; each entry MAY carry
+  `model` (a `provider/model` identity) and `variant`.
+- Every `packs` key MUST match a pack file under
+  `.opencode/uf/packs/` (pack-existence check).
+- Every `packs`, `defaults`, and `agents` value MUST name a declared
+  capability (cross-reference check).
+- `agents` pins reject `divisor-*` names -- reviewer-agent selection
+  is governed by the review matrix, not this one.
+- The tracked file MUST NOT populate `classifier.llm` values
+  (endpoint, model, apiKey, request timeout); populated values fail
+  the load with the override file named as the remediation.
+
+### Selection precedence
+
+`uf_delegate_command` accepts optional `model` (+`variant`),
+`profile`, and `pack` parameters. The child model resolves through
+a fixed chain, first match wins:
+
+1. explicit `model` parameter
+2. explicit `profile` (capability) parameter
+3. explicit `pack` parameter (validated: the pack file exists AND
+   has a matrix entry; the pack also renders a tool-generated
+   directive instructing the child to load the pack before writing)
+4. `agents:` pin for the delegated agent
+5. static `defaults:` by task kind (`plan`/`tasks` map to
+   spec-authoring)
+6. classifier cascade for `implement` and unknown task kinds
+   (agent engine, then LLM engine, then the static default)
+7. host model (the resolved profile carries no model, or no matrix
+   is configured)
+
+An unknown explicit profile, an invalid explicit pack, or an
+explicit profile/pack with no matrix configured fails closed with a
+non-retryable error naming the remediation. When any matrix profile
+model resolves, host-model introspection is skipped entirely --
+delegation no longer depends on `HOST_MODEL_UNAVAILABLE`.
+
+### Classifier
+
+For `implement` and unknown task kinds, selection runs a two-engine
+cascade:
+
+- **Agent engine** -- the hidden `model-matrix-classifier` subagent
+  investigates the feature directory's spec/plan/tasks and relevant
+  code, then responds with only a JSON object:
+  `{"pack": "<name>", "confidence": <0.0-1.0>}`. Bounded by
+  `classifier.agent_timeout_ms` (default 45,000).
+- **LLM engine** -- a chat-completions POST (`temperature: 0`, JSON
+  response format) against an endpoint configured only in the
+  gitignored override. The API key is interpolated from `{env:VAR}`
+  -- never a literal key. Bounded by
+  `classifier.llm.request_timeout_ms` (default 10,000).
+
+The first valid result whose confidence meets the threshold
+(`classifier.confidence_threshold`, default 0.6) and whose pack is
+matrix-valid wins. Below-threshold results, timeouts, malformed
+responses, and unconfigured engines all fall back to the static
+default. Classifier failure never blocks delegation. Results are
+cached in-process, keyed by the SHA-256 of the feature directory,
+prompt, and agent.
+
+### Override file
+
+Per-developer identities arrive via
+`.uf/model-matrix.override.yaml` (gitignored; `uf init` scaffolds
+the gitignore entry):
+
+```yaml
+profiles:
+  spec-authoring:
+    model: provider/model-id
+  code-writing:
+    model: provider/other-model-id
+    variant: fast
+classifier:
+  llm:
+    endpoint: https://llm.example.com/v1/chat/completions
+    model: classifier-model-id
+    apiKey: "{env:MY_API_KEY}"
+```
+
+The whitelist is fail-closed: any key outside `profiles.*.model`,
+`profiles.*.variant`, and `classifier.llm.*` -- including structural
+keys such as `packs`, `defaults`, `agents`, or `classifier.enabled`
+-- fails validation with an error naming the whitelist. The
+override merges into the tracked matrix by nested path: absent keys
+fall through, only already-declared capabilities may be overridden,
+and the merged result re-validates against the identical schema.
+
+### Audit trail
+
+Every delegation records `selection_source` (one of
+`explicit-model`, `explicit-profile`, `explicit-pack`, `agent-pin`,
+`default-kind`, `classifier-agent`, `classifier-llm`, `host`), the
+selected pack, the resolved capability and model, and classifier
+confidence when applicable -- in the success envelope and the
+checkpoint data, so model selection is auditable after the fact.
+
+---
+
 ## Common Scenarios
 
 ### Using Vertex AI as LLM provider
