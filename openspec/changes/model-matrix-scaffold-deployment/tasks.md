@@ -163,7 +163,7 @@ sequentially, no `[P]`.
 
 ## 5. Documentation
 
-- [ ] 5.1 [P] Extend `docs/configuration.md` (SC-FR-008
+- [x] 5.1 [P] Extend `docs/configuration.md` (SC-FR-008
   ripple, design D4/D7): add a scaffold-deployment subsection
   under the Delegation Model Matrix section stating what
   `uf init` deploys (tracked matrix template, schema
@@ -175,13 +175,13 @@ sequentially, no `[P]`.
   note that re-running `uf init` heals slice-1-window repos
   whose matrix names `meta-prompt`.
 
-- [ ] 5.2 [P] Add a `CHANGELOG.md` entry under Unreleased for
+- [x] 5.2 [P] Add a `CHANGELOG.md` entry under Unreleased for
   model-matrix-scaffold-deployment: hero-repo deployment of
   the model-matrix surface (meta-prompt pack + custom
   template, classifier subagent, matrix load validity), the
   re-init ownership semantics, and the healing re-run note.
 
-- [ ] 5.3 [P] Update the repo `AGENTS.md` Convention Packs
+- [x] 5.3 [P] Update the repo `AGENTS.md` Convention Packs
   list to include `.opencode/uf/packs/meta-prompt-custom.md`
   (meta-prompt.md is already listed); no other structural
   AGENTS.md changes are expected (agent count and project
