@@ -284,6 +284,16 @@ they are never the primary capability of a task; the schema does
 not forbid entries for them, the tracked starter config simply
 omits them (a team may add one).
 
+Two starter-matrix facts are deliberate and documented rather
+than accidental. First, `mechanical` is explicit-profile-only:
+no starter `packs` entry or `defaults` kind reaches it and the
+classifier resolves through `packs`, so only an explicit
+`profile: mechanical` selects it (MM-FR-001). Second, the
+`plan`/`tasks` → spec-authoring mapping is a tracked-file
+conformance rule — verified by the task 4.1 tracked-file test,
+not by schema validation, since arbitrary conforming matrices
+MAY map those kinds to any present profile (MM-FR-001).
+
 The `meta-prompt` pack (#888) is authored inside this change as
 a distinct task because the starter `packs:` mapping requires
 the pack file to exist for MM-FR-001 validation. Pack scope per

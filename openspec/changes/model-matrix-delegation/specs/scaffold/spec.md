@@ -91,6 +91,11 @@ be blocked by this requirement.
 - **WHEN** the block is inspected
 - **THEN** it contains `.uf/model-matrix.override.yaml`
 
+## MODIFIED Requirements
+
+None. This change adds to the scaffold asset surface; no
+existing scaffold requirement is modified.
+
 ## REMOVED Requirements
 
 None.

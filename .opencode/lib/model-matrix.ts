@@ -51,7 +51,12 @@ export type SelectionSource = (typeof SELECTION_SOURCE_VALUES)[number]
 export interface SelectionResult {
   /** Which precedence-chain step produced this selection (MM-FR-003). */
   readonly selection_source: SelectionSource
-  /** Selected or classified convention pack, when one participated. */
+  /**
+   * Selected, classified, or explicitly supplied convention pack, when one
+   * participated. An explicitly supplied pack that passes validation rides
+   * along even when a higher-precedence parameter supplies the model
+   * (MM-FR-003: never silently dropped).
+   */
   readonly pack: string | null
   /** Resolved capability name, when selection resolved a profile. */
   readonly capability: string | null
@@ -820,8 +825,15 @@ function nameList(names: readonly string[]): string {
  *
  * Steps 2-6 resolve a capability first, then its profile; a resolved profile
  * without a model falls to host (step 7) rather than continuing down the
- * chain. Each step is validated only when reached, so parameters shadowed by
- * a higher-precedence step are not validated. The function is pure — no
+ * chain. Validation of explicit selection parameters is unconditional, not
+ * reach-based: `profile` and `pack` are validated in full, in chain order,
+ * before the chain runs, so a winning higher-precedence parameter never
+ * shadows an invalid or unknown companion. An explicitly supplied `pack`
+ * that passes validation is never silently dropped — it rides along for
+ * directive rendering even when `model` or `profile` supplies the child
+ * model — and an explicit `model`, `profile`, or `pack` bypasses the
+ * classifier cascade entirely (the cascade participates only in chains
+ * that reach step 6). The function is pure — no
  * filesystem, clock, network, or classifier invocation; the classifier
  * participates only as the pre-computed {@link ClassifierOutcome}. An
  * unknown explicit profile, an explicit pack that is not a `packs` key, or
@@ -838,22 +850,6 @@ export function resolveSelection(
   inputs: SelectionInputs,
   classifier: ClassifierOutcome,
 ): SelectionResolution {
-  // Step 1: an explicit model wins outright and needs no matrix (MM-FR-004).
-  if (inputs.model !== undefined) {
-    return {
-      ok: true,
-      selection: {
-        selection_source: "explicit-model",
-        pack: null,
-        capability: null,
-        model: inputs.model,
-        variant: inputs.variant ?? null,
-        confidence: null,
-        fallback_reason: null,
-      },
-    }
-  }
-
   // Normalize the not-configured state (MM-FR-004): an absent matrix (null)
   // and the canonical no-op matrix (comments-only file) behave identically,
   // and the closed schema requires at least one profile for any other
@@ -861,8 +857,12 @@ export function resolveSelection(
   // configured" regardless of which shape the caller passed.
   const configured = matrix !== null && Object.keys(matrix.profiles).length > 0 ? matrix : null
 
-  // Step 2: an explicit profile must name a declared capability, or the call
-  // fails closed pre-spawn (one tool round-trip, zero child sessions).
+  // Unconditional validation (MM-FR-003): explicit profile and pack
+  // parameters are validated in full, in chain order, before the chain
+  // runs — a winning higher-precedence parameter never shadows an invalid
+  // or unknown companion (model + unknown profile, model + invalid pack,
+  // and profile + invalid pack all fail closed pre-spawn, zero child
+  // sessions).
   if (inputs.profile !== undefined) {
     if (configured === null) {
       return selectionFailure(
@@ -880,13 +880,7 @@ export function resolveSelection(
           "Remediation: pass a declared capability name, or omit the profile parameter; retrying will not fix this.",
       )
     }
-    return capabilitySelection(configured, inputs.profile, "explicit-profile", null, null)
   }
-
-  // Step 3: an explicit pack must be a `packs` key of the configured matrix.
-  // Pack-file existence was already enforced per key at load time (the
-  // loader's missingPackFiles check, MM-FR-001), so validation here reduces
-  // to the key-membership test against the passed matrix.
   if (inputs.pack !== undefined) {
     if (configured === null) {
       return selectionFailure(
@@ -906,6 +900,38 @@ export function resolveSelection(
           "retrying will not fix this.",
       )
     }
+  }
+
+  // Step 1: an explicit model wins outright and needs no matrix (MM-FR-004).
+  // An explicitly supplied, validated pack rides along for directive
+  // rendering — never silently dropped (MM-FR-003, UF-FR-002).
+  if (inputs.model !== undefined) {
+    return {
+      ok: true,
+      selection: {
+        selection_source: "explicit-model",
+        pack: inputs.pack ?? null,
+        capability: null,
+        model: inputs.model,
+        variant: inputs.variant ?? null,
+        confidence: null,
+        fallback_reason: null,
+      },
+    }
+  }
+
+  // Step 2: an explicit profile (validated above) resolves through its
+  // profile; an explicitly supplied pack rides along.
+  if (inputs.profile !== undefined && configured !== null) {
+    return capabilitySelection(configured, inputs.profile, "explicit-profile", inputs.pack ?? null, null)
+  }
+
+  // Step 3: an explicit pack (validated above) resolves through its mapped
+  // profile. Pack-file existence was already enforced per key at load time
+  // (the loader's missingPackFiles check, MM-FR-001), so validation reduced
+  // to the key-membership test above.
+  if (inputs.pack !== undefined && configured !== null) {
+    const packs = configured.packs ?? {}
     return capabilitySelection(configured, packs[inputs.pack], "explicit-pack", inputs.pack, null)
   }
 

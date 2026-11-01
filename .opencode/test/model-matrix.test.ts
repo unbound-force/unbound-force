@@ -696,7 +696,7 @@ describe("resolveSelection precedence chain (MM-FR-003/MM-FR-004, design D2)", (
   /** Cascade outcome for calls where no classifier participated. */
   const notRun: ClassifierOutcome = { status: "not-run" }
 
-  it("should let an explicit model win outright over pins and defaults", () => {
+  it("should let an explicit model win outright, bypassing pins, defaults, and the classifier", () => {
     const result = resolveSelection(
       selectionMatrix,
       { model: "provider/explicit-model", variant: "fast", checkpoint_step: "implement", agent: "cobalt-crush-dev" },
@@ -706,6 +706,9 @@ describe("resolveSelection precedence chain (MM-FR-003/MM-FR-004, design D2)", (
       ok: true,
       selection: {
         selection_source: "explicit-model",
+        // No explicit pack was supplied and the classifier cascade never
+        // runs for a chain resolved at step 1 (MM-FR-003) — the synthetic
+        // "selected" outcome above must not leak a pack directive.
         pack: null,
         capability: null,
         model: "provider/explicit-model",
@@ -716,14 +719,101 @@ describe("resolveSelection precedence chain (MM-FR-003/MM-FR-004, design D2)", (
     })
   })
 
-  it("should let an explicit profile beat an explicit pack", () => {
+  it("should let an explicit profile beat an explicit pack for the model while retaining the pack", () => {
     const result = resolveSelection(selectionMatrix, { profile: "code-writing", pack: "content" }, notRun)
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.selection.selection_source).toBe("explicit-profile")
       expect(result.selection.capability).toBe("code-writing")
       expect(result.selection.model).toBe("provider/code-model")
+      // The explicitly supplied pack is validated and retained for its
+      // directive duty — never silently dropped (MM-FR-003, UF-FR-002).
+      expect(result.selection.pack).toBe("content")
+    }
+  })
+
+  it("should retain a valid explicit pack alongside an explicit model", () => {
+    const result = resolveSelection(
+      selectionMatrix,
+      { model: "provider/explicit-model", pack: "go", checkpoint_step: "implement" },
+      notRun,
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("explicit-model")
+      expect(result.selection.pack).toBe("go")
+      expect(result.selection.capability).toBeNull()
+      expect(result.selection.model).toBe("provider/explicit-model")
+    }
+  })
+
+  it("should validate an explicit profile alongside an explicit model", () => {
+    const result = resolveSelection(
+      selectionMatrix,
+      { model: "provider/explicit-model", profile: "content-writing" },
+      notRun,
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("explicit-model")
+      expect(result.selection.capability).toBeNull()
+      expect(result.selection.model).toBe("provider/explicit-model")
       expect(result.selection.pack).toBeNull()
+    }
+  })
+
+  it("should fail closed on an invalid pack alongside an explicit model", () => {
+    const result = resolveSelection(
+      selectionMatrix,
+      { model: "provider/explicit-model", pack: "no-such-pack" },
+      notRun,
+    )
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("INVALID_PACK")
+      expect(result.retryable).toBe(false)
+      expect(result.error).toContain('pack "no-such-pack" is not a packs key in the model matrix')
+    }
+  })
+
+  it("should fail closed on an unknown profile alongside an explicit model", () => {
+    const result = resolveSelection(
+      selectionMatrix,
+      { model: "provider/explicit-model", profile: "no-such-capability" },
+      notRun,
+    )
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("UNKNOWN_PROFILE")
+      expect(result.retryable).toBe(false)
+      expect(result.error).toContain('profile "no-such-capability" is not a capability declared in the model matrix')
+    }
+  })
+
+  it("should fail closed on an invalid pack alongside a valid explicit profile", () => {
+    const result = resolveSelection(selectionMatrix, { profile: "code-writing", pack: "no-such-pack" }, notRun)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("INVALID_PACK")
+      expect(result.retryable).toBe(false)
+      expect(result.error).toContain('pack "no-such-pack" is not a packs key in the model matrix')
+    }
+  })
+
+  it("should fail closed on combined explicit params without a matrix", () => {
+    for (const matrix of [null, EMPTY_MODEL_MATRIX]) {
+      for (const inputs of [
+        { model: "provider/explicit-model", pack: "go" },
+        { model: "provider/explicit-model", profile: "code-writing" },
+      ]) {
+        const result = resolveSelection(matrix, inputs, notRun)
+        expect(result.ok).toBe(false)
+        if (!result.ok) {
+          expect(result.code).toBe("MATRIX_NOT_CONFIGURED")
+          expect(result.retryable).toBe(false)
+          expect(result.error).toContain("no model matrix is configured")
+        }
+      }
     }
   })
 
