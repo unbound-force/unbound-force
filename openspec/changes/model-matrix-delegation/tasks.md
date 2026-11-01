@@ -129,7 +129,7 @@
   pack, matrix-less model+pack, matrix-less model+profile
   (MM-FR-001 through MM-FR-004 scenarios). Run the
   file's tests via `make plugin-test`.
-- [ ] 2.6 Add the JSON-Schema cross-validation harness
+- [x] 2.6 Add the JSON-Schema cross-validation harness
   `.opencode/test/model-matrix-schema.test.ts`: a test that
   validates every `schemas/model-matrix/
   samples/` fixture against `v1.schema.json` AND against the
