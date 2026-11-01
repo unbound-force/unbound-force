@@ -3420,6 +3420,9 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".opencode/uf/packs/determinism.md":           true,
 	".opencode/skills/determinism-first/SKILL.md": true,
 	".opencode/uf/packs/meta-prompt.md":           true,
+	// Model-matrix classifier — hidden subagent, canonical repo content;
+	// scaffold deployment deferred to slice 2 (#889), per SC-FR-007
+	".opencode/agents/model-matrix-classifier.md": true,
 }
 
 func TestCanonicalSources_AreEmbedded(t *testing.T) {
