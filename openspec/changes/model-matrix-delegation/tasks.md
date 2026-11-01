@@ -199,7 +199,7 @@
 
 ## 4. Tracked matrix and schema registry
 
-- [ ] 4.1 Create the tracked `.uf/model-matrix.yaml` per design
+- [x] 4.1 Create the tracked `.uf/model-matrix.yaml` per design
   D9: `version: 1`; the four starter capabilities with empty
   profiles (comment noting identities arrive via the override);
   `packs` mapping `meta-prompt`/`go`/`typescript`/`python`/
