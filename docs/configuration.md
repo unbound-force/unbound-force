@@ -437,6 +437,80 @@ selected pack, the resolved capability and model, and classifier
 confidence when applicable -- in the success envelope and the
 checkpoint data, so model selection is auditable after the fact.
 
+### Scaffold deployment
+
+`uf init` deploys the model-matrix surface along with the rest
+of the scaffold, so a hero repository -- one generated to run
+the Unbound Force agent personas -- loads a valid matrix out of
+the box. A full-mode deploy writes:
+
+- `.uf/model-matrix.yaml` -- the tracked starter matrix: the
+  capability-named profiles, `packs` mapping, task-kind
+  `defaults`, `agents` pins, and `classifier` structure shown
+  under `### Tracked matrix`, carrying structure only -- no
+  model identities.
+- `.uf/schemas/model-matrix/` -- the schema registry, mirroring
+  `schemas/model-matrix/v1.schema.json` so invalid values fail
+  closed at load time.
+- `.opencode/uf/packs/meta-prompt.md` -- the meta-prompt
+  convention pack, deployed regardless of the detected project
+  language.
+- `.opencode/uf/packs/meta-prompt-custom.md` -- its custom
+  companion, seeded as an initial-deployment template for
+  project-specific rules.
+- `.opencode/agents/model-matrix-classifier.md` -- the hidden
+  subagent behind the classifier cascade's agent engine (see
+  `### Classifier`).
+
+The deployed surface is load-bearing, not cosmetic. The
+load-time rules under `### Tracked matrix` enforce pack
+existence -- every `packs` key MUST match a pack file under
+`.opencode/uf/packs/` -- and the starter matrix names
+`meta-prompt`, so the deployed `meta-prompt.md` is what makes
+the seeded matrix valid out of the box.
+`.uf/model-matrix.override.yaml` is deliberately not deployed:
+`uf init` writes only its gitignore entry (see
+`### Override file`); each developer creates the override
+themselves.
+
+On re-init, each file follows the scaffold's per-file ownership
+classification -- the same contract the review council files
+use (see `## Review Council Configuration`):
+
+| File | Ownership | Re-init behavior |
+|------|-----------|------------------|
+| `.uf/model-matrix.yaml` | Team-owned extension point | Preserved once deployed: team edits survive plain re-runs; `--force` replaces it; fresh deploys seed the template |
+| `.uf/schemas/model-matrix/` registry | Tool-owned | Refreshed when content differs |
+| Canonical packs (incl. `meta-prompt.md`) | Tool-owned | Refreshed when content differs |
+| `*-custom.md` packs (incl. `meta-prompt-custom.md`) | User-owned | Seeded once on first deploy, never overwritten |
+| Agent files (incl. `model-matrix-classifier.md`) | User-owned after first deploy | Skipped |
+| `.uf/model-matrix.override.yaml` | Per-developer (gitignored) | Never written beyond the gitignore entry |
+
+The tracked matrix is team-owned because it is the only home
+for team-shared structure: the override whitelist admits only
+model identities (`profiles.*.model`, `profiles.*.variant`,
+`classifier.llm.*`), so a team's profiles, `packs` mapping,
+`defaults`, and `agents` pins live solely in the tracked file.
+This is the `.uf/review-matrix.yaml` init-survival precedent
+(issues #884/#886); `--force` is the deliberate reset path.
+
+`uf init --divisor` (DivisorOnly mode, which deploys only the
+Divisor review agents and convention packs) excludes the matrix
+and its schema registry: the matrix drives content-agent
+delegation, which DivisorOnly repositories do not run, and an
+absent matrix is a valid no-op. The meta-prompt pack and its
+custom template do deploy in DivisorOnly mode, because
+DivisorOnly deploys all convention packs.
+
+The scaffold deployed the tracked matrix template before it
+deployed the meta-prompt pack. Repositories scaffolded in that
+window carry a matrix that names `meta-prompt` with no pack
+file, so their matrix is invalid and every `uf_delegate_command`
+fails non-retryably with `MATRIX_INVALID`. Re-running `uf init`
+heals them: the pack deploys as a new file (new files are
+created regardless of ownership), and the existing matrix
+becomes valid.
+
 ---
 
 ## Common Scenarios
