@@ -141,7 +141,7 @@
 
 ## 3. Classifier cascade
 
-- [ ] 3.1 Create `.opencode/agents/model-matrix-classifier.md`:
+- [x] 3.1 Create `.opencode/agents/model-matrix-classifier.md`:
   frontmatter `name: model-matrix-classifier`, `mode:
   subagent`, `hidden: true`, description "Internal to the
   model-matrix selection layer. Investigates the task context
@@ -154,7 +154,7 @@
   `{"pack": "<name>", "confidence": <0.0-1.0>, "reasoning":
   "<optional>"}` — no markdown fences, no prose, never ask
   questions (MM-FR-005 agent-engine contract).
-- [ ] 3.2 In `.opencode/lib/model-matrix.ts`, implement the
+- [x] 3.2 In `.opencode/lib/model-matrix.ts`, implement the
   classifier cascade (design D5): an agent engine that spawns
   the hidden subagent through an injected session-spawn seam
   (reusing the executor path), bounded by `agent_timeout_ms`
@@ -181,7 +181,7 @@
   cascade instance (never module-level state) and injectable
   for tests. Classifier failure
   never throws to the caller.
-- [ ] 3.3 Create `.opencode/test/model-matrix-classifier.test.ts`
+- [x] 3.3 Create `.opencode/test/model-matrix-classifier.test.ts`
   unit tests with mocked seams: agent engine success (valid
   JSON, above threshold, matrix-valid pack) and
   `selection_source: "classifier-agent"`; LLM engine success →
