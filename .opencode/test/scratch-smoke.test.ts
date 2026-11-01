@@ -131,42 +131,44 @@ describe("provider-free scratch-repository smoke test", () => {
   })
 
   it("activates uf-workflow plugin and registers all workflow tools", async () => {
-    const project = await scratchProject()
-    const hooks = await UfWorkflowPlugin.server({
-      client: { session: {} },
-      directory: project,
-      worktree: project,
-    } as unknown as PluginInput)
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await UfWorkflowPlugin.server({
+        client: { session: {} },
+        directory: project,
+        worktree: project,
+      } as unknown as PluginInput)
 
-    expect(Object.keys(hooks.tool).sort()).toEqual([
-      "checkpoint",
-      "clear_progress",
-      "format_unleash_demo",
-      "format_unleash_exit",
-      "get_progress",
-      "git_commit_no_edit",
-      "git_conflict_files",
-      "git_fetch",
-      "git_merge",
-      "git_merge_abort",
-      "git_push",
-      "git_push_force_with_lease",
-      "git_rebase",
-      "git_rebase_abort",
-      "mark_task_complete",
-      "normalize_model_name",
-      "parse_tasks",
-      "resolve_base_ref",
-      "resolve_clarification",
-      "scan_clarifications",
-      "scan_conflict_markers",
-      "uf_delegate_command",
-      "uf_unleash_branch_gate",
-      "uf_unleash_detect_resume",
-      "uf_unleash_resolve_issue",
-      "uf_unleash_route_decision",
-      "write_unleash_summary",
-    ])
+      expect(Object.keys(hooks.tool).sort()).toEqual([
+        "checkpoint",
+        "clear_progress",
+        "format_unleash_demo",
+        "format_unleash_exit",
+        "get_progress",
+        "git_commit_no_edit",
+        "git_conflict_files",
+        "git_fetch",
+        "git_merge",
+        "git_merge_abort",
+        "git_push",
+        "git_push_force_with_lease",
+        "git_rebase",
+        "git_rebase_abort",
+        "mark_task_complete",
+        "normalize_model_name",
+        "parse_tasks",
+        "resolve_base_ref",
+        "resolve_clarification",
+        "scan_clarifications",
+        "scan_conflict_markers",
+        "uf_delegate_command",
+        "uf_unleash_branch_gate",
+        "uf_unleash_detect_resume",
+        "uf_unleash_resolve_issue",
+        "uf_unleash_route_decision",
+        "write_unleash_summary",
+      ])
+    })
   })
 
   it("registers uf_delegate_command with the documented argument contract on a scratch project", async () => {
@@ -183,19 +185,25 @@ describe("provider-free scratch-repository smoke test", () => {
       // scratch-project activation — the registration surface the OpenCode
       // host consumes. The three classification-contract parameters
       // (task_classification, skill, skill_absent_reason) must reach the
-      // model-facing schema alongside the eight pre-change parameters.
+      // model-facing schema alongside the eight pre-change parameters,
+      // plus the four model-matrix selection parameters (model, variant,
+      // profile, pack — model-matrix-delegation task 5.1, UF-FR-002).
       expect(Object.keys(hooks.tool.uf_delegate_command.args).sort()).toEqual([
         "agent",
         "checkpoint_step",
         "command_path",
         "expected_artifact",
         "feature_dir",
+        "model",
+        "pack",
         "phase",
+        "profile",
         "prompt",
         "skill",
         "skill_absent_reason",
         "task_classification",
         "timeout",
+        "variant",
       ])
     })
   })

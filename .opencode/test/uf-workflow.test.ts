@@ -23,6 +23,7 @@ import {
   type ToolSuccess,
 } from "../lib/uf-workflow-types.js"
 import UfWorkflowPlugin from "../plugins/uf-workflow/index.js"
+import { withBun } from "./helpers/bun-runtime.js"
 import {
   createCheckpointTool,
   createClearProgressTool,
@@ -127,7 +128,10 @@ describe("UfWorkflowPlugin", () => {
       client: {} as PluginInput["client"],
     } as PluginInput
 
-    const result = await UfWorkflowPlugin.server(fakeInput)
+    // withBun: the model-matrix selection wiring (model-matrix-delegation
+    // task 5.2) constructs a Bun-backed YAML parser at registration, the
+    // invoke-agent/review-dispatch server() convention.
+    const result = await withBun(() => UfWorkflowPlugin.server(fakeInput))
     expect(result).toBeDefined()
     expect(result.tool).toBeDefined()
     expect(Object.keys(result.tool).sort()).toEqual([
@@ -167,12 +171,14 @@ describe("UfWorkflowPlugin", () => {
       client: {} as PluginInput["client"],
     } as PluginInput
 
-    const result = await UfWorkflowPlugin.server(fakeInput)
+    const result = await withBun(() => UfWorkflowPlugin.server(fakeInput))
 
     // DE-007 Layer 1 (delegation-skill-enforcement task 4.2): the
     // registered args must match the documented contract — the eight
     // pre-change parameters plus task_classification, skill, and
-    // skill_absent_reason (task 1.1). The registration-surface suite
+    // skill_absent_reason (task 1.1), plus the four model-matrix selection
+    // parameters model, variant, profile, and pack (model-matrix-
+    // delegation task 5.1, UF-FR-002). The registration-surface suite
     // proves args is the zod raw shape the host validates input through;
     // this pin holds the key set itself to the documented contract, so a
     // parameter added to the input schema but not the registration
@@ -183,12 +189,16 @@ describe("UfWorkflowPlugin", () => {
       "command_path",
       "expected_artifact",
       "feature_dir",
+      "model",
+      "pack",
       "phase",
+      "profile",
       "prompt",
       "skill",
       "skill_absent_reason",
       "task_classification",
       "timeout",
+      "variant",
     ])
   })
 })
