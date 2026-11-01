@@ -87,7 +87,7 @@ run sequentially, no `[P]`.
 All tasks modify `internal/scaffold/scaffold_test.go` — run
 sequentially, no `[P]`.
 
-- [ ] 4.1 Register the new assets: add
+- [x] 4.1 Register the new assets: add
   `opencode/uf/packs/meta-prompt.md`,
   `opencode/uf/packs/meta-prompt-custom.md`, and
   `opencode/agents/model-matrix-classifier.md` to
@@ -104,7 +104,7 @@ sequentially, no `[P]`.
   TestSCFR001_CanonicalAssetSurfaceMatchesMirrors'
   ./internal/scaffold/`.
 
-- [ ] 4.2 Update `TestIsToolOwned` (SC-FR-010): flip the
+- [x] 4.2 Update `TestIsToolOwned` (SC-FR-010): flip the
   `uf/model-matrix.yaml` entry to `false` with a comment
   citing the project-extension-point rationale and design D4;
   add `opencode/uf/packs/meta-prompt.md` → `true`,
@@ -113,7 +113,7 @@ sequentially, no `[P]`.
   (canonical packs tool-owned; customs and agents
   user-owned).
 
-- [ ] 4.3 Extend `TestIsDivisorAsset` and
+- [x] 4.3 Extend `TestIsDivisorAsset` and
   `TestShouldDeployPack`: meta-prompt.md and
   meta-prompt-custom.md are Divisor assets (`true` —
   DivisorOnly deploys all convention packs) and deploy for
@@ -154,7 +154,7 @@ sequentially, no `[P]`.
   `TestRun_OverwriteOnDiff_ToolOwned` pattern, and the
   `--force` replace path for the team-edited matrix.
 
-- [ ] 4.7 Update the `TestCollectDeployedPacks_*` family and
+- [x] 4.7 Update the `TestCollectDeployedPacks_*` family and
   the `TestEnsureAGENTSmdPackSection_*` expectations to
   include `meta-prompt.md` and `meta-prompt-custom.md` in the
   always-deployed candidate set and the generated AGENTS.md

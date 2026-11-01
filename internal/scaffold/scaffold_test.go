@@ -3557,6 +3557,12 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/uf/packs/severity.md", true},
 		{"opencode/uf/packs/python.md", true},
 		{"opencode/uf/packs/python-custom.md", true},
+		// Meta-prompt packs deploy in DivisorOnly too: DivisorOnly
+		// deploys all convention packs because Divisor personas load
+		// every pack at review time
+		// (model-matrix-scaffold-deployment design D1)
+		{"opencode/uf/packs/meta-prompt.md", true},
+		{"opencode/uf/packs/meta-prompt-custom.md", true},
 		// Divisor review-context skill
 		{"opencode/skills/review-context/SKILL.md", true},
 		{"opencode/skills/dispatch-advisor/SKILL.md", true},
@@ -3600,7 +3606,9 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/agents/cobalt-crush-dev.md", false},
 		// Non-Divisor: the model matrix serves content-agent delegation
 		// (uf_delegate_command), not review dispatch — it stays out of
-		// DivisorOnly deployments (model-matrix-delegation design D10)
+		// DivisorOnly deployments (model-matrix-delegation design D10;
+		// model-matrix-scaffold-deployment design D7 keeps the
+		// exclusion while the meta-prompt packs deploy)
 		{"uf/model-matrix.yaml", false},
 		{"uf/schemas/model-matrix/v1.schema.json", false},
 	}
@@ -3676,6 +3684,16 @@ func TestShouldDeployPack(t *testing.T) {
 		{"opencode/uf/packs/ci-custom.md", "typescript", true},
 		{"opencode/uf/packs/ci.md", "", true},
 		{"opencode/uf/packs/ci-custom.md", "", true},
+		// Meta-prompt packs always deploy (language-agnostic,
+		// model-matrix-scaffold-deployment design D1)
+		{"opencode/uf/packs/meta-prompt.md", "go", true},
+		{"opencode/uf/packs/meta-prompt-custom.md", "go", true},
+		{"opencode/uf/packs/meta-prompt.md", "typescript", true},
+		{"opencode/uf/packs/meta-prompt-custom.md", "typescript", true},
+		{"opencode/uf/packs/meta-prompt.md", "python", true},
+		{"opencode/uf/packs/meta-prompt-custom.md", "python", true},
+		{"opencode/uf/packs/meta-prompt.md", "", true},
+		{"opencode/uf/packs/meta-prompt-custom.md", "", true},
 		// Matching language packs deploy
 		{"opencode/uf/packs/go.md", "go", true},
 		{"opencode/uf/packs/go-custom.md", "go", true},
