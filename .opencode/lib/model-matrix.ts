@@ -1367,10 +1367,12 @@ export class ClassifierCascade {
   }
 
   /**
-   * Issues one LLM-engine HTTP attempt under a fresh AbortSignal bounded
-   * by the request timeout. The bound covers the request and the body
-   * read. A non-2xx response cancels its body without buffering the
-   * error payload; an ok response is read under the 50 MiB cap.
+   * Issues one LLM-engine HTTP attempt bounded by the request timeout.
+   * The bound is enforced by racing the request pipeline against a timer
+   * that aborts the controller — the injected fetch receives the signal
+   * (the production seam aborts with it), but the bound holds even for a
+   * seam that ignores it, mirroring the agent engine's race discipline.
+   * The bound covers the request and the body read.
    * @param url The validated endpoint URL.
    * @param body The JSON request body.
    * @param apiKey The interpolated apiKey state, or null for no header.
@@ -1384,35 +1386,19 @@ export class ClassifierCascade {
     timeoutMs: number,
   ): Promise<LlmHttpResponse> {
     const controller = new AbortController()
-    const timer = setTimeout(
-      () => controller.abort(new Error(`classifier LLM request exceeded request_timeout_ms ${timeoutMs}`)),
-      timeoutMs,
-    )
+    let timer: NodeJS.Timeout | undefined
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort(new Error(`classifier LLM request exceeded request_timeout_ms ${timeoutMs}`))
+        reject(controller.signal.reason)
+      }, timeoutMs)
+    })
+    // The losing promise's late rejection must never surface unhandled:
+    // the race result is authoritative (same discipline as the agent engine).
+    const request = this.issueLlmRequest(url, body, apiKey, controller.signal)
+    void request.catch(() => {})
     try {
-      const response = await this.dependencies.fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(apiKey !== null && apiKey.status === "ok" ? { Authorization: `Bearer ${apiKey.value}` } : {}),
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      })
-      if (!response.ok) {
-        // The error body is never needed — cancel it best-effort so the
-        // connection is released without buffering an error payload.
-        void response.body?.cancel().catch(() => {})
-        return { ok: false, status: response.status, reason: `endpoint returned HTTP ${response.status}` }
-      }
-      const content = await readBoundedResponseBody(response)
-      if (content === null) {
-        return {
-          ok: false,
-          status: response.status,
-          reason: `response body exceeds the ${MAX_LLM_RESPONSE_BYTES}-byte cap (50 MiB) and is treated as malformed`,
-        }
-      }
-      return { ok: true, content }
+      return await Promise.race([request, timeoutPromise])
     } catch (error: unknown) {
       if (controller.signal.aborted) {
         return { ok: false, status: 0, reason: `request timed out after ${timeoutMs}ms (request_timeout_ms)` }
@@ -1421,6 +1407,49 @@ export class ClassifierCascade {
     } finally {
       clearTimeout(timer)
     }
+  }
+
+  /**
+   * Issues the LLM-engine fetch and reads its body under the 50 MiB cap.
+   * A non-2xx response cancels its body without buffering the error
+   * payload; an ok response is read under the cap without buffering an
+   * oversized body.
+   * @param url The validated endpoint URL.
+   * @param body The JSON request body.
+   * @param apiKey The interpolated apiKey state, or null for no header.
+   * @param signal The per-attempt abort signal.
+   * @returns The bounded body text or the failure reason with the HTTP status.
+   */
+  private async issueLlmRequest(
+    url: URL,
+    body: Record<string, unknown>,
+    apiKey: InterpolatedApiKey | null,
+    signal: AbortSignal,
+  ): Promise<LlmHttpResponse> {
+    const response = await this.dependencies.fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey !== null && apiKey.status === "ok" ? { Authorization: `Bearer ${apiKey.value}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!response.ok) {
+      // The error body is never needed — cancel it best-effort so the
+      // connection is released without buffering an error payload.
+      void response.body?.cancel().catch(() => {})
+      return { ok: false, status: response.status, reason: `endpoint returned HTTP ${response.status}` }
+    }
+    const content = await readBoundedResponseBody(response)
+    if (content === null) {
+      return {
+        ok: false,
+        status: response.status,
+        reason: `response body exceeds the ${MAX_LLM_RESPONSE_BYTES}-byte cap (50 MiB) and is treated as malformed`,
+      }
+    }
+    return { ok: true, content }
   }
 }
 
