@@ -976,6 +976,38 @@ Each entry follows the format: `- <change-name>: <summary>`.
   openspec/changes/command-prose-pilot/)
 
 ### Fixed
+- fix-review-submission-validation: the review-dispatch submit tools
+  now enforce their declared arg schemas at execution time.
+  OpenCode 1.19.0 does not validate plugin tool arg schemas
+  host-side, so `submit_review_findings` accepted findings missing
+  required keys (e.g. `severity`) or carrying unrecognized ones and
+  persisted them to run-*.json files; `finalize_review_dispatch`'s
+  strict payload validation then rejected the consolidated payload
+  ("invalid severity fields") only after the child session had
+  ended, stranding /uf.unleash code-review dispatches at
+  code-review-no-success with no recovery path. Both submit tools
+  (`submit_review_findings`, `submit_lesson_proposal`) now
+  `safeParse` their declared input schemas before storing and
+  return a descriptive per-issue error (`<tool> validation failed:
+  <path>: <message>`) the child reviewer can fix and resubmit
+  in-session; nothing is stored on rejection. As defense-in-depth,
+  `consolidate_dispatch` validates every harvested finding and
+  proposal from successful runs against the same schemas, excludes
+  invalid entries from the payload (per-run findings, top-level
+  findings, verdict votes, and collected proposals), and reports
+  them as `invalid_submissions_excluded` warnings (agent, run_id,
+  invalid counts, per-entry validation errors bounded to the first
+  20 lines with the total issue count) so the emitted payload is
+  always finalize-shaped — by entry and by count: valid findings
+  are also capped at the finalizer's declared cardinality bounds
+  (512 per run, 512 consolidated after deduplication), with the
+  overflow surfaced as `run_findings_overflow` and
+  `consolidated_findings_overflow` warnings (agent, run_id, kept
+  and overflow counts; kept and dropped counts). Schemas,
+  thresholds, and limits are unchanged — the existing bounds are
+  enforced earlier in the consolidate path, never modified. Plugin
+  suite: rejection and defense-in-depth coverage added to
+  submit-tools and consolidate-dispatch tests.
 - forward-aggregate-correlation-id: all five review
   orchestration commands (`/uf.review-pr`,
   `/uf.review-council`, `/uf.triage-issue`,

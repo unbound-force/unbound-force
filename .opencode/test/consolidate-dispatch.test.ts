@@ -67,6 +67,22 @@ function runFixture(overrides: {
   }
 }
 
+/**
+ * Generate `count` unique, schema-valid LOW findings (unique file and
+ * root_cause per finding). `offset` shifts the generated identifiers so
+ * multiple runs produce globally-unique findings for deduplication.
+ */
+function validFindings(count: number, offset = 0) {
+  return Array.from({ length: count }, (_, i) => ({
+    severity: "LOW" as const,
+    category: "style",
+    description: `Finding ${offset + i}`,
+    root_cause: `Cause ${offset + i}`,
+    file: `file-${offset + i}.ts`,
+    line: offset + i + 1,
+  }))
+}
+
 function noopContext(): ToolContext {
   return {
     sessionID: "consolidate-session",
@@ -485,6 +501,280 @@ describe("consolidate_dispatch", () => {
     })
     // The empty-submission failed run still occupies its payload slot.
     expect(payload.runs).toHaveLength(3)
+  })
+
+  it("excludes schema-invalid harvested submissions from the payload and warns (invalid_submissions_excluded)", async () => {
+    const guardRunId = randomUUID()
+    const adversaryRunId = randomUUID()
+    await setupDispatchSession([
+      runFixture({
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        findings: [
+          { severity: "HIGH", category: "security", description: "Valid finding", root_cause: "Valid cause", file: "ok.ts", line: 1 },
+          { category: "security", description: "Missing severity", root_cause: "No severity key", file: "bad.ts", line: 2 } as never,
+          "not an object" as never,
+        ],
+      }),
+      runFixture({
+        agent: "divisor-adversary",
+        run_id: adversaryRunId,
+        proposals: [{ information: "Missing tag" } as never, { information: "Valid lesson", tag: "valid" }],
+      }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    // Only the valid finding reaches the top-level payload.
+    expect(payload.findings).toHaveLength(1)
+    expect(payload.findings[0].description).toBe("Valid finding")
+    expect(payload.findings[0].severity).toBe("HIGH")
+    // Per-run findings exclude the invalid entries too, so the payload
+    // carries no invalid severity fields anywhere (finalize-shaped).
+    const guardEntry = payload.runs.find((run) => run.run_id === guardRunId)
+    expect(guardEntry.findings).toHaveLength(1)
+    expect(guardEntry.findings[0].description).toBe("Valid finding")
+    // Only the valid proposal is collected.
+    expect(payload.proposals).toHaveLength(1)
+    expect(payload.proposals[0].information).toBe("Valid lesson")
+    // One warning per affected run (run files sort alphabetically:
+    // adversary before guard), naming what was dropped and why.
+    expect(payload.warnings).toEqual([
+      {
+        type: "invalid_submissions_excluded",
+        agent: "divisor-adversary",
+        run_id: adversaryRunId,
+        invalid_findings: 0,
+        invalid_proposals: 1,
+        errors: ["proposals[0].tag: Invalid input: expected string, received undefined"],
+      },
+      {
+        type: "invalid_submissions_excluded",
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        invalid_findings: 2,
+        invalid_proposals: 0,
+        errors: [
+          'findings[1].severity: Invalid option: expected one of "CRITICAL"|"HIGH"|"MEDIUM"|"LOW"',
+          "findings[2]: Invalid input: expected object, received string",
+        ],
+      },
+    ])
+  })
+
+  it("finalizes cleanly when a run file carries invalid submissions instead of rejecting the payload", async () => {
+    const projectRoot = join(tmpdir(), `consolidate-invalid-submissions-${randomUUID()}`)
+    await mkdir(projectRoot, { recursive: true })
+    cleanupDirs.push(projectRoot)
+
+    const guardRunId = randomUUID()
+    await setupDispatchSession(
+      [
+        runFixture({
+          agent: "divisor-guard",
+          run_id: guardRunId,
+          findings: [
+            { severity: "HIGH", category: "security", description: "Valid finding", root_cause: "Valid cause", file: "ok.ts", line: 1 },
+            { severity: "medium", category: "security", description: "Invalid finding", root_cause: "Invalid cause", file: "bad.ts", line: 2 },
+          ],
+        }),
+      ],
+      { plan: explicitRunPlan("divisor-guard") },
+    )
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+    const result = await tool.execute(
+      {
+        provenance: {
+          branch: "opsx/fix-review-submission-validation",
+          commit: "b".repeat(40), // Must match input_context.head_sha
+          workflow_id: "uf.review-council",
+        },
+      },
+      noopContext(),
+    )
+
+    const finalizationResult = JSON.parse(result.output)
+    // Pre-fix, finalize_review_dispatch rejected this payload with
+    // "invalid severity fields" (per-run findings plus top-level findings)
+    // and stranded the dispatch at code-review-no-success; the exclusion
+    // keeps the payload finalize-shaped, so finalization succeeds.
+    expect(finalizationResult.status).toBe("success")
+    expect(finalizationResult.errors).toEqual([])
+    expect(finalizationResult.operation_verdict).toBe("REQUEST CHANGES")
+    // The dropped entry rides along as a warning instead of silently
+    // disappearing.
+    expect(finalizationResult.warnings).toEqual([
+      {
+        type: "invalid_submissions_excluded",
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        invalid_findings: 1,
+        invalid_proposals: 0,
+        errors: ['findings[1].severity: Invalid option: expected one of "CRITICAL"|"HIGH"|"MEDIUM"|"LOW"'],
+      },
+    ])
+  })
+
+  it("caps a run's valid findings at the per-run cardinality bound and warns (run_findings_overflow)", async () => {
+    const projectRoot = join(tmpdir(), `consolidate-run-overflow-${randomUUID()}`)
+    await mkdir(projectRoot, { recursive: true })
+    cleanupDirs.push(projectRoot)
+
+    const guardRunId = randomUUID()
+    // 513 individually-valid findings — one beyond the DispatchRunSchema
+    // findings max (512) — as an additive submit sequence (each call caps
+    // at 512, accumulation does not) or a foreign-written run file would
+    // carry.
+    await setupDispatchSession(
+      [runFixture({ agent: "divisor-guard", run_id: guardRunId, findings: validFindings(513) })],
+      { plan: explicitRunPlan("divisor-guard") },
+    )
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+    const payloadResult = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(payloadResult.output)
+    // Pre-fix, the 513-entry run flowed into the payload untouched and
+    // stranded finalize_review_dispatch on the per-run findings array max;
+    // the cap keeps the payload finalize-shaped by count as well as entry.
+    const guardEntry = payload.runs.find((run) => run.run_id === guardRunId)
+    expect(guardEntry.findings).toHaveLength(512)
+    // Keep-first: the first 512 findings survive, the 513th is the overflow.
+    expect(guardEntry.findings[511].description).toBe("Finding 511")
+    expect(guardEntry.findings.some((finding) => finding.description === "Finding 512")).toBe(false)
+    // The consolidated set mirrors the capped per-run set (512 unique).
+    expect(payload.findings).toHaveLength(512)
+    expect(payload.warnings).toEqual([
+      {
+        type: "run_findings_overflow",
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        kept_findings: 512,
+        overflow_findings: 1,
+      },
+    ])
+
+    // The capped payload passes the finalize provenance path — the exact
+    // array-max rejection this cap exists to eliminate.
+    const finalizeResult = await tool.execute(
+      {
+        provenance: {
+          branch: "quick/fix-review-submission-validation",
+          commit: "b".repeat(40), // Must match input_context.head_sha
+          workflow_id: "uf.review-council",
+        },
+      },
+      noopContext(),
+    )
+    const finalizationResult = JSON.parse(finalizeResult.output)
+    expect(finalizationResult.status).toBe("success")
+    expect(finalizationResult.errors).toEqual([])
+    expect(finalizationResult.operation_verdict).toBe("APPROVE WITH ADVISORIES")
+    expect(finalizationResult.warnings).toEqual(payload.warnings)
+  })
+
+  it("emits no overflow warning when a run carries exactly the per-run bound of valid findings", async () => {
+    await setupDispatchSession([runFixture({ agent: "divisor-guard", findings: validFindings(512) })])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    // The bound is inclusive: exactly 512 valid findings fit the payload
+    // with no overflow warning (off-by-one guard for the cap arithmetic).
+    expect(payload.runs[0].findings).toHaveLength(512)
+    expect(payload.findings).toHaveLength(512)
+    expect(payload.warnings).toBeUndefined()
+  })
+
+  it("caps consolidated findings at the top-level cardinality bound and warns (consolidated_findings_overflow)", async () => {
+    // 600 unique valid findings across two runs (300 each) — over the
+    // ReviewDispatchPayloadSchema findings max (512) after deduplication.
+    await setupDispatchSession([
+      runFixture({ agent: "divisor-adversary", findings: validFindings(300) }),
+      runFixture({ agent: "divisor-guard", findings: validFindings(300, 300) }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    // Pre-fix, deduplicateFindings returned uncapped output and the payload
+    // stranded finalize_review_dispatch on the top-level findings max.
+    expect(payload.findings).toHaveLength(512)
+    // Keep-first in dedup insertion order: run files sort alphabetically
+    // (adversary before guard), so the first 512 unique findings survive.
+    expect(payload.findings.some((finding) => finding.description === "Finding 511")).toBe(true)
+    expect(payload.findings.some((finding) => finding.description === "Finding 512")).toBe(false)
+    // Verdict and advisories derive from the kept set, so the payload stays
+    // internally consistent (all LOW findings → APPROVE WITH ADVISORIES).
+    expect(payload.verdict).toBe("APPROVE WITH ADVISORIES")
+    expect(payload.advisories).toHaveLength(512)
+    expect(payload.warnings).toEqual([
+      {
+        type: "consolidated_findings_overflow",
+        kept_findings: 512,
+        dropped_findings: 88,
+      },
+    ])
+  })
+
+  it("truncates invalid_submissions_excluded error lines beyond the bound while keeping counts exact", async () => {
+    const guardRunId = randomUUID()
+    // 25 invalid findings, each failing with exactly one issue (missing
+    // severity) — 25 diagnostic lines, five beyond the 20-line bound.
+    const invalidFindings = Array.from({ length: 25 }, (_, i) => ({
+      category: "security",
+      description: `Invalid finding ${i}`,
+      root_cause: `Invalid cause ${i}`,
+      file: `bad-${i}.ts`,
+      line: i + 1,
+    }))
+    await setupDispatchSession([
+      runFixture({ agent: "divisor-guard", run_id: guardRunId, findings: invalidFindings as never }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    expect(payload.findings).toHaveLength(0)
+    expect(payload.warnings).toHaveLength(1)
+    const warning = payload.warnings[0]
+    // The counts stay exact — truncation applies to diagnostics only.
+    expect(warning.type).toBe("invalid_submissions_excluded")
+    expect(warning.agent).toBe("divisor-guard")
+    expect(warning.run_id).toBe(guardRunId)
+    expect(warning.invalid_findings).toBe(25)
+    expect(warning.invalid_proposals).toBe(0)
+    // 20 diagnostic lines plus the truncation note naming the total.
+    expect(warning.errors).toHaveLength(21)
+    expect(warning.errors.slice(0, 20).every((line) => /^findings\[\d+\]\.severity: /.test(line))).toBe(true)
+    expect(warning.errors[20]).toBe("... 5 more validation error line(s) truncated (25 total)")
+  })
+
+  it("does not truncate invalid_submissions_excluded error lines at exactly the bound", async () => {
+    const invalidFindings = Array.from({ length: 20 }, (_, i) => ({
+      category: "security",
+      description: `Invalid finding ${i}`,
+      root_cause: `Invalid cause ${i}`,
+      file: `bad-${i}.ts`,
+      line: i + 1,
+    }))
+    await setupDispatchSession([runFixture({ agent: "divisor-guard", findings: invalidFindings as never })])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    const warning = payload.warnings[0]
+    // Exactly at the bound: every line is carried, no truncation note.
+    expect(warning.invalid_findings).toBe(20)
+    expect(warning.errors).toHaveLength(20)
+    expect(warning.errors.some((line) => line.includes("truncated"))).toBe(false)
   })
 
   it("fails closed as INCONCLUSIVE when every run failed", async () => {
