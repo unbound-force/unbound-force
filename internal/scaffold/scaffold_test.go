@@ -1931,7 +1931,9 @@ var expectedAssetPaths = []string{
 	// Reproducible plugin package inputs (2)
 	"opencode/package-lock.json",
 	"opencode/package.json",
-	// Review policy and project-owned sibling template (3)
+	// Review policy, model-matrix template, and project-owned sibling
+	// template (4)
+	"uf/model-matrix.yaml",
 	"uf/review-matrix.yaml",
 	"uf/reviewer-capabilities.yaml",
 	"uf/sibling-repos.yaml",
@@ -1964,6 +1966,7 @@ var task42CanonicalAssets = []struct {
 	{asset: "opencode/lib/uf-workflow-types.ts", source: ".opencode/lib/uf-workflow-types.ts"},
 	{asset: "opencode/lib/agent-executor.ts", source: ".opencode/lib/agent-executor.ts"},
 	{asset: "opencode/lib/branch-classification.ts", source: ".opencode/lib/branch-classification.ts"},
+	{asset: "opencode/lib/model-matrix.ts", source: ".opencode/lib/model-matrix.ts"},
 	{asset: "opencode/lib/review-dispatch-artifact.ts", source: ".opencode/lib/review-dispatch-artifact.ts"},
 	{asset: "opencode/lib/review-dispatch-lesson-proposal.ts", source: ".opencode/lib/review-dispatch-lesson-proposal.ts"},
 	{asset: "opencode/lib/review-dispatch-sibling-evidence.ts", source: ".opencode/lib/review-dispatch-sibling-evidence.ts"},
@@ -1974,9 +1977,11 @@ var task42CanonicalAssets = []struct {
 	{asset: "opencode/lib/unleash-templates.ts", source: ".opencode/lib/unleash-templates.ts"},
 	{asset: "opencode/package-lock.json", source: ".opencode/package-lock.json"},
 	{asset: "opencode/package.json", source: ".opencode/package.json"},
+	{asset: "uf/model-matrix.yaml", source: ".uf/model-matrix.yaml"},
 	{asset: "uf/review-matrix.yaml", source: ".uf/review-matrix.yaml"},
 	{asset: "uf/reviewer-capabilities.yaml", source: ".uf/reviewer-capabilities.yaml"},
 	{asset: "uf/schemas/lesson-proposal/v1.0.0.schema.json", source: ".uf/schemas/lesson-proposal/v1.0.0.schema.json"},
+	{asset: "uf/schemas/model-matrix/v1.schema.json", source: ".uf/schemas/model-matrix/v1.schema.json"},
 	{asset: "uf/schemas/review-dispatch/v1.0.0.schema.json", source: ".uf/schemas/review-dispatch/v1.0.0.schema.json"},
 	{asset: "uf/schemas/review-matrix/v2.schema.json", source: ".uf/schemas/review-matrix/v2.schema.json"},
 	{asset: "uf/schemas/review-matrix/v3.schema.json", source: ".uf/schemas/review-matrix/v3.schema.json"},
@@ -2896,6 +2901,9 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/lib/unleash-templates.ts", true},
 		// User-owned: reviewer eligibility pairs with uf/review-matrix.yaml as a project extension point
 		{"uf/reviewer-capabilities.yaml", false},
+		// Tool-owned: model-matrix template (design D10, SC-FR-007) —
+		// drift-enforced byte-identical to the canonical tracked matrix
+		{"uf/model-matrix.yaml", true},
 		// User-owned: model policy is a supported project extension point
 		{"uf/review-matrix.yaml", false},
 		// User-owned: active sibling declarations are project-specific
@@ -3494,6 +3502,8 @@ func TestMapAssetPath_Prefixes(t *testing.T) {
 		// uf/ maps to .uf/ (dot prefix)
 		{"uf/reviewer-capabilities.yaml", ".uf/reviewer-capabilities.yaml"},
 		{"uf/sibling-repos.yaml", ".uf/sibling-repos.yaml"},
+		// uf/ maps to .uf/ (dot prefix) — model-matrix template
+		{"uf/model-matrix.yaml", ".uf/model-matrix.yaml"},
 		// uf/schemas/ maps to .uf/schemas/ via the uf/ → .uf/ prefix rule
 		{"uf/schemas/review-matrix/v2.schema.json", ".uf/schemas/review-matrix/v2.schema.json"},
 		{"uf/schemas/review-matrix/v3.schema.json", ".uf/schemas/review-matrix/v3.schema.json"},
@@ -3575,6 +3585,11 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/commands/speckit.plan.md", false},
 		// Non-Divisor: Cobalt-Crush agent
 		{"opencode/agents/cobalt-crush-dev.md", false},
+		// Non-Divisor: the model matrix serves content-agent delegation
+		// (uf_delegate_command), not review dispatch — it stays out of
+		// DivisorOnly deployments (model-matrix-delegation design D10)
+		{"uf/model-matrix.yaml", false},
+		{"uf/schemas/model-matrix/v1.schema.json", false},
 	}
 
 	for _, tt := range tests {

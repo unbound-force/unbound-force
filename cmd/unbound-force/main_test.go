@@ -35,11 +35,11 @@ func TestRunInit_FreshDir(t *testing.T) {
 	// The exact count is environment-dependent: review plugin activation
 	// appends the activation-gated plugin sources to the created set only
 	// when Node/npm/OpenCode are present and the install plus probes
-	// succeed. With 81 total embedded assets, minus 1 non-deployed
-	// (devcontainer) and 4 activation-gated plugins, the base count is 76
-	// (the model-matrix lib module joined the deployed set with the
-	// model-matrix-delegation change). Each successful activation probe
-	// adds one file, yielding [76-80].
+	// succeed. With 82 total embedded assets, minus 1 non-deployed
+	// (devcontainer) and 4 activation-gated plugins, the base count is 77
+	// (the model-matrix lib module and the uf/model-matrix.yaml template
+	// joined the deployed set with the model-matrix-delegation change).
+	// Each successful activation probe adds one file, yielding [77-81].
 	// The scaffold-level asset inventory and drift tests pin the exact
 	// asset list, so this CLI check asserts any count in that range.
 	// (devcontainer excluded — OS-specific, generated per-user by
@@ -64,8 +64,8 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected 'N files processed' line in output, got:\n%s", output)
-	} else if fileCount < 76 || fileCount > 80 {
-		t.Errorf("expected files processed in [76-80], got %d:\n%s", fileCount, output)
+	} else if fileCount < 77 || fileCount > 81 {
+		t.Errorf("expected files processed in [77-81], got %d:\n%s", fileCount, output)
 	}
 
 	// Verify a user-owned file was created
