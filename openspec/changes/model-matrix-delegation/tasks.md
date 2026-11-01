@@ -240,7 +240,7 @@
 
 ## 5. Delegation-tool integration
 
-- [ ] 5.1 In `.opencode/plugins/uf-workflow/index.ts`, extend
+- [x] 5.1 In `.opencode/plugins/uf-workflow/index.ts`, extend
   `DelegateCommandInputSchema` and the tool args with
   `model` (provider/model identity, non-empty), `variant`,
   `profile` (1–128 chars), and `pack` (1–128 chars) — the
@@ -249,7 +249,7 @@
   each with descriptions documenting the precedence order; add
   the mutual-independence refinement notes (selection params
   are orthogonal to classification params).
-- [ ] 5.2 Wire selection into `createDelegateCommandTool`'s
+- [x] 5.2 Wire selection into `createDelegateCommandTool`'s
   `execute()` (design D2): after skill resolution and BEFORE
   host introspection, probe for the matrix via the injected
   filesystem dependency (zero-config short-circuit, design
@@ -260,20 +260,20 @@
   structural-failure semantics verbatim. Pack/profile
   validation failures return non-retryable envelopes at the
   pre-spawn stage (zero child sessions).
-- [ ] 5.3 Add `renderPackDirective(pack)` — the fixed-template,
+- [x] 5.3 Add `renderPackDirective(pack)` — the fixed-template,
   tool-rendered instruction to load
   `.opencode/uf/packs/<pack>.md` before writing (never inlined
   content) — and insert it in prompt composition at the fixed
   position: command text → feature-dir context → skill
   directive → pack directive → extra prompt (MM-FR-005
   double duty; unleash delta).
-- [ ] 5.4 Record the audit trail (design D7, MM-FR-007):
+- [x] 5.4 Record the audit trail (design D7, MM-FR-007):
   `selection_source`, selected pack, resolved capability,
   resolved model, and classifier confidence (when applicable)
   in `DelegateCommandData` and the checkpoint data — additive
   fields only; zero-config calls record `selection_source:
   "host"` and keep the pre-change envelope shape.
-- [ ] 5.5 Extend `.opencode/test/unleash-delegate.test.ts` and
+- [x] 5.5 Extend `.opencode/test/unleash-delegate.test.ts` and
   add `.opencode/test/model-matrix-integration.test.ts`:
   integration test proving a delegated task runs on a non-host
   model configured via matrix + override with a mocked child
@@ -293,7 +293,7 @@
   UF-FR-002 — `profile`/`pack` at exactly 1 and 128 chars
   accepted, empty-string and 129-char values rejected
   non-retryably pre-spawn.
-- [ ] 5.6 Seam verification (DE-007): write a test proving the
+- [x] 5.6 Seam verification (DE-007): write a test proving the
   three layer surfaces stay in sync — (a) the registration
   surface: `createDelegateCommandTool` advertises
   model/profile/pack in its args and `DelegateCommandInputSchema`

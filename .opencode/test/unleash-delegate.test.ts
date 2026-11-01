@@ -48,6 +48,14 @@ vi.mock("node:fs", async (importOriginal) => {
 /** Fake repository root — never a real path on any filesystem. */
 const FAKE_CWD = "/fake/project"
 
+/**
+ * The zero-config model-matrix probe: every delegation reads
+ * .uf/model-matrix.yaml through the shared readText seam before host
+ * introspection (model-matrix-delegation D8), so successful runs record
+ * it in reads.calls even when no matrix exists.
+ */
+const MATRIX_PROBE = resolve(FAKE_CWD, ".uf/model-matrix.yaml")
+
 /** Host model identity the fake parent session reports. */
 const HOST_MODEL = "host-provider/host-model"
 
@@ -245,6 +253,70 @@ function fakeFileExists(existing: readonly string[]): { fileExists: FileExists; 
   return { fileExists, calls }
 }
 
+/**
+ * Parser stub mirroring Bun.YAML for the shapes under test (the
+ * model-matrix.test.ts / review-dispatch convention): comments-only and
+ * empty documents parse to null; everything else is JSON (a superset of
+ * the YAML the fixtures use).
+ */
+function testParseYaml(text: string): unknown {
+  const content = text
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "" && !line.trim().startsWith("#"))
+    .join("\n")
+  if (content === "") {
+    return null
+  }
+  return JSON.parse(text) as unknown
+}
+
+/**
+ * Matrix-free model-matrix selection dependencies shared by the
+ * zero-config tests: the YAML stub is never reached (fakeReadText reports
+ * .uf/model-matrix.yaml absent, so loadModelMatrix resolves before
+ * parsing), and every classifier seam fails the test when reached — the
+ * bypass predicate must keep the cascade dark when no matrix is
+ * configured.
+ */
+const matrixFreeDeps: DelegateCommandDependencies["modelMatrix"] = {
+  parseYaml: testParseYaml,
+  classifierFetch: (() => {
+    throw new Error("classifier fetch must not run without a configured matrix")
+  }) as typeof fetch,
+  classifierReadEnv: () => undefined,
+  spawnClassifierAgent: async () => {
+    throw new Error("classifier spawn must not run without a configured matrix")
+  },
+}
+
+/**
+ * Recording model-matrix selection dependencies for matrix-driven tests:
+ * the spawn seam records its prompt and returns a canned response
+ * (default: a classifier JSON response naming no pack, exercising the
+ * fall-through), and the fetch/env seams fail the test when reached (the
+ * LLM engine only runs when the agent engine fails first).
+ */
+function fakeModelMatrixDeps(options: {
+  readonly classifierResponse?: string
+}): {
+  modelMatrix: DelegateCommandDependencies["modelMatrix"]
+  spawnCalls: Array<{ agent: string; prompt: string }>
+} {
+  const spawnCalls: Array<{ agent: string; prompt: string }> = []
+  const modelMatrix: DelegateCommandDependencies["modelMatrix"] = {
+    parseYaml: testParseYaml,
+    classifierFetch: (() => {
+      throw new Error("classifier fetch must not run when the agent engine answers")
+    }) as typeof fetch,
+    classifierReadEnv: () => undefined,
+    spawnClassifierAgent: async (_context, agent, prompt) => {
+      spawnCalls.push({ agent, prompt })
+      return options.classifierResponse ?? '{"pack": null, "confidence": 0.9}'
+    },
+  }
+  return { modelMatrix, spawnCalls }
+}
+
 /** Prompt text delivered to the child session (exactly one text part). */
 function deliveredPrompt(calls: FakeCalls): string {
   const parts = calls.prompts[0]?.body?.parts as unknown as Array<{ type: string; text: string }>
@@ -305,6 +377,7 @@ describe("uf_delegate_command command-file read and prompt composition", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -317,8 +390,9 @@ describe("uf_delegate_command command-file read and prompt composition", () => {
 
     expect(result.status).toBe("ok")
 
-    // The command file is resolved against the injected cwd before reading.
-    expect(reads.calls).toEqual([commandAbs])
+    // The command file is resolved against the injected cwd before reading;
+    // the zero-config matrix probe follows (task 5.2 selection wiring).
+    expect(reads.calls).toEqual([commandAbs, MATRIX_PROBE])
 
     // Host model resolution introspects the parent session's message.
     expect(fake.calls.messages).toHaveLength(1)
@@ -352,6 +426,7 @@ describe("uf_delegate_command command-file read and prompt composition", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -363,8 +438,9 @@ describe("uf_delegate_command command-file read and prompt composition", () => {
 
     expect(result.status).toBe("ok")
     // Prompt-only delegation (per-task implement and code-fix calls) reads
-    // no command file and prepends no feature-dir section.
-    expect(reads.calls).toEqual([])
+    // no command file and prepends no feature-dir section; the only read
+    // is the zero-config matrix probe.
+    expect(reads.calls).toEqual([MATRIX_PROBE])
     expect(deliveredPrompt(fake.calls)).toBe("Implement task 2.5 exactly.")
   })
 
@@ -375,6 +451,7 @@ describe("uf_delegate_command command-file read and prompt composition", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -393,6 +470,7 @@ describe("uf_delegate_command command-file read and prompt composition", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -428,6 +506,7 @@ describe("uf_delegate_command input validation", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -451,6 +530,7 @@ describe("uf_delegate_command input validation", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -481,6 +561,7 @@ describe("uf_delegate_command input validation", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -508,6 +589,7 @@ describe("uf_delegate_command input validation", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -546,6 +628,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -575,6 +658,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -595,6 +679,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -634,6 +719,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -661,6 +747,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -695,6 +782,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([".opencode/skills/pre-flight/SKILL.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -722,6 +810,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -756,6 +845,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -787,6 +877,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -819,6 +910,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -853,6 +945,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists(existing)
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -876,6 +969,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -903,6 +997,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -932,6 +1027,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
       const artifact = fakeFileExists([])
       const deps: DelegateCommandDependencies = {
         client: fake.client,
+        modelMatrix: matrixFreeDeps,
         readText: reads.readText,
         fileExists: artifact.fileExists,
       }
@@ -960,6 +1056,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -985,6 +1082,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -992,9 +1090,10 @@ describe("uf_delegate_command task classification and skill contract", () => {
     const result = await invokeDelegate(recordingExec().exec, deps, { command_path: "cmd.md" })
 
     // The Steps 2/3 call shape is unaffected: no classification and no
-    // skill fields; the run proceeds exactly as before this change.
+    // skill fields; the run proceeds exactly as before this change (the
+    // matrix probe is the one new read, zero-config D8).
     expect(result.status).toBe("ok")
-    expect(reads.calls).toEqual([commandAbs])
+    expect(reads.calls).toEqual([commandAbs, MATRIX_PROBE])
     expect(fake.calls.prompts).toHaveLength(1)
   })
 })
@@ -1010,6 +1109,7 @@ describe("uf_delegate_command skill resolution", () => {
     const artifact = fakeFileExists([".opencode/skill/unbound-force-heroes/SKILL.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1041,6 +1141,7 @@ describe("uf_delegate_command skill resolution", () => {
     ])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1070,6 +1171,7 @@ describe("uf_delegate_command skill resolution", () => {
     const artifact = fakeFileExists([".specify/scripts/bash/check-prerequisites.sh"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1097,6 +1199,7 @@ describe("uf_delegate_command skill resolution", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1130,6 +1233,7 @@ describe("uf_delegate_command skill resolution", () => {
     const artifact = fakeFileExists([]) // nothing exists
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1176,6 +1280,7 @@ describe("uf_delegate_command skill resolution", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1211,6 +1316,7 @@ describe("uf_delegate_command skill resolution", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1248,6 +1354,7 @@ describe("uf_delegate_command skill directive injection", () => {
     const artifact = fakeFileExists([".opencode/skills/pre-flight/SKILL.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1285,6 +1392,7 @@ describe("uf_delegate_command skill directive injection", () => {
     const artifact = fakeFileExists([".opencode/skills/pre-flight/SKILL.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1300,7 +1408,7 @@ describe("uf_delegate_command skill directive injection", () => {
     // Without command text the directive holds its fixed position: after
     // feature-dir context, immediately before the extra prompt.
     expect(result.status).toBe("ok")
-    expect(reads.calls).toEqual([])
+    expect(reads.calls).toEqual([MATRIX_PROBE])
     expect(deliveredPrompt(fake.calls)).toBe(
       "Feature directory: openspec/changes/delegation-skill-enforcement/\n\n" +
         "Required skill: .opencode/skills/pre-flight/SKILL.md\n\n" +
@@ -1317,6 +1425,7 @@ describe("uf_delegate_command skill directive injection", () => {
     const artifact = fakeFileExists([".specify/scripts/bash/check-prerequisites.sh"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1357,6 +1466,7 @@ describe("uf_delegate_command expected-artifact verification", () => {
     const artifact = fakeFileExists(["specs/018-unleash-command/plan.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1381,6 +1491,15 @@ describe("uf_delegate_command expected-artifact verification", () => {
         task_classification: "judgment",
         skill: null,
         skill_absent_reason: null,
+        // Model-matrix-delegation D7 (task 5.4): the selection audit
+        // fields surface in every success envelope — zero-config calls
+        // record the host fallback with no resolved values.
+        selection_source: "host",
+        selection_pack: null,
+        selection_capability: null,
+        selection_model: null,
+        selection_confidence: null,
+        selection_fallback_reason: null,
         usage: { cost_usd: 0.25, tokens: { input: 11, output: 7 } },
         provenance: {
           agent: "cobalt-crush-dev",
@@ -1407,6 +1526,7 @@ describe("uf_delegate_command expected-artifact verification", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1445,6 +1565,7 @@ describe("uf_delegate_command expected-artifact verification", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1471,6 +1592,7 @@ describe("uf_delegate_command expected-artifact verification", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1504,6 +1626,7 @@ describe("uf_delegate_command child-session propagation", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1534,6 +1657,7 @@ describe("uf_delegate_command child-session propagation", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1571,6 +1695,7 @@ describe("uf_delegate_command child-session propagation", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1606,6 +1731,7 @@ describe("uf_delegate_command child-session propagation", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1639,6 +1765,7 @@ describe("uf_delegate_command child-session propagation", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1668,6 +1795,7 @@ describe("uf_delegate_command child-session propagation", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1692,6 +1820,7 @@ describe("uf_delegate_command child-session propagation", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1721,6 +1850,7 @@ describe("uf_delegate_command manifest isolation", () => {
     const artifact = fakeFileExists(["openspec/changes/unleash-deterministic-tools/tasks.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1734,9 +1864,10 @@ describe("uf_delegate_command manifest isolation", () => {
 
     expect(result.status).toBe("ok")
 
-    // The only text read is the command file — the reviewer manifest is not
-    // an input to content delegation (D2 boundary is agent validation).
-    expect(reads.calls).toEqual([commandAbs])
+    // The only text reads are the command file and the zero-config matrix
+    // probe — the reviewer manifest is not an input to content delegation
+    // (D2 boundary is agent validation).
+    expect(reads.calls).toEqual([commandAbs, MATRIX_PROBE])
 
     // No filesystem probe touches the manifest, and existence checks flow
     // exclusively through the injected FileExists.
@@ -1766,6 +1897,7 @@ describe("uf_delegate_command checkpoint recording", () => {
     const artifact = fakeFileExists(["specs/018-unleash-command/plan.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1808,6 +1940,7 @@ describe("uf_delegate_command checkpoint recording", () => {
       command_path: ".opencode/commands/speckit.plan.md",
       feature_dir: "specs/018-unleash-command/",
       expected_artifact: "specs/018-unleash-command/plan.md",
+      selection_source: "host",
     })
 
     expect(mkdirSync).toHaveBeenCalledTimes(1)
@@ -1822,6 +1955,7 @@ describe("uf_delegate_command checkpoint recording", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1857,6 +1991,7 @@ describe("uf_delegate_command checkpoint recording", () => {
       feature_dir: "openspec/changes/unleash-deterministic-tools/",
       phase: 3,
       task_classification: "judgment",
+      selection_source: "host",
     })
   })
 
@@ -1866,6 +2001,7 @@ describe("uf_delegate_command checkpoint recording", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1888,6 +2024,7 @@ describe("uf_delegate_command checkpoint recording", () => {
       agent: "cobalt-crush-dev",
       feature_dir: "openspec/changes/unleash-deterministic-tools/",
       task_classification: "judgment",
+      selection_source: "host",
     })
     expect(state.data).not.toHaveProperty("phase")
   })
@@ -1915,6 +2052,7 @@ describe("uf_delegate_command checkpoint recording", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1940,6 +2078,7 @@ describe("uf_delegate_command checkpoint recording", () => {
       feature_dir: "specs/018-stale-dir/",
       agent: "cobalt-crush-dev",
       task_classification: "judgment",
+      selection_source: "host",
     })
     // ...and created_at survives while updated_at is refreshed.
     expect(state.created_at).toBe("2026-10-14T00:00:00.000Z")
@@ -1952,6 +2091,7 @@ describe("uf_delegate_command checkpoint recording", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -1983,6 +2123,7 @@ describe("uf_delegate_command checkpoint recording", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2015,6 +2156,7 @@ describe("uf_delegate_command audit trail", () => {
     const artifact = fakeFileExists([".opencode/skills/pre-flight/SKILL.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2048,6 +2190,7 @@ describe("uf_delegate_command audit trail", () => {
       phase: 1,
       task_classification: "deterministic",
       skill: ".opencode/skills/pre-flight/SKILL.md",
+      selection_source: "host",
     })
     expect(state.data).not.toHaveProperty("skill_absent_reason")
   })
@@ -2058,6 +2201,7 @@ describe("uf_delegate_command audit trail", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2082,6 +2226,7 @@ describe("uf_delegate_command audit trail", () => {
       agent: "cobalt-crush-dev",
       task_classification: "deterministic",
       skill_absent_reason: reason,
+      selection_source: "host",
     })
     expect(state.data).not.toHaveProperty("skill")
   })
@@ -2093,6 +2238,7 @@ describe("uf_delegate_command audit trail", () => {
     const artifact = fakeFileExists([".opencode/skills/pre-flight/SKILL.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2139,6 +2285,7 @@ describe("uf_delegate_command audit trail", () => {
       skill: ".opencode/skills/pre-flight/SKILL.md",
       agent: "cobalt-crush-dev",
       command_path: "cmd.md",
+      selection_source: "host",
     })
   })
 
@@ -2148,6 +2295,7 @@ describe("uf_delegate_command audit trail", () => {
     const artifact = fakeFileExists([".opencode/skills/pre-flight/SKILL.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2174,6 +2322,7 @@ describe("uf_delegate_command audit trail", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2198,6 +2347,7 @@ describe("uf_delegate_command audit trail", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2225,6 +2375,7 @@ describe("uf_delegate_command audit trail", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2246,9 +2397,15 @@ describe("uf_delegate_command audit trail", () => {
     expect(writeFileSync).toHaveBeenCalledTimes(1)
     const [, stateRaw] = vi.mocked(writeFileSync).mock.calls[0]
     const state = JSON.parse(stateRaw as string) as ProgressState
-    // ...and the checkpoint data keeps the exact pre-change shape: no new
-    // keys are added when the call supplied none.
-    expect(state.data).toEqual({ agent: "cobalt-crush-dev", command_path: "cmd.md" })
+    // ...and the checkpoint data keeps the pre-change shape plus the one
+    // always-present model-matrix audit field: selection_source records
+    // "host" for every zero-config call (task 5.4); no other new keys are
+    // added when the call supplied none.
+    expect(state.data).toEqual({
+      agent: "cobalt-crush-dev",
+      command_path: "cmd.md",
+      selection_source: "host",
+    })
     expect(state.data).not.toHaveProperty("task_classification")
     expect(state.data).not.toHaveProperty("skill")
     expect(state.data).not.toHaveProperty("skill_absent_reason")
@@ -2279,6 +2436,7 @@ describe("uf_delegate_command seam verification", () => {
     const artifact = fakeFileExists([".opencode/skills/pre-flight/SKILL.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2310,6 +2468,14 @@ describe("uf_delegate_command seam verification", () => {
         task_classification: "deterministic",
         skill: ".opencode/skills/pre-flight/SKILL.md",
         skill_absent_reason: null,
+        // Model-matrix-delegation D7 (task 5.4): zero-config selection
+        // audit — host fallback, no resolved values.
+        selection_source: "host",
+        selection_pack: null,
+        selection_capability: null,
+        selection_model: null,
+        selection_confidence: null,
+        selection_fallback_reason: null,
         usage: null,
         provenance: {
           agent: "cobalt-crush-dev",
@@ -2347,7 +2513,9 @@ describe("uf_delegate_command seam verification", () => {
       "updated_at",
     ])
     // ...with the audit fields recorded in the checkpoint data's valued
-    // shape: classification plus resolved reference, no reason key.
+    // shape: classification plus resolved reference, no reason key. The
+    // model-matrix audit adds selection_source only — zero-config calls
+    // keep the pre-change checkpoint shape plus that one field (task 5.4).
     expect(state.current_step).toBe("implement")
     expect(state.completed_steps).toEqual(["implement"])
     expect(state.data).toEqual({
@@ -2356,6 +2524,7 @@ describe("uf_delegate_command seam verification", () => {
       phase: 2,
       task_classification: "deterministic",
       skill: ".opencode/skills/pre-flight/SKILL.md",
+      selection_source: "host",
     })
   })
 
@@ -2365,6 +2534,7 @@ describe("uf_delegate_command seam verification", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2392,6 +2562,14 @@ describe("uf_delegate_command seam verification", () => {
         task_classification: "deterministic",
         skill: null,
         skill_absent_reason: reason,
+        // Model-matrix-delegation D7 (task 5.4): zero-config selection
+        // audit — host fallback, no resolved values.
+        selection_source: "host",
+        selection_pack: null,
+        selection_capability: null,
+        selection_model: null,
+        selection_confidence: null,
+        selection_fallback_reason: null,
         usage: null,
         provenance: {
           agent: "cobalt-crush-dev",
@@ -2414,6 +2592,7 @@ describe("uf_delegate_command seam verification", () => {
     const artifact = fakeFileExists([".opencode/skills/pre-flight/SKILL.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2473,6 +2652,7 @@ describe("uf_delegate_command seam verification", () => {
       agent: "cobalt-crush-dev",
       task_classification: "deterministic",
       skill: ".opencode/skills/pre-flight/SKILL.md",
+      selection_source: "host",
     })
   })
 })
@@ -2501,6 +2681,7 @@ describe("uf_delegate_command spec scenario coverage", () => {
     const artifact = fakeFileExists([".opencode/skills/pre-flight/SKILL.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2551,6 +2732,7 @@ describe("uf_delegate_command spec scenario coverage", () => {
       phase: 4,
       task_classification: "deterministic",
       skill: ".opencode/skills/pre-flight/SKILL.md",
+      selection_source: "host",
     })
     if (result.status === "ok") {
       expect(result.data.task_classification).toBe("deterministic")
@@ -2572,6 +2754,7 @@ describe("uf_delegate_command spec scenario coverage", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2597,7 +2780,11 @@ describe("uf_delegate_command spec scenario coverage", () => {
     expect(statePathArg).toBe(resolve(FAKE_CWD, ".uf/progress/quick-add-docs-section/uf.unleash.json"))
     const state = JSON.parse(stateRaw as string) as ProgressState
     expect(state.current_step).toBe("implement")
-    expect(state.data).toEqual({ agent: "cobalt-crush-dev", task_classification: "judgment" })
+    expect(state.data).toEqual({
+      agent: "cobalt-crush-dev",
+      task_classification: "judgment",
+      selection_source: "host",
+    })
 
     // An unclassified quick-tier delegation fails closed like any other
     // prompt-only call — the tier earns no exemption from the rule.
@@ -2628,6 +2815,7 @@ describe("uf_delegate_command spec scenario coverage", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2667,6 +2855,7 @@ describe("uf_delegate_command path traversal", () => {
       const artifact = fakeFileExists([])
       const deps: DelegateCommandDependencies = {
         client: fake.client,
+        modelMatrix: matrixFreeDeps,
         readText: reads.readText,
         fileExists: artifact.fileExists,
       }
@@ -2695,6 +2884,7 @@ describe("uf_delegate_command path traversal", () => {
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
+      modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }

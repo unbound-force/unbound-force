@@ -1916,9 +1916,10 @@ var expectedAssetPaths = []string{
 	"opencode/lib/uf-workflow-types.ts",
 	// UF finale plugin (1)
 	"opencode/plugins/uf-finale/index.ts",
-	// Shared lib modules (10)
+	// Shared lib modules (11)
 	"opencode/lib/agent-executor.ts",
 	"opencode/lib/branch-classification.ts",
+	"opencode/lib/model-matrix.ts",
 	"opencode/lib/review-dispatch-artifact.ts",
 	"opencode/lib/review-dispatch-lesson-proposal.ts",
 	"opencode/lib/review-dispatch-sibling-evidence.ts",
