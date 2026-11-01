@@ -3,7 +3,12 @@
      (What Changes 6) closes #888 in the same PR, and the
      documentation issue filed per the AGENTS.md documentation
      gate (task 7.3) is #893: the PR body carries `Closes #887`,
-     `Closes #888`, and `Closes #893` (task 7.3 bookkeeping). -->
+     `Closes #888`, and `Closes #893` (task 7.3 bookkeeping).
+     The cross-repo documentation issue per the org constitution
+     v1.4.0 Cross-Repo Documentation rule (task 7.5) is
+     unbound-force/website#358:
+     https://github.com/unbound-force/website/issues/358 —
+     tracked there, not closed by this PR (task 7.5 bookkeeping). -->
 
 ## Why
 
