@@ -4680,6 +4680,118 @@ func TestUnleashCommand_SpawnSubtaskSeamVerification(t *testing.T) {
 	})
 }
 
+// TestUnleashCommand_ModelSelectionGuidancePin pins the UF-FR-001
+// model-selection guidance span (model-matrix-delegation task 6.6) in
+// .opencode/commands/uf.unleash.md: recommend `pack` when the task
+// clearly names one, the classifier covers the rest, the selection
+// parameter contract and precedence order documented, and no
+// pack-content reconstruction. Removing the guidance from the command
+// file fails this test; the embedded mirror is pinned by the span
+// equality check plus the whole-file drift test.
+func TestUnleashCommand_ModelSelectionGuidancePin(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatalf("project root not found; cannot verify the model-selection guidance")
+	}
+
+	canonical, err := os.ReadFile(filepath.Join(root, ".opencode", "commands", "uf.unleash.md"))
+	if err != nil {
+		t.Fatalf("read canonical uf.unleash.md: %v", err)
+	}
+	mirror, err := assetContent("opencode/commands/uf.unleash.md")
+	if err != nil {
+		t.Fatalf("read embedded uf.unleash.md: %v", err)
+	}
+
+	// The guidance lives between its bold lead-in and the next block
+	// (the build/test fix loop) inside Step 5 (Implement); between()
+	// fails closed when either marker moves or disappears.
+	guidanceSpan := func(t *testing.T, value string) string {
+		t.Helper()
+		startIndex := strings.Index(value, "**Model-selection parameters for delegated calls**")
+		if startIndex == -1 {
+			t.Fatalf("unleash command missing model-selection guidance lead-in")
+		}
+		value = value[startIndex:]
+		endIndex := strings.Index(value, "**Build/test fix loop**")
+		if endIndex == -1 {
+			t.Fatalf("unleash command missing guidance span end marker (Build/test fix loop)")
+		}
+		return value[:endIndex]
+	}
+
+	span := guidanceSpan(t, string(canonical))
+	// The command file wraps prose at ~72 columns, so multi-word phrases
+	// can span line breaks; collapse whitespace runs to single spaces
+	// before the containment checks (same technique as
+	// normalizeCommandText, without its lowercasing — the phrases pin
+	// exact casing and backticks).
+	collapse := func(text string) string {
+		return strings.Join(strings.Fields(text), " ")
+	}
+	normalizedSpan := collapse(span)
+	containsPhrase := func(t *testing.T, phrase string) {
+		t.Helper()
+		if !strings.Contains(normalizedSpan, collapse(phrase)) {
+			t.Errorf("model-selection guidance missing phrase %q", phrase)
+		}
+	}
+
+	t.Run("mirror carries the same guidance span", func(t *testing.T) {
+		// Whole-file identity is already pinned by
+		// TestEmbeddedAssets_MatchSource; the span equality check keeps
+		// the guidance drift visible at the seam itself.
+		if span != guidanceSpan(t, string(mirror)) {
+			t.Error("embedded mirror's model-selection guidance span differs from the canonical one")
+		}
+	})
+
+	t.Run("recommends pack when the task clearly names one", func(t *testing.T) {
+		for _, phrase := range []string{
+			"pass `pack` on an",
+			"`uf_delegate_command` implement delegation",
+			"a Go task passes `pack:",
+			"a TypeScript task `pack:",
+			"spec-authoring",
+		} {
+			containsPhrase(t, phrase)
+		}
+	})
+
+	t.Run("unmarked tasks rely on the classifier", func(t *testing.T) {
+		for _, phrase := range []string{
+			"A task with no",
+			"clearly named pack omits the parameter",
+			"classifier",
+		} {
+			containsPhrase(t, phrase)
+		}
+	})
+
+	t.Run("selection parameter contract and precedence order documented", func(t *testing.T) {
+		for _, phrase := range []string{
+			"`model`: explicit provider/model identity",
+			"`profile`: matrix capability name",
+			"`pack`: UF convention pack name",
+			"explicit `model` > `profile` > `pack` >",
+			"agent pin > task-kind default > classifier cascade >",
+			"host model",
+		} {
+			containsPhrase(t, phrase)
+		}
+	})
+
+	t.Run("never instructs pack-content reconstruction", func(t *testing.T) {
+		for _, phrase := range []string{
+			"Never reconstruct, inline, or paraphrase pack content",
+			"the pack directive is tool-rendered",
+			"the orchestrator only ever names the pack",
+		} {
+			containsPhrase(t, phrase)
+		}
+	})
+}
+
 // TestRun_LegacyFileWarning verifies that uf init warns about
 // previously scaffolded reviewer-*.md files per Spec 019 FR-003a.
 func TestRun_LegacyFileWarning(t *testing.T) {
