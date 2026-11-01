@@ -30,7 +30,7 @@
   file contains no literal, well-formed clarification-marker
   syntax (a marker scan must extract zero questions).
 
-- [ ] 1.2 [P] Create `.opencode/uf/packs/meta-prompt-custom.md`
+- [x] 1.2 [P] Create `.opencode/uf/packs/meta-prompt-custom.md`
   following the `default-custom.md` shape exactly (design D2):
   frontmatter (`pack_id: meta-prompt-custom`, `language: Any`,
   `version: 1.0.0`), a Custom Rules heading with intro prose
