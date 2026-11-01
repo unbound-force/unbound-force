@@ -72,12 +72,14 @@ Always run tests with `-race -count=1`. CI enforces this.
 ```text
 unbound-force/
 ├── .specify/                         # Speckit framework (templates, scripts, memory)
-├── .uf/                              # Review config (review matrix, reviewer manifest, sibling repos)
+├── .uf/                              # Review + model matrix config (matrices, overrides, sibling repos)
+│   ├── model-matrix.yaml             # Tracked model matrix (profiles, packs)
+│   └── model-matrix.override.yaml    # Gitignored override (model identities)
 ├── .opencode/
-│   ├── agents/                       # Hero persona agents (16 active)
+│   ├── agents/                       # Hero persona agents (17 active, model-matrix-classifier hidden)
 │   ├── commands/                     # Slash commands (33 files)
 │   ├── plugins/                      # Plugins registered in opencode.json (invoke-agent, review-dispatch, uf-workflow, uf-finale)
-│   ├── lib/                          # Shared TypeScript plugin library
+│   ├── lib/                          # Shared TypeScript plugin library (incl. model-matrix.ts)
 │   ├── test/                         # TypeScript plugin unit/integration/smoke tests
 │   ├── skill/                        # Swarm skills packages
 │   ├── skills/                       # Additional skills packages
@@ -108,7 +110,8 @@ unbound-force/
 ├── openspec/                         # OpenSpec tactical workflow
 ├── schemas/                          # JSON Schema registry
 │   ├── feedback-triage/              # Feedback triage schemas
-│   └── issue-triage/                 # Issue triage schemas
+│   ├── issue-triage/                 # Issue triage schemas
+│   └── model-matrix/                 # Model matrix schemas
 ├── coverage-gate.json                # Scope-based coverage thresholds
 ├── go.mod                            # Go module (1.25+)
 ├── opencode.json                     # MCP server configuration
@@ -370,6 +373,7 @@ before writing or reviewing code.
 - `.opencode/uf/packs/ci.md`
 - `.opencode/uf/packs/ci-custom.md`
 - `.opencode/uf/packs/determinism.md`
+- `.opencode/uf/packs/meta-prompt.md`
 - `.opencode/uf/packs/review-voice.md`
 - `.opencode/uf/packs/review-voice-custom.md`
 - `.opencode/uf/packs/go.md`
