@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "profiles": {
+    "code-writing": {}
+  },
+  "packs": {
+    "go": "code-writing",
+    "ruby": "code-writing"
+  }
+}

@@ -230,7 +230,7 @@
   asserts it passes `v1.schema.json` and fails
   `loadModelMatrix`. All fixtures must pass the task 2.6
   cross-validation harness.
-- [ ] 4.3 Deploy the byte-identical registry copy at
+- [x] 4.3 Deploy the byte-identical registry copy at
   `.uf/schemas/model-matrix/` and the embedded scaffold mirror
   at `internal/scaffold/assets/uf/schemas/model-matrix/`
   (verify with `diff -rq`). Not [P]: deploys content created by
