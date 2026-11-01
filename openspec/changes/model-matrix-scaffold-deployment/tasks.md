@@ -141,7 +141,7 @@ sequentially, no `[P]`.
   created list, and a DivisorOnly run must deploy the two
   packs while excluding the matrix and its schema.
 
-- [ ] 4.6 Add `TestRun_ModelMatrixPreservedOnRerun`
+- [x] 4.6 Add `TestRun_ModelMatrixPreservedOnRerun`
   (SC-FR-010), following
   `TestRun_ReviewerCapabilitiesPreservedOnRerun`
   (scaffold_test.go ~line 2390): scaffold, edit the deployed

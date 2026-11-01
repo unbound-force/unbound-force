@@ -2484,6 +2484,224 @@ func TestRun_ReviewerCapabilitiesPreservedOnRerun(t *testing.T) {
 	}
 }
 
+// TestRun_ModelMatrixPreservedOnRerun pins the deployed matrix
+// re-init ownership requirement (SC-FR-010, design D4, issue #889):
+// the tracked .uf/model-matrix.yaml is a project-owned extension
+// point — the uf/review-matrix.yaml and uf/reviewer-capabilities.yaml
+// init-survival precedent (issues #884/#886) — so a team-edited
+// matrix survives a plain re-init (scenario 1) while --force remains
+// the explicit replace path (scenario 4). The refresh side follows
+// the TestRun_OverwriteOnDiff_ToolOwned pattern: the tool-owned
+// matrix files — the .uf/schemas/model-matrix/v1.schema.json
+// registry and the canonical meta-prompt.md pack — deploy as
+// updated when their deployed content differs from the embedded
+// copy (scenario 2), and byte-identical copies produce no spurious
+// updates (scenario 3). The user-owned meta-prompt-custom.md
+// template is never overwritten once deployed.
+func TestRun_ModelMatrixPreservedOnRerun(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	const version = "1.0.0-test"
+	const (
+		matrixAsset = "uf/model-matrix.yaml"
+		schemaAsset = "uf/schemas/model-matrix/v1.schema.json"
+		packAsset   = "opencode/uf/packs/meta-prompt.md"
+
+		matrixOut = ".uf/model-matrix.yaml"
+		schemaOut = ".uf/schemas/model-matrix/v1.schema.json"
+		packOut   = ".opencode/uf/packs/meta-prompt.md"
+		customOut = ".opencode/uf/packs/meta-prompt-custom.md"
+	)
+
+	// deployedForm mirrors the deploy walk's content construction so
+	// refreshed files compare byte-for-byte against exactly what a
+	// Run() write produces: embedded bytes plus the format-appropriate
+	// version marker for marker-supported extensions (.md, .yaml);
+	// plain embedded bytes otherwise (.json).
+	deployedForm := func(relPath string) []byte {
+		t.Helper()
+		content, err := assetContent(relPath)
+		if err != nil {
+			t.Fatalf("read embedded %s: %v", relPath, err)
+		}
+		ext := filepath.Ext(relPath)
+		if !markerFileExtensions[ext] {
+			return content
+		}
+		return insertMarkerAfterFrontmatter(content, versionMarker(version, ext))
+	}
+
+	// assertDisposition fails unless path is reported in exactly the
+	// want disposition (Created, Updated, Overwritten, or Skipped)
+	// and in no other write list.
+	assertDisposition := func(res *Result, want string, path string) {
+		t.Helper()
+		lists := map[string][]string{
+			"Created":     res.Created,
+			"Updated":     res.Updated,
+			"Overwritten": res.Overwritten,
+			"Skipped":     res.Skipped,
+		}
+		for name, paths := range lists {
+			if name == want {
+				if !containsPath(paths, path) {
+					t.Errorf("expected %s in result.%s", path, name)
+				}
+				continue
+			}
+			if containsPath(paths, path) {
+				t.Errorf("expected %s to be %s, but found in result.%s", path, want, name)
+			}
+		}
+	}
+
+	// assertContent fails unless path's on-disk content equals want.
+	assertContent := func(path string, want []byte, label string) {
+		t.Helper()
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", label, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s content mismatch: got %d bytes, want %d bytes",
+				label, len(got), len(want))
+		}
+	}
+
+	// First run: the fresh deploy seeds the tracked matrix template
+	// through the new-file creation path (SC-FR-010 bullet 1).
+	result, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir: dir,
+		Version:   version,
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("first Run() error: %v", err)
+	}
+	if !containsPath(result.Created, matrixOut) {
+		t.Errorf("fresh deploy must seed %s via the new-file creation path", matrixOut)
+	}
+
+	// The team adds a capability profile to the tracked matrix — the
+	// edit class design D4 protects: profiles, packs mappings, and
+	// agent pins live solely in the tracked file (the override
+	// whitelist admits only model identities). The anchor pin keeps
+	// the fixture a well-formed YAML edit: the matrix ends with the
+	// classifier: {} mapping, so an EOF append would attach there
+	// rather than to profiles.
+	matrixPath := filepath.Join(dir, ".uf", "model-matrix.yaml")
+	seededMatrix, err := os.ReadFile(matrixPath)
+	if err != nil {
+		t.Fatalf("read seeded model matrix: %v", err)
+	}
+	const profileAnchor = "  mechanical: {}\n"
+	if !bytes.Contains(seededMatrix, []byte(profileAnchor)) {
+		t.Fatalf("fixture precondition: seeded matrix no longer contains the profiles anchor %q",
+			profileAnchor)
+	}
+	editedMatrix := bytes.Replace(seededMatrix, []byte(profileAnchor),
+		[]byte(profileAnchor+"  team-review: {}\n"), 1)
+	if err := os.WriteFile(matrixPath, editedMatrix, 0o644); err != nil {
+		t.Fatalf("write team-edited model matrix: %v", err)
+	}
+
+	// The team also extends the user-owned meta-prompt-custom.md
+	// template below its sentinel comment — the intended extension
+	// point for project-specific custom rules.
+	customPath := filepath.Join(dir, ".opencode", "uf", "packs", "meta-prompt-custom.md")
+	seededCustom, err := os.ReadFile(customPath)
+	if err != nil {
+		t.Fatalf("read seeded meta-prompt-custom: %v", err)
+	}
+	// Pin the fixture precondition: the deployed template must end
+	// with a newline, otherwise the appended rule concatenates onto
+	// the sentinel line and the fixture stops modeling a valid
+	// custom rule.
+	if !bytes.HasSuffix(seededCustom, []byte("\n")) {
+		t.Fatalf("seeded meta-prompt-custom must end with a newline so the appended rule stays on its own line")
+	}
+	customRule := []byte("CR-001 [MUST] Cite the governing design decision in every spec delta.\n")
+	editedCustom := make([]byte, 0, len(seededCustom)+len(customRule))
+	editedCustom = append(editedCustom, seededCustom...)
+	editedCustom = append(editedCustom, customRule...)
+	if err := os.WriteFile(customPath, editedCustom, 0o644); err != nil {
+		t.Fatalf("write extended meta-prompt-custom: %v", err)
+	}
+
+	// Second run: plain re-init. The team-edited matrix must land in
+	// Skipped with its edited content unchanged (scenario: Team-edited
+	// matrix survives re-init), the custom pack stays preserved, and
+	// the byte-identical tool-owned matrix files produce no spurious
+	// updates (scenario: Identical content produces no spurious
+	// updates).
+	buf.Reset()
+	result, err = runScaffoldWithoutExternalTools(t, Options{
+		TargetDir: dir,
+		Version:   version,
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("second Run() error: %v", err)
+	}
+	assertDisposition(result, "Skipped", matrixOut)
+	assertContent(matrixPath, editedMatrix, "team-edited model matrix")
+	assertDisposition(result, "Skipped", customOut)
+	assertContent(customPath, editedCustom, "extended meta-prompt-custom")
+	assertDisposition(result, "Skipped", schemaOut)
+	assertDisposition(result, "Skipped", packOut)
+
+	// Refresh side (scenario: Tool-owned matrix files refresh on
+	// diff): overwrite the deployed schema registry and canonical
+	// pack with sentinel content — the TestRun_OverwriteOnDiff_ToolOwned
+	// simulation of a deployed copy that differs from the embedded
+	// one — then verify a plain re-run reports both as updated and
+	// restores the deployed form of the embedded content.
+	schemaPath := filepath.Join(dir, ".uf", "schemas", "model-matrix", "v1.schema.json")
+	packPath := filepath.Join(dir, ".opencode", "uf", "packs", "meta-prompt.md")
+	if err := os.WriteFile(schemaPath, []byte("stale schema content"), 0o644); err != nil {
+		t.Fatalf("modify deployed matrix schema: %v", err)
+	}
+	if err := os.WriteFile(packPath, []byte("stale pack content"), 0o644); err != nil {
+		t.Fatalf("modify deployed canonical meta-prompt pack: %v", err)
+	}
+
+	buf.Reset()
+	result, err = runScaffoldWithoutExternalTools(t, Options{
+		TargetDir: dir,
+		Version:   version,
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("third Run() error: %v", err)
+	}
+	assertDisposition(result, "Updated", schemaOut)
+	assertContent(schemaPath, deployedForm(schemaAsset), "matrix schema registry")
+	assertDisposition(result, "Updated", packOut)
+	assertContent(packPath, deployedForm(packAsset), "canonical meta-prompt pack")
+	// The refresh run must not disturb the preserved files.
+	assertDisposition(result, "Skipped", matrixOut)
+	assertContent(matrixPath, editedMatrix, "team-edited model matrix")
+	assertDisposition(result, "Skipped", customOut)
+
+	// Fourth run with --force: the explicit replace path for the
+	// team-edited matrix (scenario: Force replaces the team-edited
+	// matrix) — the tracked file is overwritten with the deployed
+	// form of the embedded template.
+	buf.Reset()
+	result, err = runScaffoldWithoutExternalTools(t, Options{
+		TargetDir: dir,
+		Force:     true,
+		Version:   version,
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("force Run() error: %v", err)
+	}
+	assertDisposition(result, "Overwritten", matrixOut)
+	assertContent(matrixPath, deployedForm(matrixAsset), "reset model matrix")
+}
+
 func TestRun_ConstitutionProtectedWithForce(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
