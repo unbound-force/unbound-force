@@ -6,6 +6,88 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- model-matrix-delegation: Capability-driven model selection for
+  `uf_delegate_command` -- delegated content-agent work (the tool
+  behind `/uf.unleash` and `/uf.run-pipeline-plan`) now runs on
+  the model best suited to it instead of always replaying the
+  parent session's model. New configuration pair mirroring the
+  review matrix: tracked `.uf/model-matrix.yaml`
+  (capability-named profiles, a `packs:` mapping from UF
+  convention packs to capabilities, task-kind `defaults`,
+  optional `agents:` pins, and `classifier:` structure -- model
+  strings optional everywhere, host fallback) plus gitignored
+  `.uf/model-matrix.override.yaml` carrying per-developer model
+  identities through a fail-closed whitelist
+  (`profiles.*.model`, `profiles.*.variant`, `classifier.llm.*`
+  only; anything else fails validation naming the whitelist).
+  `uf_delegate_command` gains `model`/`variant`, `profile`, and
+  `pack` parameters resolved through a fixed precedence chain --
+  explicit model, explicit profile, explicit pack (validated:
+  pack file exists AND has a matrix entry), agents pin, static
+  defaults by task kind, classifier cascade, host model -- and a
+  resolved matrix model skips host introspection entirely
+  (delegation no longer fails on `HOST_MODEL_UNAVAILABLE`;
+  zero-config behavior with no matrix present is unchanged). For
+  `implement` and unknown task kinds a two-engine classifier
+  cascade derives the pack: a hidden `model-matrix-classifier`
+  subagent (investigate-then-decide, JSON-only response, bounded
+  by `agent_timeout_ms`, default 45 s) then an LLM engine
+  (chat-completions POST, `temperature: 0`, JSON response format
+  with one 400-retry without it, AbortSignal request bound
+  default 10 s, apiKey interpolated from `{env:VAR}` with
+  literal-key rejection, endpoint/model/apiKey configured only
+  in the gitignored override), confidence-threshold gated
+  (default 0.6), matrix-validity checked, first valid
+  above-threshold result wins, results cached in-process by
+  SHA-256 of feature dir + prompt + agent (bounded 128-entry
+  per-instance cache), and every failure mode -- timeout,
+  malformed or fences-wrapped JSON, oversized (above 50 MiB)
+  response body, low confidence, unconfigured engines -- falls
+  back to the static default; classifier failure never blocks
+  delegation. The `pack` parameter does double duty: it selects
+  the model AND renders a tool-generated pack directive (fixed
+  template at the fixed prompt position after the skill
+  directive, golden-shape tested -- never agent-reconstructed)
+  instructing the child to load `.opencode/uf/packs/<pack>.md`
+  before writing. Every delegation records its selection
+  provenance -- `selection_source` (one of `explicit-model`,
+  `explicit-profile`, `explicit-pack`, `agent-pin`,
+  `default-kind`, `classifier-agent`, `classifier-llm`, `host`),
+  the selected pack, resolved capability and model, and
+  classifier confidence -- in the success envelope and checkpoint
+  data. New meta-prompt convention pack
+  `.opencode/uf/packs/meta-prompt.md` (MP-NNN rule ids, #888)
+  codifies spec/plan/tasks/command authoring conventions and
+  anchors the starter `packs:` mapping. The selection layer
+  lives in a standalone `.opencode/lib/model-matrix.ts` (closed
+  Zod schema, loader with injectable `readText`/`fileExists`
+  seams, override merge, precedence resolution, classifier
+  engines) mirrored byte-identical into
+  `internal/scaffold/assets/opencode/lib/` alongside the synced
+  uf-workflow plugin mirror; a JSON Schema registry lands at
+  `schemas/model-matrix/` (v1.schema.json, README, sample
+  fixtures cross-validated against the Zod surface with pinned
+  per-family verdicts) with byte-identical
+  `.uf/schemas/model-matrix/` and scaffold mirrors; the embedded
+  template `internal/scaffold/assets/uf/model-matrix.yaml`
+  deploys the starter matrix; `.uf/model-matrix.override.yaml`
+  is appended to the root and scaffold-managed gitignore blocks;
+  and `.opencode/commands/uf.unleash.md` (canonical plus mirror)
+  recommends passing `pack` on implement delegation when the task
+  clearly names one. Constitution alignment verified: standalone
+  injectable lib module (II, IV); `selection_source` provenance
+  on every delegation (I, III); credentials only in the
+  gitignored override with `{env:VAR}` interpolation and a
+  fail-closed whitelist (V); deterministic precedence with the
+  classifier bounded, cached, and overridable and the pack
+  directive tool-rendered (VI); every behavior testable without
+  external services (IV). Documentation gates filed as in-repo
+  issue #893 and website issue unbound-force/website#358.
+  Plugin suite: 50 files / 1645 tests passing at 95.76 percent
+  statements under the unchanged governance-controlled 94
+  percent floor (model-matrix lib at 99.76 percent). (Spec:
+  openspec/changes/model-matrix-delegation/, Fixes: #887,
+  Fixes: #888, Fixes: #893)
 - review-dispatch-diff-manifest: Large changesets now review via a
   diff manifest plus on-demand retrieval instead of inlining the full
   diff into every reviewer prompt. `build_review_prompts` selects the
