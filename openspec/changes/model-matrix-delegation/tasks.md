@@ -374,7 +374,7 @@
   documentation issue, via `Closes #887`, `Closes #888`, and
   `Closes #<doc-issue>` (all three recorded in the proposal
   top comment).
-- [ ] 7.4 Update `AGENTS.md` (structure section): the new
+- [x] 7.4 Update `AGENTS.md` (structure section): the new
   `.uf/model-matrix.yaml` + `.uf/model-matrix.override.yaml`
   config pair and `schemas/model-matrix/` registry in the
   project structure tree; `.opencode/agents/` count 16 → 17
