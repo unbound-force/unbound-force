@@ -191,6 +191,147 @@ describe("submit_review_findings", () => {
       expect(data.findings[0].line).toBeNull()
     })
   })
+
+  it("rejects findings missing severity without storing anything", async () => {
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await ReviewDispatchPlugin.server({
+        client: { session: {} },
+        directory: project,
+        worktree: project,
+      } as unknown as PluginInput)
+
+      const result = await hooks.tool.submit_review_findings.execute(
+        {
+          findings: [
+            { category: "security", description: "Missing severity key", root_cause: "No severity", file: "a.ts", line: 1 },
+          ],
+        } as never,
+        childContext("child-invalid-missing-severity"),
+      )
+
+      expect(result.output).toContain("submit_review_findings validation failed")
+      expect(result.output).toContain("findings.0.severity")
+      expect(result.output).toContain("Invalid option: expected one of")
+      expect(_getSubmissionStore().has("child-invalid-missing-severity")).toBe(false)
+    })
+  })
+
+  it("rejects an invalid severity enum value with the expected-values message", async () => {
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await ReviewDispatchPlugin.server({
+        client: { session: {} },
+        directory: project,
+        worktree: project,
+      } as unknown as PluginInput)
+
+      const result = await hooks.tool.submit_review_findings.execute(
+        {
+          findings: [
+            { severity: "medium", category: "security", description: "Lowercase severity", root_cause: "Case mismatch", file: "a.ts", line: 1 },
+          ],
+        } as never,
+        childContext("child-invalid-lowercase"),
+      )
+
+      expect(result.output).toContain("submit_review_findings validation failed")
+      expect(result.output).toContain("findings.0.severity")
+      expect(result.output).toContain("Invalid option: expected one of")
+      expect(_getSubmissionStore().has("child-invalid-lowercase")).toBe(false)
+    })
+  })
+
+  it("rejects findings carrying an unrecognized key (strict violation)", async () => {
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await ReviewDispatchPlugin.server({
+        client: { session: {} },
+        directory: project,
+        worktree: project,
+      } as unknown as PluginInput)
+
+      const result = await hooks.tool.submit_review_findings.execute(
+        {
+          findings: [
+            {
+              severity: "HIGH",
+              category: "security",
+              description: "Extra key",
+              root_cause: "Strict violation",
+              file: "a.ts",
+              line: 1,
+              recommendation: "fix it",
+            },
+          ],
+        } as never,
+        childContext("child-invalid-extra-key"),
+      )
+
+      expect(result.output).toContain("submit_review_findings validation failed")
+      expect(result.output).toContain("findings.0")
+      expect(result.output).toContain("Unrecognized key")
+      expect(_getSubmissionStore().has("child-invalid-extra-key")).toBe(false)
+    })
+  })
+
+  it("rejects an empty findings array (min 1)", async () => {
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await ReviewDispatchPlugin.server({
+        client: { session: {} },
+        directory: project,
+        worktree: project,
+      } as unknown as PluginInput)
+
+      const result = await hooks.tool.submit_review_findings.execute(
+        { findings: [] },
+        childContext("child-invalid-empty"),
+      )
+
+      expect(result.output).toContain("submit_review_findings validation failed")
+      expect(result.output).toContain("findings")
+      expect(result.output).toContain("Too small")
+      expect(_getSubmissionStore().has("child-invalid-empty")).toBe(false)
+    })
+  })
+
+  it("stores nothing when rejected and accepts a later valid submission in the same session", async () => {
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await ReviewDispatchPlugin.server({
+        client: { session: {} },
+        directory: project,
+        worktree: project,
+      } as unknown as PluginInput)
+
+      const ctx = childContext("child-recover")
+      const rejected = await hooks.tool.submit_review_findings.execute(
+        {
+          findings: [
+            { severity: "medium", category: "security", description: "Invalid", root_cause: "Lowercase", file: "a.ts", line: 1 },
+          ],
+        } as never,
+        ctx,
+      )
+      expect(rejected.output).toContain("submit_review_findings validation failed")
+
+      const accepted = await hooks.tool.submit_review_findings.execute(
+        {
+          findings: [
+            { severity: "MEDIUM", category: "security", description: "Fixed", root_cause: "Lowercase", file: "a.ts", line: 1 },
+          ],
+        },
+        ctx,
+      )
+      expect(accepted.output).toBe("1 finding(s) submitted")
+
+      const data = _getSubmissionStore().get("child-recover")!
+      expect(data.findings).toHaveLength(1)
+      expect(data.findings[0].severity).toBe("MEDIUM")
+      expect(data.proposals).toHaveLength(0)
+    })
+  })
 })
 
 describe("submit_lesson_proposal", () => {
@@ -272,6 +413,86 @@ describe("submit_lesson_proposal", () => {
       expect(data.proposals).toHaveLength(1)
       expect(data.findings[0].severity).toBe("LOW")
       expect(data.proposals[0].tag).toBe("automation")
+    })
+  })
+
+  it("rejects a proposal missing the required tag without storing anything", async () => {
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await ReviewDispatchPlugin.server({
+        client: { session: {} },
+        directory: project,
+        worktree: project,
+      } as unknown as PluginInput)
+
+      const result = await hooks.tool.submit_lesson_proposal.execute(
+        { information: "Learning without a tag" } as never,
+        childContext("child-lesson-no-tag"),
+      )
+
+      expect(result.output).toContain("submit_lesson_proposal validation failed")
+      expect(result.output).toContain("tag: Invalid input")
+      expect(_getSubmissionStore().has("child-lesson-no-tag")).toBe(false)
+    })
+  })
+
+  it("rejects a proposal with empty information", async () => {
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await ReviewDispatchPlugin.server({
+        client: { session: {} },
+        directory: project,
+        worktree: project,
+      } as unknown as PluginInput)
+
+      const result = await hooks.tool.submit_lesson_proposal.execute(
+        { information: "", tag: "empty-information" },
+        childContext("child-lesson-empty-info"),
+      )
+
+      expect(result.output).toContain("submit_lesson_proposal validation failed")
+      expect(result.output).toContain("information: Too small")
+      expect(_getSubmissionStore().has("child-lesson-empty-info")).toBe(false)
+    })
+  })
+
+  it("rejects a proposal with an invalid category enum value", async () => {
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await ReviewDispatchPlugin.server({
+        client: { session: {} },
+        directory: project,
+        worktree: project,
+      } as unknown as PluginInput)
+
+      const result = await hooks.tool.submit_lesson_proposal.execute(
+        { information: "Learning", tag: "bad-category", category: "meta" } as never,
+        childContext("child-lesson-bad-category"),
+      )
+
+      expect(result.output).toContain("submit_lesson_proposal validation failed")
+      expect(result.output).toContain("category: Invalid option: expected one of")
+      expect(_getSubmissionStore().has("child-lesson-bad-category")).toBe(false)
+    })
+  })
+
+  it("rejects a proposal carrying an unrecognized key (strict violation)", async () => {
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await ReviewDispatchPlugin.server({
+        client: { session: {} },
+        directory: project,
+        worktree: project,
+      } as unknown as PluginInput)
+
+      const result = await hooks.tool.submit_lesson_proposal.execute(
+        { information: "Learning", tag: "extra-key", recommendation: "store it" } as never,
+        childContext("child-lesson-extra-key"),
+      )
+
+      expect(result.output).toContain("submit_lesson_proposal validation failed")
+      expect(result.output).toContain("Unrecognized key")
+      expect(_getSubmissionStore().has("child-lesson-extra-key")).toBe(false)
     })
   })
 })
