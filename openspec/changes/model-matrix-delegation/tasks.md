@@ -323,17 +323,17 @@
   table/test (`TestEmbeddedAssets_MatchSource` and the
   `task42CanonicalAssets` enumeration) to cover the new lib
   file, the matrix template, and the schema registry entries.
-- [ ] 6.4 Update `.opencode/commands/uf.unleash.md` with
+- [x] 6.4 Update `.opencode/commands/uf.unleash.md` with
   the UF-FR-001 guidance — pass `pack` on implement delegation
   when the task clearly names one; the classifier covers the
   rest; document the selection parameter contract and
   precedence order; never instruct reconstructing pack content —
   and sync the command file byte-identically to its scaffold
   mirror under `internal/scaffold/assets/opencode/commands/`.
-- [ ] 6.5 Run the scaffold drift tests and `go test
+- [x] 6.5 Run the scaffold drift tests and `go test
   ./internal/scaffold/...`; fix any mirror or enumeration
   mismatch.
-- [ ] 6.6 Add the UF-FR-001 prose pin to
+- [x] 6.6 Add the UF-FR-001 prose pin to
   `internal/scaffold/scaffold_test.go`: a between()-span
   assertion over `.opencode/commands/uf.unleash.md` (and its
   mirror via the drift test) verifying the model-selection
