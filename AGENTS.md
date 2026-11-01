@@ -374,6 +374,7 @@ before writing or reviewing code.
 - `.opencode/uf/packs/ci-custom.md`
 - `.opencode/uf/packs/determinism.md`
 - `.opencode/uf/packs/meta-prompt.md`
+- `.opencode/uf/packs/meta-prompt-custom.md`
 - `.opencode/uf/packs/review-voice.md`
 - `.opencode/uf/packs/review-voice-custom.md`
 - `.opencode/uf/packs/go.md`
