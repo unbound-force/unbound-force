@@ -121,7 +121,7 @@ sequentially, no `[P]`.
   lang); the matrix and schema entries stay `false` in
   `TestIsDivisorAsset` (design D7).
 
-- [ ] 4.4 Add the deployment completeness guard (SC-FR-009,
+- [x] 4.4 Add the deployment completeness guard (SC-FR-009,
   design D6): a test that reads the embedded
   `uf/model-matrix.yaml` via the embed-FS seam, parses its
   `packs:` keys, and fails naming each missing

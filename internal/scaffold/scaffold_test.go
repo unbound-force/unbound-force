@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/unbound-force/unbound-force/internal/textutil"
 )
 
@@ -3726,6 +3728,64 @@ func TestShouldDeployPack(t *testing.T) {
 					tt.relPath, tt.lang, got, tt.expected)
 			}
 		})
+	}
+}
+
+// TestSCFR009_DeploymentCompletenessGuard pins the deployed
+// model-matrix surface's self-consistency (SC-FR-009, design D6,
+// issue #889): every packs: key of the embedded uf/model-matrix.yaml
+// template MUST have a corresponding embedded pack file under
+// internal/scaffold/assets/opencode/uf/packs/. The matrix loader
+// fails closed when a packs: key names no pack file (MM-FR-001),
+// and the full deploy walk deploys every embedded pack (the pack
+// language filter is DivisorOnly-only), so embedded presence
+// implies deployed presence. Regression guard for the slice-1 gap —
+// the template mapped meta-prompt while its pack file was not
+// embedded, leaving hero-repo matrices unloadable
+// (uf_delegate_command fails with MATRIX_INVALID at load time) —
+// and for any future template edit that maps a non-embedded pack.
+// DivisorOnly needs no counterpart constraint: it excludes the
+// matrix itself (design D7).
+func TestSCFR009_DeploymentCompletenessGuard(t *testing.T) {
+	template, err := assetContent("uf/model-matrix.yaml")
+	if err != nil {
+		t.Fatalf("read embedded uf/model-matrix.yaml: %v", err)
+	}
+
+	// Parse only the packs: mapping (pack name -> capability per the
+	// v1 schema); the other template sections are irrelevant to this
+	// invariant, so the unmarshal stays non-strict by design.
+	var matrix struct {
+		Packs map[string]string `yaml:"packs"`
+	}
+	if err := yaml.Unmarshal(template, &matrix); err != nil {
+		t.Fatalf("parse embedded uf/model-matrix.yaml: %v", err)
+	}
+
+	// A missing or empty packs: mapping would make the guard pass
+	// vacuously; a restructured template must fail loudly here
+	// rather than silently skipping the invariant.
+	if len(matrix.Packs) == 0 {
+		t.Fatal("embedded uf/model-matrix.yaml has no packs: keys; deployment completeness guard cannot run")
+	}
+
+	// Sort keys so failures are reported deterministically
+	// regardless of map iteration order.
+	keys := make([]string, 0, len(matrix.Packs))
+	for key := range matrix.Packs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		packAsset := "opencode/uf/packs/" + key + ".md"
+		if _, err := assetContent(packAsset); err != nil {
+			t.Errorf("model-matrix template maps pack %q with no embedded pack file: "+
+				"missing internal/scaffold/assets/%s (deployed to hero repos as .%s); "+
+				"the matrix loader fails such a matrix at load time (MM-FR-001), "+
+				"breaking uf_delegate_command with MATRIX_INVALID",
+				key, packAsset, packAsset)
+		}
 	}
 }
 
