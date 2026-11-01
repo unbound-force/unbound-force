@@ -95,7 +95,7 @@
   naming the override file, while the same values arriving via
   the override still load. Not [P]: extends the task 2.1
   module and its test file (MP-017).
-- [ ] 2.5 Reconcile `.opencode/test/model-matrix.test.ts` with
+- [x] 2.5 Reconcile `.opencode/test/model-matrix.test.ts` with
   the plan of record: the file was created with tasks 2.1-2.3
   and already carries most of the enumerated coverage — this
   task verifies every enumerated case exists, corrects the
