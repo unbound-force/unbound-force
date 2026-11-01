@@ -235,7 +235,7 @@
   at `internal/scaffold/assets/uf/schemas/model-matrix/`
   (verify with `diff -rq`). Not [P]: deploys content created by
   task 4.2 in the same phase (MP-017 rule (b)).
-- [ ] 4.4 [P] Add `.uf/model-matrix.override.yaml` to the root
+- [x] 4.4 [P] Add `.uf/model-matrix.override.yaml` to the root
   `.gitignore` under the Unbound Force section.
 
 ## 5. Delegation-tool integration
