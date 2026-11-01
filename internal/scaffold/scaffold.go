@@ -677,13 +677,16 @@ func isToolOwned(relPath string) bool {
 	if relPath == "uf/reviewer-capabilities.yaml" {
 		return false
 	}
-	// The model-matrix template is tool-owned (model-matrix-delegation
-	// design D10, SC-FR-007): drift-enforced byte-identical to the
-	// canonical tracked matrix. A deployed repo's tracked copy diverging
-	// from the template is slice-2 semantics (#889); slice 1 registers
-	// the surface so the mirrored plugin loads and drift stays enforced.
+	// The deployed tracked matrix is a project-owned extension point
+	// (model-matrix-scaffold-deployment design D4, SC-FR-010): teams
+	// express shared profiles, packs mappings, and agent pins solely in
+	// the tracked file, so a plain re-init preserves it — the
+	// uf/review-matrix.yaml precedent (issues #884/#886). --force
+	// remains the explicit replace path; fresh deploys seed the template
+	// through the new-file creation path; drift enforcement of the
+	// embedded template against the canonical source is unaffected.
 	if relPath == "uf/model-matrix.yaml" {
-		return true
+		return false
 	}
 	// The matrix is a project-owned extension point: generated repositories
 	// may customize model selection without --force replacing their policy.
