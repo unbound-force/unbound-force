@@ -1002,11 +1002,42 @@ its Local Tool Detection phase to discover additional
    procedure -- the delegation names the reference and does
    not restate the procedure. The classification, resolved
    reference, and any recorded reason are written to the
-   checkpoint data and success envelope, so every delegation
-   is auditable without reconstructing prompts. Swarm-path
+   checkpoint data and success envelope, so every delegation is
+   auditable without reconstructing prompts. Swarm-path
    `[P]` delegations carry the same classification through
    the spawn tool's `task_classification` parameter (see
    parallel execution below).
+
+**Model-selection parameters for delegated calls**
+(model-matrix-delegation UF-FR-001): pass `pack` on an
+`uf_delegate_command` implement delegation whenever the task
+clearly names a convention pack -- a Go task passes `pack:
+"go"`, a TypeScript task `pack: "typescript"`,
+spec-authoring work `pack: "meta-prompt"`. A task with no
+clearly named pack omits the parameter: the classifier
+cascade (MM-FR-005) derives the selection. The selection
+parameters are independent of the classification contract
+above -- they govern which model the child session runs on,
+not skill enforcement. Parameter contract and precedence
+order (MM-FR-003):
+   - `model`: explicit provider/model identity (with optional
+     `variant`); wins the chain outright, skipping matrix
+     resolution and host introspection.
+   - `profile`: matrix capability name; resolves the
+     profile's model and pack through `.uf/model-matrix.yaml`
+     when configured.
+   - `pack`: UF convention pack name; double duty -- resolves
+     the mapped profile's model AND renders the tool-authored
+     directive instructing the child to load
+     `.opencode/uf/packs/<pack>.md` before writing.
+   - Precedence: explicit `model` > `profile` > `pack` >
+     agent pin > task-kind default > classifier cascade >
+     host model.
+
+   Never reconstruct, inline, or paraphrase pack content in a
+   delegation prompt -- the pack directive is tool-rendered
+   by `uf_delegate_command` from a fixed template; the
+   orchestrator only ever names the pack.
 
 **Build/test fix loop**: a failing check at a blocking
 gate is implement work the agent owns, not a human

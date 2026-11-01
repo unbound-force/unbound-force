@@ -310,13 +310,13 @@
   `opencode/lib/model-matrix.ts` to both lib asset enumeration
   lists (the ~line 660 and ~line 733 blocks) and append
   `.uf/model-matrix.override.yaml` to `gitignoreBlock` (SC-FR-007).
-- [ ] 6.2 Create the embedded scaffold mirror
+- [x] 6.2 Create the embedded scaffold mirror
   `internal/scaffold/assets/opencode/lib/model-matrix.ts`
   byte-identical to the canonical lib module (REQUIRED — the
   mirrored plugin imports it; design D1), and sync the modified
   `.opencode/plugins/uf-workflow/index.ts` byte-identically to
   `internal/scaffold/assets/opencode/plugins/uf-workflow/index.ts`.
-- [ ] 6.3 Create the embedded template
+- [x] 6.3 Create the embedded template
   `internal/scaffold/assets/uf/model-matrix.yaml` (the tracked
   starter matrix) and confirm the task 4.3 schema mirror; both
   must be drift-enforced. Extend the canonical-assets drift
