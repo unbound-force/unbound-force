@@ -3863,14 +3863,14 @@ func TestRun_DivisorSubset_DefaultFallback(t *testing.T) {
 	}
 
 	// Verify only always-deploy packs deployed (default, severity, content,
-	// ci, review-voice)
+	// ci, review-voice, meta-prompt)
 	for _, f := range result.Created {
 		if strings.Contains(f, "uf/packs") {
 			base := filepath.Base(f)
 			if !strings.HasPrefix(base, "default") && base != "severity.md" &&
 				!strings.HasPrefix(base, "content") && !strings.HasPrefix(base, "ci") &&
-				!strings.HasPrefix(base, "review-voice") {
-				t.Errorf("expected only default/severity/content/ci/review-voice packs, got %s", f)
+				!strings.HasPrefix(base, "review-voice") && !strings.HasPrefix(base, "meta-prompt") {
+				t.Errorf("expected only default/severity/content/ci/review-voice/meta-prompt packs, got %s", f)
 			}
 		}
 	}
@@ -8134,6 +8134,14 @@ func TestEnsureAGENTSmdPackSection_ExistingWithoutSection(t *testing.T) {
 	if !strings.Contains(text, ".opencode/uf/packs/default.md") {
 		t.Error("expected default pack reference")
 	}
+	if !strings.Contains(text, ".opencode/uf/packs/meta-prompt.md") {
+		t.Error("expected meta-prompt pack reference")
+	}
+	// The custom template is absent on disk in this fixture, so
+	// filterEmptyCustomPacks fails open and keeps it listed.
+	if !strings.Contains(text, ".opencode/uf/packs/meta-prompt-custom.md") {
+		t.Error("expected meta-prompt custom template reference")
+	}
 }
 
 func TestEnsureAGENTSmdPackSection_AlreadyConfigured(t *testing.T) {
@@ -8558,6 +8566,8 @@ func TestCollectDeployedPacks_Go(t *testing.T) {
 		"ci-custom.md":           true,
 		"review-voice.md":        true,
 		"review-voice-custom.md": true,
+		"meta-prompt.md":         true,
+		"meta-prompt-custom.md":  true,
 		"go.md":                  true,
 		"go-custom.md":           true,
 	}
@@ -8575,7 +8585,7 @@ func TestCollectDeployedPacks_Go(t *testing.T) {
 func TestCollectDeployedPacks_TypeScript(t *testing.T) {
 	packs := collectDeployedPacks("typescript", "")
 
-	required := []string{"typescript.md", "review-voice.md", "review-voice-custom.md"}
+	required := []string{"typescript.md", "review-voice.md", "review-voice-custom.md", "meta-prompt.md", "meta-prompt-custom.md"}
 	packSet := make(map[string]bool, len(packs))
 	for _, p := range packs {
 		packSet[p] = true
@@ -8595,13 +8605,14 @@ func TestCollectDeployedPacks_Default(t *testing.T) {
 			p == "severity.md" || p == "content.md" ||
 			p == "content-custom.md" || p == "ci.md" ||
 			p == "ci-custom.md" || p == "review-voice.md" ||
-			p == "review-voice-custom.md" {
+			p == "review-voice-custom.md" || p == "meta-prompt.md" ||
+			p == "meta-prompt-custom.md" {
 			continue
 		}
 		t.Errorf("unexpected pack %q for default lang", p)
 	}
-	if len(packs) != 9 {
-		t.Errorf("expected 9 packs for default lang, got %d", len(packs))
+	if len(packs) != 11 {
+		t.Errorf("expected 11 packs for default lang, got %d", len(packs))
 	}
 }
 
@@ -8702,7 +8713,7 @@ func TestCollectDeployedPacks_WithRoot_AllEmpty(t *testing.T) {
 	}
 
 	sentinel := "<!-- Add project-specific rules below this line -->"
-	stubs := []string{"default-custom.md", "content-custom.md", "ci-custom.md", "go-custom.md", "review-voice-custom.md"}
+	stubs := []string{"default-custom.md", "content-custom.md", "ci-custom.md", "go-custom.md", "review-voice-custom.md", "meta-prompt-custom.md"}
 	for _, name := range stubs {
 		if err := os.WriteFile(filepath.Join(packsDir, name), []byte(sentinel), 0o644); err != nil {
 			t.Fatalf("write %s: %v", name, err)
@@ -8717,7 +8728,7 @@ func TestCollectDeployedPacks_WithRoot_AllEmpty(t *testing.T) {
 		}
 	}
 	// Non-custom packs must still be present.
-	required := []string{"default.md", "severity.md", "content.md", "ci.md", "go.md", "review-voice.md"}
+	required := []string{"default.md", "severity.md", "content.md", "ci.md", "go.md", "review-voice.md", "meta-prompt.md"}
 	packSet := make(map[string]bool, len(packs))
 	for _, p := range packs {
 		packSet[p] = true
@@ -8737,9 +8748,9 @@ func TestCollectDeployedPacks_WithRoot_OnePopulated(t *testing.T) {
 	}
 
 	sentinel := "<!-- Add project-specific rules below this line -->"
-	// default-custom, content-custom, ci-custom, and review-voice-custom
-	// are empty stubs.
-	for _, name := range []string{"default-custom.md", "content-custom.md", "ci-custom.md", "review-voice-custom.md"} {
+	// default-custom, content-custom, ci-custom, review-voice-custom,
+	// and meta-prompt-custom are empty stubs.
+	for _, name := range []string{"default-custom.md", "content-custom.md", "ci-custom.md", "review-voice-custom.md", "meta-prompt-custom.md"} {
 		if err := os.WriteFile(filepath.Join(packsDir, name), []byte(sentinel), 0o644); err != nil {
 			t.Fatalf("write %s: %v", name, err)
 		}
@@ -8771,6 +8782,9 @@ func TestCollectDeployedPacks_WithRoot_OnePopulated(t *testing.T) {
 	if packSet["review-voice-custom.md"] {
 		t.Error("review-voice-custom.md should be excluded (empty)")
 	}
+	if packSet["meta-prompt-custom.md"] {
+		t.Error("meta-prompt-custom.md should be excluded (empty)")
+	}
 }
 
 func TestCollectDeployedPacks_WithRoot_EmptyRootFallback(t *testing.T) {
@@ -8782,7 +8796,7 @@ func TestCollectDeployedPacks_WithRoot_EmptyRootFallback(t *testing.T) {
 	for _, p := range packs {
 		packSet[p] = true
 	}
-	for _, name := range []string{"default-custom.md", "content-custom.md", "ci-custom.md", "go-custom.md", "review-voice-custom.md"} {
+	for _, name := range []string{"default-custom.md", "content-custom.md", "ci-custom.md", "go-custom.md", "review-voice-custom.md", "meta-prompt-custom.md"} {
 		if !packSet[name] {
 			t.Errorf("expected %q in packs when root is empty, got: %v", name, packs)
 		}
