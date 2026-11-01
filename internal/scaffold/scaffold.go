@@ -1790,9 +1790,10 @@ func hasRuleContent(path string) bool {
 
 // collectDeployedPacks returns the list of convention pack filenames
 // that would be deployed for the given resolved language. The list
-// always includes default.md, default-custom.md, severity.md,
-// content.md, and content-custom.md. Language-specific packs are
-// added when lang is not "default".
+// always includes the language-agnostic packs (default, severity,
+// content, ci, review-voice, and meta-prompt, each with its custom
+// template). Language-specific packs are added when lang is not
+// "default".
 //
 // When root is non-empty, each *-custom.md entry is checked with
 // hasRuleContent against the file on disk at
@@ -1811,6 +1812,8 @@ func collectDeployedPacks(lang, root string) []string {
 		"ci-custom.md",
 		"review-voice.md",
 		"review-voice-custom.md",
+		"meta-prompt.md",
+		"meta-prompt-custom.md",
 	}
 	if lang != "" && lang != "default" {
 		candidates = append(candidates, lang+".md", lang+"-custom.md")
