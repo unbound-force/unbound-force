@@ -306,7 +306,7 @@
 
 ## 6. Scaffold registration and mirrors
 
-- [ ] 6.1 In `internal/scaffold/scaffold.go`, add
+- [x] 6.1 In `internal/scaffold/scaffold.go`, add
   `opencode/lib/model-matrix.ts` to both lib asset enumeration
   lists (the ~line 660 and ~line 733 blocks) and append
   `.uf/model-matrix.override.yaml` to `gitignoreBlock` (SC-FR-007).
