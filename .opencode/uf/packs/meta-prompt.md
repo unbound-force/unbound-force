@@ -4,10 +4,14 @@ language: Any
 version: 1.0.0
 ---
 
-<!-- repo-local governance pack (not a scaffold asset);
-     authored as the issue #888 deliverable inside the
-     model-matrix-delegation change; governance-styled per
-     the determinism.md/content.md precedent -->
+<!-- deployed scaffold asset (issue #889,
+     model-matrix-scaffold-deployment change): uf init
+     deploys a byte-identical copy of this pack to every
+     hero repo through the embedded mirror and
+     alwaysDeployedPacks entries (SC-FR-008), shipping a
+     user-owned meta-prompt-custom.md initial-deployment
+     template alongside it for project-specific meta-prompt
+     rules in hero repos -->
 
 # Convention Pack: Meta-Prompt (Spec, Plan, Tasks, Commands)
 
@@ -235,9 +239,11 @@ mark genuinely optional practice.
 
 ## Custom Rules
 
-<!-- This section is intentionally empty. As a repo-local
-     governance pack (the determinism.md precedent), this pack
-     ships no `-custom.md` companion: project-specific
-     meta-prompt rules are incorporated by revising this pack
-     through a governance change, not by a sidecar custom-rules
-     file. -->
+<!-- This section is intentionally empty in the canonical
+     pack. A user-owned meta-prompt-custom.md
+     initial-deployment template ships alongside it — the
+     content.md and content-custom.md precedent for a
+     governance-styled pack with a custom companion.
+     Project-specific meta-prompt rules in hero repos
+     belong in that sidecar; the unbound-force meta repo
+     governs its own pack content through revision. -->
