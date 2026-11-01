@@ -2907,9 +2907,10 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/lib/unleash-templates.ts", true},
 		// User-owned: reviewer eligibility pairs with uf/review-matrix.yaml as a project extension point
 		{"uf/reviewer-capabilities.yaml", false},
-		// Tool-owned: model-matrix template (design D10, SC-FR-007) —
-		// drift-enforced byte-identical to the canonical tracked matrix
-		{"uf/model-matrix.yaml", true},
+		// User-owned: the deployed tracked matrix is a project extension
+		// point preserved across plain re-init (design D4, SC-FR-010;
+		// the uf/review-matrix.yaml precedent, issues #884/#886)
+		{"uf/model-matrix.yaml", false},
 		// User-owned: model policy is a supported project extension point
 		{"uf/review-matrix.yaml", false},
 		// User-owned: active sibling declarations are project-specific
@@ -2930,16 +2931,23 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/uf/packs/python.md", true},
 		// Tool-owned: convention packs (canonical) — CI
 		{"opencode/uf/packs/ci.md", true},
+		// Tool-owned: convention packs (canonical) — meta-prompt
+		{"opencode/uf/packs/meta-prompt.md", true},
 		// User-owned: convention packs (custom)
 		{"opencode/uf/packs/go-custom.md", false},
 		{"opencode/uf/packs/default-custom.md", false},
 		{"opencode/uf/packs/typescript-custom.md", false},
 		{"opencode/uf/packs/python-custom.md", false},
 		{"opencode/uf/packs/ci-custom.md", false},
+		// User-owned: convention packs (custom) — meta-prompt
+		{"opencode/uf/packs/meta-prompt-custom.md", false},
 		// User-owned: agents (including Divisor personas and Cobalt-Crush)
 		{"opencode/agents/divisor-guard.md", false},
 		{"opencode/agents/divisor-architect.md", false},
 		{"opencode/agents/cobalt-crush-dev.md", false},
+		// User-owned: model-matrix classifier subagent (agent files are
+		// user-owned; deleting or editing it degrades gracefully)
+		{"opencode/agents/model-matrix-classifier.md", false},
 		// User-owned: other
 		{"opencode/agents/constitution-check.md", false},
 		// User-owned: specify/ assets (starter constitution)
