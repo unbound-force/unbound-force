@@ -211,7 +211,7 @@
   and `tasks` to `spec-authoring` (MM-FR-001 starter-mapping
   scenario; a drifted mapping fails the check while passing
   schema validation).
-- [ ] 4.2 Create the canonical registry `schemas/model-matrix/`
+- [x] 4.2 Create the canonical registry `schemas/model-matrix/`
   (design D3, MM-FR-008): `v1.schema.json` (closed input,
   `additionalProperties: false` throughout, matching the Zod
   surface), `README.md` documenting the surface, the override
