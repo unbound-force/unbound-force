@@ -384,7 +384,7 @@
   `-custom.md` companion — the determinism.md precedent). Keep
   the edits structural (structure,
   counts, lists) — no behavioral-rule changes.
-- [ ] 7.5 File the cross-repo documentation issue against
+- [x] 7.5 File the cross-repo documentation issue against
   `unbound-force/website` covering the model matrix: the config
   pair, capability profiles, precedence chain, classifier
   engines, override whitelist, and credential story — per the
