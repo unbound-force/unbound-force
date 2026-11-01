@@ -1879,7 +1879,9 @@ var expectedAssetPaths = []string{
 	"opencode/agents/divisor-scribe.md",
 	"opencode/agents/divisor-herald.md",
 	"opencode/agents/divisor-envoy.md",
-	// Convention packs — shared by all heroes (15)
+	// OpenCode agents — model-matrix classifier subagent (1)
+	"opencode/agents/model-matrix-classifier.md",
+	// Convention packs — shared by all heroes (17)
 	"opencode/uf/packs/ci-custom.md",
 	"opencode/uf/packs/ci.md",
 	"opencode/uf/packs/content-custom.md",
@@ -1888,6 +1890,8 @@ var expectedAssetPaths = []string{
 	"opencode/uf/packs/default.md",
 	"opencode/uf/packs/go-custom.md",
 	"opencode/uf/packs/go.md",
+	"opencode/uf/packs/meta-prompt-custom.md",
+	"opencode/uf/packs/meta-prompt.md",
 	"opencode/uf/packs/python-custom.md",
 	"opencode/uf/packs/python.md",
 	"opencode/uf/packs/review-voice-custom.md",
@@ -1955,10 +1959,12 @@ var task42CanonicalAssets = []struct {
 	source string
 }{
 	{asset: "opencode/agents/cobalt-crush-dev.md", source: ".opencode/agents/cobalt-crush-dev.md"},
+	{asset: "opencode/agents/model-matrix-classifier.md", source: ".opencode/agents/model-matrix-classifier.md"},
 	{asset: "opencode/commands/uf.address-feedback.md", source: ".opencode/commands/uf.address-feedback.md"},
 	{asset: "opencode/commands/uf.review-council.md", source: ".opencode/commands/uf.review-council.md"},
 	{asset: "opencode/commands/uf.triage-issue.md", source: ".opencode/commands/uf.triage-issue.md"},
 	{asset: "opencode/skills/dispatch-advisor/SKILL.md", source: ".opencode/skills/dispatch-advisor/SKILL.md"},
+	{asset: "opencode/uf/packs/meta-prompt.md", source: ".opencode/uf/packs/meta-prompt.md"},
 	{asset: invokeAgentPluginAsset, source: ".opencode/plugins/invoke-agent/index.ts"},
 	{asset: reviewDispatchPluginAsset, source: ".opencode/plugins/review-dispatch/index.ts"},
 	{asset: "opencode/plugins/uf-workflow/index.ts", source: ".opencode/plugins/uf-workflow/index.ts"},
@@ -3388,9 +3394,9 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".opencode/agents/reviewer-sre.md":       true,
 	".opencode/agents/reviewer-testing.md":   true,
 	// Commands — local-only tooling
-	".opencode/commands/gaze.md":                       true,
-	".opencode/commands/gaze-fix.md":                   true,
-	".opencode/commands/speckit.testreview.md":         true,
+	".opencode/commands/gaze.md":               true,
+	".opencode/commands/gaze-fix.md":           true,
+	".opencode/commands/speckit.testreview.md": true,
 	// OpenSpec skill commands — local workflow tooling, not scaffolded by uf init
 	".opencode/commands/opsx-apply.md":   true,
 	".opencode/commands/opsx-archive.md": true,
@@ -3426,13 +3432,12 @@ var knownNonEmbeddedFiles = map[string]bool{
 	// DCP config — generated programmatically by configureDCPConfig(),
 	// not embedded as a scaffold asset
 	".opencode/dcp.jsonc": true,
-	// Determinism and meta-prompt governance — repo-local files, not present in scaffold assets
+	// Determinism governance — repo-local files, not present in
+	// scaffold assets (meta-prompt.md and model-matrix-classifier.md
+	// became embedded assets with model-matrix-scaffold-deployment
+	// and are registered in expectedAssetPaths)
 	".opencode/uf/packs/determinism.md":           true,
 	".opencode/skills/determinism-first/SKILL.md": true,
-	".opencode/uf/packs/meta-prompt.md":           true,
-	// Model-matrix classifier — hidden subagent, canonical repo content;
-	// scaffold deployment deferred to slice 2 (#889), per SC-FR-007
-	".opencode/agents/model-matrix-classifier.md": true,
 }
 
 func TestCanonicalSources_AreEmbedded(t *testing.T) {
