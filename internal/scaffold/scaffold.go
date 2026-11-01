@@ -54,7 +54,7 @@ func isActivationGatedAsset(relPath string) bool {
 
 // Options configures a scaffold run.
 type Options struct {
-TargetDir    string                                          // Root dir to scaffold into (default: cwd)
+	TargetDir    string                                          // Root dir to scaffold into (default: cwd)
 	Force        bool                                            // Overwrite existing files when true
 	DivisorOnly  bool                                            // Deploy only Divisor agents, command, and packs
 	DryRun       bool                                            // When true, configureOpencodeJSON() skips writing
