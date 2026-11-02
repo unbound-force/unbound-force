@@ -11,11 +11,26 @@ import (
 	"time"
 )
 
-// stealthExcludeMarker is the sentinel comment that delimits the block of
-// exclusion entries appended to .git/info/exclude by stealth mode. It is
-// used for idempotency detection and scoped rollback (only the block
-// appended by the current invocation is removed on failure).
+// stealthExcludeMarker is the sentinel comment that starts the block of
+// exclusion entries written to .git/info/exclude by stealth mode. The
+// managed block runs from this start marker through the
+// stealthExcludeEndMarker closing sentinel (design D8); the pair is
+// used for idempotency detection, in-place upgrades, and scoped
+// rollback (only the state preceding the current invocation's write
+// is restored on failure).
 const stealthExcludeMarker = "# Unbound Force — stealth exclusion (managed by uf init)"
+
+// stealthExcludeEndMarker is the sentinel comment that ends the managed
+// stealth exclusion block in .git/info/exclude: the final line of the
+// block writeGitInfoExclude writes (design D8). extractManagedRegion
+// treats the region as the marker line through the first subsequent
+// line equal to this sentinel, which is what makes byte-identical
+// "unchanged" detection and in-place upgrades possible. The sentinel
+// MUST stay a comment line (leading '#'): a non-comment sentinel would
+// act as a live exclude pattern and would be counted by
+// stealthExcludedPaths, which parses all non-comment lines (spec
+// review advisory A2).
+const stealthExcludeEndMarker = "# Unbound Force — stealth exclusion end"
 
 // gitlinkMode is the index mode git reports for submodule (gitlink) entries.
 // Snapshotting must skip these: their working tree is a directory, and
@@ -157,9 +172,53 @@ func trackedScaffoldPaths(opts *Options) ([]string, error) {
 	return found, nil
 }
 
-// writeGitInfoExclude appends the stealth exclusion block (marker + escaped
-// canonical paths + any extra paths) to .git/info/exclude. Idempotent: if
-// the marker is already present, it is a no-op.
+// stealthExcludeBlock returns the canonical managed exclusion block
+// (design D8): the stealthExcludeMarker line, the escaped canonical
+// scaffolded paths, and the stealthExcludeEndMarker line. The block
+// ends with the sentinel's line break so a region extracted by
+// extractManagedRegion from a file carrying the canonical block is
+// byte-identical to this string, and an in-place splice over the
+// region never disturbs adjacent lines. Built as a function, not a
+// constant, because the block is derived from the stealthExcludePaths
+// set.
+func stealthExcludeBlock() string {
+	var b strings.Builder
+	b.WriteString(stealthExcludeMarker)
+	b.WriteString("\n")
+	for _, p := range stealthExcludePaths {
+		b.WriteString(escapeExcludePattern(p))
+		b.WriteString("\n")
+	}
+	b.WriteString(stealthExcludeEndMarker)
+	b.WriteString("\n")
+	return b.String()
+}
+
+// writeGitInfoExclude brings .git/info/exclude under the managed-block
+// contract (design D8, mirroring ensureGitignore's D7 dispositions):
+// the region from the stealthExcludeMarker line through the first
+// subsequent stealthExcludeEndMarker line is tool-managed.
+// Dispositions, in evaluation order:
+//
+//   - no marker line: append the canonical block after the existing
+//     content (blank-line separated) and report "created" — extra
+//     paths, when given, are appended after the sentinel, outside the
+//     managed region;
+//   - marker line with no sentinel line after it (a legacy block
+//     written before the sentinel existed): leave the file untouched
+//     and report "skipped" with a detail naming the malformed region —
+//     the boundary is ambiguous and must never be guessed;
+//   - region byte-identical to the canonical block: leave the file
+//     untouched and report "unchanged";
+//   - region differing from the canonical block: rewrite the region in
+//     place with the canonical block — content before and after the
+//     region (extra exclusion lines recorded after the sentinel
+//     survive) is preserved and the marker is never duplicated — and
+//     report "upgraded".
+//
+// Read and write failures report the "failed" disposition with the
+// underlying error in the detail. Uses opts.ReadFile/WriteFile for
+// testability (dependency injection).
 func writeGitInfoExclude(opts *Options, extra []string) subToolResult {
 	p, err := resolveGitInfoExcludePath(opts)
 	if err != nil {
@@ -169,35 +228,72 @@ func writeGitInfoExclude(opts *Options, extra []string) subToolResult {
 	if readErr != nil && !os.IsNotExist(readErr) {
 		return subToolResult{name: ".git/info/exclude", action: "failed", detail: fmt.Sprintf("read failed: %v", readErr), err: readErr}
 	}
-	if readErr == nil && strings.Contains(string(existing), stealthExcludeMarker) {
-		return subToolResult{name: ".git/info/exclude", action: "already configured"}
+
+	// Empty content when the file does not exist; the append path
+	// below creates it.
+	var content string
+	if readErr == nil {
+		content = string(existing)
 	}
 
-	var b strings.Builder
-	if readErr == nil {
-		content := string(existing)
-		b.WriteString(content)
-		if len(content) > 0 && !strings.HasSuffix(content, "\n") {
-			b.WriteString("\n")
+	// No marker: append the block (the creation path).
+	if !hasMarkerLine(content, stealthExcludeMarker) {
+		updated := content
+		// Ensure a blank line separates existing content from the block.
+		if len(updated) > 0 && !strings.HasSuffix(updated, "\n\n") {
+			if !strings.HasSuffix(updated, "\n") {
+				updated += "\n"
+			}
+			updated += "\n"
 		}
-		if len(strings.TrimSpace(content)) > 0 {
-			b.WriteString("\n")
+		// Extras land after the closing sentinel, outside the managed
+		// region, so they trivially survive future in-place upgrades
+		// (appendNewUntrackedToExclude appends at end of file for the
+		// same reason).
+		block := stealthExcludeBlock()
+		for _, pp := range extra {
+			block += escapeExcludePattern(pp) + "\n"
+		}
+		return writeExcludeFile(opts, p, updated+block, "created")
+	}
+
+	start, end, ok := extractManagedRegion(content, stealthExcludeMarker, stealthExcludeEndMarker)
+	if !ok {
+		// Marker without a sentinel (a legacy block predating the
+		// sentinel, or a hand-truncated one): the region boundary is
+		// ambiguous. Never guess — leave the file untouched.
+		detail := fmt.Sprintf(
+			"malformed exclusion block: no %s sentinel after marker; left untouched",
+			stealthExcludeEndMarker)
+		return subToolResult{name: ".git/info/exclude", action: "skipped", detail: detail}
+	}
+
+	if content[start:end] == stealthExcludeBlock() {
+		// Region already canonical — nothing to do.
+		return subToolResult{name: ".git/info/exclude", action: "unchanged"}
+	}
+
+	// Stale managed block: splice the canonical block over the region.
+	// The region starts at the marker line and ends after the
+	// sentinel's line break, so content before and after it is
+	// preserved byte-for-byte and the marker is never duplicated.
+	return writeExcludeFile(opts, p, content[:start]+stealthExcludeBlock()+content[end:], "upgraded")
+}
+
+// writeExcludeFile persists content to the .git/info/exclude at path
+// through the injected WriteFile and maps the outcome onto a
+// subToolResult: success reports the given action, an I/O failure
+// reports "failed" with the underlying error in the detail.
+func writeExcludeFile(opts *Options, path, content, action string) subToolResult {
+	if writeErr := opts.WriteFile(path, []byte(content), 0o644); writeErr != nil {
+		return subToolResult{
+			name:   ".git/info/exclude",
+			action: "failed",
+			detail: fmt.Sprintf("write failed: %v", writeErr),
+			err:    writeErr,
 		}
 	}
-	b.WriteString(stealthExcludeMarker)
-	b.WriteString("\n")
-	for _, pp := range stealthExcludePaths {
-		b.WriteString(escapeExcludePattern(pp))
-		b.WriteString("\n")
-	}
-	for _, pp := range extra {
-		b.WriteString(escapeExcludePattern(pp))
-		b.WriteString("\n")
-	}
-	if writeErr := opts.WriteFile(p, []byte(b.String()), 0o644); writeErr != nil {
-		return subToolResult{name: ".git/info/exclude", action: "failed", detail: fmt.Sprintf("write failed: %v", writeErr), err: writeErr}
-	}
-	return subToolResult{name: ".git/info/exclude", action: "configured"}
+	return subToolResult{name: ".git/info/exclude", action: action}
 }
 
 // beginStealth runs the stealth pre-flight: git-repo verification, the

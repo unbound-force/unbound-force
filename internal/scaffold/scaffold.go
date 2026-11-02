@@ -54,9 +54,17 @@ func isActivationGatedAsset(relPath string) bool {
 
 // Options configures a scaffold run.
 type Options struct {
-	TargetDir    string                                          // Root dir to scaffold into (default: cwd)
-	Force        bool                                            // Overwrite existing files when true
-	DivisorOnly  bool                                            // Deploy only Divisor agents, command, and packs
+	TargetDir   string // Root dir to scaffold into (default: cwd)
+	Force       bool   // Overwrite existing files when true
+	DivisorOnly bool   // Deploy only Divisor agents, command, and packs
+
+	// OverridesOnly gates the overrides-only mode (design D5,
+	// SC-FR-012): when true, Run seeds only the per-developer
+	// override stubs and the managed .gitignore block; the
+	// embedded-asset walk, plugin activation, sub-tools, AGENTS.md
+	// sections, and migrations never run.
+	OverridesOnly bool
+
 	DryRun       bool                                            // When true, configureOpencodeJSON() skips writing
 	Stealth      bool                                            // Local-only: hide scaffolded files from git, leave tracked files unmodified
 	Check        bool                                            // Verify git-cleanliness without writing (requires Stealth)
@@ -180,6 +188,25 @@ func Run(opts Options) (*Result, error) {
 			return nil, err
 		}
 		return &Result{}, nil
+	}
+
+	// Overrides-only mode (design D5, SC-FR-012): seed the
+	// per-developer override stubs and the managed .gitignore
+	// block, print the summary, and return. The asset walk, plugin
+	// activation, sub-tools, AGENTS.md sections, and migrations
+	// never run. Positioned after the Check-mode early return and
+	// before stealth setup; flag-conflict validation (--divisor,
+	// --force, --check, --stealth) lives in the CLI layer, which
+	// fails the run before any filesystem write.
+	if opts.OverridesOnly {
+		giResult := ensureGitignore(&opts)
+		overrideResults := ensureOverrideStubs(&opts)
+		// Splice mirrors the non-stealth ensure-branch assembly:
+		// .gitignore first, then both override stubs.
+		subResults := append([]subToolResult{giResult}, overrideResults...)
+		result := &Result{}
+		printSummary(opts.Stdout, opts.DivisorOnly, langExplicit, langDetected, result, subResults)
+		return result, nil
 	}
 
 	// Stealth rollback context. The deferred rollback runs only on the
@@ -351,15 +378,43 @@ func Run(opts Options) (*Result, error) {
 	// Called after file scaffolding but before sub-tool delegation
 	// so that .gitignore is ready before sub-tools create runtime files.
 	// Stealth mode skips the tracked-file mutations.
-	var giResult, agentsResult, agentsSiblingResult subToolResult
+	var giResult, agentsResult, agentsSiblingResult, opencodeGiResult subToolResult
+	var overrideResults []subToolResult
 	if opts.Stealth {
 		giResult = subToolResult{name: ".gitignore", action: "skipped (stealth)"}
 		agentsResult = subToolResult{name: "AGENTS.md", action: "skipped (stealth)"}
 		agentsSiblingResult = subToolResult{name: "AGENTS.md sibling section", action: "skipped (stealth)"}
+		overrideResults = []subToolResult{
+			{name: ".uf/model-matrix.override.yaml", action: "skipped (stealth)"},
+			{name: ".uf/review-matrix.override.yaml", action: "skipped (stealth)"},
+		}
+		// The wholesale .opencode/ exclusion already keeps the tree
+		// clean under stealth, so the scoped ignore file is not
+		// deployed there (design D9 skip surface).
+		opencodeGiResult = subToolResult{
+			name:   ".opencode/.gitignore",
+			action: "skipped (stealth)",
+		}
 	} else {
 		giResult = ensureGitignore(&opts)
+		// Seed the per-developer override stubs (SC-FR-011, design
+		// D4) after .gitignore, before the AGENTS.md sections.
+		// --divisor mode deploys a subset into possibly foreign
+		// repositories and must not write per-developer files; it
+		// skips seeding silently, matching initSubTools and
+		// migrateCommandDir's DivisorOnly skips.
+		if !opts.DivisorOnly {
+			overrideResults = ensureOverrideStubs(&opts)
+		}
 		agentsResult = ensureAGENTSmdPackSection(&opts, lang)
 		agentsSiblingResult = ensureAGENTSmdSiblingSection(&opts)
+		// Deploy .opencode/.gitignore (SC-FR-015, design D9). Runs
+		// ungated by DivisorOnly: --divisor deploys .opencode/
+		// (package.json, plugin sources) and runs plugin activation
+		// inside it too. Independent of the pluginResult computed
+		// above — npm ci may fail or be skipped while node_modules/
+		// can still appear.
+		opencodeGiResult = ensureOpencodeGitignore(&opts)
 		warnStaleStealthExclusion(&opts)
 	}
 
@@ -375,7 +430,13 @@ func Run(opts Options) (*Result, error) {
 	}
 
 	// Initialize sub-tools after file scaffolding, before summary.
-	subResults := append([]subToolResult{giResult, agentsResult, agentsSiblingResult, pluginResult.result}, initSubTools(&opts)...)
+	// The override-stub results render directly after .gitignore,
+	// mirroring the ensure call order in the branch above. The
+	// .opencode/.gitignore result renders after the plugin-activation
+	// result it deliberately runs independent of (SC-FR-015).
+	subResults := append([]subToolResult{giResult}, overrideResults...)
+	subResults = append(subResults, agentsResult, agentsSiblingResult, pluginResult.result, opencodeGiResult)
+	subResults = append(subResults, initSubTools(&opts)...)
 
 	if opts.Stealth {
 		// A sub-tool failure leaves a half-applied tree; roll back
@@ -918,7 +979,7 @@ func insertMarkerAfterFrontmatter(content []byte, marker string) []byte {
 // subToolResult tracks the outcome of a sub-tool initialization step.
 // Action values: "initialized", "completed", "failed", "skipped",
 // "created", "configured", "already configured", "overwritten",
-// "error", "dry-run".
+// "unchanged", "upgraded", "error", "dry-run".
 // The err field captures the underlying error from ExecCmd when a
 // command fails. The output field captures stdout+stderr from
 // CombinedOutput() for diagnostic reporting.
@@ -1392,10 +1453,12 @@ func stripJSONCComments(data []byte) []byte {
 	return []byte(strings.Join(result, "\n"))
 }
 
-// gitignoreBlock is the standard Unbound Force ignore block appended
-// to .gitignore by ensureGitignore(). The marker comment on the first
-// line is used for idempotency detection — if it already exists in
-// the file, the block is not appended again.
+// gitignoreBlock is the standard Unbound Force ignore block managed
+// in .gitignore by ensureGitignore(). The marker comment on the first
+// line and the .unbound-force/ terminator on the final line delimit
+// the managed region (design D7): when the region is absent it is
+// appended, and when it differs from this constant it is rewritten in
+// place.
 const gitignoreBlock = `# Unbound Force — managed by uf init
 # Runtime data under .uf/ (databases, caches, locks, logs)
 .uf/artifacts/
@@ -1409,7 +1472,14 @@ const gitignoreBlock = `# Unbound Force — managed by uf init
 .uf/replicator/*.db-shm
 .uf/replicator/*.db-wal
 .uf/replicator/*.lock
-# Per-developer override file — never commit provider-specific model strings
+# Workspace state under .uf/ (sibling clones and caches, feedback, progress)
+.uf/sibling-clones/
+.uf/sibling-cache/
+.uf/feedback/
+.uf/progress/
+# Per-developer configuration and override files — never commit provider-specific model strings
+.uf/config.yaml
+.uf/dewey/config.yaml
 .uf/review-matrix.override.yaml
 .uf/model-matrix.override.yaml
 # Devcontainer — OS-specific, generated by uf sandbox init
@@ -1420,15 +1490,197 @@ const gitignoreBlock = `# Unbound Force — managed by uf init
 .unbound-force/
 `
 
-// gitignoreMarker is the sentinel string used to detect whether the
-// UF ignore block has already been appended. Extracted as a constant
-// so the marker is defined in exactly one place (DRY).
+// gitignoreMarker is the sentinel line that starts the managed UF
+// ignore block. Extracted as a constant so the marker is defined in
+// exactly one place (DRY).
 const gitignoreMarker = "# Unbound Force — managed by uf init"
 
-// ensureGitignore appends the standard UF ignore block to .gitignore
-// in targetDir. Idempotent: if the marker comment is already present,
-// the file is not modified. Creates .gitignore if it does not exist.
-// Uses opts.ReadFile/WriteFile for testability (dependency injection).
+// gitignoreTerminator is the sentinel line that ends the managed UF
+// ignore block: the final line of gitignoreBlock. extractManagedRegion
+// treats the region as the marker line through the first subsequent
+// line equal to this terminator (design D7). The constant MUST stay
+// equal to the block's final line — the terminator's stability across
+// block versions is what makes in-place upgrades possible (design D6).
+const gitignoreTerminator = ".unbound-force/"
+
+// modelMatrixOverrideStub is the comment-only template seeded as
+// .uf/model-matrix.override.yaml by ensureOverrideStubs (SC-FR-011).
+// It is a Go string constant, not an embedded asset (design D1): the
+// target is gitignored per-developer data with no canonical tracked
+// source for drift comparison, so it carries no version marker and is
+// absent from every asset manifest. Every line is a YAML comment or
+// blank, so the seeded file parses to YAML null and the model-matrix
+// loader treats it as a valid no-op (design D2).
+const modelMatrixOverrideStub = `# .uf/model-matrix.override.yaml
+#
+# Per-developer model identities overriding the tracked
+# .uf/model-matrix.yaml. This file is gitignored per-developer
+# configuration and MUST never be committed: it can carry
+# provider credentials.
+#
+# Fail-closed whitelist (loader-enforced; nothing else is
+# permitted):
+#
+#   profiles.<name>.model     model for a capability profile
+#   profiles.<name>.variant   runtime variant for a profile
+#   classifier.llm.*          LLM classifier engine settings
+#                             (apiKey, model, baseUrl, ...)
+#
+# Profile names come from the tracked matrix: spec-authoring,
+# code-writing, content-writing, mechanical.
+#
+# Commented-out examples -- uncomment and edit:
+#
+# profiles:
+#   code-writing:
+#     model: provider/model-id
+#   spec-authoring:
+#     model: provider/model-id
+#     variant: default
+#
+# classifier:
+#   llm:
+#     model: provider/model-id
+#     baseUrl: https://llm.example.com/v1
+`
+
+// reviewMatrixOverrideStub is the comment-only template seeded as
+// .uf/review-matrix.override.yaml by ensureOverrideStubs (SC-FR-011),
+// mirroring modelMatrixOverrideStub: a Go string constant, not an
+// embedded asset (design D1), carrying no version marker and no
+// asset-manifest registration. Comment-only content parses to YAML
+// null, which the review-dispatch override merge already accepts as
+// a valid no-op (design D2).
+const reviewMatrixOverrideStub = `# .uf/review-matrix.override.yaml
+#
+# Per-developer model identities overriding the tracked
+# .uf/review-matrix.yaml. This file is gitignored per-developer
+# configuration and MUST never be committed: it carries
+# provider-specific model strings.
+#
+# Fail-closed whitelist (loader-enforced; nothing else is
+# permitted):
+#
+#   profiles.<tier>.model     model for a review-dispatch tier
+#   profiles.<tier>.variant   runtime variant for a tier
+#
+# Tiers: lightweight, standard, heavy.
+#
+# Commented-out examples -- uncomment and edit:
+#
+# profiles:
+#   standard:
+#     model: provider/model-id
+#   heavy:
+#     model: provider/model-id
+#     variant: default
+`
+
+// opencodeGitignore is the canonical content deployed as
+// .opencode/.gitignore by ensureOpencodeGitignore (SC-FR-015, design
+// D9): the plugin-dependency and test-output noise that lands inside
+// .opencode/ when plugin activation runs npm ci there (node_modules,
+// bun.lock) and when the TypeScript plugin suite runs (.vitest/
+// cache, coverage/ output). It is a Go string constant rather than an
+// embedded asset because Go's //go:embed excludes dotfiles from
+// directory matches, so the embedded assets tree cannot carry the
+// file; like the override stubs it carries no version marker and no
+// asset-manifest registration. An existing file is merged, never
+// reset — only canonical lines missing from it are appended.
+const opencodeGitignore = `node_modules
+bun.lock
+.vitest/
+coverage/
+`
+
+// extractManagedRegion returns the byte range of a managed block in
+// content: from the first line equal to marker through the first
+// subsequent line equal to terminator. The range is half-open
+// [start, end): start is the offset of the marker line's first byte
+// and end is one past the terminator line's line break (or one past
+// the line's last byte when the terminator is the final line and the
+// content does not end with a newline). Including the line break
+// makes the region extracted from a file carrying the canonical block
+// byte-identical to the block constant, which ends with a newline,
+// and lets a caller splice content[:start] + canonical +
+// content[end:] without mangling adjacent lines. ok is false when
+// either delimiter line is absent, in which case start and end are 0.
+//
+// Delimiter comparison is line equality with trailing-\r
+// normalization: on a CRLF file the marker line carries a trailing
+// "\r" and must still match. This preserves the CRLF tolerance of the
+// substring-based marker detection the helper replaces — strict byte
+// equality would miss the marker, force the append path, and
+// accumulate duplicate managed blocks on every run. Equality is
+// exact otherwise: a line merely containing the marker as a substring
+// does not match.
+func extractManagedRegion(content, marker, terminator string) (start, end int, ok bool) {
+	regionStart := -1
+	offset := 0
+	for _, line := range strings.Split(content, "\n") {
+		// Trailing-\r normalization keeps delimiter comparison
+		// CRLF-tolerant (see the function comment).
+		normalized := strings.TrimSuffix(line, "\r")
+		if regionStart < 0 {
+			if normalized == marker {
+				regionStart = offset
+			}
+		} else if normalized == terminator {
+			// The region carries the terminator line's line
+			// break; clamp when the terminator is the last
+			// line and no break follows it.
+			regionEnd := offset + len(line) + 1
+			if regionEnd > len(content) {
+				regionEnd = len(content)
+			}
+			return regionStart, regionEnd, true
+		}
+		offset += len(line) + 1
+	}
+	return 0, 0, false
+}
+
+// hasMarkerLine reports whether content contains a line equal to
+// marker under the same trailing-\r normalization extractManagedRegion
+// uses for delimiter comparison. It distinguishes the two cases that
+// helper reports as !ok: no marker line at all (ensureGitignore
+// appends the canonical block) versus a marker line with no
+// terminator after it (the malformed region ensureGitignore must
+// refuse to touch). A line merely containing the marker as a
+// substring does not count, matching the helper's line-equality
+// semantics.
+func hasMarkerLine(content, marker string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSuffix(line, "\r") == marker {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureGitignore brings the .gitignore in targetDir under the
+// managed-block contract (design D7, SC-FR-014): the region from the
+// gitignoreMarker line through the first subsequent gitignoreTerminator
+// line is tool-managed. Dispositions, in evaluation order:
+//
+//   - no marker line: append the canonical block after the existing
+//     content (blank-line separated) and report "created";
+//   - marker line with no terminator line after it: leave the file
+//     untouched and report "skipped" with a detail naming the
+//     malformed region — the boundary is ambiguous and must never be
+//     guessed;
+//   - region byte-identical to gitignoreBlock: leave the file
+//     untouched and report "unchanged";
+//   - region differing from gitignoreBlock: rewrite the region in
+//     place with the canonical block — content before and after the
+//     region is preserved and the marker is never duplicated — and
+//     report "upgraded".
+//
+// Read and write failures report the "failed" disposition with the
+// underlying error in the detail (preserved from the pre-rewrite
+// behavior per the approved spec review's advisory A1: the success
+// dispositions above do not cover I/O errors). Uses
+// opts.ReadFile/WriteFile for testability (dependency injection).
 func ensureGitignore(opts *Options) subToolResult {
 	giPath := filepath.Join(opts.TargetDir, ".gitignore")
 
@@ -1442,40 +1694,260 @@ func ensureGitignore(opts *Options) subToolResult {
 		}
 	}
 
-	// Idempotency check: if the marker already exists, skip.
-	if readErr == nil && strings.Contains(string(existing), gitignoreMarker) {
-		return subToolResult{
-			name:   ".gitignore",
-			action: "already configured",
-		}
-	}
-
-	// Build the new content: existing content + blank line separator + UF block.
+	// Empty content when the file does not exist; the append path
+	// below creates it.
 	var content string
 	if readErr == nil {
 		content = string(existing)
+	}
+
+	// No marker: append the block (the creation path).
+	if !hasMarkerLine(content, gitignoreMarker) {
+		updated := content
 		// Ensure a blank line separates existing content from the UF block.
-		if len(content) > 0 && !strings.HasSuffix(content, "\n\n") {
-			if !strings.HasSuffix(content, "\n") {
-				content += "\n"
+		if len(updated) > 0 && !strings.HasSuffix(updated, "\n\n") {
+			if !strings.HasSuffix(updated, "\n") {
+				updated += "\n"
 			}
-			content += "\n"
+			updated += "\n"
+		}
+		return writeGitignore(opts, giPath, updated+gitignoreBlock, "created")
+	}
+
+	start, end, ok := extractManagedRegion(content, gitignoreMarker, gitignoreTerminator)
+	if !ok {
+		// Marker without a terminator: the region boundary is
+		// ambiguous. Never guess — leave the file untouched.
+		detail := fmt.Sprintf(
+			"malformed managed block: no %s terminator after marker; left untouched",
+			gitignoreTerminator)
+		return subToolResult{
+			name:   ".gitignore",
+			action: "skipped",
+			detail: detail,
 		}
 	}
-	content += gitignoreBlock
 
-	if writeErr := opts.WriteFile(giPath, []byte(content), 0o644); writeErr != nil {
+	if content[start:end] == gitignoreBlock {
+		// Region already canonical — nothing to do.
+		return subToolResult{name: ".gitignore", action: "unchanged"}
+	}
+
+	// Stale managed block: splice the canonical block over the region.
+	// The region starts at the marker line and ends after the
+	// terminator's line break, so content before and after it is
+	// preserved byte-for-byte and the marker is never duplicated.
+	return writeGitignore(opts, giPath, content[:start]+gitignoreBlock+content[end:], "upgraded")
+}
+
+// writeGitignore persists content to the .gitignore at path through
+// the injected WriteFile and maps the outcome onto a subToolResult:
+// success reports the given action, an I/O failure reports "failed"
+// with the underlying error in the detail (spec review advisory A1).
+func writeGitignore(opts *Options, path, content, action string) subToolResult {
+	if writeErr := opts.WriteFile(path, []byte(content), 0o644); writeErr != nil {
 		return subToolResult{
 			name:   ".gitignore",
 			action: "failed",
 			detail: fmt.Sprintf("write failed: %v", writeErr),
 		}
 	}
+	return subToolResult{name: ".gitignore", action: action}
+}
 
-	return subToolResult{
-		name:   ".gitignore",
-		action: "configured",
+// ensureOverrideStubs seeds the per-developer override files
+// .uf/model-matrix.override.yaml and .uf/review-matrix.override.yaml
+// with their comment-only stub constants (SC-FR-011 in
+// openspec/changes/init-override-stubs-gitignore-sync/). Seeding is
+// create-only-if-absent (design D3): an existing override file,
+// whatever its content, is reported skipped and never read-modified —
+// per-developer data is never reset by the scaffold, not even by
+// --force, whose destructive reset applies to tracked canonical files
+// only. The .uf/ parent directory is created as needed. Each file
+// reports its own disposition (created or skipped) as a subToolResult
+// so the run summary makes the seeding observable, and I/O failures
+// report "failed" with the underlying error in the detail (spec review
+// advisory A1). The --stealth and --divisor skip surfaces are enforced
+// by the caller in Run(), not here (design D4). Uses
+// opts.ReadFile/WriteFile/MkdirAll for testability (dependency
+// injection).
+func ensureOverrideStubs(opts *Options) []subToolResult {
+	return []subToolResult{
+		ensureOverrideStub(opts, ".uf/model-matrix.override.yaml", modelMatrixOverrideStub),
+		ensureOverrideStub(opts, ".uf/review-matrix.override.yaml", reviewMatrixOverrideStub),
 	}
+}
+
+// ensureOverrideStub seeds a single per-developer override file at the
+// repo-relative path name with content, create-only-if-absent (design
+// D3, SC-FR-011): an existing file is reported skipped and never
+// read-modified, whatever its content. The parent directory is created
+// as needed before the write. A read error other than "not exist"
+// during the existence check, a directory-creation failure, or a write
+// failure reports the "failed" disposition with the underlying error
+// in the detail (spec review advisory A1), exactly parallel to
+// ensureGitignore's error handling.
+func ensureOverrideStub(opts *Options, name, content string) subToolResult {
+	path := filepath.Join(opts.TargetDir, name)
+
+	// Existence probe mirroring ensureGitignore's ReadFile +
+	// os.IsNotExist pattern. Only the error matters: the bytes of an
+	// existing file are deliberately discarded — per-developer files
+	// are never read-modified.
+	_, readErr := opts.ReadFile(path)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		// Non-"not found" error (e.g., permission denied).
+		return subToolResult{
+			name:   name,
+			action: "failed",
+			detail: fmt.Sprintf("read failed: %v", readErr),
+		}
+	}
+	if readErr == nil {
+		// Existing file, whatever its content: never overwritten.
+		return subToolResult{
+			name:   name,
+			action: "skipped",
+			detail: "exists; per-developer file never modified, not even by --force",
+		}
+	}
+
+	// File absent: create the parent directory as needed, then write
+	// the stub. There is deliberately no Force branch here — --force
+	// semantics belong to the asset walk over tracked canonical files.
+	if mkErr := opts.MkdirAll(filepath.Dir(path), 0o755); mkErr != nil {
+		return subToolResult{
+			name:   name,
+			action: "failed",
+			detail: fmt.Sprintf("mkdir failed: %v", mkErr),
+		}
+	}
+	if writeErr := opts.WriteFile(path, []byte(content), 0o644); writeErr != nil {
+		return subToolResult{
+			name:   name,
+			action: "failed",
+			detail: fmt.Sprintf("write failed: %v", writeErr),
+		}
+	}
+	return subToolResult{name: name, action: "created"}
+}
+
+// ensureOpencodeGitignore deploys .opencode/.gitignore carrying the
+// canonical opencodeGitignore lines (SC-FR-015, design D9), so that
+// plugin-dependency and test-output noise inside .opencode/ is
+// ignored in fresh targets. The writer is a sub-tool independent of
+// the plugin-activation result: npm ci may fail or be skipped while
+// node_modules/ can still appear. Merge semantics, never a reset:
+//
+//   - file absent: create the parent directory as needed and write
+//     the canonical lines, reporting "created";
+//   - file present with every canonical line already in it: leave
+//     the file untouched and report "unchanged";
+//   - file present with canonical lines missing: append only the
+//     missing canonical lines at end of file, retaining every
+//     existing user line in place, and report "upgraded" with the
+//     appended lines in the detail.
+//
+// Appending at end of file is the spec-mandated SC-FR-015 behavior
+// even though gitignore matching is last-match-wins — an appended
+// canonical line therefore takes precedence over an earlier user
+// negation of the same path. That trade-off is accepted by the
+// approved spec review (advisory A4); do not "fix" it by inserting
+// lines before user content. Read, directory-creation, and write
+// failures report the "failed" disposition with the underlying
+// error in the detail (spec review advisory A1), exactly parallel to
+// ensureGitignore and ensureOverrideStub. The --stealth and
+// --overrides skip surfaces are enforced by the caller in Run(),
+// not here (design D9). Uses opts.ReadFile/WriteFile/MkdirAll for
+// testability (dependency injection).
+func ensureOpencodeGitignore(opts *Options) subToolResult {
+	path := filepath.Join(opts.TargetDir, ".opencode", ".gitignore")
+
+	existing, readErr := opts.ReadFile(path)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		// Non-"not found" error (e.g., permission denied).
+		return subToolResult{
+			name:   ".opencode/.gitignore",
+			action: "failed",
+			detail: fmt.Sprintf("read failed: %v", readErr),
+		}
+	}
+
+	// File absent: the creation path. The parent directory is
+	// created as needed — the writer must not assume the asset walk
+	// or plugin activation already created .opencode/.
+	if readErr != nil {
+		if mkErr := opts.MkdirAll(filepath.Dir(path), 0o755); mkErr != nil {
+			return subToolResult{
+				name:   ".opencode/.gitignore",
+				action: "failed",
+				detail: fmt.Sprintf("mkdir failed: %v", mkErr),
+			}
+		}
+		if writeErr := opts.WriteFile(path, []byte(opencodeGitignore), 0o644); writeErr != nil {
+			return subToolResult{
+				name:   ".opencode/.gitignore",
+				action: "failed",
+				detail: fmt.Sprintf("write failed: %v", writeErr),
+			}
+		}
+		return subToolResult{name: ".opencode/.gitignore", action: "created"}
+	}
+
+	// File present: the merge path — append only the canonical lines
+	// missing from it (design D9).
+	content := string(existing)
+	missing := missingOpencodeGitignoreLines(content)
+	if len(missing) == 0 {
+		return subToolResult{name: ".opencode/.gitignore", action: "unchanged"}
+	}
+	updated := content
+	// A non-empty file without a trailing newline needs one so the
+	// appended lines start on their own line rather than gluing onto
+	// the last existing line; an empty file receives exactly the
+	// canonical lines.
+	if len(updated) > 0 && !strings.HasSuffix(updated, "\n") {
+		updated += "\n"
+	}
+	merged := updated + strings.Join(missing, "\n") + "\n"
+	if writeErr := opts.WriteFile(path, []byte(merged), 0o644); writeErr != nil {
+		return subToolResult{
+			name:   ".opencode/.gitignore",
+			action: "failed",
+			detail: fmt.Sprintf("write failed: %v", writeErr),
+		}
+	}
+	return subToolResult{
+		name:   ".opencode/.gitignore",
+		action: "upgraded",
+		detail: "appended missing lines: " + strings.Join(missing, ", "),
+	}
+}
+
+// missingOpencodeGitignoreLines returns the canonical
+// .opencode/.gitignore lines that do not already appear as a line in
+// content, in canonical order. Line comparison is exact equality
+// under trailing-\r normalization, matching extractManagedRegion's
+// delimiter semantics: on a CRLF file the canonical LF lines still
+// count as present and are not appended twice. A line merely
+// containing a canonical pattern as a substring does not count.
+func missingOpencodeGitignoreLines(content string) []string {
+	present := make(map[string]bool)
+	for _, line := range strings.Split(content, "\n") {
+		present[strings.TrimSuffix(line, "\r")] = true
+	}
+	var missing []string
+	for _, line := range strings.Split(opencodeGitignore, "\n") {
+		// The constant ends with a newline; the split's empty final
+		// element is not a canonical line.
+		if line == "" {
+			continue
+		}
+		if !present[line] {
+			missing = append(missing, line)
+		}
+	}
+	return missing
 }
 
 // migrateCommandDir moves files from the legacy .opencode/command/
@@ -2118,8 +2590,8 @@ func initSimpleTool(opts *Options, tool simpleTool, logf func(string, ...interfa
 }
 
 // subToolSymbol returns the display symbol for a sub-tool result action.
-// FR-021: created/configured/already configured/overwritten → ✓;
-// skipped/dry-run → —; error/failed → ✗.
+// FR-021: created/configured/already configured/overwritten/
+// unchanged/upgraded → ✓; skipped/dry-run → —; error/failed → ✗.
 func subToolSymbol(action string) string {
 	switch action {
 	case "error", "failed":
@@ -2128,7 +2600,8 @@ func subToolSymbol(action string) string {
 		return "—"
 	default:
 		// "initialized", "re-initialized", "completed", "created",
-		// "configured", "already configured", "overwritten"
+		// "configured", "already configured", "overwritten",
+		// "unchanged", "upgraded"
 		return "✓"
 	}
 }
