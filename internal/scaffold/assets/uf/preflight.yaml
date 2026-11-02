@@ -11,6 +11,14 @@
 #                                    # omitted = always in scope
 #   gate: required                   # required (default) participates in the verdict;
 #                                    # advisory records output but never fails the verdict
+#   timeout_seconds: 600             # positive integer, at most 3600 (default 600)
+#
+# Runtime contract: every check runs with the repository root
+# as its working directory, except during soft-gate baseline
+# re-runs where the working directory is a merge-base worktree.
+# UF_PREFLIGHT_PROJECT_ROOT always points at the primary
+# checkout root; use it to locate config (this file,
+# .uf/scripts/) regardless of working directory.
 #
 # Project checks never map to a CI check, so ci-aware mode always runs
 # them locally. This file is project-owned: plain `uf init` re-runs keep it.

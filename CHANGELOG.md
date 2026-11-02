@@ -23,7 +23,10 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (determinism pack DE-001/DE-003/DE-005), with registration,
   golden output-shape, and round-trip seam tests (DE-007).
   Skill size: 551 -> 589 lines (+38); the prose-only draft of
-  Phase 2b was 652 lines (DE-004).
+  Phase 2b was 652 lines (DE-004). Rendered rows carry the
+  causality column only in `soft-gate`, and a check that floods
+  past the 64 MiB output budget fails as an ordinary exit, not a
+  timeout. (Spec: openspec/changes/preflight-project-checks/)
 - init-override-stubs-gitignore-sync: `uf init` now seeds both
   per-developer override stubs (`.uf/model-matrix.override.yaml`
   and `.uf/review-matrix.override.yaml`) create-only-if-absent

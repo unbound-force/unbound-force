@@ -15,6 +15,7 @@ import { join } from "node:path"
 import type { PluginInput } from "@opencode-ai/plugin"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { PreflightDeclaredDependencies } from "../lib/preflight-declared.js"
 import {
   failure,
   success,
@@ -39,6 +40,8 @@ import {
   createGetProgressTool,
   createNormalizeModelNameTool,
   createPersistUnleashSummaryTool,
+  createPreflightDeclaredChecksTool,
+  processResultFromExecFile,
   createResolveBaseRefTool,
   type GitExec,
   type ProgressState,
@@ -183,6 +186,56 @@ describe("UfWorkflowPlugin", () => {
       expect(mode.safeParse(value).success).toBe(true)
     }
     expect(mode.safeParse("advisory").success).toBe(false)
+  })
+
+  it.each([
+    // Shapes observed from execFile under Node 24 and Bun 1.4.
+    ["success", null, { exitCode: 0, timedOut: false }],
+    ["ordinary exit", Object.assign(new Error("Command failed"), { code: 3, killed: false, signal: null }), { exitCode: 3, timedOut: false }],
+    ["timeout kill", Object.assign(new Error("Command failed"), { code: null, killed: true, signal: "SIGTERM" }), { exitCode: 124, timedOut: true }],
+    [
+      "output-limit kill",
+      Object.assign(new Error("stdout maxBuffer length exceeded"), { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" }),
+      { exitCode: 1, timedOut: false },
+    ],
+  ] as const)("maps an execFile %s onto a ProcessResult", (_label, error, expected) => {
+    const result = processResultFromExecFile(error, "out", "")
+    expect({ exitCode: result.exitCode, timedOut: result.timedOut }).toEqual(expected)
+    if (_label === "output-limit kill") {
+      expect(result.output).toBe("out\n[output limit exceeded: stdout maxBuffer length exceeded]")
+    }
+  })
+
+  it("reports PREFLIGHT_DECLARED_FAILED when check execution throws", async () => {
+    // The catch-all: a rejection from the process layer (not a config
+    // error, which maps to INVALID_PREFLIGHT_CONFIG before any check
+    // runs) must surface as non-retryable PREFLIGHT_DECLARED_FAILED.
+    const deps: PreflightDeclaredDependencies = {
+      readText: async () => '{"version":1,"checks":[{"name":"boom","run":"boom.sh"}]}',
+      fileExists: () => true,
+      isExecutable: () => true,
+      parseYaml: (text) => JSON.parse(text),
+      pathEnv: "/usr/bin:/bin",
+      git: () => {
+        throw new Error("git must not run for a check without paths")
+      },
+      runProcess: async () => {
+        throw new Error("spawn EACCES")
+      },
+      makeTempDir: async () => "/tmp/uf-preflight-declared-test",
+      removeDir: async () => {},
+    }
+    const preflightTool = createPreflightDeclaredChecksTool("/fake/project", deps)
+    const result = await (
+      preflightTool as {
+        execute: (args: { mode: string }, ctx: { sessionID: string }) => Promise<{ output: string }>
+      }
+    ).execute({ mode: "hard-gate" }, { sessionID: "test-session" })
+    const parsed = JSON.parse(result.output) as ToolFailure
+    expect(parsed.status).toBe("error")
+    expect(parsed.code).toBe("PREFLIGHT_DECLARED_FAILED")
+    expect(parsed.retryable).toBe(false)
+    expect(parsed.message).toContain("spawn EACCES")
   })
 
   it("registers uf_delegate_command with the documented argument contract", async () => {
