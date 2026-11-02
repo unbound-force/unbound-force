@@ -1176,6 +1176,26 @@ Each entry follows the format: `- <change-name>: <summary>`.
   openspec/changes/command-prose-pilot/)
 
 ### Fixed
+- fix-uf-finale-ci-poll-gh-schema: `uf_finale_ci_poll` now works
+  against gh 2.91.0. The poll requests the verified
+  `name,state,bucket,link` field list through an argument-array
+  `Bun.spawn` runner that tolerates gh's exit codes (exit 8
+  pending, exit 1 failing) and reads stdout JSON as data on any
+  exit code; zero-checks and PR-not-found are detected from gh's
+  stderr markers (the not-found marker is gh 2.91.0's verified
+  "Could not resolve to a PullRequest" shape — unrelated
+  not-found stderrs stay retryable `GH_CLI_ERROR` — and the
+  matched stderr is echoed in the `PR_NOT_FOUND` envelope), and
+  classification derives from `bucket`
+  (unknown values fail closed with the check's state surfaced).
+  The poll runs in the tool's registered working directory, so
+  repository resolution matches the `gh pr view` pre-check. The
+  `fetch_pr_review_context` advisory `ci_checks` sub-call
+  moves to the same tolerant path and derives `ci_pending` from
+  the bucket vocabulary, restoring CI signal to review contexts.
+  Output contract unchanged. (Spec:
+  openspec/changes/fix-uf-finale-ci-poll-gh-schema/,
+  Fixes: #895, Docs: #925, unbound-force/website#372)
 - review-pr-consolidate-dispatch: `/uf.review-pr` now finalizes every
   dispatch through exactly one `consolidate_dispatch` call per
   finalization attempt, carrying the captured `correlation_id` plus

@@ -22,6 +22,7 @@ import samplePayload from "../../schemas/review-dispatch/samples/sample-review-d
 import manifestFixture from "./fixtures/review-dispatch/manifest.json"
 import matrixFixture from "./fixtures/review-dispatch/matrix.json"
 import { withBun } from "./helpers/bun-runtime.js"
+import { createMockSpawn, patchBunSpawn } from "./helpers/gh-spawn-mock.js"
 
 // ---------------------------------------------------------------------------
 // Golden output-shape contract tests (seam-verification task 2.2, DE-002)
@@ -1053,28 +1054,46 @@ describe("golden output shapes -- uf-finale registry (9 documented sites)", () =
         /^gh pr view 43 --json mergeable,mergeStateStatus$/,
         JSON.stringify({ mergeable: "MERGEABLE", mergeStateStatus: "CLEAN" }),
       ],
-      [
-        /^gh pr checks 43 --json name,state,conclusion,detailsUrl$/,
-        JSON.stringify([
-          { name: "ci", state: "COMPLETED", conclusion: "SUCCESS", detailsUrl: "https://example.com/ci" },
-        ]),
-      ],
     ])
-
-    const data = expectOk(
-      await callEnvelopeTool<{
-        status: string
-        failedChecks: unknown[]
-        mergeable: boolean
-        workflowsConfigured: boolean
-      }>(registry, "uf_finale_ci_poll", { prNumber: 43 }),
-    )
-    expect(data).toEqual({
-      status: "pass",
-      failedChecks: [],
-      mergeable: true,
-      workflowsConfigured: true,
+    const spawn = createMockSpawn({
+      "pr checks": {
+        stdout: JSON.stringify([
+          { name: "ci", state: "SUCCESS", bucket: "pass", link: "https://example.com/ci" },
+        ]),
+        stderr: "",
+        exitCode: 0,
+      },
     })
+    const restore = patchBunSpawn(spawn)
+    try {
+      const data = expectOk(
+        await callEnvelopeTool<{
+          status: string
+          failedChecks: unknown[]
+          mergeable: boolean
+          workflowsConfigured: boolean
+        }>(registry, "uf_finale_ci_poll", { prNumber: 43 }),
+      )
+      expect(data).toEqual({
+        status: "pass",
+        failedChecks: [],
+        mergeable: true,
+        workflowsConfigured: true,
+      })
+      // FCP-FR-005 golden pin: the verified gh 2.91.0 field list and its
+      // argument-array invocation, which fails against the pre-fix code.
+      // FCP-FR-001: the invocation binds to the tool's registered
+      // working directory (the scratch directory), not the host cwd.
+      expect(spawn).toHaveBeenCalledWith(
+        ["gh", "pr", "checks", "43", "--json", "name,state,bucket,link"],
+        expect.objectContaining({
+          signal: expect.any(AbortSignal),
+          cwd: directory,
+        }),
+      )
+    } finally {
+      restore()
+    }
   })
 
   it("uf_finale_return_to_main [uf.finale.md:349] returns success", async () => {

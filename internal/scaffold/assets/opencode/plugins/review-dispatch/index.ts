@@ -7879,19 +7879,43 @@ async function fetchPrReviewContext(
   const warnings: string[] = []
 
   // ── 1.2c: Fetch CI checks ───────────────────────────────
+  // Advisory sub-call (FPR-FR-017): uses the exit-code-tolerant runner so
+  // pending (exit 8) and failing (exit 1) PRs keep their JSON array instead
+  // of degrading. `status` carries gh's uppercase `state`; `conclusion`
+  // carries the authoritative `bucket` (design D6).
   let ciChecks: Array<{ name: string; status: string; conclusion: string | null }> = []
   try {
-    const raw = await runGhCommand(["pr", "checks", prNumberStr, "--json", "name,state,conclusion"])
-    const parsed = JSON.parse(raw) as Array<{
-      name: string
-      state: string
-      conclusion: string | null
-    }>
-    ciChecks = parsed.map((check) => ({
-      name: check.name,
-      status: check.state,
-      conclusion: check.conclusion ?? null,
-    }))
+    const result = await runGhCommandTolerant([
+      "pr",
+      "checks",
+      prNumberStr,
+      "--json",
+      "name,state,bucket",
+    ])
+    const stdout = result.stdout.trim()
+    const parsedChecks = tryParseJsonArray(stdout)
+    if (parsedChecks !== null) {
+      ciChecks = parsedChecks.map((entry: unknown) => {
+        const check = (entry ?? {}) as Partial<{
+          name: string
+          state: string
+          bucket: string
+        }>
+        return {
+          name: check.name ?? "",
+          status: check.state ?? "",
+          conclusion: check.bucket ?? null,
+        }
+      })
+    } else if (stdout === "" && NO_CHECKS_REPORTED_PATTERN.test(result.stderr)) {
+      // A checkless PR is data, not degradation: empty ci_checks.
+      ciChecks = []
+    } else {
+      const detail =
+        result.stderr.trim() ||
+        `gh pr checks stdout was not a JSON array (exit ${result.exitCode})`
+      warnings.push(`ci_checks degraded: ${detail}`)
+    }
   } catch (error: unknown) {
     // Non-fatal: CI checks may be unavailable (e.g. no checks configured).
     const msg = error instanceof Error ? error.message : String(error)
@@ -8027,7 +8051,10 @@ async function fetchPrReviewContext(
     .join("\n")
 
   const exceedsThreshold = diffLines > DIFF_THRESHOLD
-  const ciPending = ciChecks.some((check) => check.status !== "completed")
+  // FPR-FR-017 / MODIFIED FR-006: derive from the bucket vocabulary
+  // (`conclusion` carries the bucket), never by comparing the uppercase
+  // `status` to the lowercase "completed" value gh does not emit.
+  const ciPending = ciChecks.some((check) => check.conclusion === "pending")
 
   // ── 1.2g: Populate warnings ─────────────────────────────
   if (ciPending) {
@@ -8187,6 +8214,12 @@ interface GhCommandResult {
  * data. AbortSignal timeouts still reject and classify as `timeout`.
  * Uses Bun.spawn argument arrays exactly like runGhCommand — no shell
  * layer, so untrusted check names and links cannot inject.
+ *
+ * Twin: uf-finale's module-local `runGhCommandTolerant`
+ * (`.opencode/plugins/uf-finale/index.ts`) is the second consumer of this
+ * pattern (fix-uf-finale-ci-poll-gh-schema design D2/R4). A third
+ * consumer MUST trigger extraction into `.opencode/lib/`, not a third
+ * local copy.
  *
  * @param args CLI arguments (e.g. ["pr", "checks", "123", "--json", "..."]).
  * @returns stdout, stderr, and the exit code.
@@ -8399,12 +8432,13 @@ async function fetchPrChecks(prNumber: number): Promise<FetchPrChecksOutput | Fe
  * Creates the fetch_pr_checks OpenCode tool.
  *
  * Repair-lane counterpart to fetch_pr_review_context's internal advisory
- * ci_checks sub-call: that sub-call wraps runGhCommand, throws on
- * non-zero exit, and degrades ci_checks to empty with a warning —
- * correct for review dispatch, where checks are advisory, but
- * fatal-loss for PR repair. This tool treats gh pr checks stdout JSON
- * as check-status data on ANY exit code and derives the eligibility
- * classification from the observed buckets (design D4).
+ * ci_checks sub-call: that sub-call shares the exit-code-tolerant runner
+ * but treats checks as advisory — an unknown bucket leaves ci_pending
+ * false and a genuine failure degrades ci_checks to empty with a warning.
+ * That is correct for review dispatch but fatal-loss for PR repair, where
+ * the checks payload is the primary signal. This tool treats gh pr checks
+ * stdout JSON as check-status data on ANY exit code and derives the
+ * eligibility classification from the observed buckets (design D4).
  *
  * @returns An OpenCode tool definition taking a required validated PR
  *   number and returning check status plus derived eligibility.
