@@ -1,0 +1,10 @@
+---
+tag: issue-triage
+author: jay-flowers
+category: pattern
+created_at: 2026-11-01T22:54:17Z
+identity: issue-triage-20261101T225417-jay-flowers
+tier: draft
+---
+
+Triage pattern (unbound-force governance): a follow-up issue that converts a documented determinism trade-off into actionable work is VALID by construction when four anchors verify. (1) Bidirectional traceability: the originating change's constitution-check section records the trade-off and points at the follow-up issue number — e.g. openspec/changes/update-run-pipeline-plan/proposal.md Principle VI reads "PASS (trade-off documented)", names the deferred mechanical steps (lines 209-214), and ends "tracked in #842" (lines 220-221). (2) The deferred items are concretely named deterministic procedures (parsing, git/gh choreography, verification loops) that determinism.md DE-001 [MUST] and Constitution Principle VI require be extracted to executable tools with tests — so the requested work is governance-mandated, not aspirational. (3) Staleness check via grep, not memory: search the target plugin/lib for the distinctive markers (e.g. "paused at:", "[BLOCKED:") and list active openspec/changes/ — producer-side renderers (unleash-templates.ts renders the "## /uf.unleash paused at:" heading) existing without consumer-side tooling confirms the gap is real. (4) The zero-waste rule is the compliance mechanism: a Conflict-Resolution-documented deferral must map to actionable work, and the tracking issue IS that mapping. Classification: category "enhancement" (behavior-preserving internal quality work — user-visible command behavior is unchanged, only its execution mechanism), objectivity "objective" (verifiable against proposal, command prose, packs, and plugin tree). Split is unnecessary when sub-items share one origin trade-off, one command, and one integration point — the issue checklist is the decomposition. Implementation note for the follow-up change: each prose→tool increment must carry a seam-verification task per DE-007 (registration surface, documented output shape, round-trips).

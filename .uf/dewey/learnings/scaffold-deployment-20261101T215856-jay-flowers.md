@@ -1,0 +1,10 @@
+---
+tag: scaffold-deployment
+author: jay-flowers
+category: gotcha
+created_at: 2026-11-01T21:58:56Z
+identity: scaffold-deployment-20261101T215856-jay-flowers
+tier: draft
+---
+
+When a convention pack authored as repo-local governance content is later promoted to a scaffolded asset deployed by `uf init`, the deploying change must reconcile the pack's own recorded design statements, not just the deployment mechanics. The meta-prompt pack (#888) shipped with two repo-local design notes — "not a scaffold asset" in its header and "ships no `-custom.md` companion" in its Custom Rules section — that directly contradict slice-2 issue #889's acceptance criterion requiring a `meta-prompt-custom.md` deployment template. The repo-local rationale (customize by revising the canonical pack through a governance change) does not transfer to hero repos: they cannot run governance changes on the meta repo's pack, and re-init refreshes tool-owned canonical packs, so deployed repos need the user-owned `-custom.md` extension point that every other always-deployed language-agnostic pack (default, content, ci, review-voice) carries. Generalizing: triage or review of scaffold-deployment issues should check both sides — the deployment surface (alwaysDeployedPacks, embedded asset tree under internal/scaffold/assets/, isToolOwned classification) AND the canonical asset's own text — for contradictions with the acceptance criteria, and the deploying change must update the asset's recorded decision in the same increment. Related staleness trap: issues citing scaffold.go line ranges may point at isDivisorAsset (~730-758, a DivisorOnly-mode filter) rather than isToolOwned (~640, the deployment ownership list); in the model-matrix case slice 1 had already registered `uf/model-matrix.yaml` as tool-owned (line 685, citing SC-FR-007 design D10) and `uf/schemas/` is blanket tool-owned via prefix (line 644), so the genuine remaining gaps were only the alwaysDeployedPacks entries and the missing embedded meta-prompt pack files.
