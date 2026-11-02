@@ -131,19 +131,22 @@ or e2e tests needed — the command is read-only
 filesystem inspection. Git-dependent checks use
 `git init` inside `t.TempDir()` for isolation.
 
-Coverage achieved: 90.7% statement coverage for
-`internal/gate/` (measured with `go test -cover`),
-meeting the >= 90% target; the lowest per-function
-figure is 82.6% (checkCoverageStrategy).
+Coverage achieved: 93.7% statement coverage for
+`internal/gate/` (measured with `go test -cover`);
+the lowest per-function figure outside the
+deliberately-untriggered `init` panic guard is
+80.0% (FormatJSON, whose marshal-error branch is
+unreachable with the current report types).
 Justification: this is a governance gate command
 where false negatives mean constitution violations
 pass unchecked. The check functions are pure
 functions with clear input/output contracts, making
 high coverage both achievable and appropriate for
-the risk level. Note: the target is documented but
-not enforced by a CI coverage ratchet; adding one
-is a CI change requiring its own spec (tracked
-separately).
+the risk level. The enforced CI ratchet for
+`internal/gate/` is the 80% helper-scope floor in
+coverage-gate.json; the measured figure exceeds
+that floor, and a regression below 80% fails the
+CI coverage gate.
 
 ## 8. Documentation
 

@@ -23,7 +23,7 @@ func FormatJSON(report *GateReport, w io.Writer) error {
 // FormatText renders the GateReport as colored terminal output
 // per D6. Uses lipgloss for styling with automatic NO_COLOR
 // and pipe detection.
-func FormatText(report *GateReport, w io.Writer) error {
+func FormatText(report *GateReport, w io.Writer) (err error) {
 	renderer := lipgloss.NewRenderer(w)
 
 	passStyle := renderer.NewStyle().Foreground(lipgloss.Color("10"))
@@ -33,8 +33,21 @@ func FormatText(report *GateReport, w io.Writer) error {
 
 	hasColor := renderer.ColorProfile() != termenv.Ascii
 
+	// write records the first write error so a failing sink is not
+	// silently ignored, matching FormatJSON's error contract.
+	failed := false
+	write := func(f string, args ...any) {
+		if failed {
+			return
+		}
+		if _, e := fmt.Fprintf(w, f, args...); e != nil && err == nil {
+			err = e
+			failed = true
+		}
+	}
+
 	// Phase header.
-	_, _ = fmt.Fprintf(w, "%s\n\n", titleStyle.Render(fmt.Sprintf("Gate: %s", report.Phase)))
+	write("%s\n\n", titleStyle.Render(fmt.Sprintf("Gate: %s", report.Phase)))
 
 	// Individual check results.
 	for _, r := range report.Checks {
@@ -43,38 +56,38 @@ func FormatText(report *GateReport, w io.Writer) error {
 		if !r.Passed && r.Message != "" {
 			line += " — " + r.Message
 		}
-		_, _ = fmt.Fprintln(w, line)
+		write("%s\n", line)
 	}
 
-	_, _ = fmt.Fprintln(w)
+	write("\n")
 
 	// Summary line.
 	if report.Passed {
 		summary := fmt.Sprintf("PASS: %d of %d checks passed",
 			report.Summary.Passed, report.Summary.Total)
 		if hasColor {
-			_, _ = fmt.Fprintln(w, passStyle.Render(summary))
+			write("%s\n", passStyle.Render(summary))
 		} else {
-			_, _ = fmt.Fprintln(w, summary)
+			write("%s\n", summary)
 		}
 	} else {
 		summary := fmt.Sprintf("FAIL: %d of %d checks failed",
 			report.Summary.Failed, report.Summary.Total)
 		if hasColor {
-			_, _ = fmt.Fprintln(w, failStyle.Render(summary))
+			write("%s\n", failStyle.Render(summary))
 		} else {
-			_, _ = fmt.Fprintln(w, summary)
+			write("%s\n", summary)
 		}
 	}
 
 	// Provenance in dim.
 	if report.Branch != "" {
-		_, _ = fmt.Fprintln(w, dimStyle.Render(
+		write("%s\n", dimStyle.Render(
 			fmt.Sprintf("  branch: %s  |  %s v%s",
 				report.Branch, report.Producer, report.Version)))
 	}
 
-	return nil
+	return err
 }
 
 // gateIndicator returns the pass/fail symbol for a check result.

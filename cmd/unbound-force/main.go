@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,8 +38,29 @@ func main() {
 	root.AddCommand(newGateCmd())
 
 	if err := root.Execute(); err != nil {
-		os.Exit(gateExitCode(err))
+		os.Exit(exitCode(err))
 	}
+}
+
+// exitCoder is implemented by errors that carry their own process
+// exit code. Commands opt in by implementing the method; main maps
+// exit codes through this interface without naming any concrete
+// error type.
+type exitCoder interface {
+	ExitCode() int
+}
+
+// exitCode maps a command error to a process exit code: 0 for nil,
+// the error's own code when it implements exitCoder, 1 otherwise.
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var coded exitCoder
+	if errors.As(err, &coded) {
+		return coded.ExitCode()
+	}
+	return 1
 }
 
 type initParams struct {

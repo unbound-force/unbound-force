@@ -44,6 +44,11 @@ type InternalError struct {
 func (e *InternalError) Error() string { return e.Err.Error() }
 func (e *InternalError) Unwrap() error { return e.Err }
 
+// ExitCode returns the process exit code for an internal error (2).
+// It lets a CLI map exit codes through a generic interface without
+// naming this type.
+func (e *InternalError) ExitCode() int { return 2 }
+
 // GateReport is the complete output from a gate run, including
 // provenance metadata per Constitution III.
 type GateReport struct {

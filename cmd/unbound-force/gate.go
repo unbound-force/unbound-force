@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,12 +20,12 @@ type gateParams struct {
 }
 
 // runGate executes the gate command with testable parameters.
-// Returns error on check failure or internal error. Callers
-// inspect the error type to determine exit code:
+// Returns error on check failure or internal error. main maps the
+// returned error to an exit code through the exitCoder interface:
 //
-//	nil              → exit 0 (all checks pass)
-//	plain error      → exit 1 (validation or check failure)
-//	*InternalError   → exit 2 (internal error)
+//	nil           → exit 0 (all checks pass)
+//	plain error   → exit 1 (validation or check failure)
+//	*gate.InternalError → exit 2 (implements exitCoder)
 func runGate(p gateParams) error {
 	opts := gate.Options{
 		TargetDir: p.targetDir,
@@ -67,24 +66,15 @@ func runGate(p gateParams) error {
 	return err
 }
 
-// gateExitCode returns the appropriate exit code for a gate error.
-// Exit 0 = pass, 1 = check failure, 2 = internal error.
-func gateExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	var internal *gate.InternalError
-	if errors.As(err, &internal) {
-		return 2
-	}
-	return 1
-}
-
 // newGateCmd creates the cobra command for the gate subcommand.
 func newGateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gate",
 		Short: "Enforce constitution compliance at workflow phase boundaries",
+		// Headless tool: never emit usage on the error path. Errors
+		// go to stderr; the report (if any) is the only stdout
+		// content, keeping --format json output parseable.
+		SilenceUsage: true,
 		Long: `Run phase-specific constitution compliance checks. Designed for
 headless use in CI pipelines, validation loops, and pre-PR hooks.
 
@@ -107,10 +97,11 @@ Coverage strategy detection (implement phase):
   line matching coverage.*%.
 
 Artifact resolution:
-  Checks resolve artifacts from openspec/changes/* or
-  specs/* (first match, alphabetical). When multiple changes
-  exist, review and PR check messages name the resolved
-  tasks file.
+  When the current branch names a change (opsx/<name> or
+  NNN-<name>), checks resolve artifacts from that change only
+  (openspec/changes/<name>/ or specs/<name>/). On branches
+  without a change mapping, checks fall back to the first
+  alphabetical match across openspec/changes/* or specs/*.
 
 Use --format json for machine-readable output with provenance
 metadata (version, producer, timestamp, branch).`,

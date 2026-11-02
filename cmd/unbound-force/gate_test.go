@@ -45,8 +45,8 @@ func TestRunGate_JSONOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if gateExitCode(err) != 0 {
-		t.Errorf("expected exit code 0, got %d", gateExitCode(err))
+	if exitCode(err) != 0 {
+		t.Errorf("expected exit code 0, got %d", exitCode(err))
 	}
 
 	// Verify valid JSON.
@@ -80,8 +80,8 @@ func TestRunGate_TextOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if gateExitCode(err) != 0 {
-		t.Errorf("expected exit code 0, got %d", gateExitCode(err))
+	if exitCode(err) != 0 {
+		t.Errorf("expected exit code 0, got %d", exitCode(err))
 	}
 
 	output := stdout.String()
@@ -105,8 +105,8 @@ func TestRunGate_InvalidPhase(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid phase")
 	}
-	if gateExitCode(err) != 1 {
-		t.Errorf("expected exit code 1 for invalid phase, got %d", gateExitCode(err))
+	if exitCode(err) != 1 {
+		t.Errorf("expected exit code 1 for invalid phase, got %d", exitCode(err))
 	}
 }
 
@@ -132,8 +132,8 @@ func TestRunGate_UnrecognizedFormat_FallsToText(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for failing check")
 	}
-	if gateExitCode(err) != 1 {
-		t.Errorf("expected exit code 1 for check failure, got %d", gateExitCode(err))
+	if exitCode(err) != 1 {
+		t.Errorf("expected exit code 1 for check failure, got %d", exitCode(err))
 	}
 	if !strings.Contains(stdout.String(), "Gate: specify") {
 		t.Errorf("expected text formatter output, got: %s", stdout.String())
@@ -154,8 +154,8 @@ func TestRunGate_NonExistentDir(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-existent directory")
 	}
-	if gateExitCode(err) != 1 {
-		t.Errorf("expected exit code 1 for non-existent dir, got %d", gateExitCode(err))
+	if exitCode(err) != 1 {
+		t.Errorf("expected exit code 1 for non-existent dir, got %d", exitCode(err))
 	}
 }
 
@@ -175,8 +175,8 @@ func TestRunGate_CheckFailure_ExitCode1(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for failing check")
 	}
-	if gateExitCode(err) != 1 {
-		t.Errorf("expected exit code 1 for check failure, got %d", gateExitCode(err))
+	if exitCode(err) != 1 {
+		t.Errorf("expected exit code 1 for check failure, got %d", exitCode(err))
 	}
 
 	// Verify JSON output was still produced.
@@ -208,8 +208,8 @@ func TestRunGate_PathIsFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for file path")
 	}
-	if gateExitCode(err) != 1 {
-		t.Errorf("expected exit code 1 for file path, got %d", gateExitCode(err))
+	if exitCode(err) != 1 {
+		t.Errorf("expected exit code 1 for file path, got %d", exitCode(err))
 	}
 }
 
@@ -239,7 +239,7 @@ func TestNewGateCmd_MissingPhase(t *testing.T) {
 	}
 }
 
-func TestGateExitCode(t *testing.T) {
+func TestExitCode(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
@@ -258,8 +258,8 @@ func TestGateExitCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := gateExitCode(tt.err); got != tt.want {
-				t.Errorf("gateExitCode() = %d, want %d", got, tt.want)
+			if got := exitCode(tt.err); got != tt.want {
+				t.Errorf("exitCode() = %d, want %d", got, tt.want)
 			}
 		})
 	}
@@ -287,6 +287,10 @@ func TestNewGateCmd_Execute(t *testing.T) {
 	if !report.Passed {
 		t.Error("expected report.Passed=true")
 	}
+	// On success, stderr stays clean — the report is stdout-only.
+	if errBuf.Len() != 0 {
+		t.Errorf("expected empty stderr on success, got: %q", errBuf.String())
+	}
 }
 
 func TestNewGateCmd_Execute_DefaultDir(t *testing.T) {
@@ -312,7 +316,7 @@ func TestNewGateCmd_Execute_DefaultDir(t *testing.T) {
 
 // failingWriter always fails on Write, simulating a broken
 // stdout to exercise the format-failure internal error path
-// (FormatJSON propagates write errors; FormatText does not).
+// (both FormatJSON and FormatText propagate write errors).
 type failingWriter struct{}
 
 func (failingWriter) Write(p []byte) (int, error) {
@@ -337,7 +341,83 @@ func TestRunGate_FormatFailure_ExitCode2(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for format write failure")
 	}
-	if gateExitCode(err) != 2 {
-		t.Errorf("expected exit code 2 for internal error, got %d", gateExitCode(err))
+	if exitCode(err) != 2 {
+		t.Errorf("expected exit code 2 for internal error, got %d", exitCode(err))
+	}
+}
+
+func TestRunGate_TextFormatFailure_ExitCode2(t *testing.T) {
+	dir := t.TempDir()
+	scaffoldGateFixture(t, dir, map[string]string{
+		"proposal.md": "# Proposal",
+	})
+
+	var stderr bytes.Buffer
+	err := runGate(gateParams{
+		targetDir: dir,
+		phase:     "specify",
+		format:    "text",
+		stdout:    failingWriter{},
+		stderr:    &stderr,
+	})
+
+	if err == nil {
+		t.Fatal("expected error for text format write failure")
+	}
+	if exitCode(err) != 2 {
+		t.Errorf("expected exit code 2 for internal error, got %d", exitCode(err))
+	}
+}
+
+func TestNewGateCmd_ValidationError_StreamSeparation(t *testing.T) {
+	dir := t.TempDir()
+	cmd := newGateCmd()
+	var out, errBuf bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	cmd.SetArgs([]string{"--phase", "deploy", "--dir", dir})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for invalid phase")
+	}
+
+	// Validation errors must reach stderr, not stdout.
+	if !strings.Contains(errBuf.String(), "invalid") {
+		t.Errorf("expected validation error on stderr, got: %q", errBuf.String())
+	}
+	if strings.Contains(out.String(), "invalid") {
+		t.Errorf("validation error leaked to stdout: %q", out.String())
+	}
+	// Stdout must not carry a report on a validation error.
+	var report gate.GateReport
+	if json.Unmarshal(out.Bytes(), &report) == nil {
+		t.Errorf("stdout should not contain a gate report on validation error: %q", out.String())
+	}
+}
+
+func TestNewGateCmd_CheckFailure_StreamSeparation(t *testing.T) {
+	// Empty directory — the specify check fails.
+	dir := t.TempDir()
+	cmd := newGateCmd()
+	var out, errBuf bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	cmd.SetArgs([]string{"--phase", "specify", "--dir", dir, "--format", "json"})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for failing check")
+	}
+
+	// The report is the only stdout content: pure, parseable JSON.
+	var report gate.GateReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &report); jsonErr != nil {
+		t.Fatalf("stdout should be parseable JSON on check failure: %v\nraw: %s", jsonErr, out.String())
+	}
+	if report.Passed {
+		t.Error("expected report.Passed=false")
+	}
+	// The error line goes to stderr.
+	if !strings.Contains(errBuf.String(), "Error:") {
+		t.Errorf("expected error line on stderr, got: %q", errBuf.String())
 	}
 }

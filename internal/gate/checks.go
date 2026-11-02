@@ -60,37 +60,109 @@ type artifactQuery struct {
 	speckitFile  string // filename under specs/*/
 }
 
+// Base directories of the two supported artifact layouts.
+const (
+	openspecChangesBase = "openspec/changes"
+	speckitBase         = "specs"
+)
+
+// speckitBranchRe matches Speckit feature branches (NNN-<name>).
+var speckitBranchRe = regexp.MustCompile(`^[0-9]{3,}-`)
+
+// activeChangeName returns the change directory name that the given
+// branch maps to under base, or "" when the branch does not identify
+// a change in that layout:
+//
+//	opsx/<name> under openspec/changes -> <name>
+//	NNN-<name> under specs             -> NNN-<name> (full branch)
+func activeChangeName(branch, base string) string {
+	switch base {
+	case openspecChangesBase:
+		if name, ok := strings.CutPrefix(branch, "opsx/"); ok && name != "" {
+			return name
+		}
+	case speckitBase:
+		if speckitBranchRe.MatchString(branch) {
+			return branch
+		}
+	}
+	return ""
+}
+
+// fileExists reports whether path exists and is a regular file.
+func fileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
+}
+
+// globFirst returns the first (alphabetical) match of
+// <dir>/<base>/*/<file>, or "" when none exist.
+func globFirst(dir, base, file string) string {
+	matches, _ := filepath.Glob(filepath.Join(dir, base, "*", file))
+	if len(matches) > 0 {
+		return matches[0]
+	}
+	return ""
+}
+
 // checkArtifactExists probes both OpenSpec and Speckit locations
 // for an artifact. Returns a CheckResult with the given check
 // name and label. Glob errors are impossible since patterns are
 // constructed from constants via filepath.Join.
 func checkArtifactExists(q artifactQuery) CheckResult {
-	// OpenSpec: openspec/changes/*/<file>
-	pattern := filepath.Join(q.dir, "openspec", "changes", "*", q.openspecFile)
-	if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
-		rel, _ := filepath.Rel(q.dir, matches[0])
+	// Branch-aware resolution: when the current branch identifies a
+	// change, validate that change only. Falling back to another
+	// change would let an unrelated change mask a missing artifact
+	// for the active change — a false pass in multi-change repos.
+	branch := detectBranch(q.dir)
+
+	if active := activeChangeName(branch, openspecChangesBase); active != "" {
+		p := filepath.Join(q.dir, openspecChangesBase, active, q.openspecFile)
+		if fileExists(p) {
+			return q.passAt(p)
+		}
 		return CheckResult{
 			Name:    q.checkName,
-			Passed:  true,
-			Message: fmt.Sprintf("%s found at %s", q.label, rel),
+			Passed:  false,
+			Message: fmt.Sprintf("No %s artifact found for change %s (expected %s/%s/%s)", q.label, active, openspecChangesBase, active, q.openspecFile),
 		}
 	}
 
-	// Speckit: specs/*/<file>
-	pattern = filepath.Join(q.dir, "specs", "*", q.speckitFile)
-	if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
-		rel, _ := filepath.Rel(q.dir, matches[0])
+	if active := activeChangeName(branch, speckitBase); active != "" {
+		p := filepath.Join(q.dir, speckitBase, active, q.speckitFile)
+		if fileExists(p) {
+			return q.passAt(p)
+		}
 		return CheckResult{
 			Name:    q.checkName,
-			Passed:  true,
-			Message: fmt.Sprintf("%s found at %s", q.label, rel),
+			Passed:  false,
+			Message: fmt.Sprintf("No %s artifact found for change %s (expected %s/%s/%s)", q.label, active, speckitBase, active, q.speckitFile),
 		}
+	}
+
+	// No branch mapping: legacy first-match behavior across all
+	// changes.
+	if p := globFirst(q.dir, openspecChangesBase, q.openspecFile); p != "" {
+		return q.passAt(p)
+	}
+	if p := globFirst(q.dir, speckitBase, q.speckitFile); p != "" {
+		return q.passAt(p)
 	}
 
 	return CheckResult{
 		Name:    q.checkName,
 		Passed:  false,
-		Message: fmt.Sprintf("No %s artifact found (expected openspec/changes/*/%s or specs/*/%s)", q.label, q.openspecFile, q.speckitFile),
+		Message: fmt.Sprintf("No %s artifact found (expected %s/*/%s or %s/*/%s)", q.label, openspecChangesBase, q.openspecFile, speckitBase, q.speckitFile),
+	}
+}
+
+// passAt builds the passing CheckResult for a resolved artifact path.
+func (q artifactQuery) passAt(path string) CheckResult {
+	rel, _ := filepath.Rel(q.dir, path)
+	return CheckResult{
+		Name:    q.checkName,
+		Passed:  true,
+		Message: fmt.Sprintf("%s found at %s", q.label, rel),
 	}
 }
 
@@ -240,23 +312,9 @@ func hasCoverageStrategy(path string) (bool, error) {
 // checkTasksComplete scans tasks.md for unchecked task boxes
 // per FR-007. If any `- [ ]` lines remain, the check fails.
 func checkTasksComplete(dir string) CheckResult {
-	path := findTasksFile(dir)
-	if path == "" {
-		return CheckResult{
-			Name:    "tasks-complete",
-			Passed:  false,
-			Message: "No tasks.md found",
-		}
-	}
-	rel, _ := filepath.Rel(dir, path)
-
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return CheckResult{
-			Name:    "tasks-complete",
-			Passed:  false,
-			Message: fmt.Sprintf("Cannot read %s: %v", rel, err),
-		}
+	rel, content, ok, message := loadTasksFile(dir)
+	if !ok {
+		return CheckResult{Name: "tasks-complete", Passed: false, Message: message}
 	}
 
 	if strings.Contains(string(content), "- [ ]") {
@@ -274,6 +332,24 @@ func checkTasksComplete(dir string) CheckResult {
 	}
 }
 
+// loadTasksFile resolves the active change's tasks.md and reads it.
+// On success it returns a relative path (for messages) and the file
+// content. When the file is absent or unreadable, ok is false and
+// message carries the user-facing failure text — an expected check
+// outcome, not a program error.
+func loadTasksFile(dir string) (rel string, content []byte, ok bool, message string) {
+	path := findTasksFile(dir)
+	if path == "" {
+		return "", nil, false, "No tasks.md found"
+	}
+	rel, _ = filepath.Rel(dir, path)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return rel, nil, false, fmt.Sprintf("Cannot read %s: %v", rel, err)
+	}
+	return rel, content, true, ""
+}
+
 // reviewMarkers are the HTML comment markers that indicate a
 // review has been executed.
 var reviewMarkers = []string{
@@ -284,23 +360,9 @@ var reviewMarkers = []string{
 // checkReviewRun looks for any review marker in tasks.md per
 // FR-007. Accepts either spec-review or code-review marker.
 func checkReviewRun(dir string) CheckResult {
-	path := findTasksFile(dir)
-	if path == "" {
-		return CheckResult{
-			Name:    "review-run",
-			Passed:  false,
-			Message: "No tasks.md found",
-		}
-	}
-	rel, _ := filepath.Rel(dir, path)
-
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return CheckResult{
-			Name:    "review-run",
-			Passed:  false,
-			Message: fmt.Sprintf("Cannot read %s: %v", rel, err),
-		}
+	rel, content, ok, message := loadTasksFile(dir)
+	if !ok {
+		return CheckResult{Name: "review-run", Passed: false, Message: message}
 	}
 
 	text := string(content)
@@ -329,23 +391,9 @@ const codeReviewMarker = "<!-- code-review: passed -->"
 // tasks.md per FR-008. Unlike checkReviewRun, this requires
 // specifically the code-review marker.
 func checkReviewPass(dir string) CheckResult {
-	path := findTasksFile(dir)
-	if path == "" {
-		return CheckResult{
-			Name:    "review-pass",
-			Passed:  false,
-			Message: "No tasks.md found",
-		}
-	}
-	rel, _ := filepath.Rel(dir, path)
-
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return CheckResult{
-			Name:    "review-pass",
-			Passed:  false,
-			Message: fmt.Sprintf("Cannot read %s: %v", rel, err),
-		}
+	rel, content, ok, message := loadTasksFile(dir)
+	if !ok {
+		return CheckResult{Name: "review-pass", Passed: false, Message: message}
 	}
 
 	if strings.Contains(string(content), codeReviewMarker) {
@@ -411,21 +459,31 @@ func checkNotOnMain(dir string) CheckResult {
 	}
 }
 
-// findTasksFile locates the tasks.md file, checking both
-// OpenSpec and Speckit locations. Returns empty string if
-// not found.
+// findTasksFile locates the tasks.md file for the change that the
+// current branch maps to. When the branch identifies no change it
+// falls back to the first alphabetical match across both layouts.
+// Returns empty string if not found.
 func findTasksFile(dir string) string {
-	// OpenSpec: openspec/changes/*/tasks.md
-	pattern := filepath.Join(dir, "openspec", "changes", "*", "tasks.md")
-	if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
-		return matches[0]
+	branch := detectBranch(dir)
+
+	if active := activeChangeName(branch, openspecChangesBase); active != "" {
+		p := filepath.Join(dir, openspecChangesBase, active, "tasks.md")
+		if fileExists(p) {
+			return p
+		}
+		return ""
 	}
 
-	// Speckit: specs/NNN-*/tasks.md
-	pattern = filepath.Join(dir, "specs", "*", "tasks.md")
-	if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
-		return matches[0]
+	if active := activeChangeName(branch, speckitBase); active != "" {
+		p := filepath.Join(dir, speckitBase, active, "tasks.md")
+		if fileExists(p) {
+			return p
+		}
+		return ""
 	}
 
-	return ""
+	if p := globFirst(dir, openspecChangesBase, "tasks.md"); p != "" {
+		return p
+	}
+	return globFirst(dir, speckitBase, "tasks.md")
 }

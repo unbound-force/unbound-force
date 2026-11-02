@@ -3,6 +3,7 @@ package gate
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,10 +16,17 @@ import (
 
 // --- helpers ---
 
-// scaffoldOpenSpec creates an OpenSpec artifact tree inside dir.
+// scaffoldOpenSpec creates an OpenSpec artifact tree inside dir
+// under the change "test-change".
 func scaffoldOpenSpec(t *testing.T, dir string, files map[string]string) {
+	scaffoldOpenSpecChange(t, dir, "test-change", files)
+}
+
+// scaffoldOpenSpecChange creates an OpenSpec artifact tree for the
+// named change inside dir.
+func scaffoldOpenSpecChange(t *testing.T, dir, change string, files map[string]string) {
 	t.Helper()
-	changeDir := filepath.Join(dir, "openspec", "changes", "test-change")
+	changeDir := filepath.Join(dir, "openspec", "changes", change)
 	if err := os.MkdirAll(changeDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -30,10 +38,17 @@ func scaffoldOpenSpec(t *testing.T, dir string, files map[string]string) {
 	}
 }
 
-// scaffoldSpeckit creates a Speckit artifact tree inside dir.
+// scaffoldSpeckit creates a Speckit artifact tree inside dir under
+// the spec "001-test-feature".
 func scaffoldSpeckit(t *testing.T, dir string, files map[string]string) {
+	scaffoldSpeckitChange(t, dir, "001-test-feature", files)
+}
+
+// scaffoldSpeckitChange creates a Speckit artifact tree for the
+// named spec inside dir.
+func scaffoldSpeckitChange(t *testing.T, dir, spec string, files map[string]string) {
 	t.Helper()
-	specDir := filepath.Join(dir, "specs", "001-test-feature")
+	specDir := filepath.Join(dir, "specs", spec)
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -46,11 +61,21 @@ func scaffoldSpeckit(t *testing.T, dir string, files map[string]string) {
 }
 
 // initGitRepo creates a git repository in dir with a branch.
+// Repo-local config pins the test environment: user identity,
+// no GPG signing, and a hooks path pointing at an empty local
+// directory, so ambient global/system git config cannot change
+// commit behavior.
 func initGitRepo(t *testing.T, dir, branch string) {
 	t.Helper()
 	runGit(t, dir, "init", "--initial-branch=main")
 	runGit(t, dir, "config", "user.email", "test@test.com")
 	runGit(t, dir, "config", "user.name", "Test")
+	runGit(t, dir, "config", "commit.gpgsign", "false")
+	hooksDir := filepath.Join(dir, ".test-hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("mkdir hooks: %v", err)
+	}
+	runGit(t, dir, "config", "core.hooksPath", hooksDir)
 	// Create initial commit so branch operations work.
 	dummy := filepath.Join(dir, ".gitkeep")
 	if err := os.WriteFile(dummy, []byte(""), 0o644); err != nil {
@@ -713,6 +738,9 @@ func TestRun_Provenance(t *testing.T) {
 	if report.Timestamp == "" {
 		t.Error("expected non-empty timestamp")
 	}
+	if _, perr := time.Parse(time.RFC3339, report.Timestamp); perr != nil {
+		t.Errorf("timestamp %q is not RFC3339: %v", report.Timestamp, perr)
+	}
 	if report.Phase != "specify" {
 		t.Errorf("expected phase specify, got %s", report.Phase)
 	}
@@ -1104,7 +1132,9 @@ func TestRun_PRPhase_Pass(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	initGitRepo(t, dir, "opsx/test-feature")
+	// Branch must map to the scaffolded change (opsx/<change>) so
+	// branch-aware artifact resolution selects it.
+	initGitRepo(t, dir, "opsx/test-change")
 	scaffoldOpenSpec(t, dir, map[string]string{
 		"tasks.md": "# Tasks\n- [x] Task 1\n<!-- code-review: passed -->",
 	})
@@ -1123,8 +1153,8 @@ func TestRun_PRPhase_Pass(t *testing.T) {
 	if !report.Passed {
 		t.Error("expected PR phase to pass")
 	}
-	if report.Branch != "opsx/test-feature" {
-		t.Errorf("expected branch opsx/test-feature, got %s", report.Branch)
+	if report.Branch != "opsx/test-change" {
+		t.Errorf("expected branch opsx/test-change, got %s", report.Branch)
 	}
 	if report.Summary.Total != 2 || report.Summary.Failed != 0 {
 		t.Errorf("unexpected summary: %+v", report.Summary)
@@ -1201,5 +1231,206 @@ func TestRun_PRPhase_FailOnMain(t *testing.T) {
 	}
 	if report.Summary.Failed != 1 {
 		t.Errorf("expected 1 failure, got %d", report.Summary.Failed)
+	}
+}
+
+// --- symlinked target dir (FR-010) ---
+
+func TestRun_SymlinkedTargetDir(t *testing.T) {
+	real := t.TempDir()
+	scaffoldOpenSpec(t, real, map[string]string{
+		"proposal.md": "# Proposal",
+	})
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	report, err := Run(Options{
+		TargetDir: link,
+		Phase:     "specify",
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error through symlink: %v", err)
+	}
+	if !report.Passed {
+		t.Errorf("expected pass through symlinked dir, got: %+v", report.Checks)
+	}
+}
+
+// --- branch-aware multi-change resolution ---
+
+func TestFindTasksFile_MultipleChanges_SelectsBranchChange(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	// Two concurrent changes. The alphabetically first is NOT the
+	// active one; the branch must drive selection.
+	scaffoldOpenSpecChange(t, dir, "aaa-first", map[string]string{
+		"tasks.md": "# Tasks\n- [x] a\n",
+	})
+	scaffoldOpenSpecChange(t, dir, "zzz-active", map[string]string{
+		"tasks.md": "# Tasks\n- [x] z\n",
+	})
+	initGitRepo(t, dir, "opsx/zzz-active")
+
+	path := findTasksFile(dir)
+	want := filepath.Join(dir, "openspec", "changes", "zzz-active", "tasks.md")
+	if path != want {
+		t.Errorf("expected branch-mapped tasks file %s, got %s", want, path)
+	}
+}
+
+func TestCheckSpecExists_ActiveChangeMissing_Fails(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	// An unrelated change has the artifact; the active change does
+	// not. Strict branch-aware resolution must not fall back to the
+	// unrelated change (false-pass prevention).
+	scaffoldOpenSpecChange(t, dir, "aaa-other", map[string]string{
+		"proposal.md": "# Proposal",
+	})
+	scaffoldOpenSpecChange(t, dir, "zzz-active", map[string]string{
+		"tasks.md": "# Tasks\n",
+	})
+	initGitRepo(t, dir, "opsx/zzz-active")
+
+	r := checkSpecExists(dir)
+	if r.Passed {
+		t.Errorf("expected fail: active change has no proposal.md; got pass: %s", r.Message)
+	}
+}
+
+func TestFindTasksFile_SpeckitBranchChange(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	// Speckit layout: the change directory is the full branch name.
+	scaffoldSpeckit(t, dir, map[string]string{
+		"tasks.md": "# Tasks\n",
+	})
+	initGitRepo(t, dir, "001-test-feature")
+
+	path := findTasksFile(dir)
+	want := filepath.Join(dir, "specs", "001-test-feature", "tasks.md")
+	if path != want {
+		t.Errorf("expected branch-mapped tasks file %s, got %s", want, path)
+	}
+}
+
+// --- read-error branches ---
+
+func TestTaskChecks_UnreadableTasksFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root; permission bits do not apply")
+	}
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"tasks.md": "# Tasks\n- [x] done\n<!-- code-review: passed -->",
+	})
+	tasksPath := filepath.Join(dir, "openspec", "changes", "test-change", "tasks.md")
+	if err := os.Chmod(tasksPath, 0); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		fn   func(string) CheckResult
+	}{
+		{"tasks-complete", checkTasksComplete},
+		{"review-run", checkReviewRun},
+		{"review-pass", checkReviewPass},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := tc.fn(dir)
+			if r.Passed {
+				t.Errorf("expected fail for unreadable tasks.md")
+			}
+			if !strings.Contains(r.Message, "Cannot read") {
+				t.Errorf("expected 'Cannot read' message, got: %s", r.Message)
+			}
+		})
+	}
+}
+
+func TestCheckCoverageStrategy_UnreadableArtifact(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root; permission bits do not apply")
+	}
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"tasks.md": "# Tasks\n\n## Coverage Strategy\n\n>= 80%\n",
+	})
+	tasksPath := filepath.Join(dir, "openspec", "changes", "test-change", "tasks.md")
+	if err := os.Chmod(tasksPath, 0); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	r := checkCoverageStrategy(dir)
+	if r.Passed {
+		t.Errorf("expected fail for unreadable artifact")
+	}
+	if !strings.Contains(r.Message, "cannot read artifact") {
+		t.Errorf("expected 'cannot read artifact' message, got: %s", r.Message)
+	}
+}
+
+// --- InternalError contract ---
+
+func TestInternalError(t *testing.T) {
+	inner := errors.New("boom")
+	e := &InternalError{Err: inner}
+	if e.Error() != "boom" {
+		t.Errorf("expected 'boom', got %q", e.Error())
+	}
+	if e.Unwrap() != inner {
+		t.Errorf("Unwrap did not return the wrapped error")
+	}
+	if e.ExitCode() != 2 {
+		t.Errorf("expected exit code 2, got %d", e.ExitCode())
+	}
+}
+
+// --- strict-mode missing branches ---
+
+func TestFindTasksFile_ActiveChangeMissing(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	// The branch maps to a change that has no tasks.md. No fallback
+	// to other changes is allowed.
+	scaffoldOpenSpecChange(t, dir, "other-change", map[string]string{
+		"tasks.md": "# Tasks\n",
+	})
+	initGitRepo(t, dir, "opsx/zzz-missing")
+
+	if path := findTasksFile(dir); path != "" {
+		t.Errorf("expected no tasks file for missing active change, got %s", path)
+	}
+}
+
+func TestCheckSpecExists_SpeckitBranch_Missing(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	// A different Speckit feature has the artifact; the active one
+	// does not.
+	scaffoldSpeckitChange(t, dir, "001-other", map[string]string{
+		"spec.md": "# Spec",
+	})
+	initGitRepo(t, dir, "002-active")
+
+	r := checkSpecExists(dir)
+	if r.Passed {
+		t.Errorf("expected fail for active Speckit branch without spec.md; got pass: %s", r.Message)
 	}
 }
