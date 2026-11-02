@@ -162,6 +162,7 @@ describe("provider-free scratch-repository smoke test", () => {
         "scan_clarifications",
         "scan_conflict_markers",
         "uf_delegate_command",
+        "uf_preflight_declared_checks",
         "uf_unleash_branch_gate",
         "uf_unleash_detect_resume",
         "uf_unleash_resolve_issue",

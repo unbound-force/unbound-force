@@ -721,6 +721,7 @@ func isToolOwned(relPath string) bool {
 	if relPath == "opencode/lib/agent-executor.ts" ||
 		relPath == "opencode/lib/branch-classification.ts" ||
 		relPath == "opencode/lib/model-matrix.ts" ||
+		relPath == "opencode/lib/preflight-declared.ts" ||
 		relPath == "opencode/lib/review-dispatch-artifact.ts" ||
 		relPath == "opencode/lib/review-dispatch-sibling-evidence.ts" ||
 		relPath == "opencode/lib/review-dispatch-lesson-proposal.ts" ||
@@ -757,6 +758,12 @@ func isToolOwned(relPath string) bool {
 	// Sibling declarations are project-owned because active repository
 	// relationships are specific to each generated project.
 	if relPath == "uf/sibling-repos.yaml" {
+		return false
+	}
+	// Project-declared pre-flight checks are project-owned: the
+	// pre-flight skill is tool-owned and refreshed on every init, so
+	// this file is where a project adds its own deterministic gates.
+	if relPath == "uf/preflight.yaml" {
 		return false
 	}
 	// Convention packs: canonical packs are tool-owned,
@@ -809,6 +816,7 @@ func isDivisorAsset(relPath string) bool {
 	if relPath == "opencode/lib/agent-executor.ts" ||
 		relPath == "opencode/lib/branch-classification.ts" ||
 		relPath == "opencode/lib/model-matrix.ts" ||
+		relPath == "opencode/lib/preflight-declared.ts" ||
 		relPath == "opencode/lib/review-dispatch-artifact.ts" ||
 		relPath == "opencode/lib/review-dispatch-sibling-evidence.ts" ||
 		relPath == "opencode/lib/review-dispatch-lesson-proposal.ts" ||

@@ -6,6 +6,24 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- preflight-project-checks: projects can declare their own
+  deterministic pre-flight checks in a new project-owned
+  `.uf/preflight.yaml` (`name`, `run`, `args`, `requires`,
+  `paths`, `gate: required|advisory`, `timeout_seconds`), seeded
+  once by `uf init` and preserved on plain re-runs. The new
+  `uf_preflight_declared_checks` tool (uf-workflow plugin,
+  `lib/preflight-declared.ts`) runs the whole procedure as one
+  call: zod validation (a single repo-relative executable, never
+  a shell line), PATH and executable probes, diff-scope
+  filtering with the Phase 2a fallbacks, argv execution without
+  a shell, required/advisory mapping, and -- in `soft-gate` --
+  merge-base worktree baseline classification, returning
+  structured results plus the rendered Execution Results rows.
+  The pre-flight skill's new Phase 2b is a single call to it
+  (determinism pack DE-001/DE-003/DE-005), with registration,
+  golden output-shape, and round-trip seam tests (DE-007).
+  Skill size: 551 -> 589 lines (+38); the prose-only draft of
+  Phase 2b was 652 lines (DE-004).
 - init-override-stubs-gitignore-sync: `uf init` now seeds both
   per-developer override stubs (`.uf/model-matrix.override.yaml`
   and `.uf/review-matrix.override.yaml`) create-only-if-absent

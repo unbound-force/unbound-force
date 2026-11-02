@@ -1,0 +1,18 @@
+# Project-declared pre-flight checks are opt-in. The pre-flight skill
+# (.opencode/skills/pre-flight/SKILL.md, Phase 2b) runs every entry
+# below in addition to the tools it detects from config files.
+#
+# Example fields:
+# - name: bash-env-contract          # unique, [a-z0-9-]
+#   run: .uf/scripts/bash-env-contract.sh   # repo-relative executable, run from the repo root
+#   args: [--base, main]             # optional literal arguments
+#   requires: [bash, yq]             # binaries checked with `which`; missing = skipped, not failed
+#   paths: [scripts/, harness/, .sh] # optional diff scope: `dir/` = prefix, otherwise suffix;
+#                                    # omitted = always in scope
+#   gate: required                   # required (default) participates in the verdict;
+#                                    # advisory records output but never fails the verdict
+#
+# Project checks never map to a CI check, so ci-aware mode always runs
+# them locally. This file is project-owned: plain `uf init` re-runs keep it.
+version: 1
+checks: []

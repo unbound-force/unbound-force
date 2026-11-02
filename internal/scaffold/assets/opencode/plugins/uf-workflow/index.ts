@@ -1,7 +1,8 @@
 import { Buffer } from "node:buffer"
-import { execFileSync } from "node:child_process"
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { lstat, readFile, readdir, writeFile } from "node:fs/promises"
+import { execFile, execFileSync } from "node:child_process"
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { lstat, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { basename, resolve } from "node:path"
 import { tool, type PluginInput, type PluginModule } from "@opencode-ai/plugin"
 import { z } from "zod"
@@ -33,6 +34,14 @@ import {
   parseReviewDispatchArtifact,
   type ReviewDispatchArtifactSummary,
 } from "../../lib/review-dispatch-artifact.js"
+import {
+  PREFLIGHT_MODES,
+  PreflightConfigError,
+  runDeclaredChecks,
+  type DeclaredChecksData,
+  type PreflightDeclaredDependencies,
+  type ProcessResult,
+} from "../../lib/preflight-declared.js"
 import { createBunYamlParser, type YamlParser } from "../../lib/reviewer-manifest.js"
 import {
   BASE_REF_CANDIDATES,
@@ -5318,6 +5327,136 @@ export function createPersistUnleashSummaryTool(exec: GitExec, cwd: string): Ret
 }
 
 // ---------------------------------------------------------------------------
+// uf_preflight_declared_checks tool
+// ---------------------------------------------------------------------------
+
+export type { DeclaredChecksData } from "../../lib/preflight-declared.js"
+
+/** True when the path is an executable regular file. */
+function isExecutableFile(path: string): boolean {
+  try {
+    if (!statSync(path).isFile()) {
+      return false
+    }
+    accessSync(path, fsConstants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** True when the path is a regular file (follows symlinks). */
+function isRegularFile(path: string): boolean {
+  try {
+    return statSync(path).isFile()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Run an executable with an argv list and no shell. stdout and stderr are
+ * concatenated (stdout first); a timeout kills the child and reports a
+ * non-zero exit.
+ */
+function runProcessNoShell(
+  file: string,
+  args: readonly string[],
+  cwd: string,
+  timeoutMs: number,
+  env: Readonly<Record<string, string>>,
+): Promise<ProcessResult> {
+  return new Promise((resolvePromise) => {
+    execFile(
+      file,
+      [...args],
+      {
+        cwd,
+        env: { ...process.env, ...env },
+        timeout: timeoutMs,
+        maxBuffer: 64 * 1024 * 1024,
+        encoding: "utf8",
+        shell: false,
+      },
+      (error, stdout, stderr) => {
+        const output = [stdout, stderr].filter((part) => part.length > 0).join("\n")
+        if (error === null) {
+          resolvePromise({ exitCode: 0, output, timedOut: false })
+          return
+        }
+        const failed = error as NodeJS.ErrnoException & { code?: number | string; killed?: boolean; signal?: string }
+        const timedOut = failed.killed === true && failed.signal !== undefined && failed.signal !== null
+        const exitCode = typeof failed.code === "number" ? failed.code : 1
+        resolvePromise({ exitCode: timedOut ? 124 : exitCode, output: output || failed.message, timedOut })
+      },
+    )
+  })
+}
+
+/** Production dependencies for uf_preflight_declared_checks. */
+export function createPreflightDeclaredDependencies(): PreflightDeclaredDependencies {
+  return {
+    readText: (path: string) => readFile(path, "utf8"),
+    fileExists: isRegularFile,
+    isExecutable: isExecutableFile,
+    // Resolved at registration, like uf_delegate_command's matrix parser.
+    parseYaml: createBunYamlParser(),
+    pathEnv: process.env.PATH ?? "",
+    git: defaultGitExec,
+    runProcess: runProcessNoShell,
+    makeTempDir: () => mkdtemp(resolve(tmpdir(), "uf-preflight-baseline-")),
+    removeDir: (path: string) => rm(path, { recursive: true, force: true }),
+  }
+}
+
+/**
+ * Factory for uf_preflight_declared_checks: the pre-flight skill's
+ * Phase 2b as one deterministic call (determinism pack DE-001/DE-003/
+ * DE-005). Parses and validates `.uf/preflight.yaml`, probes `requires`
+ * binaries on PATH and the `run` executable, applies the diff-scope
+ * filter, runs each in-scope check as an argv list without a shell, maps
+ * `required`/`advisory` onto statuses, and returns structured results
+ * plus tool-rendered Execution Results rows.
+ *
+ * Failure codes: INVALID_PREFLIGHT_CONFIG (no check ran),
+ * PREFLIGHT_DECLARED_FAILED (unexpected error).
+ */
+export function createPreflightDeclaredChecksTool(cwd: string, deps: PreflightDeclaredDependencies): ReturnType<typeof tool> {
+  return tool({
+    description:
+      "Pre-flight Phase 2b: run the project-declared checks in .uf/preflight.yaml. " +
+      "Validates the file, skips checks whose requires/run are unavailable or whose " +
+      "paths miss the branch diff, runs the rest without a shell, and returns " +
+      "{mode, config_present, scope, checks[], required_failures[], verdict, " +
+      "baseline_method, rendered}. In soft-gate mode required failures are " +
+      "re-run in a merge-base worktree and classified branch-caused / " +
+      "pre-existing / unknown. `rendered` holds the Execution Results rows to " +
+      "insert verbatim; `verdict` is the declared checks' contribution to the " +
+      "pre-flight verdict; advisory rows never affect it. Failure code " +
+      "INVALID_PREFLIGHT_CONFIG means the file is invalid and no check ran.",
+    args: {
+      mode: z.enum(PREFLIGHT_MODES).describe("Pre-flight execution policy chosen by the consuming command."),
+    },
+    execute: async (args: { mode: (typeof PREFLIGHT_MODES)[number] }) => {
+      try {
+        const data: DeclaredChecksData = await runDeclaredChecks(cwd, deps, args.mode)
+        return { output: JSON.stringify(success(data)) }
+      } catch (error) {
+        if (error instanceof PreflightConfigError) {
+          return { output: JSON.stringify(failure(error.message, { retryable: false, code: "INVALID_PREFLIGHT_CONFIG" })) }
+        }
+        const message = error instanceof Error ? error.message : String(error)
+        return {
+          output: JSON.stringify(
+            failure(`Project-declared pre-flight checks failed: ${message}`, { retryable: false, code: "PREFLIGHT_DECLARED_FAILED" }),
+          ),
+        }
+      }
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Plugin entry point
 // ---------------------------------------------------------------------------
 
@@ -5343,6 +5482,7 @@ const UfWorkflowPlugin = {
         git_conflict_files: createGitConflictFilesTool(defaultGitExec, cwd),
         git_commit_no_edit: createGitCommitNoEditTool(defaultGitExec, cwd),
         uf_unleash_branch_gate: createUnleashBranchGateTool(defaultGitExec, cwd, defaultFileExists),
+        uf_preflight_declared_checks: createPreflightDeclaredChecksTool(cwd, createPreflightDeclaredDependencies()),
         uf_unleash_route_decision: createUnleashRouteDecisionTool(defaultGitExec, cwd),
         uf_unleash_resolve_issue: createUnleashResolveIssueTool(defaultGhRunner, cwd),
         uf_delegate_command: createDelegateCommandTool(defaultGitExec, cwd, {

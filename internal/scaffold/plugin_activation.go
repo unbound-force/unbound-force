@@ -212,6 +212,7 @@ func stageReviewPluginSources(opts *Options, stageRoot string) error {
 		"opencode/lib/agent-executor.ts",
 		"opencode/lib/branch-classification.ts",
 		"opencode/lib/model-matrix.ts",
+		"opencode/lib/preflight-declared.ts",
 		"opencode/lib/review-dispatch-artifact.ts",
 		"opencode/lib/review-dispatch-lesson-proposal.ts",
 		"opencode/lib/review-dispatch-sibling-evidence.ts",
