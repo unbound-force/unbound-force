@@ -1,14 +1,36 @@
 <!-- capability: review-dispatch
      change: host-fallback-provenance
-     originating_issue: 901 -->
+     originating_issue: 901
+     Archive ordering: this change MUST archive after
+     advisor-host-model-fallback — the MODIFIED 'Advisor
+     Host-Model Fallback' entry supersedes that change's ADDED
+     'Non-advisor with empty profile rejected' scenario text
+     per requirement name and archive order; the MODIFY applies
+     against the materialized predecessor text and excludes
+     only source "host". Strategy and rationale: design.md
+     (D6). -->
 
 Requirement numbering: RD-FR-037 is allocated for this change.
 RD-FR-038 through RD-FR-048 are reserved for future
-review-dispatch changes. The dispatch-agent-run tool-surface
-requirements live in the `review-dispatch` capability (RD-FR-001
-through RD-FR-036, allocated by earlier changes); the
-model-matrix structure requirements live in
-`specs/model-matrix/spec.md` under the `model-matrix` capability.
+review-dispatch changes. The RD-FR-001..036 range is allocated
+across two capabilities' unarchived deltas: the review-dispatch
+capability carries RD-FR-001..008
+(review-council-multi-model-fanout), RD-FR-025..027
+(fix-review-dispatch-recovery), RD-FR-028..031
+(derive-per-run-timeout), and RD-FR-032..036
+(review-dispatch-diff-manifest); the review-matrix capability
+carries RD-FR-009..010 (derive-per-run-timeout's review-matrix
+delta) and RD-FR-019..024 (optional-profile-models), with
+RD-FR-011..018 reserved for future review-matrix changes per
+that delta's own numbering note. The unnumbered
+`dispatch_agent_run Tool` requirement — including the
+tier-default clause RD-FR-037 narrows for `source: "host"` —
+lives in the dispatch-agent-run capability delta at
+`openspec/changes/shared-agent-executor/specs/dispatch-agent-run.md`.
+The model-matrix structure requirements (MM-FR-001 through
+MM-FR-008) live in the model-matrix capability's change delta at
+`openspec/changes/model-matrix-delegation/specs/model-matrix/spec.md`
+(no archived `specs/model-matrix/spec.md` exists yet).
 
 ## ADDED Requirements
 
@@ -38,12 +60,15 @@ of `resolveHostModel()`. The plan-entry model-provenance match and
 runs without any finalizer change.
 
 A host-source run whose host resolution fails MUST fail with
-error code `host_model_unavailable` and `retryable: true`, with a
-sanitized error message that MUST NOT leak internal session
-details (session ids, message ids, internal API paths). A host
-resolution aborted via the cancellation signal MUST fail with
-error code `cancelled`. Both failure paths are pre-execution
-early exits: no run file is written for them.
+error code `host_model_unavailable` and `retryable: true`, with
+an error message passed through the shared
+`sanitizeInvocationError()` redaction
+(`.opencode/lib/agent-executor.ts`) — the same sanitization the
+advisor branch applies, redacting Bearer tokens,
+credential-shaped assignments, URL query strings, and home
+paths. A host resolution aborted via the cancellation signal
+MUST fail with error code `cancelled`. Both failure paths are
+pre-execution early exits: no run file is written for them.
 
 The `source` field comparison MUST use strict string equality
 (`=== "host"`) with no case normalization, trimming, or
@@ -74,6 +99,18 @@ model on both paths.
 - **AND** `resolved_parent_model` is the host model's combined
   identity and `resolved_parent_variant` is its active variant
 
+#### Scenario: Host run without an active variant
+
+- **GIVEN** a dispatch plan entry with `source: "host"`,
+  `model: null`, and `tier: null`
+- **AND** the parent session's current assistant message carries
+  a model identity with no active variant
+- **WHEN** the shared dispatch core resolves the model
+- **THEN** the run executes on the resolved host model
+- **AND** the persisted run records `resolved_parent_variant`
+  as null
+- **AND** finalization raises no defect for the host run
+
 #### Scenario: Host run ignores a configured profile model
 
 - **GIVEN** a dispatch plan entry with `source: "host"`,
@@ -94,8 +131,10 @@ model on both paths.
 - **WHEN** `resolveHostModel()` fails
 - **THEN** the run fails with error code `host_model_unavailable`
 - **AND** `retryable` is true
-- **AND** the error message is sanitized and leaks no internal
-  session details
+- **AND** the error message is the `sanitizeInvocationError()`
+  form of the resolution failure (no Bearer tokens,
+  credential-shaped assignments, URL query strings, or home
+  paths)
 - **AND** no run file is written
 
 #### Scenario: Host resolution cancelled
@@ -134,9 +173,101 @@ model on both paths.
 - **WHEN** the shared dispatch core resolves the model
 - **THEN** it fails with `tier_model_unavailable` as before
 
+#### Scenario: Direct bypass overrides host resolution
+
+- **GIVEN** a `dispatch_agent_run` invocation with
+  `source: "host"` and an explicit direct `model` bypass
+- **WHEN** the shared dispatch core resolves the model
+- **THEN** it executes the direct bypass unchanged and records
+  the requested model
+- **AND** host resolution is not consulted
+- **AND** the persisted provenance follows the non-host shape,
+  so finalization applies its existing host invariants and
+  fails closed on the contradictory provenance input
+
 ## MODIFIED Requirements
 
-None.
+### Requirement: Advisor Host-Model Fallback
+
+Previously: the requirement's "Non-advisor with empty profile
+rejected" scenario and its closing prose routed every source
+other than `"advisor"` — including `"host"` — to the
+`tier_model_unavailable` rejection path when the profile has no
+model. Modified: the full replacement text below is verbatim
+from the advisor-host-model-fallback delta except that
+`source: "host"` is excluded from that rejection path (it
+resolves the parent model per RD-FR-037 instead). Supersession
+rationale: design.md (D6); archive ordering: this change MUST
+archive after advisor-host-model-fallback, per the header.
+
+When an advisor run's review-matrix profile omits a `model`
+field, `dispatch_agent_run` MUST resolve the parent session's
+active model via `resolveHostModel` and use it as the execution
+model. The run MUST use host-run provenance semantics: null
+requested model provenance with resolved parent model
+provenance.
+
+#### Scenario: Advisor inherits parent model
+
+- **GIVEN** the review matrix profile for the requested tier
+  has no `model` field
+- **AND** the dispatch input has `source: "advisor"`
+- **WHEN** `dispatch_agent_run` resolves the model
+- **THEN** it calls `resolveHostModel` to obtain the parent
+  session's active model identity and variant
+- **AND** the run executes with the resolved model
+- **AND** `requested_model` is `null`
+- **AND** `resolved_parent_model` is the host model's combined
+  identity
+- **AND** `resolved_parent_variant` is the host model's active
+  variant
+
+#### Scenario: Host resolution failure
+
+- **GIVEN** the review matrix profile has no `model`
+- **AND** `source: "advisor"`
+- **WHEN** `resolveHostModel` fails (session message
+  unavailable)
+- **THEN** `dispatch_agent_run` returns a failed result with
+  error code `host_model_unavailable`
+- **AND** `retryable` is `true`
+- **AND** the error message is a sanitized availability error
+  that MUST NOT leak internal session details (session IDs,
+  message IDs, internal API paths)
+
+#### Scenario: Host resolution cancelled
+
+- **GIVEN** the review matrix profile has no `model`
+- **AND** `source: "advisor"`
+- **WHEN** `resolveHostModel` is aborted via signal
+- **THEN** `dispatch_agent_run` returns a failed result with
+  error code `cancelled`
+
+#### Scenario: Non-advisor with empty profile rejected
+
+- **GIVEN** the review matrix profile has no `model`
+- **AND** `source` is neither `"advisor"` nor `"host"` (or is
+  absent)
+- **WHEN** `dispatch_agent_run` resolves the model
+- **THEN** it returns `tier_model_unavailable` as before
+
+#### Scenario: Host source with empty profile uses host model
+
+- **GIVEN** the review matrix profile has no `model`
+- **AND** `source` is `"host"`
+- **WHEN** `dispatch_agent_run` resolves the model
+- **THEN** it resolves the parent session's active model per
+  RD-FR-037, or fails with retryable `host_model_unavailable`
+  — never `tier_model_unavailable`
+
+The `source` field comparison MUST use strict string equality
+(`=== "advisor"` for the advisor branch, `=== "host"` for the
+host branch per RD-FR-037) with no case normalization,
+trimming, or coercion. Unexpected values (empty string, `null`,
+`undefined`, case variations like `"Advisor"` or `"ADVISOR"`)
+MUST fall through to the `tier_model_unavailable` rejection
+path; `source: "host"` is excluded from that fallthrough per
+RD-FR-037.
 
 ## REMOVED Requirements
 

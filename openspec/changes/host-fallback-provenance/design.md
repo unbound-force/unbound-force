@@ -38,11 +38,14 @@ The finalizer matches the spec (RD-FR-008 as modified by
 Model Validation" requirement). The dispatcher is the defect: it
 never implements host resolution for host-source runs.
 
-Constitution alignment carries over from the proposal: the fix
+Constitution alignment carries over from the proposal (all six
+active principles of the org constitution v1.4.0): the fix
 restores artifact finalization (I), reuses the shared
 `resolveHostModel()` (II), makes host-run provenance accurate and
-finalizable (III), and is testable with the existing vitest
-doubles (IV).
+finalizable (III), is testable with the existing vitest doubles
+(IV), fails closed with a sanitized retryable error instead of
+surfacing raw runtime text (V), and is runtime dispatch code
+with no instruction-prose changes (VI).
 
 ## Goals / Non-Goals
 
@@ -145,6 +148,20 @@ pre-execution early exits: no run file is written; finalization
 fails closed with "included plan entry has no run" → INCONCLUSIVE,
 unchanged from today's early-exit behavior.
 
+Advisor-symmetry conflation (recorded for a follow-up):
+`resolveHostModel()` failures also cover structural causes
+(`StructuralHostModelError` — for example a session message
+carrying no model identity) that retry cannot fix, and the
+persisted `errorText` drops the remediation string the shared
+failure carries. This change deliberately mirrors the advisor
+branch's single `host_model_unavailable` / `retryable: true`
+class rather than diverging from it; splitting structural vs
+transient host-resolution failure classes across both branches
+is deferred to a follow-up change (issue filed per tasks.md
+3.6, scoped to also state that `retryable` on a pre-execution
+early exit means caller re-invocation only — no run file
+exists for DR-FR-002 redispatch to target).
+
 ### D3. Direct bypass precedence preserved
 
 `source: "host"` combined with an explicit `model` remains a
@@ -173,8 +190,31 @@ ENOENT), `failingClient`/`hangingClient` for host-resolution
 failure/abort. New coverage: host-source success + provenance
 shape (with a profile model configured, proving D1's bypass),
 host failure/cancel, host-fallback panel finalization
-(dispatch-review-runs or consolidate-dispatch), and re-dispatch
-of a failed host run (dispatch-recovery).
+(dispatch-review-runs or consolidate-dispatch), re-dispatch
+of a failed host run (dispatch-recovery), a direct-bypass
+precedence case (RD-FR-037 scenario "Direct bypass overrides
+host resolution"), and a variant-less host-result sub-case
+(`resolved_parent_variant: null` with clean finalization —
+RD-FR-037 scenario "Host run without an active variant").
+
+### D6. Cross-delta supersession (MODIFIED entries)
+
+RD-FR-037 falsifies two live requirement texts in earlier
+unarchived deltas: the advisor-host-model-fallback delta's
+"Non-advisor with empty profile rejected" scenario (a source
+"host" entry with no profile model now resolves the host model
+or fails retryable `host_model_unavailable` — never
+`tier_model_unavailable`) and the shared-agent-executor
+dispatch-agent-run delta's unconditional tier-default clause (a
+source "host" entry bypasses it). The change therefore carries
+two MODIFIED entries with Previously paragraphs (MP-013): one
+in the review-dispatch delta (Advisor Host-Model Fallback,
+narrowed to exclude source "host") and one in a new
+dispatch-agent-run capability delta (dispatch_agent_run Tool,
+tier default scoped to non-host sources). Both delta headers
+declare archive ordering after their predecessors per the
+accept-variantless-parent-model precedent; neither older change
+is edited in place.
 
 ## Risks / Trade-offs
 

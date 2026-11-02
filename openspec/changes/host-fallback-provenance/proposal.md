@@ -137,11 +137,23 @@ asset copy.
   94 percent statements coverage floor) and the Go scaffold
   drift gate (`go test -race -count=1 ./internal/scaffold/...`).
 - **Documentation impact**: CHANGELOG.md entry; no AGENTS.md or
-  README structural changes.
+  README structural changes. docs/configuration.md's Review
+  Council Configuration section gains a host-fallback semantics
+  note (parent-session model execution for host-source runs,
+  profile/override bypass, advisor lists as the sanctioned
+  pinning mechanism) — tasked as tasks.md 3.4 with the
+  documentation issue filed against this repo per the
+  documentation-gate precedent (#778, #891, #676). The org
+  constitution's Cross-Repo Documentation rule applies (the
+  change is user-facing): a unbound-force/website documentation
+  issue is filed before PR merge (tasks.md 3.5), pairing with
+  the in-repo issue per precedent (#778 ↔ website#316, #891 ↔
+  website#360, model-matrix-scaffold-deployment's website#362).
 
 ## Constitution Alignment
 
-Assessed against the Unbound Force org constitution.
+Assessed against the Unbound Force org constitution (v1.4.0 —
+six active principles).
 
 ### I. Autonomous Collaboration
 
@@ -195,3 +207,30 @@ advisor host-model-fallback tests use. The persisted run-file
 provenance and the finalization round-trip are assertable without
 external services; `make plugin-test` enforces the coverage
 floor.
+
+### V. Security by Default
+
+**Assessment**: PASS
+
+The change adds no dependency and no new external surface: host
+resolution reuses the shared `resolveHostModel()` client lookup
+the advisor branch already exercises, and its failure mode is
+the sanitized, retryable `host_model_unavailable` error — the
+message passes through the shared `sanitizeInvocationError()`
+redaction (Bearer tokens, credential-shaped assignments, URL
+query strings, home paths) rather than surfacing raw provider
+or runtime text. No credentials, tokens, or filesystem paths
+enter the persisted run file.
+
+### VI. Deterministic Execution
+
+**Assessment**: PASS
+
+The change is runtime dispatch code: one branch in
+`executeDispatchRun`'s model-resolution section, byte-identical
+between the live plugin and the scaffold asset, pinned by the
+vitest suite and the Go drift gate. No instruction prose,
+command markdown, agent definition, or skill text is added or
+altered — the model-resolution procedure moves out of
+accidental profile inheritance into tested tool code, which is
+the principle's exact intent.
