@@ -251,8 +251,11 @@ Resolution is branch-aware: when the current branch maps
 to a change (`opsx/<name>` -> `openspec/changes/<name>/`,
 `NNN-<name>` -> `specs/<name>/`), checks validate that
 change only, so an unrelated change cannot mask a missing
-artifact for the active change. On branches without a
-change mapping, resolution falls back to the first
+artifact for the active change. `quick/<name>` branches
+(the /uf.unleash quick tier) resolve strictly to no change —
+the quick tier carries no spec artifacts, so unrelated
+changes must not satisfy its checks either. On branches
+without a change mapping, resolution falls back to the first
 alphabetical match across both layouts. Both paths can
 miss artifacts in non-standard locations or custom
 schemas. Mitigated by testing both detection paths and

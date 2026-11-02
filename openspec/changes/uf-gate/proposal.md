@@ -26,8 +26,8 @@ checks derived from the constitution:
 - **specify**: Verifies spec artifacts exist in the expected
   location (openspec or speckit).
 - **plan**: Verifies plan artifact exists and spec is present.
-- **implement**: Verifies spec + plan + tasks exist. Verifies coverage strategy is present
-  (Constitution IV).
+- **implement**: Verifies spec + plan + tasks exist. Verifies
+  coverage strategy is present (Constitution IV).
 - **review**: Verifies implementation is complete per task
   checklist. Verifies review council has run.
 - **pr**: Verifies review PASS exists. Verifies not on main
@@ -42,7 +42,8 @@ checks derived from the constitution:
   check results, pass/fail status, and exit code semantics
 - `--dir`: Target directory (defaults to cwd)
 - Exit code 0: all checks pass. Exit code 1: one or more checks
-  fail.
+  fail or arguments are invalid. Exit code 2: internal error
+  (unexpected filesystem or output failure).
 
 ### Modified Capabilities
 - None

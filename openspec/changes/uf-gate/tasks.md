@@ -18,7 +18,7 @@
   Branch, Phase, Passed, Checks, Summary), and `Summary`
   struct (Total, Passed, Failed). Include JSON tags on
   all fields. Add provenance constants: `SchemaVersion`
-  ("1.0.0") and `ProducerName` ("uf-gate"). (FR-003)
+  ("1.0.0") and `ProducerName` ("uf-gate"). (GATE-FR-003)
 
 ## 2. Check functions
 
@@ -26,33 +26,33 @@
   functions. Each function has signature
   `func(dir string) CheckResult`:
   - `checkSpecExists`: probe openspec
-    `proposal.md` and speckit `spec.md` (FR-004)
+    `proposal.md` and speckit `spec.md` (GATE-FR-004)
   - `checkPlanExists`: probe openspec `design.md`
-    and speckit `plan.md` (FR-005)
+    and speckit `plan.md` (GATE-FR-005)
   - `checkTasksExist`: probe openspec `tasks.md`
-    and speckit `tasks.md` (FR-006)
+    and speckit `tasks.md` (GATE-FR-006)
   - `checkCoverageStrategy`: scan plan/tasks content
     for coverage strategy keywords — heading containing
     "coverage" (case-insensitive), body containing
     "coverage target", "unit test", "integration test",
-    "e2e test", or line matching `coverage.*%` (FR-006)
+    "e2e test", or line matching `coverage.*%` (GATE-FR-006)
   - `checkTasksComplete`: scan tasks.md for `- [ ]`
     lines — if any unchecked boxes remain, check fails
-    (FR-007)
+    (GATE-FR-007)
   - `checkReviewRun`: look for `<!-- spec-review: passed -->`
     or `<!-- code-review: passed -->` marker in
-    tasks.md (FR-007)
+    tasks.md (GATE-FR-007)
   - `checkReviewPass`: look for
     `<!-- code-review: passed -->` marker in
-    tasks.md (FR-008)
+    tasks.md (GATE-FR-008)
   - `checkNotOnMain`: exec `git rev-parse
     --abbrev-ref HEAD` using `exec.Command` with
     explicit argument separation (no `sh -c`) and
     verify not `main`. Handle git unavailable and
     non-git directory with descriptive error messages.
-    Detached HEAD passes (not `main`). (FR-008)
+    Detached HEAD passes (not `main`). (GATE-FR-008)
   Define `phaseChecks` map from phase string to
-  `[]CheckFunc` slice. (FR-002)
+  `[]CheckFunc` slice. (GATE-FR-002)
 
 ## 3. Core gate logic
 
@@ -65,7 +65,7 @@
   fields (version, producer, timestamp, branch), builds
   `GateReport`, returns error if any check fails.
   Exit code 0 (pass), 1 (check failure), 2 (internal
-  error). (FR-002, FR-009, FR-010)
+  error). (GATE-FR-002, GATE-FR-009, GATE-FR-010)
 
 ## 4. Output formatting
 
@@ -74,7 +74,7 @@
   `FormatText(report, writer)` functions following the
   doctor pattern. Text format uses checkmark/cross
   symbols. Check results go to stdout; validation and
-  internal errors go to stderr. (FR-003, D7)
+  internal errors go to stderr. (GATE-FR-003, D7)
 
 ## 5. CLI wiring
 
@@ -86,7 +86,7 @@
   against "text"/"json"), `--dir` (default ".",
   validated as existing directory). Register in
   `main.go` with `root.AddCommand(newGateCmd())`.
-  (FR-001, FR-002, FR-003, FR-010, FR-011)
+  (GATE-FR-001, GATE-FR-002, GATE-FR-003, GATE-FR-010, GATE-FR-011)
 
 ## 6. Tests
 
@@ -111,14 +111,14 @@
     isolated git repository fixtures)
   - git error paths: non-git directory, detached HEAD
   Test `Run()` integration with multiple phases,
-  including provenance field population. (FR-004
-  through FR-011)
+  including provenance field population. (GATE-FR-004
+  through GATE-FR-011)
 - [x] 6.2 [P] Create `cmd/unbound-force/gate_test.go`
   with tests for `runGate()` verifying JSON and text
   output, invalid phase rejection, missing phase flag,
   invalid format rejection, non-existent directory
   rejection, exit code 2 for internal errors.
-  (FR-001, FR-002, FR-003, FR-009, FR-010)
+  (GATE-FR-001, GATE-FR-002, GATE-FR-003, GATE-FR-009, GATE-FR-010)
 
 ## 7. Coverage strategy
 
@@ -156,7 +156,8 @@ CI coverage gate.
   subcommand.
 - [x] 8.3 [P] File documentation issue against the
   current repo for user-facing `uf gate` usage docs.
-  (Filed: #583)
+  (Filed: #583; website tracking: unbound-force/website#343
+  per the constitution's Cross-Repo Documentation rule)
 
 <!-- spec-review: passed -->
 <!-- code-review: passed -->

@@ -45,7 +45,7 @@ func runGate(p gateParams) error {
 		return err
 	}
 
-	// Format and write output to stdout (FR-009, D7).
+	// Format and write output to stdout (GATE-FR-009, D7).
 	if report != nil {
 		switch p.format {
 		case "json":
@@ -111,7 +111,7 @@ metadata (schema version, producer, tool version, timestamp, branch, commit).`,
 			format, _ := cmd.Flags().GetString("format")
 			dir, _ := cmd.Flags().GetString("dir")
 
-			// --phase is required (FR-002).
+			// --phase is required (GATE-FR-002).
 			if phase == "" {
 				validList := strings.Join(gate.ValidPhases(), ", ")
 				return fmt.Errorf(
@@ -119,7 +119,7 @@ metadata (schema version, producer, tool version, timestamp, branch, commit).`,
 					validList)
 			}
 
-			// Validate format flag (FR-003).
+			// Validate format flag (GATE-FR-003).
 			if format != "text" && format != "json" {
 				return fmt.Errorf(
 					"invalid format %q: must be 'text' or 'json'",

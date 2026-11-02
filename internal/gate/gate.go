@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,11 @@ import (
 	"strings"
 	"time"
 )
+
+// gitCommandTimeout bounds each git subprocess invocation so a
+// wedged git binary or hung filesystem cannot stall a headless
+// gate run indefinitely.
+const gitCommandTimeout = 10 * time.Second
 
 // Options configures a gate run. External dependencies are
 // injected for testability per Constitution IV.
@@ -73,7 +79,7 @@ func Run(opts Options) (*GateReport, error) {
 		)
 	}
 
-	// Canonicalize and validate target directory (FR-010).
+	// Canonicalize and validate target directory (GATE-FR-010).
 	absDir, err := filepath.Abs(opts.TargetDir)
 	if err != nil {
 		return nil, &InternalError{
@@ -165,10 +171,12 @@ func computeSummary(results []CheckResult) Summary {
 }
 
 // detectBranch returns the current git branch name, or an empty
-// string if git is unavailable or the directory is not a git
-// repository. Best-effort per D4.
+// string if git is unavailable, times out, or the directory is not
+// a git repository. Best-effort per D4.
 func detectBranch(dir string) string {
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -178,9 +186,11 @@ func detectBranch(dir string) string {
 }
 
 // detectCommit returns the checked HEAD commit, or an empty string when git
-// is unavailable or the directory is not a repository.
+// is unavailable, times out, or the directory is not a repository.
 func detectCommit(dir string) string {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {

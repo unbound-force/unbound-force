@@ -42,7 +42,11 @@ type InternalError struct {
 	Err error
 }
 
+// Error returns the wrapped error's message.
 func (e *InternalError) Error() string { return e.Err.Error() }
+
+// Unwrap returns the wrapped error so errors.Is and errors.As
+// traverse the chain.
 func (e *InternalError) Unwrap() error { return e.Err }
 
 // ExitCode returns the process exit code for an internal error (2).

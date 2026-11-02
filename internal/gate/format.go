@@ -10,7 +10,7 @@ import (
 )
 
 // FormatJSON serializes the GateReport as indented JSON per
-// FR-003. Uses 2-space indentation following the doctor pattern.
+// GATE-FR-003. Uses 2-space indentation following the doctor pattern.
 func FormatJSON(report *GateReport, w io.Writer) error {
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {

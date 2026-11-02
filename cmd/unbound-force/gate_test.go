@@ -15,6 +15,9 @@ import (
 // scaffoldGateFixture creates an OpenSpec artifact tree for testing.
 func scaffoldGateFixture(t *testing.T, dir string, files map[string]string) {
 	t.Helper()
+	// Stop git discovery above the fixture so fallback-path tests do
+	// not depend on ambient repository state.
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	changeDir := filepath.Join(dir, "openspec", "changes", "test-change")
 	if err := os.MkdirAll(changeDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -215,6 +218,9 @@ func TestRunGate_PathIsFile(t *testing.T) {
 
 func TestNewGateCmd_InvalidFormat(t *testing.T) {
 	cmd := newGateCmd()
+	var out, errBuf bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
 	cmd.SetArgs([]string{"--phase", "specify", "--format", "xml"})
 
 	err := cmd.Execute()
@@ -223,6 +229,30 @@ func TestNewGateCmd_InvalidFormat(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid format") {
 		t.Errorf("expected 'invalid format' in error, got: %v", err)
+	}
+	// GATE-FR-003: the error message goes to stderr, keeping stdout clean.
+	if !strings.Contains(errBuf.String(), "invalid format") {
+		t.Errorf("expected 'invalid format' on stderr, got: %q", errBuf.String())
+	}
+	if out.String() != "" {
+		t.Errorf("expected empty stdout on validation error, got: %q", out.String())
+	}
+}
+
+func TestNewGateCmd_Help(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newGateCmd()
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("help execution: %v", err)
+	}
+	text := out.String()
+	for _, want := range []string{"specify", "plan", "implement", "review", "pr", "--format", "Exit codes"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("help output missing %q", want)
+		}
 	}
 }
 
@@ -348,6 +378,7 @@ func TestRunGate_FormatFailure_ExitCode2(t *testing.T) {
 
 func TestRunGate_ArtifactReadFailure_ExitCode2(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	openspecDir := filepath.Join(dir, "openspec")
 	if err := os.MkdirAll(openspecDir, 0o755); err != nil {
 		t.Fatalf("mkdir openspec: %v", err)

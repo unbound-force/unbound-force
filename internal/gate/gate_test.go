@@ -26,6 +26,7 @@ func scaffoldOpenSpec(t *testing.T, dir string, files map[string]string) {
 // named change inside dir.
 func scaffoldOpenSpecChange(t *testing.T, dir, change string, files map[string]string) {
 	t.Helper()
+	pinGitCeiling(t, dir)
 	changeDir := filepath.Join(dir, "openspec", "changes", change)
 	if err := os.MkdirAll(changeDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -48,6 +49,7 @@ func scaffoldSpeckit(t *testing.T, dir string, files map[string]string) {
 // named spec inside dir.
 func scaffoldSpeckitChange(t *testing.T, dir, spec string, files map[string]string) {
 	t.Helper()
+	pinGitCeiling(t, dir)
 	specDir := filepath.Join(dir, "specs", spec)
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -96,6 +98,15 @@ func runGit(t *testing.T, dir string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
+}
+
+// pinGitCeiling stops git repository discovery from walking above
+// dir, so fallback-path fixtures do not depend on ambient repository
+// state — a TMPDIR inside a repository on an opsx/* or NNN-* branch
+// would otherwise map fixtures to an unrelated change.
+func pinGitCeiling(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 }
 
 // --- checkSpecExists tests ---
@@ -262,6 +273,7 @@ func TestCheckCoverageStrategy_Missing(t *testing.T) {
 
 func TestCheckCoverageStrategy_NoFiles(t *testing.T) {
 	dir := t.TempDir()
+	pinGitCeiling(t, dir)
 
 	r := checkCoverageStrategy(dir)
 	if r.Passed {
@@ -307,8 +319,21 @@ func TestCheckTasksComplete_ProseLiteral(t *testing.T) {
 	}
 }
 
+func TestCheckTasksComplete_IndentedSubtask(t *testing.T) {
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"tasks.md": "# Tasks\n- [x] 1.1 Done\n  - [ ] 1.1.1 Nested incomplete\n",
+	})
+
+	r := checkTasksComplete(dir)
+	if r.Passed {
+		t.Errorf("expected indented unchecked subtask to fail, got pass")
+	}
+}
+
 func TestCheckTasksComplete_NoFile(t *testing.T) {
 	dir := t.TempDir()
+	pinGitCeiling(t, dir)
 
 	r := checkTasksComplete(dir)
 	if r.Passed {
@@ -486,6 +511,62 @@ func TestCheckCoverageStrategy_ActiveChangeMissingCoverage_Fails(t *testing.T) {
 	}
 }
 
+// --- quick-branch strict resolution tests ---
+
+func TestCheckSpecExists_QuickBranch_Fails(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"proposal.md": "# Proposal",
+	})
+	initGitRepo(t, dir, "quick/some-change")
+
+	r := checkSpecExists(dir)
+	if r.Passed {
+		t.Errorf("expected quick branch to fail spec-exists, got: %s", r.Message)
+	}
+	if !strings.Contains(r.Message, "quick") {
+		t.Errorf("expected quick-branch explanation in message, got: %s", r.Message)
+	}
+}
+
+func TestCheckCoverageStrategy_QuickBranch_Fails(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"tasks.md": "# Tasks\n\n## Coverage Strategy\n\nUnit tests required.\n",
+	})
+	initGitRepo(t, dir, "quick/some-change")
+
+	r := checkCoverageStrategy(dir)
+	if r.Passed {
+		t.Errorf("expected quick branch to fail coverage-strategy, got: %s", r.Message)
+	}
+}
+
+func TestFindTasksFile_QuickBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"tasks.md": "# Tasks",
+	})
+	initGitRepo(t, dir, "quick/some-change")
+
+	path, err := findTasksFile(dir)
+	if err != nil {
+		t.Fatalf("find tasks file: %v", err)
+	}
+	if path != "" {
+		t.Errorf("expected no tasks file on quick branch, got %s", path)
+	}
+}
+
 // --- checkNotOnMain tests ---
 
 func TestCheckNotOnMain_FeatureBranch(t *testing.T) {
@@ -522,6 +603,7 @@ func TestCheckNotOnMain_NonGitDir(t *testing.T) {
 	}
 
 	dir := t.TempDir()
+	pinGitCeiling(t, dir)
 
 	r := checkNotOnMain(dir)
 	if r.Passed {
@@ -550,7 +632,7 @@ func TestCheckNotOnMain_DetachedHead(t *testing.T) {
 
 func TestCheckNotOnMain_GitUnavailable(t *testing.T) {
 	dir := t.TempDir()
-	// Empty PATH so exec.LookPath("git") fails (FR-008
+	// Empty PATH so exec.LookPath("git") fails (GATE-FR-008
 	// "Git not available" scenario).
 	t.Setenv("PATH", t.TempDir())
 
@@ -1257,6 +1339,7 @@ func TestFindTasksFile_Speckit(t *testing.T) {
 
 func TestFindTasksFile_NotFound(t *testing.T) {
 	dir := t.TempDir()
+	pinGitCeiling(t, dir)
 
 	path, err := findTasksFile(dir)
 	if err != nil {
@@ -1294,7 +1377,7 @@ func TestRun_PRPhase_FailOnMain(t *testing.T) {
 	}
 }
 
-// --- symlinked target dir (FR-010) ---
+// --- symlinked target dir (GATE-FR-010) ---
 
 func TestRun_SymlinkedTargetDir(t *testing.T) {
 	real := t.TempDir()
