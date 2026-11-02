@@ -287,7 +287,12 @@ independently updatable.
 
 **Managed files**:
 ```
-.gitignore block   (appended, ignores .uf/ runtime data)
+.gitignore block        (created or upgraded in place when it
+                         differs, SC-FR-014; ignores .uf/ runtime
+                         data)
+.opencode/.gitignore    (node_modules, bun.lock, .vitest/,
+                         coverage/; existing user lines retained,
+                         missing canonical lines appended)
 ```
 
 ### Sub-tool Delegation

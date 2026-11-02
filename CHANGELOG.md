@@ -6,6 +6,41 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- init-override-stubs-gitignore-sync: `uf init` now seeds both
+  per-developer override stubs (`.uf/model-matrix.override.yaml`
+  and `.uf/review-matrix.override.yaml`) create-only-if-absent
+  as comment-only templates -- comment-only content parses to
+  YAML null, a valid no-op in both loaders, so no loader changes
+  -- ending the fresh-scaffold state that left every developer
+  on host-model defaults until they hand-created an override
+  from the docs. This amends SC-FR-010's "never scaffolded
+  beyond the gitignore entry" clause: `*-custom.md` packs stay
+  preserved user-owned files, while each override is seeded once
+  and never modified afterwards -- not even by `--force`, which
+  resets tracked canonical files only. A new `uf init
+  --overrides` mode creates exactly the two stubs plus the
+  managed `.gitignore` block (skipping the asset walk,
+  sub-tools, AGENTS.md sections, and migrations) and fails
+  closed when combined with `--divisor`, `--force`, `--check`,
+  or `--stealth`. The managed gitignore block syncs the six
+  patterns that had drifted out of the scaffold
+  (`.uf/config.yaml`, `.uf/dewey/config.yaml`,
+  `.uf/sibling-clones/`, `.uf/sibling-cache/`, `.uf/feedback/`,
+  `.uf/progress/`) and gains in-place upgrade semantics: a
+  present marker with a differing managed region is rewritten
+  in place (deterministic, trailing content preserved, malformed
+  marker-without-terminator regions skipped with detail), with
+  each run reporting created / upgraded / unchanged per file; a
+  drift test pins the repo's own managed block to the scaffold
+  constant byte-for-byte so the drift cannot recur silently.
+  `.opencode/.gitignore` deploys as a new idempotent sub-tool
+  independent of plugin activation, with merge semantics that
+  seed the canonical `node_modules` / `bun.lock` / `.vitest/` /
+  `coverage/` lines into an absent file and append only missing
+  canonical lines to an existing one, covering the `node_modules/`
+  tree `npm ci` creates during init. (Spec:
+  openspec/changes/init-override-stubs-gitignore-sync/,
+  Fixes: #903, Fixes: #902)
 - model-matrix-scaffold-deployment: `uf init` now deploys the
   model-matrix configuration surface to hero repositories, so
   every repo gets the same content-agent model-selection
