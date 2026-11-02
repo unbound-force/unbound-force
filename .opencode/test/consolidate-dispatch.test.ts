@@ -1258,6 +1258,128 @@ describe("consolidate_dispatch", () => {
     expect(finalizationResult.proposals[0].information).toBe("Test lesson from provenance path")
   })
 
+  describe("host-fallback panel finalization (RD-FR-037)", () => {
+    /** Build a host-source run with the dispatcher-recorded host provenance shape. */
+    function hostRunFixture(agent: string, resolvedParentVariant: string | null) {
+      return {
+        ...runFixture({ agent }),
+        source: "host" as const,
+        requested_model: null,
+        provider: null,
+        model_id: null,
+        variant: null,
+        resolved_parent_model: "p/m",
+        resolved_parent_variant: resolvedParentVariant,
+        reported_model: "p/m",
+      }
+    }
+
+    /** Host-fallback plan entry matching the run's identity (agent + source + sequence). */
+    function hostFallbackPlan(agent: string) {
+      return {
+        agent,
+        decision: "include" as const,
+        reason_code: "host-fallback",
+        reason: "no explicit or advisor run; use the active host model",
+        source: "host" as const,
+        sequence: 1,
+        read_only: true,
+        tier: null,
+        model: null,
+        variant: null,
+        validation_errors: [],
+      }
+    }
+
+    it("finalizes a provenance-carrying panel that includes a host-fallback run", async () => {
+      // RD-FR-037 "Host-fallback panel finalizes cleanly" — the #901
+      // reproduction at the unit seam: a panel whose plan includes a
+      // host-fallback entry alongside a regular explicit run. Before the
+      // dispatch-core host branch, the host run carried advisor-shaped
+      // provenance and validateRunModel rejected it with four defects,
+      // bricking finalization despite the native verdict; the
+      // dispatcher-recorded host shape finalizes with zero errors.
+      const projectRoot = join(tmpdir(), `consolidate-host-finalize-${randomUUID()}`)
+      await mkdir(projectRoot, { recursive: true })
+      cleanupDirs.push(projectRoot)
+
+      const headSha = "b".repeat(40)
+      const correlationId = await setupDispatchSession(
+        [
+          hostRunFixture("divisor-guard", "active"),
+          runFixture({ agent: "divisor-adversary" }),
+        ],
+        {
+          plan: [
+            hostFallbackPlan("divisor-guard"),
+            ...explicitRunPlan("divisor-adversary"),
+          ],
+        },
+      )
+
+      const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+      const result = await tool.execute(
+        {
+          provenance: {
+            branch: "opsx/host-fallback-provenance",
+            commit: headSha, // Must match input_context.head_sha
+            workflow_id: "uf.review-council",
+          },
+        },
+        noopContext(),
+      )
+
+      const finalizationResult = JSON.parse(result.output)
+      expect(finalizationResult.status).toBe("success")
+      expect(finalizationResult.operation_verdict).toBe("APPROVE")
+      expect(finalizationResult.correlation_id).toBe(correlationId)
+      expect(finalizationResult.artifact_path).toContain(".uf/artifacts/dispatch/")
+      expect(finalizationResult.errors).toHaveLength(0)
+      const persistedPayload = finalizationResult.review_dispatch.payload
+      expect(persistedPayload.runs).toHaveLength(2)
+      const hostRun = persistedPayload.runs.find((run: { source: string }) => run.source === "host")
+      expect(hostRun).toBeDefined()
+      expect(hostRun.requested_model).toBeNull()
+      expect(hostRun.resolved_parent_model).toBe("p/m")
+    })
+
+    it("finalizes a variant-less host run (resolved_parent_variant null) cleanly", async () => {
+      // RD-FR-037 "Host run without an active variant": the writer contract
+      // of resolveHostModel permits a null variant, and the finalizer raises
+      // no defect for it.
+      const projectRoot = join(tmpdir(), `consolidate-host-variantless-${randomUUID()}`)
+      await mkdir(projectRoot, { recursive: true })
+      cleanupDirs.push(projectRoot)
+
+      const headSha = "b".repeat(40)
+      const correlationId = await setupDispatchSession(
+        [hostRunFixture("divisor-guard", null)],
+        { plan: [hostFallbackPlan("divisor-guard")] },
+      )
+
+      const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+      const result = await tool.execute(
+        {
+          provenance: {
+            branch: "opsx/host-fallback-provenance",
+            commit: headSha, // Must match input_context.head_sha
+            workflow_id: "uf.review-council",
+          },
+        },
+        noopContext(),
+      )
+
+      const finalizationResult = JSON.parse(result.output)
+      expect(finalizationResult.status).toBe("success")
+      expect(finalizationResult.operation_verdict).toBe("APPROVE")
+      expect(finalizationResult.correlation_id).toBe(correlationId)
+      expect(finalizationResult.errors).toHaveLength(0)
+      const persistedPayload = finalizationResult.review_dispatch.payload
+      expect(persistedPayload.runs).toHaveLength(1)
+      expect(persistedPayload.runs[0].resolved_parent_variant).toBeNull()
+    })
+  })
+
   it("internally finalizes a triage-issue dispatch with native NEEDS-CLARIFICATION run verdicts", async () => {
     const projectRoot = join(tmpdir(), `consolidate-triage-finalize-${randomUUID()}`)
     await mkdir(projectRoot, { recursive: true })

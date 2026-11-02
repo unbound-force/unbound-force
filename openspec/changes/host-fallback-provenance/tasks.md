@@ -12,7 +12,7 @@
 
 ## 1. Host-source branch in the live dispatch core
 
-- [ ] 1.1 Add the `source === "host"` model-resolution branch to
+- [x] 1.1 Add the `source === "host"` model-resolution branch to
       `executeDispatchRun` in
       `.opencode/plugins/review-dispatch/index.ts` (design D1):
       after the `options.model` direct-bypass branch and before
@@ -32,7 +32,7 @@
       state the host-source resolution and that the
       `tier ?? "standard"` default is unreachable for host
       entries.
-- [ ] 1.2 Checkpoint: run `cd .opencode && npx vitest run` —
+- [x] 1.2 Checkpoint: run `cd .opencode && npx vitest run` —
       the existing suite MUST stay green (no existing test pins
       host-source execution; the planner and finalizer tests are
       unaffected; the `tier_model_unavailable` test at
@@ -41,7 +41,7 @@
 
 ## 2. Host-source test coverage (RD-FR-037 scenarios)
 
-- [ ] 2.1 [P] In `.opencode/test/dispatch-agent-run.test.ts`,
+- [x] 2.1 [P] In `.opencode/test/dispatch-agent-run.test.ts`,
       add a `describe("host-source model resolution")` block
       mirroring the advisor host-model-fallback block (L801-922,
       including the cancelled-case assertions at L918-920):
@@ -85,7 +85,7 @@
       returning a model with no active variant; assert
       `result.provenance.resolved_parent_variant` is null —
       RD-FR-037 scenario "Host run without an active variant".
-- [ ] 2.2 [P] In `.opencode/test/dispatch-review-runs.test.ts`,
+- [x] 2.2 [P] In `.opencode/test/dispatch-review-runs.test.ts`,
       add a test that dispatches a panel whose `plan_entries`
       include a `source: "host"`, `model: null`, `tier: null`
       include-entry (host-fallback shape from `baseRuns`) and
@@ -94,7 +94,7 @@
       provenance: `requested_model`, `provider`, `model_id`,
       `variant` null; `resolved_parent_model` non-null
       (RD-FR-037 scenario "Host run inherits the parent model").
-- [ ] 2.3 [P] In `.opencode/test/consolidate-dispatch.test.ts`,
+- [x] 2.3 [P] In `.opencode/test/consolidate-dispatch.test.ts`,
       add a provenance-carrying consolidation test over a
       scratch dispatch session that includes a successful
       host-source run file with the dispatcher-recorded host
@@ -105,21 +105,21 @@
       finalizing cleanly (RD-FR-037 scenarios "Host-fallback
       panel finalizes cleanly" and "Host run without an active
       variant" — the #901 reproduction at the unit seam).
-- [ ] 2.4 [P] In `.opencode/test/dispatch-recovery.test.ts`,
+- [x] 2.4 [P] In `.opencode/test/dispatch-recovery.test.ts`,
       add a test that re-dispatches a failed host-source run
       (persisted prompt + plan entry with `source: "host"`,
       null model/tier) through `redispatch_failed_runs` and
       asserts the replacement run resolves the host model and
       carries host-run provenance (RD-FR-037 scenario
       "Re-dispatched host run reuses host resolution").
-- [ ] 2.5 Checkpoint: run `make plugin-test` — the full vitest
+- [x] 2.5 Checkpoint: run `make plugin-test` — the full vitest
       suite with the 94 percent statements coverage floor MUST
       pass. Gatekeeping: if the floor fails, report and stop;
       never adjust `.opencode/vitest.config.ts`.
 
 ## 3. Scaffold mirror, CI parity, documentation
 
-- [ ] 3.1 Sync the edited live plugin byte-identical into the
+- [x] 3.1 Sync the edited live plugin byte-identical into the
       scaffold asset copy at
       `internal/scaffold/assets/opencode/plugins/review-dispatch/`
       (`index.ts`; design D4) and run the drift gate:
@@ -130,11 +130,11 @@
       until this sync (the mirror is batched here to avoid
       re-sync churn); the phase-1/2 checkpoints gate the vitest
       suite only, per MP-018's per-suite reading.
-- [ ] 3.2 Add the CHANGELOG.md entry for the behavior change
+- [x] 3.2 Add the CHANGELOG.md entry for the behavior change
       (host-fallback runs execute on the parent session model
       and finalize cleanly; host resolution failure is now
       retryable `host_model_unavailable`; issue #901).
-- [ ] 3.3 Documentation-gate assessment across CHANGELOG.md,
+- [x] 3.3 Documentation-gate assessment across CHANGELOG.md,
       AGENTS.md, README.md, and docs/: the changed panel outcome
       (host-fallback triage/review panels finalizing with their
       native verdicts; host runs executing on the parent session
@@ -149,7 +149,7 @@
       (#778 ↔ website#316, #891 ↔ website#360,
       model-matrix-scaffold-deployment's website#362). Record
       the assessment in the PR body.
-- [ ] 3.4 Add the host-fallback semantics note to the Review
+- [x] 3.4 Add the host-fallback semantics note to the Review
       Council Configuration section of docs/configuration.md
       (parent-session model execution for host-source runs,
       profile/override bypass, advisor lists as the sanctioned
@@ -158,17 +158,17 @@
       retryable in the caller-re-invocation sense only — no run
       file exists for DR-FR-002 redispatch to target) and file
       the in-repo documentation issue; link it in the PR body.
-- [ ] 3.5 File the unbound-force/website documentation issue for
+- [x] 3.5 File the unbound-force/website documentation issue for
       the user-facing panel-outcome change per the Cross-Repo
       Documentation rule (precedent: website#316, website#360,
       website#362); link it in the PR body.
-- [ ] 3.6 File the follow-up issue for splitting
+- [x] 3.6 File the follow-up issue for splitting
       host-resolution failure classes (structural vs transient)
       across the advisor and host branches, scoped to also state
       that `retryable` on a pre-execution early exit means
       caller re-invocation only — no DR-FR-002 redispatch
       target (design D2 note); link it in the PR body.
-- [ ] 3.7 Constitution-alignment verification (proposal
+- [x] 3.7 Constitution-alignment verification (proposal
       identifies all six principles): confirm the tests run
       without external services (IV — vitest doubles only), the
       run-file provenance assertions verify observable side
@@ -179,6 +179,6 @@
       `host_model_unavailable` error (V) and the change is
       runtime dispatch code with no instruction-prose additions
       (VI). Record the verification summary in the PR body.
-- [ ] 3.8 Final CI parity (MP-023): run `make plugin-test` and
+- [x] 3.8 Final CI parity (MP-023): run `make plugin-test` and
       `go test -race -count=1 ./internal/scaffold/...` — both
       MUST pass before the change is marked complete.

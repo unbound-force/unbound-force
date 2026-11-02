@@ -921,6 +921,202 @@ describe("dispatch_agent_run", () => {
     })
   })
 
+  describe("host-source model resolution (RD-FR-037)", () => {
+    /**
+     * Fake client whose host lookup (session.message) and child prompt are
+     * independently shapable: prompt calls are captured so tests can assert
+     * the execution seam — which model identity and variant the child
+     * session actually received — while message overrides drive
+     * host-resolution success, variant-less, failure, and abort shapes.
+     */
+    function hostLookupClient(options?: {
+      message?: () => Promise<unknown>
+      promptCalls?: unknown[]
+    }): Client {
+      const session = {
+        create: async (): Promise<unknown> => ({
+          data: { id: "child-session" },
+          error: undefined,
+        }),
+        message:
+          options?.message ??
+          (async (): Promise<unknown> => ({
+            data: {
+              info: { id: "m", sessionID: "s", role: "assistant", providerID: "p", modelID: "m", variant: "active" },
+              parts: [],
+            },
+            error: undefined,
+          })),
+        prompt: async (request: unknown): Promise<unknown> => {
+          options?.promptCalls?.push(request)
+          // Echo the requested model so model-mismatch checks pass.
+          const req = request as { body?: { model?: { providerID: string; modelID: string } } }
+          const providerID = req.body?.model?.providerID ?? "provider"
+          const modelID = req.body?.model?.modelID ?? "standard"
+          return {
+            data: {
+              info: { role: "assistant", providerID, modelID },
+              parts: [
+                { id: "t", sessionID: "child-session", messageID: "m", type: "text", text: "review output", ignored: false },
+              ],
+            },
+            error: undefined,
+          }
+        },
+        abort: async (): Promise<unknown> => ({ data: true, error: undefined }),
+      }
+      return { session } as unknown as Client
+    }
+
+    it("inherits the parent session model, ignoring a configured profile model", async () => {
+      // RD-FR-037 "Host run ignores a configured profile model": the default
+      // matrixFixture configures provider/standard on the standard profile —
+      // a host-source entry MUST execute on the resolved parent model p/m
+      // instead and never consult the profile.
+      const promptCalls: unknown[] = []
+      const deps = makeDeps({ client: hostLookupClient({ promptCalls }) })
+      const result = await dispatchAgentRun(
+        { agent: "divisor-guard", prompt: "Review this change.", source: "host" },
+        toolContext(),
+        deps,
+      )
+      trackForCleanup(result.correlation_id)
+
+      expect(result.status).toBe("success")
+      expect(result.provenance).toMatchObject({
+        agent: "divisor-guard",
+        requested_model: null,
+        resolved_parent_model: "p/m",
+        resolved_parent_variant: "active",
+        requested_variant: null,
+        model_mismatch: false,
+        read_only: true,
+      })
+      // Execution seam: the child session was invoked with the resolved host
+      // model and variant, not the standard profile's provider/standard.
+      expect(promptCalls).toHaveLength(1)
+      const promptBody = (promptCalls[0] as { body?: { model?: { providerID: string; modelID: string }; variant?: string } }).body
+      expect(promptBody?.model).toEqual({ providerID: "p", modelID: "m" })
+      expect(promptBody?.variant).toBe("active")
+    })
+
+    it("returns a sanitized retryable host_model_unavailable when host resolution fails", async () => {
+      // RD-FR-037 "Host resolution failure": the raw lookup error carries
+      // redactable material (Bearer token, URL query string, home path) so
+      // the assertion pins the branch's sanitizeInvocationError() form.
+      const failingClient = hostLookupClient({
+        message: async (): Promise<never> => {
+          throw new Error(
+            "host lookup failed with Bearer abc123def456 at https://api.internal.example.com/v1/message?token=xyz789 reading /Users/jflowers/state.json",
+          )
+        },
+      })
+      const deps = makeDeps({ client: failingClient })
+      const result = await dispatchAgentRun(
+        { agent: "divisor-guard", prompt: "Review this change.", source: "host" },
+        toolContext(),
+        deps,
+      )
+      trackForCleanup(result.correlation_id)
+
+      expect(result.status).toBe("failed")
+      expect(result.error?.code).toBe("host_model_unavailable")
+      expect(result.error?.retryable).toBe(true)
+      // The sanitizeInvocationError() form: no Bearer value, no query string,
+      // no home path survives into the surfaced error message.
+      expect(result.error?.message).toContain("Bearer [REDACTED]")
+      expect(result.error?.message).not.toContain("abc123def456")
+      expect(result.error?.message).toContain("?[REDACTED]")
+      expect(result.error?.message).not.toContain("token=xyz789")
+      expect(result.error?.message).toContain("~/[REDACTED]")
+      expect(result.error?.message).not.toContain("/Users/jflowers")
+      // Pre-execution early exit: no run file is written for the correlation.
+      expect(await listRunFiles(result.correlation_id)).toEqual([])
+    })
+
+    it("returns cancelled when the abort signal fires during host resolution", async () => {
+      const abortController = new AbortController()
+      const hangingClient = hostLookupClient({
+        message: async (): Promise<unknown> => {
+          abortController.abort()
+          return { data: undefined, error: { message: "aborted" } }
+        },
+      })
+      const deps = makeDeps({ client: hangingClient })
+      const ctx = {
+        ...toolContext(),
+        abort: abortController.signal,
+      }
+      const result = await dispatchAgentRun(
+        { agent: "divisor-guard", prompt: "Review this change.", source: "host" },
+        ctx,
+        deps,
+      )
+      trackForCleanup(result.correlation_id)
+
+      expect(result.status).toBe("failed")
+      expect(result.error?.code).toBe("cancelled")
+      expect(result.error?.retryable).toBe(false)
+      // Pre-execution early exit: no run file is written for the correlation.
+      expect(await listRunFiles(result.correlation_id)).toEqual([])
+    })
+
+    it("executes the direct model bypass without consulting host resolution", async () => {
+      // RD-FR-037 "Direct bypass overrides host resolution": the bypass
+      // branch precedes source-based resolution, so a source "host" entry
+      // carrying an explicit model records non-host provenance. The
+      // scenario's finalization clause — fail-closed on the contradictory
+      // host provenance — is pinned compositionally by
+      // finalize-error-boundaries.test.ts ("rejects a host run that carries
+      // requested model provenance").
+      const message = vi.fn(async (): Promise<never> => {
+        throw new Error("host lookup must not be consulted for a direct bypass")
+      })
+      const promptCalls: unknown[] = []
+      const deps = makeDeps({ client: hostLookupClient({ message, promptCalls }) })
+      const result = await dispatchAgentRun(
+        { agent: "divisor-guard", prompt: "Review this change.", source: "host", model: "provider/bypass" },
+        toolContext(),
+        deps,
+      )
+      trackForCleanup(result.correlation_id)
+
+      expect(result.status).toBe("success")
+      expect(result.provenance.requested_model).toBe("provider/bypass")
+      expect(result.provenance.resolved_parent_model).toBeNull()
+      expect(message).not.toHaveBeenCalled()
+      const promptBody = (promptCalls[0] as { body?: { model?: { providerID: string; modelID: string } } }).body
+      expect(promptBody?.model).toEqual({ providerID: "provider", modelID: "bypass" })
+    })
+
+    it("records a null resolved parent variant when the host model has no active variant", async () => {
+      // RD-FR-037 "Host run without an active variant": the parent
+      // assistant message carries a model identity but no variant field.
+      const variantlessClient = hostLookupClient({
+        message: async (): Promise<unknown> => ({
+          data: {
+            info: { id: "m", sessionID: "s", role: "assistant", providerID: "p", modelID: "m" },
+            parts: [],
+          },
+          error: undefined,
+        }),
+      })
+      const deps = makeDeps({ client: variantlessClient })
+      const result = await dispatchAgentRun(
+        { agent: "divisor-guard", prompt: "Review this change.", source: "host" },
+        toolContext(),
+        deps,
+      )
+      trackForCleanup(result.correlation_id)
+
+      expect(result.status).toBe("success")
+      expect(result.provenance.requested_model).toBeNull()
+      expect(result.provenance.resolved_parent_model).toBe("p/m")
+      expect(result.provenance.resolved_parent_variant).toBeNull()
+      expect(result.provenance.model_mismatch).toBe(false)
+    })
+  })
+
   describe("shouldReclassifyToSuccess predicate", () => {
     it("returns true for a post-submission child_message_error abort with findings", () => {
       // The issue #751 shape: submissions accepted, final response begun,
