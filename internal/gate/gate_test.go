@@ -455,6 +455,25 @@ func TestCheckCoverageStrategy_PercentagePattern(t *testing.T) {
 	}
 }
 
+func TestCheckCoverageStrategy_ActiveChangeMissingCoverage_Fails(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	scaffoldOpenSpecChange(t, dir, "aaa-other", map[string]string{
+		"tasks.md": "# Tasks\n\n## Coverage Strategy\n\nUnit tests required.\n",
+	})
+	scaffoldOpenSpecChange(t, dir, "zzz-active", map[string]string{
+		"tasks.md": "# Tasks\n\n- [ ] Implement feature\n",
+	})
+	initGitRepo(t, dir, "opsx/zzz-active")
+
+	r := checkCoverageStrategy(dir)
+	if r.Passed {
+		t.Errorf("expected active change without coverage strategy to fail, got: %s", r.Message)
+	}
+}
+
 // --- checkNotOnMain tests ---
 
 func TestCheckNotOnMain_FeatureBranch(t *testing.T) {
@@ -747,18 +766,26 @@ func TestRun_Provenance(t *testing.T) {
 	if report.Branch != "" {
 		t.Errorf("expected empty branch for non-git dir, got %s", report.Branch)
 	}
+	if report.Commit != "" {
+		t.Errorf("expected empty commit for non-git dir, got %s", report.Commit)
+	}
+	if report.ToolVersion != "dev" {
+		t.Errorf("expected default tool version dev, got %s", report.ToolVersion)
+	}
 }
 
 // --- FormatJSON tests ---
 
 func TestFormatJSON_ValidOutput(t *testing.T) {
 	report := &GateReport{
-		Version:   SchemaVersion,
-		Producer:  ProducerName,
-		Timestamp: "2026-09-08T12:00:00Z",
-		Branch:    "opsx/test",
-		Phase:     "specify",
-		Passed:    true,
+		Version:     SchemaVersion,
+		ToolVersion: "v1.2.3",
+		Producer:    ProducerName,
+		Timestamp:   "2026-09-08T12:00:00Z",
+		Branch:      "opsx/test",
+		Commit:      "0123456789abcdef",
+		Phase:       "specify",
+		Passed:      true,
 		Checks: []CheckResult{
 			{Name: "spec-exists", Passed: true, Message: "Spec found"},
 		},
@@ -787,8 +814,14 @@ func TestFormatJSON_ValidOutput(t *testing.T) {
 	if decoded.Producer != ProducerName {
 		t.Errorf("expected producer %s, got %s", ProducerName, decoded.Producer)
 	}
+	if decoded.ToolVersion != "v1.2.3" {
+		t.Errorf("expected tool version v1.2.3, got %s", decoded.ToolVersion)
+	}
 	if decoded.Branch != "opsx/test" {
 		t.Errorf("expected branch opsx/test, got %s", decoded.Branch)
+	}
+	if decoded.Commit != "0123456789abcdef" {
+		t.Errorf("expected commit provenance, got %s", decoded.Commit)
 	}
 	if _, err := time.Parse(time.RFC3339, decoded.Timestamp); err != nil {
 		t.Errorf("expected RFC3339 timestamp %q, parse error: %v", decoded.Timestamp, err)
@@ -1156,6 +1189,12 @@ func TestRun_PRPhase_Pass(t *testing.T) {
 	if report.Branch != "opsx/test-change" {
 		t.Errorf("expected branch opsx/test-change, got %s", report.Branch)
 	}
+	if report.Commit == "" {
+		t.Error("expected commit provenance for git repository")
+	}
+	if report.ToolVersion != "dev" {
+		t.Errorf("expected default tool version dev, got %s", report.ToolVersion)
+	}
 	if report.Summary.Total != 2 || report.Summary.Failed != 0 {
 		t.Errorf("unexpected summary: %+v", report.Summary)
 	}
@@ -1180,7 +1219,10 @@ func TestFindTasksFile_OpenSpec(t *testing.T) {
 		"tasks.md": "# Tasks",
 	})
 
-	path := findTasksFile(dir)
+	path, err := findTasksFile(dir)
+	if err != nil {
+		t.Fatalf("find tasks file: %v", err)
+	}
 	if path == "" {
 		t.Error("expected to find tasks.md in OpenSpec layout")
 	}
@@ -1192,7 +1234,10 @@ func TestFindTasksFile_Speckit(t *testing.T) {
 		"tasks.md": "# Tasks",
 	})
 
-	path := findTasksFile(dir)
+	path, err := findTasksFile(dir)
+	if err != nil {
+		t.Fatalf("find tasks file: %v", err)
+	}
 	if path == "" {
 		t.Error("expected to find tasks.md in Speckit layout")
 	}
@@ -1201,7 +1246,10 @@ func TestFindTasksFile_Speckit(t *testing.T) {
 func TestFindTasksFile_NotFound(t *testing.T) {
 	dir := t.TempDir()
 
-	path := findTasksFile(dir)
+	path, err := findTasksFile(dir)
+	if err != nil {
+		t.Fatalf("find tasks file: %v", err)
+	}
 	if path != "" {
 		t.Errorf("expected empty string, got %s", path)
 	}
@@ -1278,7 +1326,10 @@ func TestFindTasksFile_MultipleChanges_SelectsBranchChange(t *testing.T) {
 	})
 	initGitRepo(t, dir, "opsx/zzz-active")
 
-	path := findTasksFile(dir)
+	path, err := findTasksFile(dir)
+	if err != nil {
+		t.Fatalf("find tasks file: %v", err)
+	}
 	want := filepath.Join(dir, "openspec", "changes", "zzz-active", "tasks.md")
 	if path != want {
 		t.Errorf("expected branch-mapped tasks file %s, got %s", want, path)
@@ -1318,7 +1369,10 @@ func TestFindTasksFile_SpeckitBranchChange(t *testing.T) {
 	})
 	initGitRepo(t, dir, "001-test-feature")
 
-	path := findTasksFile(dir)
+	path, err := findTasksFile(dir)
+	if err != nil {
+		t.Fatalf("find tasks file: %v", err)
+	}
 	want := filepath.Join(dir, "specs", "001-test-feature", "tasks.md")
 	if path != want {
 		t.Errorf("expected branch-mapped tasks file %s, got %s", want, path)
@@ -1353,8 +1407,8 @@ func TestTaskChecks_UnreadableTasksFile(t *testing.T) {
 			if r.Passed {
 				t.Errorf("expected fail for unreadable tasks.md")
 			}
-			if !strings.Contains(r.Message, "Cannot read") {
-				t.Errorf("expected 'Cannot read' message, got: %s", r.Message)
+			if r.internalErr == nil {
+				t.Errorf("expected internal error, got: %s", r.Message)
 			}
 		})
 	}
@@ -1377,8 +1431,8 @@ func TestCheckCoverageStrategy_UnreadableArtifact(t *testing.T) {
 	if r.Passed {
 		t.Errorf("expected fail for unreadable artifact")
 	}
-	if !strings.Contains(r.Message, "cannot read artifact") {
-		t.Errorf("expected 'cannot read artifact' message, got: %s", r.Message)
+	if r.internalErr == nil {
+		t.Errorf("expected internal error, got: %s", r.Message)
 	}
 }
 
@@ -1412,7 +1466,9 @@ func TestFindTasksFile_ActiveChangeMissing(t *testing.T) {
 	})
 	initGitRepo(t, dir, "opsx/zzz-missing")
 
-	if path := findTasksFile(dir); path != "" {
+	if path, err := findTasksFile(dir); err != nil {
+		t.Fatalf("find tasks file: %v", err)
+	} else if path != "" {
 		t.Errorf("expected no tasks file for missing active change, got %s", path)
 	}
 }

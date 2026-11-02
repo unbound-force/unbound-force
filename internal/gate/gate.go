@@ -19,6 +19,9 @@ type Options struct {
 	// Phase is the workflow phase to check.
 	Phase string
 
+	// BuildVersion identifies the uf binary that produced the report.
+	BuildVersion string
+
 	// Format is the output format: "text" or "json".
 	Format string
 
@@ -41,6 +44,9 @@ func (o *Options) defaults() {
 	}
 	if o.Format == "" {
 		o.Format = "text"
+	}
+	if o.BuildVersion == "" {
+		o.BuildVersion = "dev"
 	}
 	if o.Stdout == nil {
 		o.Stdout = os.Stdout
@@ -101,7 +107,11 @@ func Run(opts Options) (*GateReport, error) {
 	checks := phaseChecks[opts.Phase]
 	results := make([]CheckResult, 0, len(checks))
 	for _, check := range checks {
-		results = append(results, check(resolved))
+		result := check(resolved)
+		if result.internalErr != nil {
+			return nil, &InternalError{Err: result.internalErr}
+		}
+		results = append(results, result)
 	}
 
 	// Compute summary.
@@ -111,14 +121,16 @@ func Run(opts Options) (*GateReport, error) {
 	branch := detectBranch(resolved)
 
 	report := &GateReport{
-		Version:   SchemaVersion,
-		Producer:  ProducerName,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Branch:    branch,
-		Phase:     opts.Phase,
-		Passed:    summary.Failed == 0,
-		Checks:    results,
-		Summary:   summary,
+		Version:     SchemaVersion,
+		ToolVersion: opts.BuildVersion,
+		Producer:    ProducerName,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		Branch:      branch,
+		Commit:      detectCommit(resolved),
+		Phase:       opts.Phase,
+		Passed:      summary.Failed == 0,
+		Checks:      results,
+		Summary:     summary,
 	}
 
 	if summary.Failed > 0 {
@@ -157,6 +169,18 @@ func computeSummary(results []CheckResult) Summary {
 // repository. Best-effort per D4.
 func detectBranch(dir string) string {
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// detectCommit returns the checked HEAD commit, or an empty string when git
+// is unavailable or the directory is not a repository.
+func detectCommit(dir string) string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {

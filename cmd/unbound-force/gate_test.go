@@ -346,6 +346,31 @@ func TestRunGate_FormatFailure_ExitCode2(t *testing.T) {
 	}
 }
 
+func TestRunGate_ArtifactReadFailure_ExitCode2(t *testing.T) {
+	dir := t.TempDir()
+	openspecDir := filepath.Join(dir, "openspec")
+	if err := os.MkdirAll(openspecDir, 0o755); err != nil {
+		t.Fatalf("mkdir openspec: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(openspecDir, "changes"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write malformed artifact root: %v", err)
+	}
+
+	err := runGate(gateParams{
+		targetDir: dir,
+		phase:     "specify",
+		format:    "json",
+		stdout:    &bytes.Buffer{},
+		stderr:    &bytes.Buffer{},
+	})
+	if err == nil {
+		t.Fatal("expected error for artifact read failure")
+	}
+	if exitCode(err) != 2 {
+		t.Errorf("expected exit code 2 for artifact read failure, got %d", exitCode(err))
+	}
+}
+
 func TestRunGate_TextFormatFailure_ExitCode2(t *testing.T) {
 	dir := t.TempDir()
 	scaffoldGateFixture(t, dir, map[string]string{

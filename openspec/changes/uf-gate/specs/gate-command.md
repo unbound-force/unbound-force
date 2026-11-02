@@ -1,6 +1,13 @@
+<!-- Requirement allocation: this delta owns GATE-FR-001 through
+GATE-FR-011. GATE-FR-012 through GATE-FR-099 are reserved for future
+gate-command changes. Other capability requirements are allocated in
+their respective OpenSpec deltas. -->
+
 ## ADDED Requirements
 
-### Requirement: FR-001 Gate command existence
+### Requirement: Gate command existence
+
+**ID:** GATE-FR-001
 
 The `unbound-force` CLI MUST provide a `gate` subcommand
 that performs phase-specific constitution compliance checks.
@@ -12,7 +19,9 @@ that performs phase-specific constitution compliance checks.
 - **THEN** help text is displayed showing usage, phase
   values, and format options
 
-### Requirement: FR-002 Phase flag
+### Requirement: Phase flag
+
+**ID:** GATE-FR-002
 
 The `gate` command MUST accept a `--phase` flag with one
 of the following values: `specify`, `plan`, `implement`,
@@ -40,7 +49,9 @@ with a non-zero exit code.
 - **THEN** the command exits with code 1 and an error
   message indicating `--phase` is required
 
-### Requirement: FR-003 JSON output format
+### Requirement: JSON output format
+
+**ID:** GATE-FR-003
 
 The `gate` command MUST support `--format json` for
 machine-readable output. The default format MUST be
@@ -50,6 +61,8 @@ machine-readable output. The default format MUST be
 - `producer`: tool identifier ("uf-gate")
 - `timestamp`: ISO 8601 UTC timestamp of the check run
 - `branch`: current git branch (empty if unavailable)
+- `commit`: checked git commit (empty if unavailable)
+- `tool_version`: producing `uf` binary version
 - `phase`: the phase checked (string)
 - `passed`: overall result (boolean)
 - `checks`: array of individual check results, each with
@@ -82,7 +95,9 @@ machine-readable output. The default format MUST be
 - **THEN** the command exits with code 1 and an error
   message to stderr listing valid formats (text, json)
 
-### Requirement: FR-004 Specify phase checks
+### Requirement: Specify phase checks
+
+**ID:** GATE-FR-004
 
 When `--phase specify`, the gate MUST check:
 
@@ -108,7 +123,9 @@ When `--phase specify`, the gate MUST check:
 - **THEN** the `spec-exists` check fails and the command
   exits with code 1
 
-### Requirement: FR-005 Plan phase checks
+### Requirement: Plan phase checks
+
+**ID:** GATE-FR-005
 
 When `--phase plan`, the gate MUST check:
 
@@ -130,7 +147,9 @@ When `--phase plan`, the gate MUST check:
 - **WHEN** the user runs `uf gate --phase plan`
 - **THEN** the `plan-exists` check fails
 
-### Requirement: FR-006 Implement phase checks
+### Requirement: Implement phase checks
+
+**ID:** GATE-FR-006
 
 When `--phase implement`, the gate MUST check:
 
@@ -168,7 +187,9 @@ When `--phase implement`, the gate MUST check:
 - **WHEN** the user runs `uf gate --phase implement`
 - **THEN** the `coverage-strategy` check passes
 
-### Requirement: FR-007 Review phase checks
+### Requirement: Review phase checks
+
+**ID:** GATE-FR-007
 
 When `--phase review`, the gate MUST check:
 
@@ -204,7 +225,9 @@ When `--phase review`, the gate MUST check:
 - **THEN** the `review-run` check fails with a message
   indicating no review has been recorded
 
-### Requirement: FR-008 PR phase checks
+### Requirement: PR phase checks
+
+**ID:** GATE-FR-008
 
 When `--phase pr`, the gate MUST check:
 
@@ -261,7 +284,9 @@ When `--phase pr`, the gate MUST check:
 - **THEN** the `not-on-main` check passes (detached HEAD
   is not `main`)
 
-### Requirement: FR-009 Exit code semantics
+### Requirement: Exit code semantics
+
+**ID:** GATE-FR-009
 
 The `gate` command MUST exit with code 0 when all checks
 for the requested phase pass. It MUST exit with code 1
@@ -290,7 +315,9 @@ non-existent directory) MUST be written to stderr.
 - **THEN** it writes an error message to stderr and
   exits with code 2
 
-### Requirement: FR-010 Directory flag
+### Requirement: Directory flag
+
+**ID:** GATE-FR-010
 
 The `gate` command MUST accept a `--dir` flag to specify
 the project root directory. The default MUST be the
@@ -328,7 +355,9 @@ validated before any checks execute:
 - **THEN** the command exits with code 1 and an error
   message indicating the path is not a directory
 
-### Requirement: FR-011 Testability pattern
+### Requirement: Testability pattern
+
+**ID:** GATE-FR-011
 
 The gate command MUST follow the testable CLI pattern:
 a `gateParams` struct with `io.Writer` injection for

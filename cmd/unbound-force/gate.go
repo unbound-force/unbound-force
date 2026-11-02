@@ -28,11 +28,12 @@ type gateParams struct {
 //	*gate.InternalError → exit 2 (implements exitCoder)
 func runGate(p gateParams) error {
 	opts := gate.Options{
-		TargetDir: p.targetDir,
-		Phase:     p.phase,
-		Format:    p.format,
-		Stdout:    p.stdout,
-		Stderr:    p.stderr,
+		TargetDir:    p.targetDir,
+		Phase:        p.phase,
+		BuildVersion: version,
+		Format:       p.format,
+		Stdout:       p.stdout,
+		Stderr:       p.stderr,
 	}
 
 	report, err := gate.Run(opts)
@@ -104,7 +105,7 @@ Artifact resolution:
   alphabetical match across openspec/changes/* or specs/*.
 
 Use --format json for machine-readable output with provenance
-metadata (version, producer, timestamp, branch).`,
+metadata (schema version, producer, tool version, timestamp, branch, commit).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			phase, _ := cmd.Flags().GetString("phase")
 			format, _ := cmd.Flags().GetString("format")

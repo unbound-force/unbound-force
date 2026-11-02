@@ -81,10 +81,15 @@ func FormatText(report *GateReport, w io.Writer) (err error) {
 	}
 
 	// Provenance in dim.
-	if report.Branch != "" {
-		write("%s\n", dimStyle.Render(
-			fmt.Sprintf("  branch: %s  |  %s v%s",
-				report.Branch, report.Producer, report.Version)))
+	if report.Branch != "" || report.Commit != "" {
+		provenance := fmt.Sprintf("  %s v%s", report.Producer, report.ToolVersion)
+		if report.Branch != "" {
+			provenance = fmt.Sprintf("  branch: %s  |%s", report.Branch, provenance)
+		}
+		if report.Commit != "" {
+			provenance = fmt.Sprintf("%s  |  commit: %s", provenance, report.Commit)
+		}
+		write("%s\n", dimStyle.Render(provenance))
 	}
 
 	return err

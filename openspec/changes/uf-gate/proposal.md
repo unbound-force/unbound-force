@@ -26,8 +26,7 @@ checks derived from the constitution:
 - **specify**: Verifies spec artifacts exist in the expected
   location (openspec or speckit).
 - **plan**: Verifies plan artifact exists and spec is present.
-- **implement**: Verifies spec + plan + tasks exist and are
-  approved. Verifies coverage strategy is present
+- **implement**: Verifies spec + plan + tasks exist. Verifies coverage strategy is present
   (Constitution IV).
 - **review**: Verifies implementation is complete per task
   checklist. Verifies review council has run.
@@ -91,8 +90,8 @@ or human produced them.
 **Assessment**: PASS
 
 The `--format json` flag produces machine-parseable output with
-per-check results, overall pass/fail, and phase metadata. The
-JSON schema will be stable across minor versions.
+per-check results, overall pass/fail, phase metadata, and branch/commit
+provenance. The JSON schema will be stable across minor versions.
 
 ### IV. Testability
 

@@ -193,6 +193,9 @@ spec workflows) requires only `uf` and `opencode`.
 
 ## Additional Tools
 
+- **`uf gate`** -- Enforce constitution compliance at workflow phase
+  boundaries for CI pipelines, validation loops, and pre-PR hooks. See
+  [CLI Reference](docs/cli-reference.md#uf-gate).
 - **`uf gateway`** -- Local LLM reverse proxy for
   Vertex AI and AWS Bedrock users. See
   [CLI Reference](docs/cli-reference.md#uf-gateway).

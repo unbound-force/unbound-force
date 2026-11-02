@@ -21,9 +21,10 @@ const ProducerName = "uf-gate"
 // Gate checks are binary pass/fail — there is no warn severity
 // because constitution compliance is not gradual.
 type CheckResult struct {
-	Name    string `json:"name"`
-	Passed  bool   `json:"passed"`
-	Message string `json:"message"`
+	Name        string `json:"name"`
+	Passed      bool   `json:"passed"`
+	Message     string `json:"message"`
+	internalErr error
 }
 
 // Summary provides aggregate counts of check results.
@@ -33,8 +34,8 @@ type Summary struct {
 	Failed int `json:"failed"`
 }
 
-// InternalError indicates an internal (exit code 2) failure such
-// as invalid arguments or filesystem errors. Callers use
+// InternalError indicates an unexpected execution (exit code 2) failure,
+// such as a filesystem or output error. Callers use
 // errors.As to distinguish internal errors from check failures
 // (exit code 1).
 type InternalError struct {
@@ -52,12 +53,14 @@ func (e *InternalError) ExitCode() int { return 2 }
 // GateReport is the complete output from a gate run, including
 // provenance metadata per Constitution III.
 type GateReport struct {
-	Version   string        `json:"version"`
-	Producer  string        `json:"producer"`
-	Timestamp string        `json:"timestamp"`
-	Branch    string        `json:"branch"`
-	Phase     string        `json:"phase"`
-	Passed    bool          `json:"passed"`
-	Checks    []CheckResult `json:"checks"`
-	Summary   Summary       `json:"summary"`
+	Version     string        `json:"version"`
+	ToolVersion string        `json:"tool_version"`
+	Producer    string        `json:"producer"`
+	Timestamp   string        `json:"timestamp"`
+	Branch      string        `json:"branch"`
+	Commit      string        `json:"commit"`
+	Phase       string        `json:"phase"`
+	Passed      bool          `json:"passed"`
+	Checks      []CheckResult `json:"checks"`
+	Summary     Summary       `json:"summary"`
 }
