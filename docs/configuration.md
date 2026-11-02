@@ -272,7 +272,7 @@ defaults.
 | File | Purpose |
 |------|---------|
 | `.uf/review-matrix.yaml` | Named model profiles and ordered per-mode, per-agent run arrays, plus `limits` (persona/run/timeout/cost). Project-owned: seeded once on first deploy, survives plain `uf init` re-runs, reset to canonical only by `--force`. |
-| `.uf/review-matrix.override.yaml` | Per-developer model/variant overrides for specific profile tiers. Only `profiles.<tier>.[model, variant]` paths are permitted (whitelist). Gitignored — each developer maintains their own; never seeded or reset by `uf init`. |
+| `.uf/review-matrix.override.yaml` | Per-developer model/variant overrides for specific profile tiers. Only `profiles.<tier>.[model, variant]` paths are permitted (whitelist). Gitignored — each developer maintains their own; seeded once as a comment-only stub on first `uf init` (or `uf init --overrides`), never modified afterwards, not even by `--force`. |
 | `.uf/reviewer-capabilities.yaml` | Classifies each Divisor persona as review or content and declares its ordered review scopes. Project-owned: seeded once on first deploy, survives plain `uf init` re-runs, reset to canonical only by `--force`. |
 | `.uf/sibling-repos.yaml` | Declares the sibling repositories eligible for bounded evidence acquisition. |
 
@@ -284,8 +284,9 @@ from the embedded canonical asset, skipped on plain `uf init` re-runs
 byte-for-byte), and reset to the canonical asset only by
 `uf init --force` -- a destructive reset for both files that discards
 local entries. `.uf/review-matrix.override.yaml` is deliberately
-different: it is gitignored, per-developer, and never seeded or reset
-by `uf init`.
+different: it is gitignored, per-developer, seeded once as a
+comment-only stub on first `uf init` (or `uf init --overrides`),
+and never modified afterwards -- not even by `--force`.
 
 Each file has a corresponding JSON Schema under `schemas/` (and a
 scaffold mirror under `internal/scaffold/assets/uf/schemas/`), so invalid
@@ -486,10 +487,11 @@ existence -- every `packs` key MUST match a pack file under
 `.opencode/uf/packs/` -- and the starter matrix names
 `meta-prompt`, so the deployed `meta-prompt.md` is what makes
 the seeded matrix valid out of the box.
-`.uf/model-matrix.override.yaml` is deliberately not deployed:
-`uf init` writes only its gitignore entry (see
-`### Override file`); each developer creates the override
-themselves.
+`.uf/model-matrix.override.yaml` is seeded once as a comment-only
+stub on first `uf init` (or `uf init --overrides`) and never
+modified afterwards -- not even by `--force` (see
+`### Override file`); each developer edits the stub to add their
+overrides.
 
 On re-init, each file follows the scaffold's per-file ownership
 classification -- the same contract the review council files
@@ -502,7 +504,7 @@ use (see `## Review Council Configuration`):
 | Canonical packs (incl. `meta-prompt.md`) | Tool-owned | Refreshed when content differs |
 | `*-custom.md` packs (incl. `meta-prompt-custom.md`) | User-owned | Seeded once on first deploy, never overwritten |
 | Agent files (incl. `model-matrix-classifier.md`) | User-owned after first deploy | Skipped |
-| `.uf/model-matrix.override.yaml` | Per-developer (gitignored) | Never written beyond the gitignore entry |
+| `.uf/model-matrix.override.yaml` | Per-developer (gitignored) | Seeded once as a comment-only stub if absent; never modified afterwards, not even by `--force` |
 
 The tracked matrix is team-owned because it is the only home
 for team-shared structure: the override whitelist admits only

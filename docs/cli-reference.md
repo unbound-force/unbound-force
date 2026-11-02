@@ -17,9 +17,14 @@ current directory. Creates Speckit templates, scripts, OpenCode
 commands and agents, Divisor review personas, convention packs,
 and OpenSpec schema files.
 
-User-owned files (templates, scripts, agents, config) are skipped
-if they already exist. Tool-owned files (speckit commands, OpenSpec
-schema, convention packs) are updated if their content has changed.
+Files fall into three ownership classes. Scaffold-managed files
+(speckit commands, OpenSpec schema, convention packs) are updated
+when their content has changed. Project-owned files (templates,
+scripts, agents, config) are skipped if they already exist and are
+replaced only by `--force`. Per-developer files
+(`.uf/model-matrix.override.yaml` and
+`.uf/review-matrix.override.yaml`) are seeded once as comment-only
+stubs, never modified afterwards, and never reset by `--force`.
 
 ```
 uf init [flags]
@@ -27,8 +32,9 @@ uf init [flags]
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--force` | bool | `false` | Overwrite all existing files |
+| `--force` | bool | `false` | Overwrite existing scaffold-managed files; per-developer override files are never modified |
 | `--divisor` | bool | `false` | Deploy only Divisor review agents and convention packs |
+| `--overrides` | bool | `false` | Create only the per-developer override stubs and the managed .gitignore block; mutually exclusive with --divisor, --force, --check, and --stealth |
 | `--lang` | string | `""` | Project language for convention pack (auto-detected from go.mod, package.json, etc. if omitted) |
 | `--stealth` | bool | `false` | Scaffold locally without modifying tracked files or dirtying git (local-only; hidden files are not preserved on re-clone, re-run `uf init --stealth` to restore) |
 | `--check` | bool | `false` | Verify git-cleanliness without writing (requires `--stealth`) |
@@ -49,6 +55,23 @@ uf init --divisor
 
 # Force-overwrite all files for a Go project
 uf init --force --lang go
+
+# Seed only the per-developer override stubs plus the managed
+# .gitignore block (skips the asset walk, sub-tools, AGENTS.md
+# sections, and migrations)
+uf init --overrides
+```
+
+`uf init --overrides` reports only the managed-block and stub
+dispositions, then exits (context-aware next-step hints follow):
+
+```
+uf init: 0 files processed
+
+Sub-tool initialization:
+  ✓ .gitignore created
+  ✓ .uf/model-matrix.override.yaml created
+  ✓ .uf/review-matrix.override.yaml created
 ```
 
 ### uf version
