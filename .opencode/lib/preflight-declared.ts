@@ -290,17 +290,30 @@ function cell(value: string): string {
 }
 
 /**
- * Render rows for the pre-flight Execution Results table. Columns match
- * the soft-gate table (Tool | Command | Exit code | Status | Causality);
- * other modes drop the last column. Causality is filled only for required
- * failures in soft-gate mode; advisory rows never reach the baseline.
+ * Wrap a value in a code span that its own backticks cannot close: the
+ * fence is one backtick longer than the longest backtick run inside, and
+ * a value starting or ending with a backtick is space-padded (CommonMark).
  */
-export function renderDeclaredRows(checks: readonly DeclaredCheckResult[]): string {
+function codeSpan(value: string): string {
+  const longestRun = Math.max(0, ...(value.match(/`+/g) ?? []).map((run) => run.length))
+  const fence = "`".repeat(longestRun + 1)
+  const pad = value.startsWith("`") || value.endsWith("`") ? " " : ""
+  return `${fence}${pad}${cell(value)}${pad}${fence}`
+}
+
+/**
+ * Render rows for the pre-flight Execution Results table of `mode`:
+ * Tool | Command | Exit code | Status, plus Causality in soft-gate.
+ * Causality is filled only for required failures; advisory rows never
+ * reach the baseline.
+ */
+export function renderDeclaredRows(checks: readonly DeclaredCheckResult[], mode: PreflightMode): string {
   return checks
     .map((check) => {
       const exit = check.exit_code === null ? "—" : String(check.exit_code)
       const status = check.status === "SKIP — not available" ? `${check.status}: ${check.unavailable.join(", ")}` : check.status
-      return `| ${cell(check.name)} | \`${cell(check.command)}\` | ${exit} | ${cell(status)} | ${check.causality ?? "—"} |`
+      const causality = mode === "soft-gate" ? ` ${check.causality ?? "—"} |` : ""
+      return `| ${cell(check.name)} | ${codeSpan(check.command)} | ${exit} | ${cell(status)} |${causality}`
     })
     .join("\n")
 }
@@ -438,7 +451,9 @@ export async function runDeclaredChecks(
 
   if (mode === "soft-gate" && requiredFailures.length > 0) {
     if (!needsDiff) {
-      scope = { ...computeDiffScope(deps.git, cwd), files: null, fallback_reason: "no check declares paths" }
+      // Only the merge-base is needed; a real fallback reason outranks the no-paths note.
+      const recomputed = computeDiffScope(deps.git, cwd)
+      scope = { ...recomputed, files: null, fallback_reason: recomputed.fallback_reason ?? "no check declares paths" }
     }
     const failing = config.checks.filter((check) => requiredFailures.includes(check.name))
     const classified = await classifyFailures(failing, scope.merge_base, cwd, deps)
@@ -457,6 +472,6 @@ export async function runDeclaredChecks(
     required_failures: requiredFailures,
     verdict,
     baseline_method: baselineMethod,
-    rendered: renderDeclaredRows(checks),
+    rendered: renderDeclaredRows(checks, mode),
   }
 }

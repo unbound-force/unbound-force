@@ -124,6 +124,10 @@ describe("parsePreflightConfig", () => {
     ["bad gate", { name: "a", run: "a.sh", gate: "hard" }],
     ["unknown key", { name: "a", run: "a.sh", shell: "bash" }],
     ["requires with path", { name: "a", run: "a.sh", requires: ["/bin/sh"] }],
+    ["zero timeout", { name: "a", run: "a.sh", timeout_seconds: 0 }],
+    ["negative timeout", { name: "a", run: "a.sh", timeout_seconds: -1 }],
+    ["timeout above max", { name: "a", run: "a.sh", timeout_seconds: 3601 }],
+    ["non-integer timeout", { name: "a", run: "a.sh", timeout_seconds: 1.5 }],
   ])("rejects %s", (_label, entry) => {
     expect(() => parsePreflightConfig({ version: 1, checks: [entry] })).toThrow(PreflightConfigError)
   })
@@ -187,6 +191,34 @@ describe("computeDiffScope", () => {
     expect(computeDiffScope(gitFake({}), ROOT).files).toBeNull()
   })
 
+  it("returns an empty, non-fallback diff on the base branch itself (merge-base == HEAD)", () => {
+    const onBase = gitFake({
+      "rev-parse --verify upstream/main": "",
+      "rev-parse --verify origin/main": HEAD_SHA,
+      "rev-parse --verify HEAD": HEAD_SHA,
+      [`merge-base --is-ancestor ${HEAD_SHA} HEAD`]: "",
+      "rev-parse --is-shallow-repository": "false",
+      [`merge-base ${HEAD_SHA} HEAD`]: HEAD_SHA,
+      [`diff --name-only ${HEAD_SHA}`]: "",
+    })
+    expect(computeDiffScope(onBase, ROOT)).toEqual({ files: [], fallback_reason: null, base_ref: "origin/main", merge_base: HEAD_SHA })
+  })
+
+  it("falls back when git throws mid-diff (merge-base or diff fails)", () => {
+    const gitFailure = gitFake({
+      "rev-parse --verify upstream/main": "",
+      "rev-parse --verify origin/main": BASE_SHA,
+      "rev-parse --verify HEAD": HEAD_SHA,
+      [`merge-base --is-ancestor ${BASE_SHA} HEAD`]: "",
+    })
+    expect(computeDiffScope(gitFailure, ROOT)).toEqual({
+      files: null,
+      fallback_reason: "git diff failed",
+      base_ref: "origin/main",
+      merge_base: null,
+    })
+  })
+
   it("falls back on a diverged base, a shallow clone, and an empty feature-branch diff", () => {
     const diverged = gitFake({ "rev-parse --verify upstream/main": BASE_SHA, "rev-parse --verify HEAD": HEAD_SHA })
     expect(computeDiffScope(diverged, ROOT).fallback_reason).toMatch(/not an ancestor/)
@@ -228,8 +260,21 @@ describe("tailOutput and renderDeclaredRows", () => {
           output: "",
           causality: null,
         },
-      ]),
+      ], "soft-gate"),
     ).toBe("| a | `x.sh --k a\\|b` | 1 | FAIL | pre-existing |\n| b | `y.sh` | — | SKIP — not available: ripwire | — |")
+  })
+
+  it("drops the causality column outside soft-gate", () => {
+    const row = { name: "a", gate: "required", command: "x.sh", status: "FAIL", exit_code: 1, timed_out: false, unavailable: [], output: "", causality: null } as const
+    expect(renderDeclaredRows([row], "hard-gate")).toBe("| a | `x.sh` | 1 | FAIL |")
+    expect(renderDeclaredRows([row], "ci-aware")).toBe("| a | `x.sh` | 1 | FAIL |")
+  })
+
+  it("keeps backticks inside the command code span", () => {
+    const row = (command: string) =>
+      ({ name: "a", gate: "required", command, status: "PASS", exit_code: 0, timed_out: false, unavailable: [], output: "", causality: null }) as const
+    expect(renderDeclaredRows([row("x.sh a`b")], "hard-gate")).toBe("| a | ``x.sh a`b`` | 0 | PASS |")
+    expect(renderDeclaredRows([row("x.sh ``c`")], "hard-gate")).toBe("| a | ``` x.sh ``c` ``` | 0 | PASS |")
   })
 })
 
@@ -375,7 +420,7 @@ describe("runDeclaredChecks modes", () => {
 
   it("soft-gate re-runs only required failures at the merge-base and classifies them", async () => {
     const log: string[] = []
-    const { deps, calls, removed } = fakeDeps({
+    const { deps, calls, envs, removed } = fakeDeps({
       config,
       executables,
       results,
@@ -388,6 +433,9 @@ describe("runDeclaredChecks modes", () => {
     expect(removed).toEqual([WORKTREE])
     // Baseline runs execute the branch's script from the worktree cwd.
     expect(calls.filter((c) => c.cwd === WORKTREE).map((c) => c.file)).toEqual([`${ROOT}/new.sh`, `${ROOT}/old.sh`])
+    // Every run, baseline included, can find the primary checkout.
+    expect(envs).toHaveLength(calls.length)
+    expect(envs.every((env) => env.UF_PREFLIGHT_PROJECT_ROOT === ROOT)).toBe(true)
     expect(data.checks.map((c) => [c.name, c.causality])).toEqual([
       ["new-break", "branch-caused"],
       ["old-break", "pre-existing"],
@@ -422,6 +470,8 @@ describe("runDeclaredChecks modes", () => {
     expect(data.baseline_method).toBe("unavailable")
     expect(data.checks[0]?.causality).toBe("unknown")
     expect(data.verdict).toBe("FAIL")
+    // The recomputed scope reports the real reason, not the no-paths note.
+    expect(data.scope.fallback_reason).toBe("no base ref resolved")
   })
 
   it("soft-gate removes the temp dir when worktree creation fails", async () => {

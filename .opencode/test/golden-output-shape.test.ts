@@ -556,8 +556,8 @@ describe("golden output shapes -- uf-workflow registry (22 documented sites)", (
     ])
     expect(data.required_failures).toEqual([])
     expect(data.rendered).toBe(
-      "| contract | `check.sh --strict` | 0 | PASS | — |\n" +
-        "| needs-tool | `check.sh` | — | SKIP — not available: uf-golden-no-such-binary | — |",
+      "| contract | `check.sh --strict` | 0 | PASS |\n" +
+        "| needs-tool | `check.sh` | — | SKIP — not available: uf-golden-no-such-binary |",
     )
   })
 

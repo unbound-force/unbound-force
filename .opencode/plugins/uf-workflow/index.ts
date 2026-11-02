@@ -5354,41 +5354,47 @@ function isRegularFile(path: string): boolean {
   }
 }
 
+/** Output budget for one declared check before execFile kills it. */
+export const PREFLIGHT_MAX_BUFFER_BYTES = 64 * 1024 * 1024
+
 /**
- * Run an executable with an argv list and no shell. stdout and stderr are
- * concatenated (stdout first); a timeout kills the child and reports a
- * non-zero exit.
+ * Map an execFile completion onto a ProcessResult. stdout and stderr are
+ * concatenated (stdout first). Three failure classes:
+ * - timeout: execFile killed the child (`killed` + a signal) -> exit 124,
+ *   timedOut true;
+ * - output limit: `code` is ERR_CHILD_PROCESS_STDIO_MAXBUFFER (Node and
+ *   Bun; `killed` is not set) -> exit 1 with an annotation, timedOut false;
+ * - ordinary exit: numeric `code` passes through.
  */
-function runProcessNoShell(
+export function processResultFromExecFile(error: Error | null, stdout: string, stderr: string): ProcessResult {
+  const output = [stdout, stderr].filter((part) => part.length > 0).join("\n")
+  if (error === null) {
+    return { exitCode: 0, output, timedOut: false }
+  }
+  const failed = error as NodeJS.ErrnoException & { code?: number | string | null; killed?: boolean; signal?: string | null }
+  if (failed.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+    return { exitCode: 1, output: `${output}\n[output limit exceeded: ${failed.message}]`, timedOut: false }
+  }
+  const timedOut = failed.killed === true && failed.signal !== undefined && failed.signal !== null
+  const exitCode = typeof failed.code === "number" ? failed.code : 1
+  return { exitCode: timedOut ? 124 : exitCode, output: output || failed.message, timedOut }
+}
+
+/** Run an executable with an argv list and no shell; see processResultFromExecFile. */
+export function runProcessNoShell(
   file: string,
   args: readonly string[],
   cwd: string,
   timeoutMs: number,
   env: Readonly<Record<string, string>>,
+  maxBuffer: number = PREFLIGHT_MAX_BUFFER_BYTES,
 ): Promise<ProcessResult> {
   return new Promise((resolvePromise) => {
     execFile(
       file,
       [...args],
-      {
-        cwd,
-        env: { ...process.env, ...env },
-        timeout: timeoutMs,
-        maxBuffer: 64 * 1024 * 1024,
-        encoding: "utf8",
-        shell: false,
-      },
-      (error, stdout, stderr) => {
-        const output = [stdout, stderr].filter((part) => part.length > 0).join("\n")
-        if (error === null) {
-          resolvePromise({ exitCode: 0, output, timedOut: false })
-          return
-        }
-        const failed = error as NodeJS.ErrnoException & { code?: number | string; killed?: boolean; signal?: string }
-        const timedOut = failed.killed === true && failed.signal !== undefined && failed.signal !== null
-        const exitCode = typeof failed.code === "number" ? failed.code : 1
-        resolvePromise({ exitCode: timedOut ? 124 : exitCode, output: output || failed.message, timedOut })
-      },
+      { cwd, env: { ...process.env, ...env }, timeout: timeoutMs, maxBuffer, encoding: "utf8", shell: false },
+      (error, stdout, stderr) => resolvePromise(processResultFromExecFile(error, stdout, stderr)),
     )
   })
 }

@@ -16,7 +16,7 @@
  *   contract);
  * - `key: scalar` leaves (bare tokens and integers);
  * - `key:` block mappings nested by consistent indentation;
- * - the `{}` empty flow mapping.
+ * - the `{}` empty flow mapping and the `[]` empty flow sequence.
  *
  * A tracked-file edit that introduces syntax outside the subset fails
  * the conformance test loudly instead of misparsing, and every parsed
@@ -101,8 +101,8 @@ export function parseYamlSubset(text: string): unknown {
 }
 
 /**
- * Parses one scalar leaf value in the subset: `{}`, an integer, or a
- * bare token. Anything else — quoted strings, flow collections, values
+ * Parses one scalar leaf value in the subset: `{}`, `[]`, an integer, or a
+ * bare token. Anything else — quoted strings, non-empty flow collections, values
  * with internal spaces or trailing comments — throws.
  * @param key The leaf's key, for diagnostics.
  * @param value The raw scalar text.
@@ -112,6 +112,9 @@ export function parseYamlSubset(text: string): unknown {
 function parseScalar(key: string, value: string): unknown {
   if (value === "{}") {
     return {}
+  }
+  if (value === "[]") {
+    return []
   }
   if (/^-?\d+$/.test(value)) {
     return Number(value)

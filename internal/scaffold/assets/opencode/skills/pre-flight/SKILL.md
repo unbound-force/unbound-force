@@ -137,8 +137,8 @@ merge-base baseline classification) and returns:
 - Error `INVALID_PREFLIGHT_CONFIG`: report a pre-flight
   FAIL with the message; no declared check ran.
 - Otherwise insert `rendered` verbatim into the Phase 5
-  Execution Results table (drop the last column outside
-  `soft-gate`), include each non-PASS check's `output`,
+  Execution Results table (its columns already match the
+  mode), include each non-PASS check's `output`,
   and combine `verdict` with the detected tools' verdict:
   the overall result is FAIL if either is FAIL.
 
