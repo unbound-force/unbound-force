@@ -605,6 +605,176 @@ func TestQuestionToolPresentationContractGates(t *testing.T) {
 	})
 }
 
+// TestConsolidateDispatchFinalizationContractGates pins the
+// consolidate_dispatch finalization contract gates of the
+// review-pr-consolidate-dispatch change (FR-016): uf.review-pr.md
+// finalizes through exactly one provenance-bearing
+// consolidate_dispatch call with workflow_id "uf.review-pr"
+// (FR-013), resolves provenance only from the frozen PR input
+// context (head_ref/head_sha), never assembles a finalization
+// payload and never calls finalize_review_dispatch directly,
+// retries mechanical failures as the identical call at most
+// twice, and scopes deduplication and cross-persona grouping to
+// presentation only (FR-015); uf.review-council.md Section 3
+// deduplication prose carries the same presentation-only scope.
+// The pinned contract sentences wrap across markdown source
+// lines, so fragments are matched whitespace-normalized (the
+// question-tool precedent's option-label matching rule).
+// The absence gates pin the removed manual-finalize prose:
+// the Section 5b finalize_review_dispatch instruction and the
+// finalization-path verdict-ladder sentence are asserted
+// absent from uf.review-pr.md whole-file (the ladder sentence
+// legitimately remains in uf.review-council.md's presentation
+// verdict ladder), and the deduplication mandate's absence is
+// scoped to the Finalize Dispatch section boundaries because
+// "first deduplicate" legitimately remains in Section 6's
+// presentation-only prose. Absence is asserted both raw and
+// whitespace-normalized so line-wrapped reintroductions fail
+// (the question-tool precedent's legacy-phrasing rule).
+func TestConsolidateDispatchFinalizationContractGates(t *testing.T) {
+	readAsset := func(name string) string {
+		t.Helper()
+		content, err := assetContent("opencode/commands/" + name)
+		if err != nil {
+			t.Fatalf("read embedded %s command: %v", name, err)
+		}
+		return string(content)
+	}
+
+	review := readAsset("uf.review-pr.md")
+	council := readAsset("uf.review-council.md")
+
+	// normalize collapses markdown line wrapping so contract
+	// sentences split across lines in the source still match
+	// their landed wording.
+	normalize := func(s string) string {
+		return strings.Join(strings.Fields(s), " ")
+	}
+
+	assertFragments := func(t *testing.T, command, normalized string, fragments []string) {
+		t.Helper()
+		for _, fragment := range fragments {
+			if !strings.Contains(normalized, normalize(fragment)) {
+				t.Errorf("%s command missing contract fragment %q", command, fragment)
+			}
+		}
+	}
+
+	reviewNormalized := normalize(review)
+	councilNormalized := normalize(council)
+
+	t.Run("uf.review-pr one-call finalization contract", func(t *testing.T) {
+		assertFragments(t, "uf.review-pr", reviewNormalized, []string{
+			"Finalize the dispatch through a single deterministic `consolidate_dispatch` call",
+			"Then call `consolidate_dispatch` exactly once per finalization attempt, with the captured `correlation_id` from Section 4c and provenance as its only arguments",
+			`"workflow_id": "uf.review-pr"`,
+		})
+	})
+
+	t.Run("uf.review-pr frozen-context provenance source", func(t *testing.T) {
+		assertFragments(t, "uf.review-pr", reviewNormalized, []string{
+			"Resolve provenance only from the Step 2 frozen PR input context",
+			"never from the local checkout or a mutable ref",
+			"`branch` is the PR's head branch (`head_ref`)",
+			"`commit` is the PR's immutable head SHA (`head_sha`, 40-character lowercase hex, already validated in Step 2)",
+			"the frozen pair is the only valid source",
+		})
+	})
+
+	t.Run("uf.review-pr never-assemble and never-finalizer-directly prohibitions", func(t *testing.T) {
+		assertFragments(t, "uf.review-pr", reviewNormalized, []string{
+			"Never assemble, restate, or recompute the payload; never call `finalize_review_dispatch` directly",
+			"Never call `finalize_review_dispatch` yourself, and never hand-build or transform a finalization payload",
+		})
+	})
+
+	t.Run("uf.review-pr bounded mechanical retry policy", func(t *testing.T) {
+		assertFragments(t, "uf.review-pr", reviewNormalized, []string{
+			"Bounded mechanical retry",
+			"classify the failure from the structured response alone — default-deny",
+			"For a mechanical failure, retry the identical `consolidate_dispatch` call — same captured `correlation_id`, same provenance, no changes — at most twice",
+			"The initial attempt plus at most two retries is the fixed bound",
+		})
+	})
+
+	t.Run("uf.review-pr presentation-only grouping scope", func(t *testing.T) {
+		assertFragments(t, "uf.review-pr", reviewNormalized, []string{
+			"Presentation-only grouping",
+			"These transformations are presentation-only: they govern presenting the GitHub review comment and the terminal report ONLY",
+			"never merge, filter, re-order, or otherwise alter the findings, contributing run ids, verdicts, run counts, or advisories in finalization data",
+			"The finalized payload's findings remain exactly as `consolidate_dispatch` returned them",
+		})
+	})
+
+	t.Run("uf.review-council section 3 presentation-only scope", func(t *testing.T) {
+		assertFragments(t, "uf.review-council", councilNormalized, []string{
+			"These transformations are presentation-only",
+			"they govern presenting the review comment and the terminal report ONLY",
+			"never merge, filter, re-order, or otherwise alter the findings, contributing run ids, verdicts, run counts, or advisories in finalization data",
+		})
+	})
+
+	t.Run("uf.review-pr legacy manual-finalize fragments absent", func(t *testing.T) {
+		// Finalization-unique fragments of the removed Sections
+		// 5/5b: the Section 5b instruction to call the finalizer
+		// directly with a hand-built payload, and the
+		// finalization-path verdict-ladder sentence (the verdict
+		// now arrives from the consolidate_dispatch result). The
+		// bare tool name is deliberately not pinned:
+		// `finalize_review_dispatch` legitimately remains inside
+		// the never-call prohibitions. The ladder sentence
+		// legitimately remains in uf.review-council.md's
+		// presentation verdict ladder, so both pins are scoped
+		// to uf.review-pr only.
+		legacyFragments := []string{
+			"Call `finalize_review_dispatch` with",
+			"Any blocking successful run yields `REQUEST CHANGES`",
+		}
+		for _, fragment := range legacyFragments {
+			if strings.Contains(review, fragment) {
+				t.Errorf("uf.review-pr command retains legacy manual-finalize fragment %q", fragment)
+			}
+			if strings.Contains(reviewNormalized, normalize(fragment)) {
+				t.Errorf("uf.review-pr command retains legacy manual-finalize fragment %q across wrapped lines", fragment)
+			}
+		}
+	})
+
+	t.Run("uf.review-pr finalize-dispatch section free of deduplication mandate", func(t *testing.T) {
+		// The legacy Section 5 deduplication mandate conflicted
+		// with the finalizer's run-finding correspondence check.
+		// "first deduplicate" legitimately remains in Section
+		// 6's presentation-only prose, so the absence is scoped
+		// to the Finalize Dispatch section boundaries rather
+		// than the whole file; both casings are pinned so the
+		// surviving presentation wording cannot be copied back
+		// into the finalization path either. Missing section
+		// markers fail closed (the unleash command test's
+		// between-slice precedent).
+		const sectionStart = "### 5. Finalize Dispatch"
+		const sectionEnd = "### 6. Output Format"
+		startIndex := strings.Index(review, sectionStart)
+		if startIndex == -1 {
+			t.Fatalf("uf.review-pr command missing Finalize Dispatch section start %q", sectionStart)
+		}
+		fromStart := review[startIndex:]
+		endIndex := strings.Index(fromStart, sectionEnd)
+		if endIndex == -1 {
+			t.Fatalf("uf.review-pr command missing Finalize Dispatch section end %q", sectionEnd)
+		}
+		section := fromStart[:endIndex]
+		sectionNormalized := normalize(section)
+		for _, mandate := range []string{"First deduplicate", "first deduplicate"} {
+			if strings.Contains(section, mandate) {
+				t.Errorf("uf.review-pr Finalize Dispatch section retains deduplication mandate %q", mandate)
+			}
+			if strings.Contains(sectionNormalized, normalize(mandate)) {
+				t.Errorf("uf.review-pr Finalize Dispatch section retains deduplication mandate %q across wrapped lines", mandate)
+			}
+		}
+	})
+}
+
 func TestUnleashCommand_ToolRoutingContracts(t *testing.T) {
 	content, err := assetContent("opencode/commands/uf.unleash.md")
 	if err != nil {
