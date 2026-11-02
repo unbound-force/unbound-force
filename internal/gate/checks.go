@@ -98,7 +98,7 @@ func regularFile(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return !st.IsDir(), nil
+	return st.Mode().IsRegular(), nil
 }
 
 // firstArtifactFile returns the first alphabetical artifact below base.
@@ -388,11 +388,13 @@ func checkTasksComplete(dir string) CheckResult {
 		return CheckResult{Name: "tasks-complete", Passed: false, Message: message}
 	}
 
-	if strings.Contains(string(content), "- [ ]") {
-		return CheckResult{
-			Name:    "tasks-complete",
-			Passed:  false,
-			Message: fmt.Sprintf("Incomplete tasks remain in %s (unchecked checkboxes found)", rel),
+	for _, line := range strings.Split(string(content), "\n") {
+		if strings.HasPrefix(line, "- [ ]") {
+			return CheckResult{
+				Name:    "tasks-complete",
+				Passed:  false,
+				Message: fmt.Sprintf("Incomplete tasks remain in %s (unchecked checkboxes found)", rel),
+			}
 		}
 	}
 

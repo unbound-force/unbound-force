@@ -295,6 +295,18 @@ func TestCheckTasksComplete_Incomplete(t *testing.T) {
 	}
 }
 
+func TestCheckTasksComplete_ProseLiteral(t *testing.T) {
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"tasks.md": "# Tasks\n- [x] Complete task\n\nUse `- [ ]` for incomplete tasks.\n",
+	})
+
+	r := checkTasksComplete(dir)
+	if !r.Passed {
+		t.Errorf("expected prose literal to be ignored, got fail: %s", r.Message)
+	}
+}
+
 func TestCheckTasksComplete_NoFile(t *testing.T) {
 	dir := t.TempDir()
 
