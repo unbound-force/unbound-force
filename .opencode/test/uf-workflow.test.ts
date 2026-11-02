@@ -157,12 +157,32 @@ describe("UfWorkflowPlugin", () => {
       "scan_clarifications",
       "scan_conflict_markers",
       "uf_delegate_command",
+      "uf_preflight_declared_checks",
       "uf_unleash_branch_gate",
       "uf_unleash_detect_resume",
       "uf_unleash_resolve_issue",
       "uf_unleash_route_decision",
       "write_unleash_summary",
     ])
+  })
+
+  it("registers uf_preflight_declared_checks with the documented mode argument", async () => {
+    const fakeInput = {
+      directory: "/tmp/fake",
+      client: {} as PluginInput["client"],
+    } as PluginInput
+
+    const result = await withBun(() => UfWorkflowPlugin.server(fakeInput))
+
+    // DE-007 Layer 1: pre-flight Phase 2b passes exactly the consuming
+    // command's execution policy.
+    const args = result.tool.uf_preflight_declared_checks.args
+    expect(Object.keys(args)).toEqual(["mode"])
+    const mode = args.mode as unknown as { safeParse: (value: unknown) => { success: boolean } }
+    for (const value of ["hard-gate", "ci-aware", "soft-gate"]) {
+      expect(mode.safeParse(value).success).toBe(true)
+    }
+    expect(mode.safeParse("advisory").success).toBe(false)
   })
 
   it("registers uf_delegate_command with the documented argument contract", async () => {

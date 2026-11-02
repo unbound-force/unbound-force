@@ -1,5 +1,5 @@
 import type { PluginInput, PluginModule, ToolContext } from "@opencode-ai/plugin"
-import { execFileSync, execSync } from "node:child_process"
+import { execFile, execFileSync, execSync } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -35,14 +35,14 @@ import { withBun } from "./helpers/bun-runtime.js"
 // scratch-project filesystems with DI'd git/gh fakes, then asserts the
 // documented fields on the returned envelope.
 //
-// Coverage: 44 of the 48 documented sites. The four dispatch_review_runs
+// Coverage: 45 of the 49 documented sites. The four dispatch_review_runs
 // sites (uf.triage-issue.md:238, uf.review-council.md:260,
 // uf.review-pr.md:421, uf.address-feedback.md:363) belong to task 2.3
 // and are pinned in dispatch-review-runs.test.ts instead — one golden
 // per documented input variant (triage, code, feedback).
 //
 // Per-plugin site counts (registered-tool attribution):
-// - uf-workflow: 21 sites -- get_progress x4 (uf.unleash.md:87,
+// - uf-workflow: 22 sites -- get_progress x4 (uf.unleash.md:87,
 //   uf.finale.md:42, uf.review-council.md:51, uf.address-feedback.md:71),
 //   uf_unleash_branch_gate (uf.unleash.md:114), uf_unleash_detect_resume
 //   (uf.unleash.md:285), scan_clarifications (uf.unleash.md:374),
@@ -51,7 +51,8 @@ import { withBun } from "./helpers/bun-runtime.js"
 //   (uf.unleash.md:1146), scan_conflict_markers (uf.unleash.md:1250),
 //   format_unleash_demo (uf.unleash.md:1790), resolve_base_ref
 //   (uf.review-council.md:132), normalize_model_name
-//   (uf.address-feedback.md:910)
+//   (uf.address-feedback.md:910), uf_preflight_declared_checks
+//   (skills/pre-flight/SKILL.md Phase 2b)
 // - uf-finale: 9 sites -- uf_finale_startup (uf.finale.md:51),
 //   uf_finale_stage (72), uf_finale_commit_context (83),
 //   uf_finale_base_state (132), uf_finale_push_state (172),
@@ -445,10 +446,10 @@ async function setupGoldenDispatchSession(
 }
 
 // ---------------------------------------------------------------------------
-// uf-workflow registry -- 21 documented sites
+// uf-workflow registry -- 22 documented sites
 // ---------------------------------------------------------------------------
 
-describe("golden output shapes -- uf-workflow registry (21 documented sites)", () => {
+describe("golden output shapes -- uf-workflow registry (22 documented sites)", () => {
   it("get_progress [uf.unleash.md:87, uf.finale.md:42, uf.review-council.md:51, uf.address-feedback.md:71] returns completed_steps and current_step", async () => {
     const directory = await makeScratch()
     const registry = await loadRegistry(UfWorkflowPlugin, directory)
@@ -513,6 +514,65 @@ describe("golden output shapes -- uf-workflow registry (21 documented sites)", (
       expect(envelope.status).toBe("error")
       expect(envelope.status === "error" ? envelope.code : undefined).toBe(code)
     }
+  })
+
+  it("uf_preflight_declared_checks [skills/pre-flight/SKILL.md Phase 2b] returns checks, required_failures, and rendered rows", async () => {
+    const directory = await makeScratch()
+    // JSON is valid YAML; the withBun shim parses it with JSON.parse.
+    await writeProjectFile(
+      directory,
+      ".uf/preflight.yaml",
+      JSON.stringify({
+        version: 1,
+        checks: [
+          { name: "contract", run: "check.sh", args: ["--strict"] },
+          { name: "needs-tool", run: "check.sh", requires: ["uf-golden-no-such-binary"], gate: "advisory" },
+        ],
+      }),
+    )
+    await writeFile(join(directory, "check.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 })
+    const registry = await loadRegistry(UfWorkflowPlugin, directory)
+    vi.mocked(execFile).mockImplementation(((
+      _file: string,
+      _args: readonly string[],
+      _options: unknown,
+      callback: (error: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      callback(null, "contract ok", "")
+    }) as unknown as typeof execFile)
+
+    const data = expectOk(
+      await callEnvelopeTool<{
+        config_present: boolean
+        checks: Array<{ name: string; gate: string; status: string; exit_code: number | null }>
+        required_failures: string[]
+        rendered: string
+      }>(registry, "uf_preflight_declared_checks", { mode: "hard-gate" }),
+    )
+    expect(data.config_present).toBe(true)
+    expect(data.checks.map(({ name, gate, status, exit_code }) => ({ name, gate, status, exit_code }))).toEqual([
+      { name: "contract", gate: "required", status: "PASS", exit_code: 0 },
+      { name: "needs-tool", gate: "advisory", status: "SKIP — not available", exit_code: null },
+    ])
+    expect(data.required_failures).toEqual([])
+    expect(data.rendered).toBe(
+      "| contract | `check.sh --strict` | 0 | PASS | — |\n" +
+        "| needs-tool | `check.sh` | — | SKIP — not available: uf-golden-no-such-binary | — |",
+    )
+  })
+
+  it("uf_preflight_declared_checks [skills/pre-flight/SKILL.md Phase 2b] carries INVALID_PREFLIGHT_CONFIG", async () => {
+    const directory = await makeScratch()
+    await writeProjectFile(
+      directory,
+      ".uf/preflight.yaml",
+      JSON.stringify({ version: 1, checks: [{ name: "x", run: "a.sh && rm -rf ." }] }),
+    )
+    const registry = await loadRegistry(UfWorkflowPlugin, directory)
+    const envelope = await callEnvelopeTool(registry, "uf_preflight_declared_checks", { mode: "hard-gate" })
+    expect(envelope.status).toBe("error")
+    expect(envelope.status === "error" ? envelope.code : undefined).toBe("INVALID_PREFLIGHT_CONFIG")
+    expect(vi.mocked(execFile)).not.toHaveBeenCalled()
   })
 
   it("uf_unleash_detect_resume [uf.unleash.md:285] returns step_statuses, resume_from, all_complete, unchecked_count, and checkpoint_claims", async () => {

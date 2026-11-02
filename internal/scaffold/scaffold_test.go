@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -2093,10 +2094,11 @@ var expectedAssetPaths = []string{
 	"opencode/lib/uf-workflow-types.ts",
 	// UF finale plugin (1)
 	"opencode/plugins/uf-finale/index.ts",
-	// Shared lib modules (11)
+	// Shared lib modules (12)
 	"opencode/lib/agent-executor.ts",
 	"opencode/lib/branch-classification.ts",
 	"opencode/lib/model-matrix.ts",
+	"opencode/lib/preflight-declared.ts",
 	"opencode/lib/review-dispatch-artifact.ts",
 	"opencode/lib/review-dispatch-lesson-proposal.ts",
 	"opencode/lib/review-dispatch-sibling-evidence.ts",
@@ -2108,9 +2110,10 @@ var expectedAssetPaths = []string{
 	// Reproducible plugin package inputs (2)
 	"opencode/package-lock.json",
 	"opencode/package.json",
-	// Review policy, model-matrix template, and project-owned sibling
-	// template (4)
+	// Review policy, model-matrix template, project-owned sibling
+	// template, and project-declared pre-flight checks (5)
 	"uf/model-matrix.yaml",
+	"uf/preflight.yaml",
 	"uf/review-matrix.yaml",
 	"uf/reviewer-capabilities.yaml",
 	"uf/sibling-repos.yaml",
@@ -2146,6 +2149,7 @@ var task42CanonicalAssets = []struct {
 	{asset: "opencode/lib/agent-executor.ts", source: ".opencode/lib/agent-executor.ts"},
 	{asset: "opencode/lib/branch-classification.ts", source: ".opencode/lib/branch-classification.ts"},
 	{asset: "opencode/lib/model-matrix.ts", source: ".opencode/lib/model-matrix.ts"},
+	{asset: "opencode/lib/preflight-declared.ts", source: ".opencode/lib/preflight-declared.ts"},
 	{asset: "opencode/lib/review-dispatch-artifact.ts", source: ".opencode/lib/review-dispatch-artifact.ts"},
 	{asset: "opencode/lib/review-dispatch-lesson-proposal.ts", source: ".opencode/lib/review-dispatch-lesson-proposal.ts"},
 	{asset: "opencode/lib/review-dispatch-sibling-evidence.ts", source: ".opencode/lib/review-dispatch-sibling-evidence.ts"},
@@ -2652,6 +2656,82 @@ func TestRun_ReviewerCapabilitiesPreservedOnRerun(t *testing.T) {
 	}
 	if !bytes.Equal(got, customized) {
 		t.Errorf("reviewer-capabilities content was modified on re-run")
+	}
+}
+
+// TestRun_PreflightChecksPreservedOnRerun pins .uf/preflight.yaml as a
+// project-owned extension point: the pre-flight skill that reads it is
+// tool-owned and refreshed on every init, so project-declared checks
+// must survive a plain re-init while --force resets the template.
+func TestRun_PreflightChecksPreservedOnRerun(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	if _, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir: dir,
+		Version:   "1.0.0",
+		Stdout:    &buf,
+	}); err != nil {
+		t.Fatalf("first Run() error: %v", err)
+	}
+
+	preflightPath := filepath.Join(dir, ".uf", "preflight.yaml")
+	seeded, err := os.ReadFile(preflightPath)
+	if err != nil {
+		t.Fatalf("read seeded preflight.yaml: %v", err)
+	}
+	if !bytes.Contains(seeded, []byte("version: 1\nchecks: []")) {
+		t.Fatalf("seeded preflight.yaml must be an empty version 1 template")
+	}
+	customized := []byte("version: 1\nchecks:\n" +
+		"  - name: bash-env-contract\n" +
+		"    run: .uf/scripts/bash-env-contract.sh\n" +
+		"    gate: required\n")
+	if err := os.WriteFile(preflightPath, customized, 0o644); err != nil {
+		t.Fatalf("write customized preflight.yaml: %v", err)
+	}
+
+	// Re-run without --force: the declared check must survive.
+	buf.Reset()
+	result, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir: dir,
+		Version:   "1.0.0",
+		Stdout:    &buf,
+	})
+	if err != nil {
+		t.Fatalf("second Run() error: %v", err)
+	}
+	const preflightOut = ".uf/preflight.yaml"
+	if !slices.Contains(result.Skipped, preflightOut) {
+		t.Errorf("expected %s in result.Skipped", preflightOut)
+	}
+	if slices.Contains(result.Updated, preflightOut) || slices.Contains(result.Overwritten, preflightOut) {
+		t.Errorf("expected %s to be skipped, but it was rewritten", preflightOut)
+	}
+	got, err := os.ReadFile(preflightPath)
+	if err != nil {
+		t.Fatalf("read preflight.yaml after re-run: %v", err)
+	}
+	if !bytes.Equal(got, customized) {
+		t.Errorf("preflight.yaml content was modified on re-run")
+	}
+
+	// --force is the explicit reset path.
+	buf.Reset()
+	if _, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir: dir,
+		Version:   "1.0.0",
+		Force:     true,
+		Stdout:    &buf,
+	}); err != nil {
+		t.Fatalf("force Run() error: %v", err)
+	}
+	got, err = os.ReadFile(preflightPath)
+	if err != nil {
+		t.Fatalf("read preflight.yaml after --force: %v", err)
+	}
+	if !bytes.Equal(got, seeded) {
+		t.Errorf("--force must reset preflight.yaml to the embedded template")
 	}
 }
 
@@ -4037,6 +4117,7 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/lib/reviewer-manifest.ts", true},
 		{"opencode/lib/run-timeout.ts", true},
 		{"opencode/lib/uf-workflow-types.ts", true},
+		{"opencode/lib/preflight-declared.ts", true},
 		{"opencode/lib/unleash-templates.ts", true},
 		// User-owned: reviewer eligibility pairs with uf/review-matrix.yaml as a project extension point
 		{"uf/reviewer-capabilities.yaml", false},
@@ -4048,6 +4129,8 @@ func TestIsToolOwned(t *testing.T) {
 		{"uf/review-matrix.yaml", false},
 		// User-owned: active sibling declarations are project-specific
 		{"uf/sibling-repos.yaml", false},
+		// User-owned: project-declared pre-flight checks
+		{"uf/preflight.yaml", false},
 		// Tool-owned: shared multi-model schemas
 		{"uf/schemas/review-matrix/v2.schema.json", true},
 		{"uf/schemas/review-matrix/v3.schema.json", true},
@@ -4648,6 +4731,7 @@ func TestMapAssetPath_Prefixes(t *testing.T) {
 		// uf/ maps to .uf/ (dot prefix)
 		{"uf/reviewer-capabilities.yaml", ".uf/reviewer-capabilities.yaml"},
 		{"uf/sibling-repos.yaml", ".uf/sibling-repos.yaml"},
+		{"uf/preflight.yaml", ".uf/preflight.yaml"},
 		// uf/ maps to .uf/ (dot prefix) — model-matrix template
 		{"uf/model-matrix.yaml", ".uf/model-matrix.yaml"},
 		// uf/schemas/ maps to .uf/schemas/ via the uf/ → .uf/ prefix rule
@@ -4717,12 +4801,16 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/lib/reviewer-manifest.ts", true},
 		{"opencode/lib/run-timeout.ts", true},
 		{"opencode/lib/uf-workflow-types.ts", true},
+		{"opencode/lib/preflight-declared.ts", true},
 		{"opencode/lib/unleash-templates.ts", true},
 		// Divisor review eligibility policy
 		{"uf/reviewer-capabilities.yaml", true},
 		{"uf/review-matrix.yaml", true},
 		// Divisor sibling evidence template
 		{"uf/sibling-repos.yaml", true},
+		// Pre-flight config follows the pre-flight skill, which is not
+		// part of the Divisor subset
+		{"uf/preflight.yaml", false},
 		// Divisor contract schemas
 		{"uf/schemas/review-matrix/v2.schema.json", true},
 		{"uf/schemas/review-matrix/v3.schema.json", true},
