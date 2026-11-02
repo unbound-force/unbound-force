@@ -1380,6 +1380,63 @@ describe("consolidate_dispatch", () => {
     })
   })
 
+  describe("host-resolution early-exit consolidation (RD-FR-038)", () => {
+    it("fails closed as INCONCLUSIVE when an included plan entry early-exited without a run file", async () => {
+      // RD-FR-038 "Early exit is not a redispatch target": the
+      // host-fallback entry early-exited during host resolution (a
+      // structural cause), so no run file exists for it — the explicit
+      // panel member did run. Consolidation MUST fail closed: the
+      // finalizer finds no run for the included entry and the verdict is
+      // INCONCLUSIVE, never silently dropping the missing reviewer from
+      // the panel.
+      const projectRoot = join(tmpdir(), `consolidate-early-exit-${randomUUID()}`)
+      await mkdir(projectRoot, { recursive: true })
+      cleanupDirs.push(projectRoot)
+
+      const headSha = "b".repeat(40)
+      const correlationId = await setupDispatchSession(
+        [runFixture({ agent: "divisor-adversary" })],
+        {
+          plan: [
+            {
+              agent: "divisor-guard",
+              decision: "include",
+              reason_code: "host-fallback",
+              reason: "no explicit or advisor run; use the active host model",
+              source: "host",
+              sequence: 1,
+              read_only: true,
+              tier: null,
+              model: null,
+              variant: null,
+              validation_errors: [],
+            },
+            ...explicitRunPlan("divisor-adversary"),
+          ],
+        },
+      )
+
+      const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+      const result = await tool.execute(
+        {
+          provenance: {
+            branch: "opsx/split-host-resolution-failure-classes",
+            commit: headSha, // Must match input_context.head_sha
+            workflow_id: "uf.review-council",
+          },
+        },
+        noopContext(),
+      )
+
+      const finalizationResult = JSON.parse(result.output)
+      expect(finalizationResult.status).toBe("failed")
+      expect(finalizationResult.operation_verdict).toBe("INCONCLUSIVE")
+      expect(finalizationResult.correlation_id).toBe(correlationId)
+      expect(finalizationResult.artifact_path).toBeNull()
+      expect(finalizationResult.errors).toContain("included plan entry divisor-guard/1 has no run")
+    })
+  })
+
   it("internally finalizes a triage-issue dispatch with native NEEDS-CLARIFICATION run verdicts", async () => {
     const projectRoot = join(tmpdir(), `consolidate-triage-finalize-${randomUUID()}`)
     await mkdir(projectRoot, { recursive: true })
