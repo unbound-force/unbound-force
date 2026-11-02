@@ -155,7 +155,7 @@ func TestStealthInit_LeavesTrackedFilesUnmodified(t *testing.T) {
 				ExecCmd:   g.exec,
 				ReadFile:  os.ReadFile,
 				WriteFile: os.WriteFile,
-		LookPath:  exec.LookPath,
+				LookPath:  exec.LookPath,
 			}
 			if _, err := Run(opts); err != nil {
 				t.Fatalf("Run() error: %v", err)
@@ -920,31 +920,31 @@ func TestStealthInit_FlagCompositions(t *testing.T) {
 				if !strings.Contains(exclude, stealthExcludeMarker) {
 					t.Errorf("divisor: exclusion block missing")
 				}
-			if _, err := os.Stat(filepath.Join(dir, ".opencode", "agents", "divisor-adversary.md")); os.IsNotExist(err) {
-				t.Errorf("divisor: expected divisor agent scaffolded")
-			}
-			if _, err := os.Stat(filepath.Join(dir, ".opencode", "agents", "cobalt-crush-dev.md")); !os.IsNotExist(err) {
-				t.Errorf("divisor: non-divisor agent should NOT be scaffolded")
-			}
-		},
-	},
-	{
-		name:   "lang",
-		mutate: func(o *Options) { o.DivisorOnly = true; o.Lang = "go" },
-		verify: func(t *testing.T, dir, exclude string) {
-			if !strings.Contains(exclude, stealthExcludeMarker) {
-				t.Errorf("lang: exclusion block missing")
-			}
-			if _, err := os.Stat(filepath.Join(dir, ".opencode", "uf", "packs", "go.md")); os.IsNotExist(err) {
-				t.Errorf("lang: expected go pack scaffolded")
-			}
-			for _, other := range []string{"python.md", "typescript.md"} {
-				if _, err := os.Stat(filepath.Join(dir, ".opencode", "uf", "packs", other)); !os.IsNotExist(err) {
-					t.Errorf("lang: non-go pack %s should NOT be scaffolded under --divisor --lang go", other)
+				if _, err := os.Stat(filepath.Join(dir, ".opencode", "agents", "divisor-adversary.md")); os.IsNotExist(err) {
+					t.Errorf("divisor: expected divisor agent scaffolded")
 				}
-			}
+				if _, err := os.Stat(filepath.Join(dir, ".opencode", "agents", "cobalt-crush-dev.md")); !os.IsNotExist(err) {
+					t.Errorf("divisor: non-divisor agent should NOT be scaffolded")
+				}
+			},
 		},
-	},
+		{
+			name:   "lang",
+			mutate: func(o *Options) { o.DivisorOnly = true; o.Lang = "go" },
+			verify: func(t *testing.T, dir, exclude string) {
+				if !strings.Contains(exclude, stealthExcludeMarker) {
+					t.Errorf("lang: exclusion block missing")
+				}
+				if _, err := os.Stat(filepath.Join(dir, ".opencode", "uf", "packs", "go.md")); os.IsNotExist(err) {
+					t.Errorf("lang: expected go pack scaffolded")
+				}
+				for _, other := range []string{"python.md", "typescript.md"} {
+					if _, err := os.Stat(filepath.Join(dir, ".opencode", "uf", "packs", other)); !os.IsNotExist(err) {
+						t.Errorf("lang: non-go pack %s should NOT be scaffolded under --divisor --lang go", other)
+					}
+				}
+			},
+		},
 		{
 			name:   "dry-run",
 			mutate: func(o *Options) { o.DryRun = true },
@@ -1097,6 +1097,163 @@ func TestWriteGitInfoExclude_AppendsToExistingAndReadError(t *testing.T) {
 			t.Fatalf("expected read-failed error, got %v (detail %q)", sr.err, sr.detail)
 		}
 	})
+}
+
+// TestWriteGitInfoExclude_FreshWriteIncludesSentinel is task 1.3
+// (design D8): a fresh write delimits the managed region with the
+// closing sentinel, and a re-run over the canonical block reports
+// "unchanged" without writing.
+func TestWriteGitInfoExclude_FreshWriteIncludesSentinel(t *testing.T) {
+	dir := t.TempDir()
+	initGitDir(t, dir)
+	g := newStealthGitFake()
+	opts := &Options{TargetDir: dir, ExecCmd: g.exec, ReadFile: os.ReadFile, WriteFile: os.WriteFile}
+
+	sr := writeGitInfoExclude(opts, nil)
+	if sr.err != nil {
+		t.Fatalf("writeGitInfoExclude() error: %v", sr.err)
+	}
+	if sr.action != "created" {
+		t.Errorf("action = %q, want %q", sr.action, "created")
+	}
+	p := filepath.Join(dir, ".git", "info", "exclude")
+	first, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read exclude: %v", err)
+	}
+	// The fresh file is exactly the canonical block: start marker,
+	// escaped canonical paths, closing sentinel.
+	if got, want := string(first), stealthExcludeBlock(); got != want {
+		t.Errorf("fresh exclude = %q, want canonical block %q", got, want)
+	}
+	// Structural pin independent of stealthExcludeBlock: the block is
+	// the marker line, one line per canonical path, then the sentinel.
+	lines := strings.Split(strings.TrimSuffix(string(first), "\n"), "\n")
+	if len(lines) != len(stealthExcludePaths)+2 {
+		t.Errorf("fresh block has %d lines, want %d (marker + %d paths + sentinel)",
+			len(lines), len(stealthExcludePaths)+2, len(stealthExcludePaths))
+	}
+	if lines[0] != stealthExcludeMarker {
+		t.Errorf("first line = %q, want the start marker", lines[0])
+	}
+	if lines[len(lines)-1] != stealthExcludeEndMarker {
+		t.Errorf("last line = %q, want the closing sentinel", lines[len(lines)-1])
+	}
+
+	// Re-run over the canonical region: "unchanged", a genuine no-op —
+	// a failing WriteFile proves nothing is written.
+	opts.WriteFile = func(string, []byte, os.FileMode) error { return errors.New("must not write") }
+	sr2 := writeGitInfoExclude(opts, nil)
+	if sr2.err != nil {
+		t.Fatalf("second writeGitInfoExclude() error: %v", sr2.err)
+	}
+	if sr2.action != "unchanged" {
+		t.Errorf("second action = %q, want %q", sr2.action, "unchanged")
+	}
+	second, _ := os.ReadFile(p)
+	if string(second) != string(first) {
+		t.Errorf("file changed across an unchanged disposition:\n%s", second)
+	}
+}
+
+// TestWriteGitInfoExclude_UpgradesStaleRegionInPlace is task 1.3
+// (design D8): a stale managed region is rewritten in place with the
+// canonical block; content before the region is preserved and extra
+// exclusion lines after the region (appended at end of file by
+// appendNewUntrackedToExclude) survive the upgrade.
+func TestWriteGitInfoExclude_UpgradesStaleRegionInPlace(t *testing.T) {
+	dir := t.TempDir()
+	initGitDir(t, dir)
+	g := newStealthGitFake()
+
+	// A stale region: the .specify/ canonical path was hand-removed
+	// and a stray line sits inside the region; a trailing extra line
+	// lives after the sentinel, outside the managed region.
+	stale := "# user preamble\n\n" +
+		stealthExcludeMarker + "\n" +
+		".opencode/\n" +
+		"openspec/\n" +
+		".uf/\n" +
+		"opencode.json\n" +
+		"stray-inside.log\n" +
+		stealthExcludeEndMarker + "\n" +
+		"trailing-extra.log\n"
+	writeFile(t, filepath.Join(dir, ".git", "info", "exclude"), stale, 0o644)
+
+	opts := &Options{TargetDir: dir, ExecCmd: g.exec, ReadFile: os.ReadFile, WriteFile: os.WriteFile}
+	sr := writeGitInfoExclude(opts, nil)
+	if sr.err != nil {
+		t.Fatalf("writeGitInfoExclude() error: %v", sr.err)
+	}
+	if sr.action != "upgraded" {
+		t.Fatalf("action = %q, want %q", sr.action, "upgraded")
+	}
+
+	want := "# user preamble\n\n" + stealthExcludeBlock() + "trailing-extra.log\n"
+	got, _ := os.ReadFile(filepath.Join(dir, ".git", "info", "exclude"))
+	if string(got) != want {
+		t.Errorf("upgraded exclude = %q, want %q", got, want)
+	}
+	if n := strings.Count(string(got), stealthExcludeMarker); n != 1 {
+		t.Errorf("marker count = %d, want 1", n)
+	}
+	if n := strings.Count(string(got), stealthExcludeEndMarker); n != 1 {
+		t.Errorf("sentinel count = %d, want 1", n)
+	}
+
+	// The extra line after the region stays counted by
+	// stealthExcludedPaths (it parses all non-comment lines), and the
+	// sentinel comment does not corrupt the accounting (spec review
+	// advisory A2).
+	excluded, err := stealthExcludedPaths(opts)
+	if err != nil {
+		t.Fatalf("stealthExcludedPaths() error: %v", err)
+	}
+	found := map[string]bool{}
+	for _, p := range excluded {
+		found[p] = true
+	}
+	if !found["trailing-extra.log"] {
+		t.Errorf("extra line after the region must stay counted, got %v", excluded)
+	}
+	if found[stealthExcludeEndMarker] {
+		t.Errorf("sentinel comment must not be counted as an excluded path")
+	}
+
+	// The upgraded region is canonical: a re-run converges to unchanged.
+	if sr := writeGitInfoExclude(opts, nil); sr.err != nil || sr.action != "unchanged" {
+		t.Errorf("re-run after upgrade: action = %q, err = %v; want unchanged, nil", sr.action, sr.err)
+	}
+}
+
+// TestWriteGitInfoExclude_LegacyBlockWithoutSentinelSkipped is task
+// 1.3 (design D8): a legacy block (start marker, no closing sentinel)
+// takes the malformed-skip path — "skipped" with a detail naming the
+// missing sentinel, and the file is left untouched.
+func TestWriteGitInfoExclude_LegacyBlockWithoutSentinelSkipped(t *testing.T) {
+	dir := t.TempDir()
+	initGitDir(t, dir)
+	g := newStealthGitFake()
+	legacy := stealthExcludeMarker + "\n.opencode/\n.specify/\nopenspec/\n.uf/\nopencode.json\n"
+	writeFile(t, filepath.Join(dir, ".git", "info", "exclude"), legacy, 0o644)
+
+	opts := &Options{TargetDir: dir, ExecCmd: g.exec, ReadFile: os.ReadFile, WriteFile: os.WriteFile}
+	// A failing WriteFile proves the skip is a genuine no-op.
+	opts.WriteFile = func(string, []byte, os.FileMode) error { return errors.New("must not write") }
+	sr := writeGitInfoExclude(opts, nil)
+	if sr.err != nil {
+		t.Fatalf("writeGitInfoExclude() error: %v", sr.err)
+	}
+	if sr.action != "skipped" {
+		t.Errorf("action = %q, want %q", sr.action, "skipped")
+	}
+	if !strings.Contains(sr.detail, stealthExcludeEndMarker) {
+		t.Errorf("detail should name the missing sentinel, got %q", sr.detail)
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, ".git", "info", "exclude"))
+	if string(got) != legacy {
+		t.Errorf("legacy block must be left untouched, got:\n%s", got)
+	}
 }
 
 // TestSnapshotTrackedFiles_LstatError covers the non-IsNotExist Lstat error

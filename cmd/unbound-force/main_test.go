@@ -508,3 +508,162 @@ func TestRunInit_StealthCheckParams(t *testing.T) {
 		t.Error("expected check to be true")
 	}
 }
+
+// assertDirEmpty fails the test when dir contains any entry. The
+// --overrides conflict matrix must reject an invocation before any
+// filesystem write, so a non-empty target directory means the
+// validation regressed past the CLI layer.
+func assertDirEmpty(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read target dir: %v", err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("target directory must remain untouched on a rejected --overrides combination, found: %v", names)
+	}
+}
+
+// TestRunInit_OverridesFlagConflicts pins the SC-FR-012 CLI conflict
+// matrix (design D5): --overrides is mutually exclusive with --divisor,
+// --force, --check, and --stealth. runInit validates the combination
+// before config.Load and scaffold.Run, so each conflicting invocation
+// fails with an error naming both flags while the target directory
+// stays untouched.
+func TestRunInit_OverridesFlagConflicts(t *testing.T) {
+	conflicts := []struct {
+		flag        string
+		divisorOnly bool
+		force       bool
+		check       bool
+		stealth     bool
+	}{
+		{"--divisor", true, false, false, false},
+		{"--force", false, true, false, false},
+		{"--check", false, false, true, false},
+		{"--stealth", false, false, false, true},
+	}
+	for _, tc := range conflicts {
+		t.Run(tc.flag, func(t *testing.T) {
+			dir := t.TempDir()
+			var buf bytes.Buffer
+
+			err := runInit(initParams{
+				targetDir:     dir,
+				force:         tc.force,
+				divisorOnly:   tc.divisorOnly,
+				overridesOnly: true,
+				stealth:       tc.stealth,
+				check:         tc.check,
+				version:       "1.0.0-test",
+				stdout:        &buf,
+			})
+			if err == nil {
+				t.Fatalf("expected --overrides combined with %s to be rejected", tc.flag)
+			}
+			want := "--overrides cannot be combined with " + tc.flag
+			if err.Error() != want {
+				t.Errorf("error = %q, want %q", err.Error(), want)
+			}
+
+			// The conflict is rejected before any filesystem write, so
+			// the target directory must remain empty.
+			assertDirEmpty(t, dir)
+		})
+	}
+}
+
+// TestInitCmd_Execute_OverridesConflictRejected exercises the same
+// SC-FR-012 conflict matrix through the cobra command surface: the
+// flags parse, newInitCmd's RunE forwards them into runInit, and the
+// conflict error propagates out of Execute — a non-zero CLI exit —
+// with the target directory untouched. Follows the
+// TestInitCmd_Execute_CreatesFiles chdir pattern, since newInitCmd
+// resolves its target from os.Getwd.
+func TestInitCmd_Execute_OverridesConflictRejected(t *testing.T) {
+	conflicts := []struct {
+		flag string
+		args []string
+	}{
+		{"--divisor", []string{"--overrides", "--divisor"}},
+		{"--force", []string{"--overrides", "--force"}},
+		{"--check", []string{"--overrides", "--check"}},
+		{"--stealth", []string{"--overrides", "--stealth"}},
+	}
+	for _, tc := range conflicts {
+		t.Run(tc.flag, func(t *testing.T) {
+			dir := t.TempDir()
+
+			original, err := os.Getwd()
+			if err != nil {
+				t.Fatalf("getwd: %v", err)
+			}
+			if err := os.Chdir(dir); err != nil {
+				t.Fatalf("chdir: %v", err)
+			}
+			t.Cleanup(func() { _ = os.Chdir(original) })
+
+			cmd := newInitCmd()
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
+			cmd.SetErr(&buf)
+			cmd.SetArgs(tc.args)
+
+			if err := cmd.Execute(); err == nil {
+				t.Fatalf("expected %v to be rejected", tc.args)
+			} else if err.Error() != "--overrides cannot be combined with "+tc.flag {
+				t.Errorf("error = %q, want %q",
+					err.Error(), "--overrides cannot be combined with "+tc.flag)
+			}
+
+			// A conflicting invocation must fail before any filesystem
+			// write, so the target directory must remain empty.
+			assertDirEmpty(t, dir)
+		})
+	}
+}
+
+// TestInitCmd_OverridesHelpText is the SC-FR-012 help-text assertion,
+// following TestInitCmd_StealthHelpText: the --overrides flag help and
+// the init long help must document what the mode creates, that
+// existing override files are never modified, and the four conflicting
+// flags.
+func TestInitCmd_OverridesHelpText(t *testing.T) {
+	cmd := newInitCmd()
+	overridesFlag := cmd.Flags().Lookup("overrides")
+	if overridesFlag == nil {
+		t.Fatal("expected --overrides flag to be registered")
+	}
+	if !strings.Contains(overridesFlag.Usage, "override stubs") {
+		t.Errorf("expected --overrides usage to mention the override stubs, got: %q", overridesFlag.Usage)
+	}
+	if !strings.Contains(overridesFlag.Usage, ".gitignore") {
+		t.Errorf("expected --overrides usage to mention the managed .gitignore block, got: %q", overridesFlag.Usage)
+	}
+	if overridesFlag.DefValue != "false" {
+		t.Errorf("expected --overrides to default to false, got: %q", overridesFlag.DefValue)
+	}
+
+	long := cmd.Long
+	if !strings.Contains(long, "Use --overrides to create only") {
+		t.Errorf("expected help text to document the --overrides mode:\n%s", long)
+	}
+	if !strings.Contains(long, "never modified") {
+		t.Errorf("expected help text to state that existing override files are never modified:\n%s", long)
+	}
+	// Normalize line breaks so the exclusion-list assertion survives
+	// paragraph re-wrapping.
+	normalized := strings.ReplaceAll(long, "\n", " ")
+	if !strings.Contains(normalized, "cannot be combined with --divisor, --force, --check, or --stealth.") {
+		t.Errorf("expected help text to name the conflicting flags:\n%s", long)
+	}
+	// Task 4.2 places the --overrides paragraph after the --check
+	// paragraph; keep that documented ordering pinned.
+	if strings.Index(long, "Use --check") > strings.Index(long, "Use --overrides") {
+		t.Errorf("expected the --overrides paragraph to follow the --check paragraph:\n%s", long)
+	}
+}
