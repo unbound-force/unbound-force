@@ -3,6 +3,7 @@ package scaffold
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -1793,7 +1794,7 @@ func TestPluginPackageInputs_GitignoreTracksCanonicalInputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read .opencode/.gitignore: %v", err)
 	}
-	want := "node_modules\nbun.lock\n"
+	want := opencodeGitignore
 	if string(content) != want {
 		t.Errorf(".opencode/.gitignore = %q, want %q", string(content), want)
 	}
@@ -2870,6 +2871,748 @@ func TestRun_ModelMatrixPreservedOnRerun(t *testing.T) {
 	}
 	assertDisposition(result, "Overwritten", matrixOut)
 	assertContent(matrixPath, deployedForm(matrixAsset), "reset model matrix")
+}
+
+// TestRun_OverrideStubs_FreshRunCreatesExactContent pins the SC-FR-011
+// fresh-scaffold scenario: a full (non-stealth, non-divisor) Run() seeds
+// both per-developer override stubs with exactly their constant content
+// and reports each as created with a ✓ line in the run summary. Fixture
+// follows TestRun_ReviewerCapabilitiesPreservedOnRerun: a t.TempDir()
+// target, a bytes.Buffer Stdout, and runScaffoldWithoutExternalTools so
+// no sub-tool or plugin activation touches the machine.
+func TestRun_OverrideStubs_FreshRunCreatesExactContent(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	if _, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+	}); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	output := buf.String()
+	stubs := []struct {
+		rel     string
+		content string
+	}{
+		{".uf/model-matrix.override.yaml", modelMatrixOverrideStub},
+		{".uf/review-matrix.override.yaml", reviewMatrixOverrideStub},
+	}
+	for _, s := range stubs {
+		got, err := os.ReadFile(filepath.Join(dir, s.rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", s.rel, err)
+		}
+		if !bytes.Equal(got, []byte(s.content)) {
+			t.Errorf("%s content mismatch: got %d bytes, want %d bytes",
+				s.rel, len(got), len(s.content))
+		}
+		if !strings.Contains(output, "✓ "+s.rel+" created") {
+			t.Errorf("expected summary to report %s as created, got:\n%s", s.rel, output)
+		}
+	}
+}
+
+// TestRun_OverrideStubs_PreservedOnRerunAndForce pins the SC-FR-011
+// preservation contract (design D3): hand-edited per-developer override
+// files survive a plain re-run AND a --force re-run byte-for-byte —
+// per-developer data is never reset by the scaffold, whose --force reset
+// applies to tracked canonical files only — each time reported as
+// skipped in the summary. Follows the
+// TestRun_ReviewerCapabilitiesPreservedOnRerun preserved-on-rerun
+// pattern, with the hand-edited bytes pre-seeded before both runs.
+func TestRun_OverrideStubs_PreservedOnRerunAndForce(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	const version = "1.0.0-test"
+
+	// Distinct hand-edited content per file, deliberately unlike the
+	// comment-only stubs: uncommented YAML entries that must survive.
+	if err := os.MkdirAll(filepath.Join(dir, ".uf"), 0o755); err != nil {
+		t.Fatalf("mkdir .uf: %v", err)
+	}
+	handEdited := []struct {
+		rel     string
+		content string
+	}{
+		{".uf/model-matrix.override.yaml",
+			"# hand-edited model override\n" +
+				"profiles:\n" +
+				"  code-writing:\n" +
+				"    model: acme/rocket\n"},
+		{".uf/review-matrix.override.yaml",
+			"# hand-edited review override\n" +
+				"profiles:\n" +
+				"  heavy:\n" +
+				"    model: acme/titan\n"},
+	}
+	for _, edit := range handEdited {
+		if err := os.WriteFile(filepath.Join(dir, edit.rel),
+			[]byte(edit.content), 0o644); err != nil {
+			t.Fatalf("pre-seed %s: %v", edit.rel, err)
+		}
+	}
+
+	// runOnce asserts the SC-FR-011 invariants after one Run() pass:
+	// both hand-edited files byte-for-byte unchanged and reported
+	// skipped in the summary.
+	runOnce := func(force bool) {
+		t.Helper()
+		buf.Reset()
+		if _, err := runScaffoldWithoutExternalTools(t, Options{
+			TargetDir: dir,
+			Force:     force,
+			Version:   version,
+			Stdout:    &buf,
+		}); err != nil {
+			t.Fatalf("Run(force=%v) error: %v", force, err)
+		}
+		output := buf.String()
+		for _, edit := range handEdited {
+			got, err := os.ReadFile(filepath.Join(dir, edit.rel))
+			if err != nil {
+				t.Fatalf("read %s after Run(force=%v): %v", edit.rel, force, err)
+			}
+			if !bytes.Equal(got, []byte(edit.content)) {
+				t.Errorf("Run(force=%v) modified %s: got %q, want %q",
+					force, edit.rel, got, edit.content)
+			}
+			if !strings.Contains(output, edit.rel+" skipped") {
+				t.Errorf("Run(force=%v): expected summary to report %s as skipped, got:\n%s",
+					force, edit.rel, output)
+			}
+		}
+	}
+
+	runOnce(false) // plain re-run
+	runOnce(true)  // --force re-run
+}
+
+// TestRun_OverrideStubs_StealthWritesNeitherFile pins the SC-FR-011
+// --stealth skip surface (design D4): stealth is a local-only trial
+// whose rollback sweeps .uf/, so per-developer state is not seeded into
+// it. Neither override file may exist after the run, and the summary
+// reports both as skipped (stealth). Wiring follows the
+// TestStealthInit_LeavesTrackedFilesUnmodified stealth-test fake.
+func TestRun_OverrideStubs_StealthWritesNeitherFile(t *testing.T) {
+	dir := t.TempDir()
+	initGitDir(t, dir)
+	writeFile(t, filepath.Join(dir, ".gitignore"), "existing-ignore\n", 0o644)
+
+	var buf bytes.Buffer
+	g := newStealthGitFake()
+	opts := Options{
+		TargetDir: dir,
+		Stealth:   true,
+		Version:   "1.2.3-test",
+		Stdout:    &buf,
+		ExecCmd:   g.exec,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+	}
+	if _, err := Run(opts); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	output := buf.String()
+	for _, rel := range []string{
+		".uf/model-matrix.override.yaml",
+		".uf/review-matrix.override.yaml",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); !os.IsNotExist(err) {
+			t.Errorf("stealth run must not write %s", rel)
+		}
+		// Symbol-agnostic disposition check: the sub-tool line carries
+		// the "skipped (stealth)" action text; its glyph is presentation.
+		if !strings.Contains(output, rel+" skipped (stealth)") {
+			t.Errorf("expected summary to report %s as skipped (stealth), got:\n%s",
+				rel, output)
+		}
+	}
+}
+
+// TestRun_OverrideStubs_DivisorWritesNeitherFile pins the SC-FR-011
+// --divisor skip surface (design D4): a DivisorOnly deployment writes a
+// minimal review-council subset into possibly-foreign repositories and
+// must not write per-developer files. Neither override file may exist
+// after the run, and the summary must not mention either — the seeding
+// gate in Run() never calls ensureOverrideStubs in DivisorOnly mode.
+func TestRun_OverrideStubs_DivisorWritesNeitherFile(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	if _, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir:   dir,
+		DivisorOnly: true,
+		Version:     "1.0.0-test",
+		Stdout:      &buf,
+	}); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	output := buf.String()
+	for _, rel := range []string{
+		".uf/model-matrix.override.yaml",
+		".uf/review-matrix.override.yaml",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); !os.IsNotExist(err) {
+			t.Errorf("divisor run must not write %s", rel)
+		}
+		if strings.Contains(output, rel) {
+			t.Errorf("divisor run must not report %s in the summary", rel)
+		}
+	}
+}
+
+// --- OverridesOnly mode tests (SC-FR-012) ---
+
+// wantOverridesOnlyEntries returns the exact entry set an OverridesOnly
+// run over an empty directory must leave behind: the managed
+// .gitignore, the .uf/ parent directory, and the two per-developer
+// override stubs — and nothing else. Returns a fresh slice per call so
+// each test owns its expectation.
+func wantOverridesOnlyEntries() []string {
+	return []string{
+		".gitignore",
+		".uf",
+		".uf/model-matrix.override.yaml",
+		".uf/review-matrix.override.yaml",
+	}
+}
+
+// assertOverridesOnlyEntrySet fails the test when the recursive entry
+// set under dir is not exactly the OverridesOnly isolation set. Walking
+// the whole tree (not just the top level) catches stray nested writes
+// such as an asset directory or a scaffolded AGENTS.md.
+func assertOverridesOnlyEntrySet(t *testing.T, dir string) {
+	t.Helper()
+	var got []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == dir {
+			return nil
+		}
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			return relErr
+		}
+		got = append(got, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
+	}
+	sort.Strings(got)
+	want := wantOverridesOnlyEntries()
+	if len(got) != len(want) {
+		t.Fatalf("expected exactly the OverridesOnly entry set %v, got %d entries: %v",
+			want, len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("entry %d = %q, want %q (full set: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+// TestOverridesOnly_CreatesExactlyThreeEntries pins the SC-FR-012
+// isolation contract (design D5): an OverridesOnly run over an empty
+// directory seeds exactly the two per-developer override stubs and a
+// .gitignore carrying the managed block — nothing else. The
+// runScaffoldWithoutExternalTools guard fails the test if any external
+// command runs (no sub-tools and no plugin activation may execute),
+// and the returned Result carries no file dispositions because the
+// embedded-asset walk never runs.
+func TestOverridesOnly_CreatesExactlyThreeEntries(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	res, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir:     dir,
+		OverridesOnly: true,
+		Version:       "1.0.0-test",
+		Stdout:        &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// The asset walk never runs: no file dispositions may be recorded
+	// and the run stays a clean success (no partial status, no failed
+	// sub-tools).
+	if len(res.Created) != 0 || len(res.Skipped) != 0 || len(res.Overwritten) != 0 ||
+		len(res.Updated) != 0 || len(res.Migrated) != 0 {
+		t.Errorf("OverridesOnly run must record no file dispositions, got %+v", res)
+	}
+	if res.Status != "" || res.FailedSubTools != 0 {
+		t.Errorf("OverridesOnly run must be a clean success, got status %q and %d failed sub-tools",
+			res.Status, res.FailedSubTools)
+	}
+
+	assertOverridesOnlyEntrySet(t, dir)
+
+	// Both override stubs carry exactly their constant content; the
+	// constants themselves are already pinned by
+	// TestRun_OverrideStubs_FreshRunCreatesExactContent.
+	stubs := []struct {
+		rel     string
+		content string
+	}{
+		{".uf/model-matrix.override.yaml", modelMatrixOverrideStub},
+		{".uf/review-matrix.override.yaml", reviewMatrixOverrideStub},
+	}
+	for _, s := range stubs {
+		got, readErr := os.ReadFile(filepath.Join(dir, s.rel))
+		if readErr != nil {
+			t.Fatalf("read %s: %v", s.rel, readErr)
+		}
+		if !bytes.Equal(got, []byte(s.content)) {
+			t.Errorf("%s content mismatch: got %d bytes, want %d bytes",
+				s.rel, len(got), len(s.content))
+		}
+	}
+
+	// The .gitignore carries the managed block. Region extraction uses
+	// the same helper ensureGitignore's replacement logic uses
+	// (precedent: the SC-FR-013 drift test), so the assertion cannot
+	// drift from the behavior it verifies.
+	giContent, readErr := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if readErr != nil {
+		t.Fatalf("read .gitignore: %v", readErr)
+	}
+	start, end, ok := extractManagedRegion(string(giContent), gitignoreMarker, gitignoreTerminator)
+	if !ok {
+		t.Fatalf(".gitignore has no managed region, got:\n%s", giContent)
+	}
+	if region := string(giContent)[start:end]; region != gitignoreBlock {
+		t.Errorf(".gitignore managed region must equal gitignoreBlock, got:\n%s", region)
+	}
+
+	// Every seeded entry reports its created disposition in the summary.
+	// Symbol-agnostic checks: the disposition text is the contract, the
+	// glyph is presentation (precedent:
+	// TestRun_OverrideStubs_StealthWritesNeitherFile).
+	output := buf.String()
+	for _, line := range []string{
+		".gitignore created",
+		".uf/model-matrix.override.yaml created",
+		".uf/review-matrix.override.yaml created",
+	} {
+		if !strings.Contains(output, line) {
+			t.Errorf("expected summary to report %q, got:\n%s", line, output)
+		}
+	}
+}
+
+// TestOverridesOnly_RerunIsNoOp pins the SC-FR-012 idempotency: a
+// second OverridesOnly run over an already-seeded directory leaves
+// every file byte-identical, adds no entries, and reports the no-op
+// dispositions — .gitignore unchanged and both override stubs skipped
+// with the never-modified detail.
+func TestOverridesOnly_RerunIsNoOp(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	const version = "1.0.0-test"
+
+	// runOverridesOnly executes one OverridesOnly pass and returns the
+	// post-run bytes of the three seeded files for cross-run
+	// comparison.
+	runOverridesOnly := func() map[string][]byte {
+		t.Helper()
+		buf.Reset()
+		if _, err := runScaffoldWithoutExternalTools(t, Options{
+			TargetDir:     dir,
+			OverridesOnly: true,
+			Version:       version,
+			Stdout:        &buf,
+		}); err != nil {
+			t.Fatalf("Run() error: %v", err)
+		}
+		state := make(map[string][]byte)
+		for _, rel := range []string{
+			".gitignore",
+			".uf/model-matrix.override.yaml",
+			".uf/review-matrix.override.yaml",
+		} {
+			data, readErr := os.ReadFile(filepath.Join(dir, rel))
+			if readErr != nil {
+				t.Fatalf("read %s: %v", rel, readErr)
+			}
+			state[rel] = data
+		}
+		return state
+	}
+
+	first := runOverridesOnly()
+	second := runOverridesOnly()
+
+	// Byte-identical files and an unchanged entry set: the re-run is a
+	// no-op, not a rewrite.
+	for rel, want := range first {
+		if !bytes.Equal(second[rel], want) {
+			t.Errorf("re-run modified %s: got %d bytes, want %d bytes",
+				rel, len(second[rel]), len(want))
+		}
+	}
+	assertOverridesOnlyEntrySet(t, dir)
+
+	// The re-run reports no-op dispositions for all three entries.
+	// Symbol-agnostic: the disposition text is the contract.
+	output := buf.String()
+	for _, line := range []string{
+		".gitignore unchanged",
+		".uf/model-matrix.override.yaml skipped",
+		".uf/review-matrix.override.yaml skipped",
+		"exists; per-developer file never modified, not even by --force",
+	} {
+		if !strings.Contains(output, line) {
+			t.Errorf("expected re-run summary to report %q, got:\n%s", line, output)
+		}
+	}
+}
+
+// TestOverridesOnly_PreservesExistingOverride pins the SC-FR-012
+// preservation contract through the overrides-only mode: a pre-existing
+// hand-edited override survives the run byte-for-byte and reports the
+// skipped disposition, while the absent stub is still seeded with its
+// constant content and the managed .gitignore block is still created —
+// both sides of the create-only-if-absent contract in a single run.
+func TestOverridesOnly_PreservesExistingOverride(t *testing.T) {
+	dir := t.TempDir()
+
+	// Pre-seed one hand-edited override, deliberately unlike the
+	// comment-only stub: uncommented YAML entries that must survive.
+	if err := os.MkdirAll(filepath.Join(dir, ".uf"), 0o755); err != nil {
+		t.Fatalf("mkdir .uf: %v", err)
+	}
+	const handEdited = "# hand-edited model override\n" +
+		"profiles:\n" +
+		"  code-writing:\n" +
+		"    model: acme/rocket\n"
+	if err := os.WriteFile(filepath.Join(dir, ".uf", "model-matrix.override.yaml"),
+		[]byte(handEdited), 0o644); err != nil {
+		t.Fatalf("pre-seed model-matrix override: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if _, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir:     dir,
+		OverridesOnly: true,
+		Version:       "1.0.0-test",
+		Stdout:        &buf,
+	}); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// The hand-edited override is preserved byte-for-byte.
+	got, err := os.ReadFile(filepath.Join(dir, ".uf", "model-matrix.override.yaml"))
+	if err != nil {
+		t.Fatalf("read model-matrix override: %v", err)
+	}
+	if !bytes.Equal(got, []byte(handEdited)) {
+		t.Errorf("OverridesOnly run modified a pre-existing override: got %q, want %q",
+			got, handEdited)
+	}
+
+	// The absent stub is still seeded with its constant content, and
+	// the entry set is exactly the isolation set.
+	review, err := os.ReadFile(filepath.Join(dir, ".uf", "review-matrix.override.yaml"))
+	if err != nil {
+		t.Fatalf("read review-matrix override: %v", err)
+	}
+	if !bytes.Equal(review, []byte(reviewMatrixOverrideStub)) {
+		t.Errorf("absent override stub must be seeded with its constant content: got %d bytes, want %d bytes",
+			len(review), len(reviewMatrixOverrideStub))
+	}
+	assertOverridesOnlyEntrySet(t, dir)
+
+	// The managed .gitignore block is still created alongside.
+	giContent, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	start, end, ok := extractManagedRegion(string(giContent), gitignoreMarker, gitignoreTerminator)
+	if !ok || string(giContent)[start:end] != gitignoreBlock {
+		t.Errorf("expected the managed block in .gitignore, got:\n%s", giContent)
+	}
+
+	// Dispositions: the existing file skipped, the absent file created.
+	// Symbol-agnostic: the disposition text is the contract.
+	output := buf.String()
+	if !strings.Contains(output, ".uf/model-matrix.override.yaml skipped") {
+		t.Errorf("expected summary to report the pre-existing override as skipped, got:\n%s", output)
+	}
+	if !strings.Contains(output, ".uf/review-matrix.override.yaml created") {
+		t.Errorf("expected summary to report the absent override stub as created, got:\n%s", output)
+	}
+}
+
+// --- OpenCode directory ignore sub-tool tests (SC-FR-015) ---
+
+// TestRun_OpencodeGitignore_FreshRunCreatesCanonicalLines pins the
+// SC-FR-015 fresh-target scenario (design D9): a full-mode Run() over an
+// empty directory creates .opencode/.gitignore with exactly the canonical
+// opencodeGitignore lines and reports the created disposition in the
+// summary. The canonical content itself is pinned against the repo file
+// by TestPluginPackageInputs_GitignoreTracksCanonicalInputs; this test
+// pins the deployment side.
+func TestRun_OpencodeGitignore_FreshRunCreatesCanonicalLines(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	if _, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+	}); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".opencode", ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .opencode/.gitignore: %v", err)
+	}
+	if !bytes.Equal(got, []byte(opencodeGitignore)) {
+		t.Errorf(".opencode/.gitignore content mismatch: got %q, want %q",
+			got, opencodeGitignore)
+	}
+	// Symbol-agnostic disposition check: the sub-tool line carries the
+	// created action text; its glyph is presentation.
+	if !strings.Contains(buf.String(), ".opencode/.gitignore created") {
+		t.Errorf("expected summary to report .opencode/.gitignore as created, got:\n%s",
+			buf.String())
+	}
+}
+
+// TestRun_OpencodeGitignore_MergesMissingLinesKeepsUserLines pins the
+// SC-FR-015 merge contract at the Run() level: an existing
+// .opencode/.gitignore carrying user lines and a partial canonical set
+// keeps every user line in place and gains only the canonical lines
+// missing from it, reported as upgraded with the appended lines named.
+func TestRun_OpencodeGitignore_MergesMissingLinesKeepsUserLines(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0o755); err != nil {
+		t.Fatalf("mkdir .opencode: %v", err)
+	}
+	const preExisting = "# user-owned ignores\nfoo.log\nnode_modules\n"
+	if err := os.WriteFile(filepath.Join(dir, ".opencode", ".gitignore"),
+		[]byte(preExisting), 0o644); err != nil {
+		t.Fatalf("pre-seed .opencode/.gitignore: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if _, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir: dir,
+		Version:   "1.0.0-test",
+		Stdout:    &buf,
+	}); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// The user comment and foo.log line survive in place; only the
+	// missing canonical lines (bun.lock, .vitest/, coverage/) append.
+	got, err := os.ReadFile(filepath.Join(dir, ".opencode", ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .opencode/.gitignore: %v", err)
+	}
+	want := preExisting + "bun.lock\n.vitest/\ncoverage/\n"
+	if string(got) != want {
+		t.Errorf(".opencode/.gitignore merge mismatch:\n got %q\nwant %q", got, want)
+	}
+	output := buf.String()
+	if !strings.Contains(output, ".opencode/.gitignore upgraded") {
+		t.Errorf("expected summary to report .opencode/.gitignore as upgraded, got:\n%s",
+			output)
+	}
+	if !strings.Contains(output, "appended missing lines: bun.lock, .vitest/, coverage/") {
+		t.Errorf("expected the upgraded detail to name the appended lines, got:\n%s", output)
+	}
+}
+
+// TestRun_OpencodeGitignore_WrittenDespiteActivationFailure pins the
+// SC-FR-015 independence requirement: the .opencode/.gitignore writer is
+// a sub-tool independent of the review-plugin activation result — npm ci
+// may fail or be skipped while node_modules/ can still appear. The run
+// reuses the reviewPluginRunOpts seam with failInstall=true so activation
+// genuinely fails at the npm ci step (same wiring as
+// TestRun_IndependentSubtoolsContinueOnPluginFailure), and the failed
+// activation is asserted first so the test cannot silently stop testing
+// the failure path.
+func TestRun_OpencodeGitignore_WrittenDespiteActivationFailure(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	res, err := Run(reviewPluginRunOpts(t, dir, &buf, true))
+	if err != nil {
+		t.Fatalf("Run() error: %v (activation failure is soft and exits zero)", err)
+	}
+
+	// The activation failure must be real for this test to mean anything:
+	// partial status, one failed sub-tool, and the inactive disposition
+	// surfaced in the summary.
+	if res.Status != resultStatusPartial || res.FailedSubTools != 1 {
+		t.Fatalf("Run() Status = %q, FailedSubTools = %d; want %q and 1 (plugin activation must fail)",
+			res.Status, res.FailedSubTools, resultStatusPartial)
+	}
+	output := buf.String()
+	for _, want := range []string{"review-plugins", "failed", "activation: inactive"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected the failed activation to surface %q in the summary, got:\n%s",
+				want, output)
+		}
+	}
+
+	// The ignore file is still written with exactly the canonical lines
+	// and its created disposition is still reported.
+	got, err := os.ReadFile(filepath.Join(dir, ".opencode", ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .opencode/.gitignore despite activation failure: %v", err)
+	}
+	if !bytes.Equal(got, []byte(opencodeGitignore)) {
+		t.Errorf(".opencode/.gitignore content mismatch: got %q, want %q",
+			got, opencodeGitignore)
+	}
+	if !strings.Contains(output, ".opencode/.gitignore created") {
+		t.Errorf("expected summary to report .opencode/.gitignore as created despite the failed activation, got:\n%s",
+			output)
+	}
+}
+
+// TestRun_OpencodeGitignore_DivisorDeploysIt pins the SC-FR-015
+// --divisor deployment surface (design D9): divisor mode deploys
+// .opencode/ (package.json, plugin sources) and runs plugin activation
+// inside it, so the scoped ignore file deploys there too, ungated by the
+// DivisorOnly skip that shields the per-developer override stubs.
+func TestRun_OpencodeGitignore_DivisorDeploysIt(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	if _, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir:   dir,
+		DivisorOnly: true,
+		Version:     "1.0.0-test",
+		Stdout:      &buf,
+	}); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".opencode", ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .opencode/.gitignore: %v", err)
+	}
+	if !bytes.Equal(got, []byte(opencodeGitignore)) {
+		t.Errorf(".opencode/.gitignore content mismatch: got %q, want %q",
+			got, opencodeGitignore)
+	}
+	if !strings.Contains(buf.String(), ".opencode/.gitignore created") {
+		t.Errorf("expected divisor summary to report .opencode/.gitignore as created, got:\n%s",
+			buf.String())
+	}
+}
+
+// TestRun_OpencodeGitignore_StealthSkipsIt pins the SC-FR-015 --stealth
+// skip surface (design D9): the wholesale .opencode/ exclusion already
+// keeps the tree clean under stealth, so the scoped ignore file is not
+// deployed there. The file must not exist after the run and the summary
+// reports the skipped (stealth) disposition. Wiring follows the
+// TestRun_OverrideStubs_StealthWritesNeitherFile stealth-test fake, with
+// one deliberate difference: LookPath is stubbed to find only node and
+// npm (opencode absent, as on a CI machine) and ExecCmdInDir answers the
+// activation version probes with canned output. Two reasons: a real
+// opencode binary found on PATH gets probed during activation and writes
+// .opencode/.gitignore itself — a different actor that would masquerade
+// as a deployment — and a stealth run aborts when a sub-tool carries an
+// error, so activation must stay on its err-free skipped path
+// deterministically instead of depending on the machine's PATH.
+func TestRun_OpencodeGitignore_StealthSkipsIt(t *testing.T) {
+	dir := t.TempDir()
+	initGitDir(t, dir)
+	writeFile(t, filepath.Join(dir, ".gitignore"), "existing-ignore\n", 0o644)
+
+	var buf bytes.Buffer
+	g := newStealthGitFake()
+	opencodeDir := filepath.Join(dir, ".opencode")
+	opts := Options{
+		TargetDir: dir,
+		Stealth:   true,
+		Version:   "1.2.3-test",
+		Stdout:    &buf,
+		ExecCmd:   g.exec,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+		LookPath: func(name string) (string, error) {
+			switch name {
+			case "node", "npm":
+				return filepath.Join("/tools", name), nil
+			default:
+				return "", fmt.Errorf("executable %q not found", name)
+			}
+		},
+		ExecCmdInDir: func(d, name string, args ...string) ([]byte, error) {
+			if d != opencodeDir {
+				t.Fatalf("in-dir command directory = %q, want %q", d, opencodeDir)
+			}
+			command := filepath.Base(name) + " " + strings.Join(args, " ")
+			switch command {
+			case "node --version":
+				return []byte("v22.15.0\n"), nil
+			case "npm --version":
+				return []byte("10.9.2\n"), nil
+			case "npm ci --ignore-scripts --omit=dev":
+				return nil, nil
+			default:
+				t.Fatalf("unexpected in-dir command %q", command)
+				return nil, nil
+			}
+		},
+	}
+	if _, err := Run(opts); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, ".opencode", ".gitignore")); !os.IsNotExist(err) {
+		t.Errorf("stealth run must not write .opencode/.gitignore")
+	}
+	// Symbol-agnostic disposition check, as above.
+	if !strings.Contains(buf.String(), ".opencode/.gitignore skipped (stealth)") {
+		t.Errorf("expected summary to report .opencode/.gitignore as skipped (stealth), got:\n%s",
+			buf.String())
+	}
+}
+
+// TestRun_OpencodeGitignore_OverridesOnlySkipsIt pins the SC-FR-015
+// --overrides skip surface: SC-FR-012 restricts that mode to the
+// override stubs and the managed .gitignore block, and its early exit
+// never reaches the writer. The OverridesOnly entry-set test already
+// covers the directory isolation; this is the explicit sub-tool-side pin
+// — the file must not exist and the summary must not mention it.
+func TestRun_OpencodeGitignore_OverridesOnlySkipsIt(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+
+	if _, err := runScaffoldWithoutExternalTools(t, Options{
+		TargetDir:     dir,
+		OverridesOnly: true,
+		Version:       "1.0.0-test",
+		Stdout:        &buf,
+	}); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, ".opencode", ".gitignore")); !os.IsNotExist(err) {
+		t.Errorf("overrides-only run must not write .opencode/.gitignore")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".opencode")); !os.IsNotExist(err) {
+		t.Errorf("overrides-only run must not create the .opencode/ directory")
+	}
+	if strings.Contains(buf.String(), ".opencode/.gitignore") {
+		t.Errorf("overrides-only summary must not mention .opencode/.gitignore, got:\n%s",
+			buf.String())
+	}
 }
 
 func TestRun_ConstitutionProtectedWithForce(t *testing.T) {
@@ -8423,6 +9166,149 @@ func TestInitSubTools_GazeFailed(t *testing.T) {
 	}
 }
 
+// --- extractManagedRegion tests ---
+
+// TestExtractManagedRegion exercises the shared managed-region
+// extraction helper (design D7, init-override-stubs-gitignore-sync):
+// the byte range from the first line equal to the marker through the
+// first subsequent line equal to the terminator, with ok false when
+// either delimiter line is absent. Delimiter matching is line
+// equality with trailing-\r normalization (CRLF tolerance).
+func TestExtractManagedRegion(t *testing.T) {
+	marker := gitignoreMarker
+	terminator := ".unbound-force/"
+
+	// A representative managed block in canonical shape: marker
+	// line, body, terminator line, and the terminator's line break —
+	// block constants end with a newline (gitignoreBlock does), so
+	// the region extracted from a current block is byte-identical
+	// to the constant.
+	region := marker + "\n# Runtime data under .uf/\n.uf/artifacts/\n" + terminator + "\n"
+
+	// The same block with no trailing line break at end of file.
+	regionNoNewline := marker + "\n# Runtime data under .uf/\n" + terminator
+
+	// User content surrounding the managed region.
+	before := "node_modules/\n*.log\n\n"
+	after := "\n# User patterns after the block\n*.tmp\n"
+
+	// The same region with CRLF line endings: both delimiter lines
+	// carry a trailing "\r" that must not prevent a match, and the
+	// region keeps the terminator line's "\r\n" break.
+	regionCRLF := marker + "\r\n# Runtime data under .uf/\r\n.uf/artifacts/\r\n" + terminator + "\r\n"
+
+	// A block whose body carries a second marker line: the first
+	// marker line must delimit the region start.
+	regionDupMarker := marker + "\n# Runtime data under .uf/\n" + marker + "\n" + terminator + "\n"
+
+	tests := []struct {
+		name      string
+		content   string
+		wantStart int
+		wantEnd   int
+		wantOK    bool
+		// wantRegion is the expected content[start:end] when wantOK
+		// is true; ignored when wantOK is false (start and end are
+		// asserted to be 0 in that case).
+		wantRegion string
+	}{
+		{
+			name:       "region found as entire content",
+			content:    region,
+			wantStart:  0,
+			wantEnd:    len(region),
+			wantOK:     true,
+			wantRegion: region,
+		},
+		{
+			name:       "terminator as final line without trailing newline",
+			content:    "node_modules/\n" + regionNoNewline,
+			wantStart:  len("node_modules/\n"),
+			wantEnd:    len("node_modules/\n") + len(regionNoNewline),
+			wantOK:     true,
+			wantRegion: regionNoNewline,
+		},
+		{
+			name:       "content before and after the region",
+			content:    before + region + after,
+			wantStart:  len(before),
+			wantEnd:    len(before) + len(region),
+			wantOK:     true,
+			wantRegion: region,
+		},
+		{
+			name:    "marker absent",
+			content: before + after,
+		},
+		{
+			name:    "marker present with no terminator (malformed)",
+			content: before + marker + "\n# Runtime data under .uf/\n.uf/artifacts/\n" + after,
+		},
+		{
+			name:       "marker after a terminator line still wins",
+			content:    "node_modules/\n" + terminator + "\n" + region + after,
+			wantStart:  len("node_modules/\n" + terminator + "\n"),
+			wantEnd:    len("node_modules/\n"+terminator+"\n") + len(region),
+			wantOK:     true,
+			wantRegion: region,
+		},
+		{
+			name:       "duplicate marker lines, first marker wins",
+			content:    before + regionDupMarker + after,
+			wantStart:  len(before),
+			wantEnd:    len(before) + len(regionDupMarker),
+			wantOK:     true,
+			wantRegion: regionDupMarker,
+		},
+		{
+			name:       "CRLF line endings, delimiters matched despite trailing CR",
+			content:    "node_modules/\r\n*.log\r\n\r\n" + regionCRLF + "# User patterns after the block\r\n",
+			wantStart:  len("node_modules/\r\n*.log\r\n\r\n"),
+			wantEnd:    len("node_modules/\r\n*.log\r\n\r\n") + len(regionCRLF),
+			wantOK:     true,
+			wantRegion: regionCRLF,
+		},
+		{
+			name:    "marker embedded in a longer line does not match",
+			content: before + "# see " + marker + " above\n" + terminator + "\n" + after,
+		},
+		{
+			name:    "empty content",
+			content: "",
+		},
+		{
+			name:       "full gitignoreBlock extracted verbatim",
+			content:    "node_modules/\n\n" + gitignoreBlock + "\n# trailing user line\n",
+			wantStart:  len("node_modules/\n\n"),
+			wantEnd:    len("node_modules/\n\n") + len(gitignoreBlock),
+			wantOK:     true,
+			wantRegion: gitignoreBlock,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start, end, ok := extractManagedRegion(tt.content, marker, terminator)
+
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if start != tt.wantStart {
+				t.Errorf("start = %d, want %d", start, tt.wantStart)
+			}
+			if end != tt.wantEnd {
+				t.Errorf("end = %d, want %d", end, tt.wantEnd)
+			}
+			if !tt.wantOK {
+				return
+			}
+			if got := tt.content[start:end]; got != tt.wantRegion {
+				t.Errorf("region = %q, want %q", got, tt.wantRegion)
+			}
+		})
+	}
+}
+
 // --- ensureGitignore tests ---
 
 func TestEnsureGitignore_FreshDir(t *testing.T) {
@@ -8439,8 +9325,8 @@ func TestEnsureGitignore_FreshDir(t *testing.T) {
 	if result.name != ".gitignore" {
 		t.Errorf("expected name '.gitignore', got %q", result.name)
 	}
-	if result.action != "configured" {
-		t.Errorf("expected action 'configured', got %q", result.action)
+	if result.action != "created" {
+		t.Errorf("expected action 'created', got %q", result.action)
 	}
 
 	// Verify file exists with marker and all patterns.
@@ -8458,6 +9344,12 @@ func TestEnsureGitignore_FreshDir(t *testing.T) {
 		".uf/dewey/graph.db",
 		".uf/dewey/cache/",
 		".uf/replicator/*.db",
+		".uf/sibling-clones/",
+		".uf/sibling-cache/",
+		".uf/feedback/",
+		".uf/progress/",
+		".uf/config.yaml",
+		".uf/dewey/config.yaml",
 		".devcontainer/",
 		".dewey/",
 		".hive/",
@@ -8466,6 +9358,12 @@ func TestEnsureGitignore_FreshDir(t *testing.T) {
 		if !strings.Contains(text, pattern) {
 			t.Errorf("expected pattern %q in .gitignore", pattern)
 		}
+	}
+
+	// SC-FR-013: gaze is a separate hero not deployed by uf init,
+	// so its directory must stay out of the managed block.
+	if strings.Contains(text, ".gaze/") {
+		t.Error("expected .gaze/ to be absent from the managed .gitignore block (SC-FR-013)")
 	}
 }
 
@@ -8487,8 +9385,8 @@ func TestEnsureGitignore_ExistingNoBlock(t *testing.T) {
 
 	result := ensureGitignore(opts)
 
-	if result.action != "configured" {
-		t.Errorf("expected action 'configured', got %q", result.action)
+	if result.action != "created" {
+		t.Errorf("expected action 'created', got %q", result.action)
 	}
 
 	content, err := os.ReadFile(giPath)
@@ -8538,8 +9436,8 @@ func TestEnsureGitignore_ExistingWithBlock(t *testing.T) {
 
 	result := ensureGitignore(opts)
 
-	if result.action != "already configured" {
-		t.Errorf("expected action 'already configured', got %q", result.action)
+	if result.action != "unchanged" {
+		t.Errorf("expected action 'unchanged', got %q", result.action)
 	}
 
 	// Verify file is byte-identical (not modified).
@@ -8563,8 +9461,8 @@ func TestEnsureGitignore_Idempotent(t *testing.T) {
 
 	// First call — creates the file.
 	result1 := ensureGitignore(opts)
-	if result1.action != "configured" {
-		t.Errorf("first call: expected 'configured', got %q", result1.action)
+	if result1.action != "created" {
+		t.Errorf("first call: expected 'created', got %q", result1.action)
 	}
 
 	content1, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
@@ -8572,10 +9470,10 @@ func TestEnsureGitignore_Idempotent(t *testing.T) {
 		t.Fatalf("read after first call: %v", err)
 	}
 
-	// Second call — should skip (idempotent).
+	// Second call — reports unchanged (idempotent).
 	result2 := ensureGitignore(opts)
-	if result2.action != "already configured" {
-		t.Errorf("second call: expected 'already configured', got %q", result2.action)
+	if result2.action != "unchanged" {
+		t.Errorf("second call: expected 'unchanged', got %q", result2.action)
 	}
 
 	content2, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
@@ -8588,6 +9486,595 @@ func TestEnsureGitignore_Idempotent(t *testing.T) {
 		t.Errorf("content differs after second call:\nfirst:\n%s\nsecond:\n%s",
 			string(content1), string(content2))
 	}
+}
+
+// TestEnsureGitignore_Dispositions exercises the SC-FR-014 disposition
+// matrix (design D7): created (append), unchanged (current region),
+// upgraded (stale region rewritten in place), and skipped (marker with
+// no terminator). Every case asserts the reported action and the exact
+// resulting file content, so a regression in either the disposition or
+// the splice fails with a byte-level diff.
+func TestEnsureGitignore_Dispositions(t *testing.T) {
+	// A stale managed region: canonical marker and terminator lines
+	// with an out-of-date body (patterns removed).
+	staleRegion := gitignoreMarker + "\n" +
+		"# Runtime data under .uf/ (databases, caches, locks, logs)\n" +
+		".uf/artifacts/\n" + gitignoreTerminator + "\n"
+
+	// The same stale shape as the final bytes of the file, with no
+	// line break after the terminator: extractManagedRegion clamps
+	// end to len(content), and the splice must still produce a clean
+	// file ending in the canonical block's trailing newline.
+	staleRegionEOF := gitignoreMarker + "\n.uf/artifacts/\n" + gitignoreTerminator
+
+	tests := []struct {
+		name        string
+		existing    string // starting .gitignore content; "" means no file
+		wantAction  string
+		wantContent string
+	}{
+		{
+			name:        "no marker and no file appends the block",
+			existing:    "",
+			wantAction:  "created",
+			wantContent: gitignoreBlock,
+		},
+		{
+			name:        "no marker with existing content appends after separator",
+			existing:    "node_modules/\n*.log\n",
+			wantAction:  "created",
+			wantContent: "node_modules/\n*.log\n\n" + gitignoreBlock,
+		},
+		{
+			name:        "current region left untouched",
+			existing:    "node_modules/\n\n" + gitignoreBlock + "\n# user trailer\n",
+			wantAction:  "unchanged",
+			wantContent: "node_modules/\n\n" + gitignoreBlock + "\n# user trailer\n",
+		},
+		{
+			name:        "stale region with trailing user content upgrades in place",
+			existing:    "node_modules/\n" + staleRegion + "\n# user trailer\n*.tmp\n",
+			wantAction:  "upgraded",
+			wantContent: "node_modules/\n" + gitignoreBlock + "\n# user trailer\n*.tmp\n",
+		},
+		{
+			name:        "stale region at EOF without trailing newline upgrades",
+			existing:    "node_modules/\n\n" + staleRegionEOF,
+			wantAction:  "upgraded",
+			wantContent: "node_modules/\n\n" + gitignoreBlock,
+		},
+		{
+			name:        "marker without terminator is skipped with detail",
+			existing:    "node_modules/\n" + gitignoreMarker + "\n.uf/artifacts/\n",
+			wantAction:  "skipped",
+			wantContent: "node_modules/\n" + gitignoreMarker + "\n.uf/artifacts/\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			giPath := filepath.Join(dir, ".gitignore")
+			if tt.existing != "" {
+				if err := os.WriteFile(giPath, []byte(tt.existing), 0o644); err != nil {
+					t.Fatalf("write .gitignore: %v", err)
+				}
+			}
+
+			opts := &Options{
+				TargetDir: dir,
+				ReadFile:  os.ReadFile,
+				WriteFile: os.WriteFile,
+			}
+			result := ensureGitignore(opts)
+
+			if result.name != ".gitignore" {
+				t.Errorf("name = %q, want %q", result.name, ".gitignore")
+			}
+			if result.action != tt.wantAction {
+				t.Errorf("action = %q, want %q", result.action, tt.wantAction)
+			}
+			if tt.wantAction == "skipped" {
+				if result.detail == "" {
+					t.Fatal("skipped disposition must carry a detail naming the malformed region")
+				}
+				if !strings.Contains(result.detail, gitignoreTerminator) {
+					t.Errorf("detail %q does not name the %s terminator", result.detail, gitignoreTerminator)
+				}
+			} else if result.detail != "" {
+				t.Errorf("unexpected detail %q on %q disposition", result.detail, tt.wantAction)
+			}
+
+			got, err := os.ReadFile(giPath)
+			if err != nil {
+				t.Fatalf("read .gitignore: %v", err)
+			}
+			if string(got) != tt.wantContent {
+				t.Errorf("content =\n%q\nwant:\n%q", string(got), tt.wantContent)
+			}
+
+			// The managed marker must never be duplicated (SC-FR-014).
+			if n := strings.Count(string(got), gitignoreMarker); n != 1 {
+				t.Errorf("marker count = %d, want 1", n)
+			}
+		})
+	}
+}
+
+// TestEnsureGitignore_ReadFailure verifies the failed disposition on
+// read errors, preserved from the pre-SC-FR-014 behavior per the
+// approved spec review's advisory A1: a non-not-exist read error must
+// surface as "failed" with the underlying error in the detail, never
+// as a silent append or skip.
+func TestEnsureGitignore_ReadFailure(t *testing.T) {
+	opts := &Options{
+		TargetDir: t.TempDir(),
+		ReadFile: func(string) ([]byte, error) {
+			return nil, errors.New("permission denied")
+		},
+		WriteFile: os.WriteFile,
+	}
+
+	result := ensureGitignore(opts)
+
+	if result.action != "failed" {
+		t.Errorf("action = %q, want %q", result.action, "failed")
+	}
+	if !strings.Contains(result.detail, "read failed") {
+		t.Errorf("detail = %q, want it to contain %q", result.detail, "read failed")
+	}
+	if !strings.Contains(result.detail, "permission denied") {
+		t.Errorf("detail = %q, want it to contain the underlying error", result.detail)
+	}
+}
+
+// TestEnsureGitignore_WriteFailure verifies the failed disposition on
+// write errors (advisory A1) for both mutating paths: the append
+// (created) path and the in-place upgrade path.
+func TestEnsureGitignore_WriteFailure(t *testing.T) {
+	dir := t.TempDir()
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: func(string, []byte, os.FileMode) error {
+			return errors.New("disk full")
+		},
+	}
+
+	// Append path: no marker, so the canonical block write is attempted.
+	result := ensureGitignore(opts)
+	if result.action != "failed" {
+		t.Errorf("append path: action = %q, want %q", result.action, "failed")
+	}
+	if !strings.Contains(result.detail, "write failed") || !strings.Contains(result.detail, "disk full") {
+		t.Errorf("append path: detail = %q, want it to contain %q and the underlying error",
+			result.detail, "write failed")
+	}
+
+	// Upgrade path: a stale managed region triggers the in-place rewrite.
+	stale := "node_modules/\n" + gitignoreMarker + "\n.uf/artifacts/\n" + gitignoreTerminator + "\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(stale), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+	result = ensureGitignore(opts)
+	if result.action != "failed" {
+		t.Errorf("upgrade path: action = %q, want %q", result.action, "failed")
+	}
+	if !strings.Contains(result.detail, "write failed") || !strings.Contains(result.detail, "disk full") {
+		t.Errorf("upgrade path: detail = %q, want it to contain %q and the underlying error",
+			result.detail, "write failed")
+	}
+}
+
+// TestOverrideStubs_ExistingFilesSkippedNeverModified pins the
+// create-only-if-absent core of SC-FR-011 (design D3) at the
+// ensureOverrideStubs unit level: existing override files, whatever
+// their content, report the skipped disposition with the never-modified
+// detail, WriteFile is never invoked for them, and the pre-write bytes
+// survive the call unchanged.
+func TestOverrideStubs_ExistingFilesSkippedNeverModified(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".uf"), 0o755); err != nil {
+		t.Fatalf("mkdir .uf: %v", err)
+	}
+	existing := []struct {
+		rel     string
+		content string
+	}{
+		{".uf/model-matrix.override.yaml", "# hand-edited model override\n"},
+		{".uf/review-matrix.override.yaml", "# hand-edited review override\n"},
+	}
+	for _, s := range existing {
+		if err := os.WriteFile(filepath.Join(dir, s.rel),
+			[]byte(s.content), 0o644); err != nil {
+			t.Fatalf("pre-seed %s: %v", s.rel, err)
+		}
+	}
+
+	// Recording WriteFile: the skipped dispositions must never reach it.
+	var writes []string
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		MkdirAll:  os.MkdirAll,
+		WriteFile: func(path string, data []byte, mode os.FileMode) error {
+			writes = append(writes, path)
+			return os.WriteFile(path, data, mode)
+		},
+	}
+
+	results := ensureOverrideStubs(opts)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d: %v", len(results), results)
+	}
+	for _, result := range results {
+		if result.action != "skipped" {
+			t.Errorf("%s: action = %q, want %q", result.name, result.action, "skipped")
+		}
+		if !strings.Contains(result.detail, "never modified, not even by --force") {
+			t.Errorf("%s: detail = %q, want it to state the never-modified contract",
+				result.name, result.detail)
+		}
+	}
+	if len(writes) != 0 {
+		t.Errorf("existing override files must never be written, got writes: %v", writes)
+	}
+	for _, s := range existing {
+		got, err := os.ReadFile(filepath.Join(dir, s.rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", s.rel, err)
+		}
+		if !bytes.Equal(got, []byte(s.content)) {
+			t.Errorf("%s was modified by ensureOverrideStubs", s.rel)
+		}
+	}
+}
+
+// TestOverrideStubs_CreatesFilesAndParentDir pins the creation side of
+// SC-FR-011 at the ensureOverrideStubs unit level: with neither file
+// present — and the .uf/ parent deliberately absent — both files are
+// created via MkdirAll with exactly their stub-constant content, in the
+// fixed order ensureOverrideStubs reports (model-matrix first, then
+// review-matrix, mirroring the ensure order Run() renders in the
+// summary).
+func TestOverrideStubs_CreatesFilesAndParentDir(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+		MkdirAll:  os.MkdirAll,
+	}
+
+	results := ensureOverrideStubs(opts)
+	want := []struct {
+		name    string
+		content string
+	}{
+		{".uf/model-matrix.override.yaml", modelMatrixOverrideStub},
+		{".uf/review-matrix.override.yaml", reviewMatrixOverrideStub},
+	}
+	if len(results) != len(want) {
+		t.Fatalf("expected %d results, got %d: %v", len(want), len(results), results)
+	}
+	for i, w := range want {
+		if results[i].name != w.name {
+			t.Errorf("results[%d].name = %q, want %q", i, results[i].name, w.name)
+		}
+		if results[i].action != "created" {
+			t.Errorf("%s: action = %q, want %q", w.name, results[i].action, "created")
+		}
+		if results[i].detail != "" {
+			t.Errorf("%s: unexpected detail %q on created disposition", w.name, results[i].detail)
+		}
+		got, err := os.ReadFile(filepath.Join(dir, w.name))
+		if err != nil {
+			t.Fatalf("read %s: %v", w.name, err)
+		}
+		if !bytes.Equal(got, []byte(w.content)) {
+			t.Errorf("%s content mismatch: got %d bytes, want %d bytes",
+				w.name, len(got), len(w.content))
+		}
+	}
+	if info, err := os.Stat(filepath.Join(dir, ".uf")); err != nil || !info.IsDir() {
+		t.Errorf("expected .uf/ parent directory to be created via MkdirAll, got err %v", err)
+	}
+}
+
+// TestOverrideStubs_ReadFailure verifies the failed disposition on read
+// errors, following TestEnsureGitignore_ReadFailure (spec review
+// advisory A1): a non-not-exist read error during the existence probe
+// must surface as "failed" with the underlying error in the detail,
+// never as a silent skip or write, for both stub files.
+func TestOverrideStubs_ReadFailure(t *testing.T) {
+	opts := &Options{
+		TargetDir: t.TempDir(),
+		ReadFile: func(string) ([]byte, error) {
+			return nil, errors.New("permission denied")
+		},
+		WriteFile: os.WriteFile,
+		MkdirAll:  os.MkdirAll,
+	}
+
+	for _, result := range ensureOverrideStubs(opts) {
+		if result.action != "failed" {
+			t.Errorf("%s: action = %q, want %q", result.name, result.action, "failed")
+		}
+		if !strings.Contains(result.detail, "read failed") {
+			t.Errorf("%s: detail = %q, want it to contain %q", result.name, result.detail, "read failed")
+		}
+		if !strings.Contains(result.detail, "permission denied") {
+			t.Errorf("%s: detail = %q, want it to contain the underlying error",
+				result.name, result.detail)
+		}
+	}
+}
+
+// TestOverrideStubs_WriteFailure verifies the failed disposition on
+// write errors, following TestEnsureGitignore_WriteFailure (spec review
+// advisory A1): when the existence probe reports absence but the write
+// fails, both stub files must report "failed" with the underlying error
+// in the detail rather than a false "created".
+func TestOverrideStubs_WriteFailure(t *testing.T) {
+	opts := &Options{
+		TargetDir: t.TempDir(),
+		ReadFile: func(string) ([]byte, error) {
+			return nil, os.ErrNotExist // absence probe: file does not exist
+		},
+		WriteFile: func(string, []byte, os.FileMode) error {
+			return errors.New("disk full")
+		},
+		MkdirAll: os.MkdirAll,
+	}
+
+	for _, result := range ensureOverrideStubs(opts) {
+		if result.action != "failed" {
+			t.Errorf("%s: action = %q, want %q", result.name, result.action, "failed")
+		}
+		if !strings.Contains(result.detail, "write failed") {
+			t.Errorf("%s: detail = %q, want it to contain %q", result.name, result.detail, "write failed")
+		}
+		if !strings.Contains(result.detail, "disk full") {
+			t.Errorf("%s: detail = %q, want it to contain the underlying error",
+				result.name, result.detail)
+		}
+	}
+}
+
+// --- OpenCode directory ignore unit tests (SC-FR-015) ---
+
+// TestEnsureOpencodeGitignore_MergeSemantics pins the SC-FR-015 merge
+// edges at the writer level, following the TestEnsureGitignore_
+// Dispositions table shape: an empty existing file receives exactly the
+// canonical lines, a file without a trailing newline gets one synthesized
+// before the appended lines, and a partial canonical set gains only the
+// missing lines with every user line retained in place. Every case
+// asserts the reported action, the exact detail naming the appended
+// lines, and the resulting file content.
+func TestEnsureOpencodeGitignore_MergeSemantics(t *testing.T) {
+	tests := []struct {
+		name        string
+		existing    string
+		wantContent string
+		wantDetail  string
+	}{
+		{
+			name:        "empty file receives exactly the canonical lines",
+			existing:    "",
+			wantContent: opencodeGitignore,
+			wantDetail:  "appended missing lines: node_modules, bun.lock, .vitest/, coverage/",
+		},
+		{
+			name:        "missing trailing newline is synthesized before appending",
+			existing:    "user.log\nnode_modules",
+			wantContent: "user.log\nnode_modules\nbun.lock\n.vitest/\ncoverage/\n",
+			wantDetail:  "appended missing lines: bun.lock, .vitest/, coverage/",
+		},
+		{
+			name:        "only missing canonical lines append, user lines retained in place",
+			existing:    "foo.log\nnode_modules\n",
+			wantContent: "foo.log\nnode_modules\nbun.lock\n.vitest/\ncoverage/\n",
+			wantDetail:  "appended missing lines: bun.lock, .vitest/, coverage/",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(dir, ".opencode"), 0o755); err != nil {
+				t.Fatalf("mkdir .opencode: %v", err)
+			}
+			path := filepath.Join(dir, ".opencode", ".gitignore")
+			if err := os.WriteFile(path, []byte(tt.existing), 0o644); err != nil {
+				t.Fatalf("pre-seed .opencode/.gitignore: %v", err)
+			}
+
+			opts := &Options{
+				TargetDir: dir,
+				ReadFile:  os.ReadFile,
+				WriteFile: os.WriteFile,
+				MkdirAll:  os.MkdirAll,
+			}
+			result := ensureOpencodeGitignore(opts)
+
+			if result.name != ".opencode/.gitignore" {
+				t.Errorf("name = %q, want %q", result.name, ".opencode/.gitignore")
+			}
+			if result.action != "upgraded" {
+				t.Errorf("action = %q, want %q", result.action, "upgraded")
+			}
+			if result.detail != tt.wantDetail {
+				t.Errorf("detail = %q, want %q", result.detail, tt.wantDetail)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read .opencode/.gitignore: %v", err)
+			}
+			if string(got) != tt.wantContent {
+				t.Errorf("content =\n%q\nwant:\n%q", string(got), tt.wantContent)
+			}
+		})
+	}
+}
+
+// TestEnsureOpencodeGitignore_RerunIsIdempotent pins the SC-FR-015
+// idempotency at the writer level: after a first run creates the file
+// with the canonical lines, a second run reports unchanged, performs no
+// write, and leaves the bytes stable.
+func TestEnsureOpencodeGitignore_RerunIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	opts := &Options{
+		TargetDir: dir,
+		ReadFile:  os.ReadFile,
+		WriteFile: os.WriteFile,
+		MkdirAll:  os.MkdirAll,
+	}
+
+	// First call — creates the file.
+	first := ensureOpencodeGitignore(opts)
+	if first.action != "created" {
+		t.Fatalf("first call: expected %q, got %q", "created", first.action)
+	}
+
+	// Recording WriteFile: the unchanged disposition must never reach it.
+	var writes []string
+	opts.WriteFile = func(path string, data []byte, mode os.FileMode) error {
+		writes = append(writes, path)
+		return os.WriteFile(path, data, mode)
+	}
+	second := ensureOpencodeGitignore(opts)
+	if second.action != "unchanged" {
+		t.Errorf("second call: expected %q, got %q", "unchanged", second.action)
+	}
+	if len(writes) != 0 {
+		t.Errorf("unchanged disposition must not write, got writes: %v", writes)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".opencode", ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .opencode/.gitignore after second call: %v", err)
+	}
+	if !bytes.Equal(got, []byte(opencodeGitignore)) {
+		t.Errorf(".opencode/.gitignore content mismatch after re-run: got %q, want %q",
+			got, opencodeGitignore)
+	}
+}
+
+// TestEnsureOpencodeGitignore_FailureDispositions verifies the failed
+// disposition on I/O errors, following TestOverrideStubs_ReadFailure and
+// TestOverrideStubs_WriteFailure (spec review advisory A1): read,
+// directory-creation, and write failures must surface as failed with the
+// underlying error in the detail, never as a silent skip or a false
+// created or upgraded.
+func TestEnsureOpencodeGitignore_FailureDispositions(t *testing.T) {
+	failureErr := errors.New("simulated I/O failure")
+	tests := []struct {
+		name       string
+		opts       Options
+		wantDetail string
+	}{
+		{
+			name: "read failure",
+			opts: Options{
+				ReadFile:  func(string) ([]byte, error) { return nil, failureErr },
+				WriteFile: os.WriteFile,
+				MkdirAll:  os.MkdirAll,
+			},
+			wantDetail: "read failed",
+		},
+		{
+			name: "mkdir failure",
+			opts: Options{
+				ReadFile:  func(string) ([]byte, error) { return nil, os.ErrNotExist },
+				MkdirAll:  func(string, os.FileMode) error { return failureErr },
+				WriteFile: os.WriteFile,
+			},
+			wantDetail: "mkdir failed",
+		},
+		{
+			name: "write failure",
+			opts: Options{
+				ReadFile:  func(string) ([]byte, error) { return nil, os.ErrNotExist },
+				MkdirAll:  os.MkdirAll,
+				WriteFile: func(string, []byte, os.FileMode) error { return failureErr },
+			},
+			wantDetail: "write failed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := tt.opts
+			opts.TargetDir = t.TempDir()
+			result := ensureOpencodeGitignore(&opts)
+
+			if result.name != ".opencode/.gitignore" {
+				t.Errorf("name = %q, want %q", result.name, ".opencode/.gitignore")
+			}
+			if result.action != "failed" {
+				t.Errorf("action = %q, want %q", result.action, "failed")
+			}
+			if !strings.Contains(result.detail, tt.wantDetail) {
+				t.Errorf("detail = %q, want it to contain %q", result.detail, tt.wantDetail)
+			}
+			if !strings.Contains(result.detail, failureErr.Error()) {
+				t.Errorf("detail = %q, want it to contain the underlying error %q",
+					result.detail, failureErr.Error())
+			}
+		})
+	}
+}
+
+// TestGitignoreBlock_RepositoryManagedRegionMatchesCanonical is the
+// SC-FR-013 drift test (design D7): the managed region in the repo
+// root .gitignore — the gitignoreMarker line through the
+// gitignoreTerminator line — must equal the gitignoreBlock constant
+// byte-for-byte. It extracts the region with the same helper
+// ensureGitignore's replacement logic uses (SC-FR-014), so the
+// verification cannot drift from the behavior it verifies, and it
+// compares against the shared constant rather than a re-declared
+// copy. Repo-file access follows the
+// TestPluginPackageInputs_GitignoreTracksCanonicalInputs pattern.
+func TestGitignoreBlock_RepositoryManagedRegionMatchesCanonical(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+
+	content, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+
+	text := string(content)
+	start, end, ok := extractManagedRegion(text, gitignoreMarker, gitignoreTerminator)
+	if !ok {
+		t.Fatalf(".gitignore has no managed region: no %q marker line followed by a %q terminator line",
+			gitignoreMarker, gitignoreTerminator)
+	}
+
+	if got := text[start:end]; got != gitignoreBlock {
+		t.Errorf(".gitignore managed region drifted from gitignoreBlock (first difference at region line %d):\n"+
+			" got region: %q\nwant block: %q\n"+
+			"reconcile the repo .gitignore managed region with gitignoreBlock in internal/scaffold/scaffold.go",
+			firstDifferingLine(got, gitignoreBlock), got, gitignoreBlock)
+	}
+}
+
+// firstDifferingLine returns the 1-based number of the first line
+// where a and b differ, treating a line present in only one string
+// as a difference, and 0 when the strings are equal.
+func firstDifferingLine(a, b string) int {
+	aLines := strings.Split(a, "\n")
+	bLines := strings.Split(b, "\n")
+	for i := 0; i < len(aLines) && i < len(bLines); i++ {
+		if aLines[i] != bLines[i] {
+			return i + 1
+		}
+	}
+	if len(aLines) != len(bLines) {
+		return min(len(aLines), len(bLines)) + 1
+	}
+	return 0
 }
 
 // TestAgentBriefAsset_GovernanceBlockPresence verifies the
