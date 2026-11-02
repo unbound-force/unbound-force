@@ -18,7 +18,7 @@ All tasks in this group modify the same file
 mirror, kept byte-identical within each task) — no parallel
 execution.
 
-- [ ] 1.1 Replace Sections 5, 5a, and 5b with a single
+- [x] 1.1 Replace Sections 5, 5a, and 5b with a single
       "Finalize Dispatch" section (both copies): exactly one
       `consolidate_dispatch` call per finalization attempt,
       passing the captured `correlation_id` from the dispatch
@@ -46,7 +46,7 @@ execution.
       captured `correlation_id` into the single finalization
       call and sources proposals and warnings from its result
       (FR-013, FR-014)
-- [ ] 1.2 In the same rewrite, scope deduplication,
+- [x] 1.2 In the same rewrite, scope deduplication,
       cross-persona root-cause grouping, and compound
       severity to presenting the review comment and terminal
       report only, stating explicitly that they never merge,
@@ -56,7 +56,7 @@ execution.
       finalization-path verdict-ladder prose — the verdict
       and zero-success results come from the tool's
       finalization result (FR-015)
-- [ ] 1.3 In the same rewrite, source lesson proposals and
+- [x] 1.3 In the same rewrite, source lesson proposals and
       consolidation warnings from the finalization result's
       top-level `proposals` and `warnings` arrays; remove the
       Section 5a no-provenance retrieval call and its
@@ -71,7 +71,7 @@ execution.
 
 ## 2. Tidy `/uf.review-council` Section 3
 
-- [ ] 2.1 Reword the Section 3 (~L360) "First deduplicate
+- [x] 2.1 Reword the Section 3 (~L360) "First deduplicate
       ... cross-persona grouping" prose in
       `.opencode/commands/uf.review-council.md` and its
       `internal/scaffold/assets/opencode/commands/`
@@ -83,7 +83,7 @@ execution.
 
 ## 3. Content-gate tests and site-label refresh
 
-- [ ] 3.1 Add content-gate assertions in
+- [x] 3.1 Add content-gate assertions in
       `internal/scaffold/scaffold_test.go` (following the
       `TestQuestionToolPresentationContractGates` precedent)
       reading the canonical command sources: for
@@ -96,7 +96,7 @@ execution.
       presentation-only grouping scope; for
       `uf.review-council.md`, assert the presentation-only
       scope of the Section 3 deduplication prose (FR-016)
-- [ ] 3.2 Add absence assertions to the same content-gate
+- [x] 3.2 Add absence assertions to the same content-gate
       test: `uf.review-pr.md` no longer contains the legacy
       manual-finalize fragments — pin finalization-unique
       removed strings (the Section 5b "Call
@@ -109,7 +109,7 @@ execution.
       "First deduplicate" (which legitimately remains in
       presentation-scoped prose), so the prohibitions cannot
       be silently reintroduced (FR-016)
-- [ ] 3.3 [P] Refresh the documented-site inventory in
+- [x] 3.3 [P] Refresh the documented-site inventory in
       `.opencode/test/golden-output-shape.test.ts` (design
       D6): the coverage comments and the `it.each` site
       labels no longer attribute a `finalize_review_dispatch`
@@ -121,7 +121,7 @@ execution.
       coverage comments and `it.each` inventory and update
       the per-plugin site counts so the inventory stays
       exhaustive
-- [ ] 3.4 [P] Update the `uf.review-pr.md` clause set pinned
+- [x] 3.4 [P] Update the `uf.review-pr.md` clause set pinned
       by `TestCommandContracts_CorrelationIdForwarding` in
       `internal/scaffold/command_contract_test.go`
       (~L302-381): its current clauses assert the deleted
@@ -133,19 +133,19 @@ execution.
 
 ## 4. Verification, Parity, and Docs
 
-- [ ] 4.1 Verify byte-identical parity between each edited
+- [x] 4.1 Verify byte-identical parity between each edited
       `.opencode/commands/` file and its
       `internal/scaffold/assets/opencode/commands/` mirror
       (`uf.review-pr.md`, `uf.review-council.md`) (FR-016,
       FR-005)
-- [ ] 4.2 Run `make check` — which includes the scaffold
+- [x] 4.2 Run `make check` — which includes the scaffold
       drift-detection and content-gate tests, `make build`
       (embed.FS asset sync), and `make plugin-test`; all must
       pass (FR-016)
-- [ ] 4.3 Add a CHANGELOG.md entry describing the
+- [x] 4.3 Add a CHANGELOG.md entry describing the
       deterministic one-call finalization for `/uf.review-pr`
       and the presentation-only grouping scope
-- [ ] 4.4 File both documentation issues for the user-facing
+- [x] 4.4 File both documentation issues for the user-facing
       command behavior change before PR merge: the repo-local
       documentation issue (per the AGENTS.md documentation
       gate; duplicate-check open docs issues in this repo
@@ -153,7 +153,7 @@ execution.
       (per the constitution's Cross-Repo Documentation rule;
       duplicate-check open website issues first — #303, #316,
       and #360 do not cover this change)
-- [ ] 4.5 Confirm constitution alignment: human-confirmation
+- [x] 4.5 Confirm constitution alignment: human-confirmation
       gates untouched, no quality or governance gate
       modified, finalization artifacts remain
       tool-authoritative (proposal Constitution Alignment

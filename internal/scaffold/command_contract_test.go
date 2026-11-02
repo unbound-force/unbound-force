@@ -311,9 +311,13 @@ func TestCommandContracts_CorrelationIdForwarding(t *testing.T) {
 	// scope in uf.address-feedback.md and the per-dispatch scope in
 	// uf.unleash.md. uf.unleash.md has no retrieval-failure section, so
 	// it carries no permanent-failure clause; its consolidation surface
-	// is finalization plus re-dispatch retries. uf.review-pr.md and
-	// uf.unleash.md join this file's covered command set here (both are
-	// scaffolded).
+	// is finalization plus re-dispatch retries. uf.review-pr.md has no
+	// retrieval step either (review-pr-consolidate-dispatch replaced
+	// its Sections 5a/5b with a single finalization call): its
+	// consolidation surface is finalization plus identical-call retries
+	// only, so it too carries no retrieval or permanent-failure clause.
+	// uf.review-pr.md and uf.unleash.md join this file's covered command
+	// set here (both are scaffolded).
 	commands := []struct {
 		name    string
 		clauses []commandClause
@@ -321,11 +325,9 @@ func TestCommandContracts_CorrelationIdForwarding(t *testing.T) {
 		{
 			name: "uf.review-pr.md",
 			clauses: []commandClause{
-				{name: "dispatch-step capture and forwarding", all: []string{"capture the `correlation_id` reported in that one-line summary", "pass it as `correlation_id` on every subsequent consolidation call in this workflow", "the Section 5a retrieval, the Section 5b finalization, and every identical-call retry", "forward it unconditionally, never conditioned on in-process session-map state"}},
-				{name: "retrieval forwards the captured id", all: []string{"passing the captured `correlation_id` from Section 4c"}},
-				{name: "retry forwards the same captured id", all: []string{"passing the same captured `correlation_id`"}},
-				{name: "finalization forwards the captured id", all: []string{"the captured `correlation_id` from Section 4c as the payload's `correlation_id`"}},
-				{name: "not-found with the forwarded id is permanent", all: []string{"consolidation carrying the forwarded `correlation_id` for a dispatch that executed runs", "with the ID forwarded, `not_found` means no persisted dispatch session exists", "a plugin-process or tool-session split can no longer produce it", "a `not_found` lacking the forwarded `correlation_id` indicates the capture step was skipped"}},
+				{name: "dispatch-step capture and forwarding", all: []string{"capture the `correlation_id` reported in that one-line summary", "pass it as the `correlation_id` argument of the single finalization call in Section 5 and of every identical-call retry", "forward it unconditionally, never conditioned on in-process session-map state"}},
+				{name: "finalization forwards the captured id", all: []string{"with the captured `correlation_id` from Section 4c and provenance as its only arguments"}},
+				{name: "finalization retry forwards the same captured id", all: []string{"same captured `correlation_id`, same provenance, no changes"}},
 			},
 		},
 		{

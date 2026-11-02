@@ -60,10 +60,10 @@ import { withBun } from "./helpers/bun-runtime.js"
 // - review-dispatch: 14 sites -- plan_review_dispatch x7 (uf.unleash.md:665
 //   and 1532, uf.review-council.md:235, uf.review-pr.md:402,
 //   uf.triage-issue.md:190, uf.address-feedback.md:339,
-//   speckit.testreview.md:154), consolidate_dispatch x3
-//   (uf.review-council.md:424, uf.triage-issue.md:1091,
-//   uf.address-feedback.md:561), finalize_review_dispatch x2
-//   (uf.review-pr.md:543, speckit.testreview.md:278),
+//   speckit.testreview.md:154), consolidate_dispatch x4
+//   (uf.review-council.md:424, uf.review-pr.md:527,
+//   uf.triage-issue.md:1091, uf.address-feedback.md:561),
+//   finalize_review_dispatch x1 (speckit.testreview.md:278),
 //   acquire_sibling_evidence (speckit.testreview.md:134),
 //   prepare_lesson_learning (speckit.testreview.md:268)
 //
@@ -1097,7 +1097,7 @@ const PLAN_SITES: ReadonlyArray<{ readonly site: string; readonly args: Record<s
   },
 ]
 
-/** consolidate_dispatch sessions for the three documented call sites. */
+/** consolidate_dispatch sessions for the four documented call sites. */
 const CONSOLIDATE_SITES: ReadonlyArray<{
   readonly site: string
   readonly command: "review-council" | "triage-issue" | "address-feedback"
@@ -1105,6 +1105,7 @@ const CONSOLIDATE_SITES: ReadonlyArray<{
   readonly metadataOverrides: Record<string, unknown>
 }> = [
   { site: "uf.review-council.md:424", command: "review-council", mode: "code", metadataOverrides: {} },
+  { site: "uf.review-pr.md:527", command: "review-council", mode: "code", metadataOverrides: {} },
   { site: "uf.triage-issue.md:1091", command: "triage-issue", mode: "triage", metadataOverrides: TRIAGE_METADATA_OVERRIDES },
   { site: "uf.address-feedback.md:561", command: "address-feedback", mode: "feedback", metadataOverrides: {} },
 ]
@@ -1204,7 +1205,6 @@ describe("golden output shapes -- review-dispatch registry (15 documented sites)
   )
 
   it.each([
-    { site: "uf.review-pr.md:543", command: "review-council", mode: "code", workflowResult: { kind: "council", value: "APPROVE" } },
     { site: "speckit.testreview.md:278", command: "speckit-testreview", mode: "test", workflowResult: { kind: "test-review", value: "APPROVE" } },
   ] as const)(
     "finalize_review_dispatch [$site] persists the artifact and returns canonical review-verdict v2 data",

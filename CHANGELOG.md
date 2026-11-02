@@ -1096,6 +1096,35 @@ Each entry follows the format: `- <change-name>: <summary>`.
   openspec/changes/command-prose-pilot/)
 
 ### Fixed
+- review-pr-consolidate-dispatch: `/uf.review-pr` now finalizes every
+  dispatch through exactly one `consolidate_dispatch` call per
+  finalization attempt, carrying the captured `correlation_id` plus
+  provenance (`workflow_id` "uf.review-pr"; `branch`/`commit`
+  resolved only from the Step 2 frozen PR input context
+  `head_ref`/`head_sha`) — replacing the old §5/§5a/§5b manual
+  `finalize_review_dispatch` payload assembly whose hand-rebuilt
+  payloads caused repeated finalizer rejections (the #906 defect
+  class). The command never assembles, restates, or recomputes the
+  payload and never calls `finalize_review_dispatch` directly;
+  bounded mechanical retry re-issues the identical call at most
+  twice, classified from the structured response alone
+  (default-deny), and exhausted retries or non-mechanical failures
+  fail closed to `INCONCLUSIVE`. Lesson proposals and consolidation
+  warnings now come from the same finalization result's top-level
+  `proposals` and `warnings` arrays (no separate no-provenance
+  retrieval call). Cross-persona root-cause grouping and compound
+  severity are presentation-only: they govern the GitHub review
+  comment and terminal report only and never alter findings,
+  run ids, verdicts, run counts, or advisories in finalization
+  data — the same tidy applied to the `/uf.review-council` §3
+  deduplication prose. The scaffold mirror stays byte-identical;
+  content-gate tests in `internal/scaffold/scaffold_test.go` pin
+  the one-call contract and assert the absence of the
+  manual-finalize prose; the golden-test documented-site inventory
+  now attributes the finalization `consolidate_dispatch` site
+  (`uf.review-pr.md:527`) instead of the removed
+  `finalize_review_dispatch` site. (Spec:
+  openspec/changes/review-pr-consolidate-dispatch/, Fixes: #906)
 - fix-review-submission-validation: the review-dispatch submit tools
   now enforce their declared arg schemas at execution time.
   OpenCode 1.19.0 does not validate plugin tool arg schemas
