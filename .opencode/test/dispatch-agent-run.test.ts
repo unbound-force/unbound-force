@@ -97,6 +97,54 @@ function fakeClient(): Client {
   return { session } as unknown as Client
 }
 
+/**
+ * Fake client whose host lookup (session.message) and child prompt are
+ * independently shapable: prompt calls are captured so tests can assert
+ * the execution seam — which model identity and variant the child
+ * session actually received — while message overrides drive
+ * host-resolution success, variant-less, failure, and abort shapes.
+ * Shared by the RD-FR-037 host-source suite and the RD-FR-038
+ * host-resolution failure-classification suite.
+ */
+function hostLookupClient(options?: {
+  message?: () => Promise<unknown>
+  promptCalls?: unknown[]
+}): Client {
+  const session = {
+    create: async (): Promise<unknown> => ({
+      data: { id: "child-session" },
+      error: undefined,
+    }),
+    message:
+      options?.message ??
+      (async (): Promise<unknown> => ({
+        data: {
+          info: { id: "m", sessionID: "s", role: "assistant", providerID: "p", modelID: "m", variant: "active" },
+          parts: [],
+        },
+        error: undefined,
+      })),
+    prompt: async (request: unknown): Promise<unknown> => {
+      options?.promptCalls?.push(request)
+      // Echo the requested model so model-mismatch checks pass.
+      const req = request as { body?: { model?: { providerID: string; modelID: string } } }
+      const providerID = req.body?.model?.providerID ?? "provider"
+      const modelID = req.body?.model?.modelID ?? "standard"
+      return {
+        data: {
+          info: { role: "assistant", providerID, modelID },
+          parts: [
+            { id: "t", sessionID: "child-session", messageID: "m", type: "text", text: "review output", ignored: false },
+          ],
+        },
+        error: undefined,
+      }
+    },
+    abort: async (): Promise<unknown> => ({ data: true, error: undefined }),
+  }
+  return { session } as unknown as Client
+}
+
 function toolContext(): ToolContext {
   return {
     sessionID: "parent-session",
@@ -922,52 +970,6 @@ describe("dispatch_agent_run", () => {
   })
 
   describe("host-source model resolution (RD-FR-037)", () => {
-    /**
-     * Fake client whose host lookup (session.message) and child prompt are
-     * independently shapable: prompt calls are captured so tests can assert
-     * the execution seam — which model identity and variant the child
-     * session actually received — while message overrides drive
-     * host-resolution success, variant-less, failure, and abort shapes.
-     */
-    function hostLookupClient(options?: {
-      message?: () => Promise<unknown>
-      promptCalls?: unknown[]
-    }): Client {
-      const session = {
-        create: async (): Promise<unknown> => ({
-          data: { id: "child-session" },
-          error: undefined,
-        }),
-        message:
-          options?.message ??
-          (async (): Promise<unknown> => ({
-            data: {
-              info: { id: "m", sessionID: "s", role: "assistant", providerID: "p", modelID: "m", variant: "active" },
-              parts: [],
-            },
-            error: undefined,
-          })),
-        prompt: async (request: unknown): Promise<unknown> => {
-          options?.promptCalls?.push(request)
-          // Echo the requested model so model-mismatch checks pass.
-          const req = request as { body?: { model?: { providerID: string; modelID: string } } }
-          const providerID = req.body?.model?.providerID ?? "provider"
-          const modelID = req.body?.model?.modelID ?? "standard"
-          return {
-            data: {
-              info: { role: "assistant", providerID, modelID },
-              parts: [
-                { id: "t", sessionID: "child-session", messageID: "m", type: "text", text: "review output", ignored: false },
-              ],
-            },
-            error: undefined,
-          }
-        },
-        abort: async (): Promise<unknown> => ({ data: true, error: undefined }),
-      }
-      return { session } as unknown as Client
-    }
-
     it("inherits the parent session model, ignoring a configured profile model", async () => {
       // RD-FR-037 "Host run ignores a configured profile model": the default
       // matrixFixture configures provider/standard on the standard profile —
@@ -1114,6 +1116,203 @@ describe("dispatch_agent_run", () => {
       expect(result.provenance.resolved_parent_model).toBe("p/m")
       expect(result.provenance.resolved_parent_variant).toBeNull()
       expect(result.provenance.model_mismatch).toBe(false)
+    })
+  })
+
+  describe("host-resolution failure classification (RD-FR-038)", () => {
+    /**
+     * Deps whose review matrix configures no model on the standard profile
+     * (the empty profile matrix from the advisor fallback suite), so an
+     * advisor dispatch falls back to host-model resolution.
+     */
+    function emptyStandardProfileDeps(client: Client): DispatchAgentRunDependencies {
+      const emptyProfileMatrix = {
+        ...matrixFixture,
+        profiles: { ...matrixFixture.profiles, standard: {} },
+      }
+      const readText = vi.fn(async (path: string): Promise<string> => {
+        if (path === ".uf/review-matrix.yaml") return JSON.stringify(emptyProfileMatrix)
+        if (path === ".uf/reviewer-capabilities.yaml") return JSON.stringify(manifestFixture)
+        if (path === ".uf/review-matrix.override.yaml") {
+          const err = new Error("ENOENT") as NodeJS.ErrnoException
+          err.code = "ENOENT"
+          throw err
+        }
+        throw new Error(`unexpected read: ${path}`)
+      })
+      return makeDeps({ readText, client })
+    }
+
+    it("classifies a non-assistant parent message as non-retryable host_model_structural on the host branch", async () => {
+      // RD-FR-038 "Structural failure on the host-source branch": the
+      // parent session's current message is a user message, so
+      // resolveHostModel() throws StructuralHostModelError. The failure is
+      // non-retryable and preserves the remediation in the
+      // uf_delegate_command message shape; no run file is written.
+      const deps = makeDeps({
+        client: hostLookupClient({
+          message: async (): Promise<unknown> => ({
+            data: {
+              info: { id: "m", sessionID: "s", role: "user", providerID: "p", modelID: "m" },
+              parts: [],
+            },
+            error: undefined,
+          }),
+        }),
+      })
+      const result = await dispatchAgentRun(
+        { agent: "divisor-guard", prompt: "Review this change.", source: "host" },
+        toolContext(),
+        deps,
+      )
+      trackForCleanup(result.correlation_id)
+
+      expect(result.status).toBe("failed")
+      expect(result.error?.code).toBe("host_model_structural")
+      expect(result.error?.retryable).toBe(false)
+      expect(result.error?.message).toContain(
+        "current message is not an assistant message. Remediation: re-invoke the command so host introspection reads the current assistant turn; retrying will not fix this.",
+      )
+      expect(await listRunFiles(result.correlation_id)).toEqual([])
+    })
+
+    it("classifies a missing model identity as host_model_structural on the advisor branch", async () => {
+      // RD-FR-038 "Structural failure on the advisor fallback": the empty
+      // standard profile drives the host fallback, and the parent assistant
+      // message reports no model identity. The advisor branch classifies
+      // through the same shared helper as the host branch — the split is
+      // symmetric by construction, not by mirrored edits.
+      const deps = emptyStandardProfileDeps(
+        hostLookupClient({
+          message: async (): Promise<unknown> => ({
+            data: {
+              info: { id: "m", sessionID: "s", role: "assistant", providerID: "", modelID: "" },
+              parts: [],
+            },
+            error: undefined,
+          }),
+        }),
+      )
+      const result = await dispatchAgentRun(
+        { agent: "divisor-guard", prompt: "Review this change.", tier: "standard", source: "advisor" },
+        toolContext(),
+        deps,
+      )
+      trackForCleanup(result.correlation_id)
+
+      expect(result.status).toBe("failed")
+      expect(result.error?.code).toBe("host_model_structural")
+      expect(result.error?.retryable).toBe(false)
+      expect(result.error?.message).toContain(
+        "current assistant model identity is unavailable. Remediation: run the command from a provider that reports the active model identity; retrying will not fix this.",
+      )
+      expect(await listRunFiles(result.correlation_id)).toEqual([])
+    })
+
+    it("classifies a present-but-invalid parent variant as host_model_structural", async () => {
+      // RD-FR-038 "Invalid parent variant is structural": the variant is
+      // present but fails the shared VariantSchema, so the classification
+      // preserves the invalid-variant remediation.
+      const deps = makeDeps({
+        client: hostLookupClient({
+          message: async (): Promise<unknown> => ({
+            data: {
+              info: { id: "m", sessionID: "s", role: "assistant", providerID: "p", modelID: "m", variant: "not valid" },
+              parts: [],
+            },
+            error: undefined,
+          }),
+        }),
+      })
+      const result = await dispatchAgentRun(
+        { agent: "divisor-guard", prompt: "Review this change.", source: "host" },
+        toolContext(),
+        deps,
+      )
+      trackForCleanup(result.correlation_id)
+
+      expect(result.status).toBe("failed")
+      expect(result.error?.code).toBe("host_model_structural")
+      expect(result.error?.retryable).toBe(false)
+      expect(result.error?.message).toContain(
+        "current assistant active variant is invalid. Remediation: run the command from a provider whose active variant is a valid slug; retrying will not fix this.",
+      )
+      expect(await listRunFiles(result.correlation_id)).toEqual([])
+    })
+
+    it("keeps a thrown transient failure as retryable host_model_unavailable with the sanitized form", async () => {
+      // RD-FR-038 "Transient failure keeps the retryable class": a plain
+      // Error (not StructuralHostModelError) stays retryable with no
+      // remediation suffix. Driven through the advisor branch so the shared
+      // helper's transient leg — including sanitizeInvocationError()
+      // redaction of a thrown error — is pinned on both branches.
+      const deps = emptyStandardProfileDeps(
+        hostLookupClient({
+          message: async (): Promise<never> => {
+            throw new Error(
+              "host lookup failed with Bearer abc123def456 at https://api.internal.example.com/v1/message?token=xyz789 reading /Users/jflowers/state.json",
+            )
+          },
+        }),
+      )
+      const result = await dispatchAgentRun(
+        { agent: "divisor-guard", prompt: "Review this change.", tier: "standard", source: "advisor" },
+        toolContext(),
+        deps,
+      )
+      trackForCleanup(result.correlation_id)
+
+      expect(result.status).toBe("failed")
+      expect(result.error?.code).toBe("host_model_unavailable")
+      expect(result.error?.retryable).toBe(true)
+      // The sanitizeInvocationError() form: no Bearer value, no query
+      // string, no home path survives into the surfaced error message.
+      expect(result.error?.message).toContain("Bearer [REDACTED]")
+      expect(result.error?.message).not.toContain("abc123def456")
+      expect(result.error?.message).toContain("?[REDACTED]")
+      expect(result.error?.message).not.toContain("token=xyz789")
+      expect(result.error?.message).toContain("~/[REDACTED]")
+      expect(result.error?.message).not.toContain("/Users/jflowers")
+      // Transient failures carry no remediation suffix.
+      expect(result.error?.message).not.toContain("Remediation:")
+      expect(await listRunFiles(result.correlation_id)).toEqual([])
+    })
+
+    it("keeps cancellation precedence over the structural classification", async () => {
+      // RD-FR-038 "Abort takes precedence over classification": the
+      // message override aborts the controller and returns a non-assistant
+      // message — a shape that would otherwise classify as
+      // host_model_structural — so the cancelled code wins.
+      const abortController = new AbortController()
+      const deps = makeDeps({
+        client: hostLookupClient({
+          message: async (): Promise<unknown> => {
+            abortController.abort()
+            return {
+              data: {
+                info: { id: "m", sessionID: "s", role: "user", providerID: "p", modelID: "m" },
+                parts: [],
+              },
+              error: undefined,
+            }
+          },
+        }),
+      })
+      const ctx = {
+        ...toolContext(),
+        abort: abortController.signal,
+      }
+      const result = await dispatchAgentRun(
+        { agent: "divisor-guard", prompt: "Review this change.", source: "host" },
+        ctx,
+        deps,
+      )
+      trackForCleanup(result.correlation_id)
+
+      expect(result.status).toBe("failed")
+      expect(result.error?.code).toBe("cancelled")
+      expect(result.error?.retryable).toBe(false)
+      expect(await listRunFiles(result.correlation_id)).toEqual([])
     })
   })
 

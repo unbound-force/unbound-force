@@ -824,6 +824,30 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/remove-mutimind-mxf-orchestration/, Fixes: #565, Fixes: #566)
 
 ### Changed
+- split-host-resolution-failure-classes: Host-resolution
+  failures in the review-dispatch plugin's `executeDispatchRun`
+  now split by cause instead of collapsing into one retryable
+  class. Structural causes -- the parent session's current
+  message is not an assistant message, carries no model
+  identity, or carries an invalid variant -- surface the
+  non-retryable `host_model_structural` error code with the
+  shared failure's remediation string preserved in the message
+  shape `<message>. Remediation: <remediation>; retrying will
+  not fix this.`; transient lookup failures keep the
+  retryable, sanitized `host_model_unavailable`. One shared
+  `hostResolutionFailureResult()` helper classifies both the
+  host-source branch (RD-FR-037) and the advisor fallback
+  (#693), so the split is symmetric by construction, and an
+  abort signal keeps `cancelled` precedence over
+  classification. `retryable` on these pre-execution early
+  exits means caller re-invocation only -- no run file exists,
+  so `redispatch_failed_runs` (DR-FR-002) has nothing to
+  target, and a dispatch session whose included plan entry
+  early-exited consolidates fail-closed ("included plan entry
+  has no run" -> `INCONCLUSIVE`).
+  (Spec: openspec/changes/split-host-resolution-failure-classes/,
+  Fixes: #914)
+  (Docs: #919, unbound-force/website#370)
 - reviewer-capabilities-init-survival: Reclassified
   `.uf/reviewer-capabilities.yaml` from tool-owned to
   project-owned in the scaffold's `isToolOwned` table,

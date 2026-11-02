@@ -43,8 +43,12 @@ function withBun<T>(run: () => T | Promise<T>): Promise<T> {
 
 type Client = PluginInput["client"]
 
-/** Fake client: succeeds, or fails the child prompt when failPrompt is set. */
-function fakeClient(options?: { failPrompt?: boolean }): Client {
+/**
+ * Fake client: succeeds, fails the child prompt when failPrompt is set,
+ * or reports a non-assistant parent message when parentRole is set (the
+ * structural host-resolution shape per RD-FR-038).
+ */
+function fakeClient(options?: { failPrompt?: boolean; parentRole?: string }): Client {
   const session = {
     create: async (): Promise<unknown> => ({
       data: { id: "child-session" },
@@ -55,7 +59,7 @@ function fakeClient(options?: { failPrompt?: boolean }): Client {
         info: {
           id: "m",
           sessionID: "s",
-          role: "assistant",
+          role: options?.parentRole ?? "assistant",
           providerID: "p",
           modelID: "m",
           variant: "active",
@@ -1260,6 +1264,58 @@ describe("redispatch_failed_runs", () => {
       expect(finalized.status).toBe("success")
       expect(finalized.operation_verdict).toBe("APPROVE")
       expect(finalized.errors).toEqual([])
+    })
+  })
+
+  it("reports the classified structural error when the re-run's host resolution fails structurally (RD-FR-038 Re-run early exit)", async () => {
+    // Seed a failed host-source run with host-run provenance and a
+    // persisted prompt (the RD-FR-037 re-dispatch fixture shape). On the
+    // re-run the parent session's current message is a user message, so
+    // resolveHostModel() throws StructuralHostModelError and the shared
+    // classification fails the re-run non-retryably before execution:
+    // outcome early_exit with the classified error, the prior run file
+    // restored byte-identically to its active path, and superseded/
+    // empty — the session back to its pre-attempt state.
+    const failedHostRun = {
+      ...makeRun("divisor-guard", { status: "failed" }),
+      source: "host" as const,
+      requested_model: null,
+      provider: null,
+      model_id: null,
+      variant: null,
+      resolved_parent_model: "p/m",
+      resolved_parent_variant: "active",
+      reported_model: null,
+    }
+    const hostPlanEntry = {
+      ...planEntry("divisor-guard"),
+      reason_code: "host-fallback",
+      reason: "no explicit or advisor run; use the active host model",
+      source: "host" as const,
+      tier: null,
+      model: null,
+      variant: null,
+    }
+    const { correlationId, dir } = await setupSession([failedHostRun], [hostPlanEntry])
+
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await activate(fakeClient({ parentRole: "user" }), project)
+
+      const result = await hooks.tool.redispatch_failed_runs.execute({ correlation_id: correlationId }, noopContext())
+      const data = JSON.parse(result.output)
+      expect(data.runs[0].outcome).toBe("early_exit")
+      expect(data.runs[0].new_run_id).toBeNull()
+      expect(data.runs[0].error.code).toBe("host_model_structural")
+      expect(data.runs[0].error.retryable).toBe(false)
+      expect(data.runs[0].error.message).toContain("Remediation: ")
+      expect(data.runs[0].error.message).toContain("retrying will not fix this.")
+
+      // The prior run file is restored byte-identically to its active path
+      // and superseded/ is empty: the structural early exit created no
+      // redispatch target and left no replacement behind.
+      expect(await readFile(join(dir, "run-divisor-guard.json"), "utf8")).toBe(JSON.stringify(failedHostRun, null, 2))
+      expect(await readdir(join(dir, "superseded"))).toEqual([])
     })
   })
 

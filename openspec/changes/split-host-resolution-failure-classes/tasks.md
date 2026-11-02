@@ -12,7 +12,7 @@
 
 ## 1. Shared classification helper in the live dispatch core
 
-- [ ] 1.1 Add `StructuralHostModelError` to the
+- [x] 1.1 Add `StructuralHostModelError` to the
       `../../lib/agent-executor.js` import block in
       `.opencode/plugins/review-dispatch/index.ts`, and add
       one unexported module-level helper next to
@@ -42,7 +42,7 @@
       caller-re-invocation-only meaning of `retryable` on
       these early exits. No planner, finalizer, schema, or
       run-file shape change.
-- [ ] 1.2 Checkpoint: run `cd .opencode && npx vitest run` —
+- [x] 1.2 Checkpoint: run `cd .opencode && npx vitest run` —
       the existing suite MUST stay green. In particular, the
       transient assertions at
       `test/dispatch-agent-run.test.ts` L836-875 (advisor)
@@ -54,7 +54,7 @@
 
 ## 2. Test coverage (RD-FR-038 scenarios)
 
-- [ ] 2.1 [P] In `.opencode/test/dispatch-agent-run.test.ts`,
+- [x] 2.1 [P] In `.opencode/test/dispatch-agent-run.test.ts`,
       add a `describe("host-resolution failure
       classification (RD-FR-038)")` block reusing the
       `hostLookupClient({ message })` shaper (L932) and the
@@ -86,7 +86,7 @@
       aborts the controller, backed by an error whose shape
       would otherwise be structural; assert `cancelled` and
       `retryable: false`.
-- [ ] 2.2 [P] In `.opencode/test/dispatch-recovery.test.ts`,
+- [x] 2.2 [P] In `.opencode/test/dispatch-recovery.test.ts`,
       add a test in the pattern of the early-exit test at
       L1207-1264: seed a failed host-source run
       (`source: "host"`, null model/tier, persisted prompt),
@@ -97,14 +97,14 @@
       the message carries the remediation string, the prior
       run file is restored byte-identically to its active
       path, and `superseded/` is empty.
-- [ ] 2.3 [P] In `.opencode/test/consolidate-dispatch.test.ts`,
+- [x] 2.3 [P] In `.opencode/test/consolidate-dispatch.test.ts`,
       add a test for a dispatch session whose included plan
       entry early-exited structurally (no run file): assert
       consolidation fails closed with an error containing
       `included plan entry <agent>/<sequence> has no run`
       and `operation_verdict` / final verdict `INCONCLUSIVE`
       (RD-FR-038 "Early exit is not a redispatch target").
-- [ ] 2.4 Checkpoint: run `make plugin-test` — the full
+- [x] 2.4 Checkpoint: run `make plugin-test` — the full
       vitest suite with the 94 percent statements coverage
       floor MUST pass. Gatekeeping: if the floor fails,
       report and stop; never adjust
@@ -112,7 +112,7 @@
 
 ## 3. Scaffold mirror, CI parity, documentation
 
-- [ ] 3.1 Sync the edited live plugin byte-identical into
+- [x] 3.1 Sync the edited live plugin byte-identical into
   `internal/scaffold/assets/opencode/plugins/review-dispatch/index.ts`
   (design D9) and run the drift gate:
       `go test -race -count=1 ./internal/scaffold/...` —
@@ -121,14 +121,14 @@
       change. Note: the drift gate is intentionally red from
       task 1.1 until this sync; the phase-1/2 checkpoints
       gate the vitest suite only.
-- [ ] 3.2 [P] Add the CHANGELOG.md entry for the behavior
+- [x] 3.2 [P] Add the CHANGELOG.md entry for the behavior
       change: structural host-resolution failures now
       surface non-retryable `host_model_structural` with the
       remediation string preserved, while transient failures
       keep retryable `host_model_unavailable`; `retryable`
       on a pre-execution early exit means caller
       re-invocation only (issue #914, lineage #901/#693).
-- [ ] 3.3 [P] Update the "Host-fallback model resolution"
+- [x] 3.3 [P] Update the "Host-fallback model resolution"
       section of `docs/configuration.md` (L296-312) to
       document both failure classes — `host_model_structural`
       (non-retryable, remediation-carrying) and
@@ -137,7 +137,7 @@
       caller re-invocation only, with no DR-FR-002 redispatch
       target and fail-closed consolidation ("included plan
       entry has no run" → `INCONCLUSIVE`).
-- [ ] 3.4 Documentation-gate assessment across
+- [x] 3.4 Documentation-gate assessment across
       `CHANGELOG.md`, `AGENTS.md`, `README.md`, and `docs/`:
       the failure-class split is user-facing (operators and
       calling agents consume the error class), so the
@@ -147,7 +147,7 @@
       #778 ↔ website#316, #891 ↔ website#360), and link
       both in the PR body. Record the assessment in the PR
       body.
-- [ ] 3.5 Constitution-alignment verification (proposal
+- [x] 3.5 Constitution-alignment verification (proposal
       identifies all six principles): confirm the tests run
       without external services (IV — vitest doubles only),
       the tool-result assertions verify observable side
@@ -159,7 +159,7 @@
       (V), and the change is runtime dispatch code with no
       instruction-prose additions (VI). Record the
       verification summary in the PR body.
-- [ ] 3.6 Final CI parity (MP-023): run `make plugin-test`
+- [x] 3.6 Final CI parity (MP-023): run `make plugin-test`
       and `go test -race -count=1
       ./internal/scaffold/...` — both MUST pass before the
       change is marked complete.

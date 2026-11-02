@@ -306,10 +306,22 @@ active model, and the persisted run carries host-run provenance
 containing host-fallback entries finalize with their native verdicts.
 To pin such a persona to a profile model, list it in the mode's
 `advisor[<mode>]` array -- the advisor list is the sanctioned pinning
-mechanism. If host resolution fails, the run fails before execution
-with a retryable, sanitized `host_model_unavailable`; `retryable`
-here means the caller may re-invoke the dispatch -- no run file
-exists, so `redispatch_failed_runs` has nothing to target.
+mechanism. If host resolution fails, the run fails before
+execution with one of two failure classes (RD-FR-038):
+`host_model_structural` is non-retryable and
+remediation-carrying -- structural causes are the parent
+session's current message not being an assistant message,
+carrying no model identity, or carrying an invalid variant,
+and the error message preserves the remediation string in the
+shape `<message>. Remediation: <remediation>; retrying will
+not fix this.` -- while transient lookup failures keep the
+retryable, sanitized `host_model_unavailable`. `retryable` on
+these pre-execution early exits means the caller may re-invoke
+the dispatch only -- no run file exists, so
+`redispatch_failed_runs` (DR-FR-002) has nothing to target,
+and a dispatch session whose included plan entry early-exited
+consolidates fail-closed ("included plan entry has no run" ->
+`INCONCLUSIVE`).
 
 ---
 
