@@ -33,6 +33,14 @@ import {
   type ProgressState,
   type UnleashSummary,
 } from "../plugins/uf-workflow/index.js"
+import {
+  createMockSpawn,
+  mockProcess,
+  patchBunSpawn,
+  type MockResponse,
+  type MockSpawnProcess,
+  type MockSpawnResponses,
+} from "./helpers/gh-spawn-mock.js"
 
 // ---------------------------------------------------------------------------
 // Module-level mocks (hoisted by vitest)
@@ -74,6 +82,42 @@ async function invokeTool<T = unknown>(
     }
   ).execute(args, { sessionID: "test-session" })
   return JSON.parse(result.output) as ToolResult<T>
+}
+
+/**
+ * Install a routed Bun.spawn mock for the duration of `run` and restore the
+ * original global afterwards. The uf-finale poller reaches `gh pr checks`
+ * through Bun.spawn (FCP-FR-001), so its fixtures live here rather than on
+ * execSync — the merge-conflict pre-check still uses execSync.
+ */
+async function withGhSpawn<T>(
+  responses: MockSpawnResponses,
+  run: (spawn: ReturnType<typeof createMockSpawn>) => Promise<T>,
+): Promise<T> {
+  const spawn = createMockSpawn(responses)
+  const restore = patchBunSpawn(spawn)
+  try {
+    return await run(spawn)
+  } finally {
+    restore()
+  }
+}
+
+/** Install a spawn mock that serves canned responses in order, repeating the last. */
+async function withSequentialSpawn<T>(
+  responses: readonly MockResponse[],
+  run: () => Promise<T>,
+): Promise<T> {
+  let call = 0
+  const spawn = vi.fn((): MockSpawnProcess =>
+    mockProcess(responses[Math.min(call++, responses.length - 1)]),
+  )
+  const restore = patchBunSpawn(spawn)
+  try {
+    return await run()
+  } finally {
+    restore()
+  }
 }
 
 beforeEach(() => {
@@ -1779,8 +1823,8 @@ describe("uf_finale_create_pr", () => {
 // ---------------------------------------------------------------------------
 
 describe("uf_finale_ci_poll", () => {
-  it("returns pass when all checks succeed", async () => {
-    const mockExec: GitExec = () => ""
+  /** execSync answers the merge-conflict pre-check only; checks use Bun.spawn. */
+  function mockMergeablePrView(): void {
     vi.mocked(execSync).mockImplementation((cmd) => {
       const cmdStr = String(cmd)
       if (cmdStr.includes("gh pr view")) {
@@ -1789,31 +1833,32 @@ describe("uf_finale_ci_poll", () => {
           mergeStateStatus: "CLEAN",
         })
       }
-      if (cmdStr.includes("gh pr checks")) {
-        return JSON.stringify([
-          {
-            name: "CI",
-            state: "COMPLETED",
-            conclusion: "SUCCESS",
-            detailsUrl: "https://ci/1",
-          },
-          {
-            name: "Lint",
-            state: "COMPLETED",
-            conclusion: "SUCCESS",
-            detailsUrl: "https://ci/2",
-          },
-        ])
-      }
-      throw new Error(`unexpected: ${cmdStr}`)
+      throw new Error(`unexpected shell invocation: ${cmdStr}`)
     })
+  }
 
-    const result = await invokeTool<{
-      status: string
-      failedChecks: unknown[]
-      mergeable: boolean
-      workflowsConfigured: boolean
-    }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 })
+  it("returns pass when all checks bucket as pass", async () => {
+    const mockExec: GitExec = () => ""
+    mockMergeablePrView()
+    const result = await withGhSpawn(
+      {
+        "pr checks": {
+          stdout: JSON.stringify([
+            { name: "CI", state: "SUCCESS", bucket: "pass", link: "https://ci/1" },
+            { name: "Lint", state: "SUCCESS", bucket: "pass", link: "https://ci/2" },
+          ]),
+          stderr: "",
+          exitCode: 0,
+        },
+      },
+      () =>
+        invokeTool<{
+          status: string
+          failedChecks: unknown[]
+          mergeable: boolean
+          workflowsConfigured: boolean
+        }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 }),
+    )
 
     expect(result.status).toBe("ok")
     if (result.status === "ok") {
@@ -1824,44 +1869,78 @@ describe("uf_finale_ci_poll", () => {
     }
   })
 
-  it("returns fail when checks have failures", async () => {
+  it("pins the verified gh field list and argument-array invocation", async () => {
     const mockExec: GitExec = () => ""
-    vi.mocked(execSync).mockImplementation((cmd) => {
-      const cmdStr = String(cmd)
-      if (cmdStr.includes("gh pr view")) {
-        return JSON.stringify({
-          mergeable: "MERGEABLE",
-          mergeStateStatus: "CLEAN",
+    mockMergeablePrView()
+    let argv: string[] | undefined
+    let options: { signal?: AbortSignal; cwd?: string } | undefined
+    await withGhSpawn(
+      {
+        "pr checks": {
+          stdout: JSON.stringify([
+            { name: "CI", state: "SUCCESS", bucket: "pass", link: "https://ci/1" },
+          ]),
+          stderr: "",
+          exitCode: 0,
+        },
+      },
+      async (spawn) => {
+        await invokeTool(createUfFinaleCiPollTool(mockExec, "/fake"), {
+          prNumber: 42,
         })
-      }
-      if (cmdStr.includes("gh pr checks")) {
-        return JSON.stringify([
-          {
-            name: "CI",
-            state: "COMPLETED",
-            conclusion: "SUCCESS",
-            detailsUrl: "https://ci/1",
-          },
-          {
-            name: "Lint",
-            state: "COMPLETED",
-            conclusion: "FAILURE",
-            detailsUrl: "https://ci/lint",
-          },
-        ])
-      }
-      throw new Error("unexpected")
-    })
+        const checksCall = spawn.mock.calls.find(
+          (call) =>
+            (call[0] as string[])[1] === "pr" &&
+            (call[0] as string[])[2] === "checks",
+        )
+        argv = checksCall?.[0] as string[] | undefined
+        options = checksCall?.[1] as
+          | { signal?: AbortSignal; cwd?: string }
+          | undefined
+      },
+    )
 
-    const result = await invokeTool<{
-      status: string
-      failedChecks: Array<{
-        name: string
-        conclusion: string
-        url: string
-      }>
-      mergeable: boolean
-    }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 })
+    expect(argv).toStrictEqual([
+      "gh",
+      "pr",
+      "checks",
+      "42",
+      "--json",
+      "name,state,bucket,link",
+    ])
+    // FCP-FR-001: each invocation is bounded by a real AbortSignal timeout.
+    expect(options?.signal).toBeInstanceOf(AbortSignal)
+    // FCP-FR-001: the checks poll runs in the tool's registered working
+    // directory so repository resolution matches the gh pr view pre-check
+    // and the .github/workflows probe — never the plugin host process cwd.
+    expect(options?.cwd).toBe("/fake")
+  })
+
+  it("returns fail when checks bucket as fail", async () => {
+    const mockExec: GitExec = () => ""
+    mockMergeablePrView()
+    const result = await withGhSpawn(
+      {
+        "pr checks": {
+          stdout: JSON.stringify([
+            { name: "CI", state: "SUCCESS", bucket: "pass", link: "https://ci/1" },
+            { name: "Lint", state: "FAILURE", bucket: "fail", link: "https://ci/lint" },
+          ]),
+          stderr: "",
+          exitCode: 1,
+        },
+      },
+      () =>
+        invokeTool<{
+          status: string
+          failedChecks: Array<{
+            name: string
+            conclusion: string
+            url: string
+          }>
+          mergeable: boolean
+        }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 }),
+    )
 
     expect(result.status).toBe("ok")
     if (result.status === "ok") {
@@ -1870,6 +1949,90 @@ describe("uf_finale_ci_poll", () => {
       expect(result.data?.failedChecks).toHaveLength(1)
       expect(result.data?.failedChecks[0].name).toBe("Lint")
       expect(result.data?.failedChecks[0].conclusion).toBe("FAILURE")
+      expect(result.data?.failedChecks[0].url).toBe("https://ci/lint")
+    }
+  })
+
+  it("counts a cancel bucket as failed", async () => {
+    const mockExec: GitExec = () => ""
+    mockMergeablePrView()
+    const result = await withGhSpawn(
+      {
+        "pr checks": {
+          stdout: JSON.stringify([
+            { name: "CI", state: "CANCELLED", bucket: "cancel", link: "https://ci/1" },
+          ]),
+          stderr: "",
+          exitCode: 1,
+        },
+      },
+      () =>
+        invokeTool<{
+          status: string
+          failedChecks: Array<{ name: string; conclusion: string }>
+        }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 }),
+    )
+
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      expect(result.data?.status).toBe("fail")
+      expect(result.data?.failedChecks[0].conclusion).toBe("CANCELLED")
+    }
+  })
+
+  it("treats pass and skipping buckets as passing", async () => {
+    const mockExec: GitExec = () => ""
+    mockMergeablePrView()
+    const result = await withGhSpawn(
+      {
+        "pr checks": {
+          stdout: JSON.stringify([
+            { name: "CI", state: "SUCCESS", bucket: "pass", link: "https://ci/1" },
+            { name: "Optional", state: "SKIPPED", bucket: "skipping", link: "https://ci/2" },
+          ]),
+          stderr: "",
+          exitCode: 0,
+        },
+      },
+      () =>
+        invokeTool<{
+          status: string
+          failedChecks: unknown[]
+        }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 }),
+    )
+
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      expect(result.data?.status).toBe("pass")
+      expect(result.data?.failedChecks).toStrictEqual([])
+    }
+  })
+
+  it("classifies an unknown bucket fail-closed with its state surfaced", async () => {
+    const mockExec: GitExec = () => ""
+    mockMergeablePrView()
+    const result = await withGhSpawn(
+      {
+        "pr checks": {
+          stdout: JSON.stringify([
+            { name: "CI", state: "NEUTRAL", bucket: "blocked", link: "https://ci/1" },
+          ]),
+          stderr: "",
+          exitCode: 0,
+        },
+      },
+      () =>
+        invokeTool<{
+          status: string
+          failedChecks: Array<{ name: string; conclusion: string }>
+        }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 }),
+    )
+
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      expect(result.data?.status).toBe("fail")
+      expect(result.data?.failedChecks[0].name).toBe("CI")
+      expect(result.data?.failedChecks[0].conclusion).toBe("NEUTRAL")
     }
   })
 
@@ -1898,48 +2061,105 @@ describe("uf_finale_ci_poll", () => {
     }
   })
 
-  it("returns GH_CLI_ERROR when gh CLI fails during poll", async () => {
+  it("returns GH_CLI_ERROR when stdout is not a JSON array and stderr has no marker", async () => {
     const mockExec: GitExec = () => ""
-    // Both calls throw — merge check is caught, poll check returns error
-    vi.mocked(execSync).mockImplementation(() => {
-      throw new Error("gh: command not found")
-    })
-
-    const result = await invokeTool(
-      createUfFinaleCiPollTool(mockExec, "/fake"),
-      { prNumber: 42 },
+    mockMergeablePrView()
+    const result = await withGhSpawn(
+      {
+        "pr checks": {
+          stdout: "not a json array",
+          stderr: "fatal: HTTP 503 Service Unavailable",
+          exitCode: 1,
+        },
+      },
+      () =>
+        invokeTool(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 }),
     )
 
     expect(result.status).toBe("error")
     if (result.status === "error") {
       expect(result.code).toBe("GH_CLI_ERROR")
       expect(result.retryable).toBe(true)
-      expect(result.message).toContain("gh: command not found")
+      expect(result.message).toContain("HTTP 503 Service Unavailable")
+    }
+  })
+
+  it("returns PR_NOT_FOUND when stderr reports an unresolvable PR", async () => {
+    const mockExec: GitExec = () => ""
+    mockMergeablePrView()
+    const result = await withGhSpawn(
+      {
+        "pr checks": {
+          stdout: "",
+          stderr:
+            "Could not resolve to a PullRequest with the number of 999999",
+          exitCode: 1,
+        },
+      },
+      () =>
+        invokeTool(createUfFinaleCiPollTool(mockExec, "/fake"), {
+          prNumber: 42,
+        }),
+    )
+
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("PR_NOT_FOUND")
+      expect(result.retryable).toBe(false)
+      expect(result.message).toContain("42")
+      // FCP-FR-002: the matched gh stderr is echoed for diagnosability.
+      expect(result.message).toContain("Could not resolve to a PullRequest")
+    }
+  })
+
+  it("classifies an unrelated not-found stderr as retryable GH_CLI_ERROR, not PR_NOT_FOUND", async () => {
+    const mockExec: GitExec = () => ""
+    mockMergeablePrView()
+    const result = await withGhSpawn(
+      {
+        "pr checks": {
+          stdout: "",
+          stderr: "HTTP 404: resource not found",
+          exitCode: 1,
+        },
+      },
+      () =>
+        invokeTool(createUfFinaleCiPollTool(mockExec, "/fake"), {
+          prNumber: 42,
+        }),
+    )
+
+    // FCP-FR-002: only gh 2.91.0's verified unresolvable-PR shape
+    // classifies as PR_NOT_FOUND; looser "not found" phrasing falls
+    // through to the retryable error path so transient failures keep
+    // their retry semantics.
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("GH_CLI_ERROR")
+      expect(result.retryable).toBe(true)
+      expect(result.message).toContain("HTTP 404: resource not found")
     }
   })
 
   it("detects no-checks with workflows existing", async () => {
     const mockExec: GitExec = () => ""
-    vi.mocked(execSync).mockImplementation((cmd) => {
-      const cmdStr = String(cmd)
-      if (cmdStr.includes("gh pr view")) {
-        return JSON.stringify({
-          mergeable: "MERGEABLE",
-          mergeStateStatus: "CLEAN",
-        })
-      }
-      if (cmdStr.includes("gh pr checks")) {
-        return "[]"
-      }
-      throw new Error("unexpected")
-    })
+    mockMergeablePrView()
     vi.mocked(existsSync).mockReturnValue(true)
-
-    const result = await invokeTool<{
-      status: string
-      workflowsConfigured: boolean
-      skipReason: string
-    }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 })
+    const result = await withGhSpawn(
+      {
+        "pr checks": {
+          stdout: "",
+          stderr: "no checks reported on the 'feature/x' branch",
+          exitCode: 1,
+        },
+      },
+      () =>
+        invokeTool<{
+          status: string
+          workflowsConfigured: boolean
+          skipReason: string
+        }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 }),
+    )
 
     expect(result.status).toBe("ok")
     if (result.status === "ok") {
@@ -1951,25 +2171,22 @@ describe("uf_finale_ci_poll", () => {
 
   it("detects no-checks with no workflows directory", async () => {
     const mockExec: GitExec = () => ""
-    vi.mocked(execSync).mockImplementation((cmd) => {
-      const cmdStr = String(cmd)
-      if (cmdStr.includes("gh pr view")) {
-        return JSON.stringify({
-          mergeable: "MERGEABLE",
-          mergeStateStatus: "CLEAN",
-        })
-      }
-      if (cmdStr.includes("gh pr checks")) {
-        return "[]"
-      }
-      throw new Error("unexpected")
-    })
+    mockMergeablePrView()
     vi.mocked(existsSync).mockReturnValue(false)
-
-    const result = await invokeTool<{
-      status: string
-      workflowsConfigured: boolean
-    }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 })
+    const result = await withGhSpawn(
+      {
+        "pr checks": {
+          stdout: "",
+          stderr: "no checks reported on the 'feature/x' branch",
+          exitCode: 1,
+        },
+      },
+      () =>
+        invokeTool<{
+          status: string
+          workflowsConfigured: boolean
+        }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 }),
+    )
 
     expect(result.status).toBe("ok")
     if (result.status === "ok") {
@@ -1978,106 +2195,66 @@ describe("uf_finale_ci_poll", () => {
     }
   })
 
-  it("treats NEUTRAL and SKIPPED conclusions as passing", async () => {
+  it("honors a parsed empty array as zero checks", async () => {
     const mockExec: GitExec = () => ""
-    vi.mocked(execSync).mockImplementation((cmd) => {
-      const cmdStr = String(cmd)
-      if (cmdStr.includes("gh pr view")) {
-        return JSON.stringify({
-          mergeable: "MERGEABLE",
-          mergeStateStatus: "CLEAN",
-        })
-      }
-      if (cmdStr.includes("gh pr checks")) {
-        return JSON.stringify([
-          {
-            name: "CI",
-            state: "COMPLETED",
-            conclusion: "SUCCESS",
-            detailsUrl: "https://ci/1",
-          },
-          {
-            name: "Optional",
-            state: "COMPLETED",
-            conclusion: "NEUTRAL",
-            detailsUrl: "https://ci/2",
-          },
-          {
-            name: "Skipped",
-            state: "COMPLETED",
-            conclusion: "SKIPPED",
-            detailsUrl: "https://ci/3",
-          },
-        ])
-      }
-      throw new Error("unexpected")
-    })
-
-    const result = await invokeTool<{
-      status: string
-      failedChecks: unknown[]
-    }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 })
+    mockMergeablePrView()
+    vi.mocked(existsSync).mockReturnValue(true)
+    const result = await withGhSpawn(
+      {
+        "pr checks": { stdout: "[]", stderr: "", exitCode: 0 },
+      },
+      () =>
+        invokeTool<{ status: string }>(
+          createUfFinaleCiPollTool(mockExec, "/fake"),
+          { prNumber: 42 },
+        ),
+    )
 
     expect(result.status).toBe("ok")
     if (result.status === "ok") {
-      expect(result.data?.status).toBe("pass")
-      expect(result.data?.failedChecks).toStrictEqual([])
+      expect(result.data?.status).toBe("no-checks-workflows-exist")
     }
   })
 
-  it("logs pending progress and resolves on next poll", async () => {
+  it("keeps polling while a check buckets as pending, then resolves", async () => {
     vi.useFakeTimers()
     try {
       const mockExec: GitExec = () => ""
-      let checkCallCount = 0
-      vi.mocked(execSync).mockImplementation((cmd) => {
-        const cmdStr = String(cmd)
-        if (cmdStr.includes("gh pr view")) {
-          return JSON.stringify({
-            mergeable: "MERGEABLE",
-            mergeStateStatus: "CLEAN",
-          })
-        }
-        if (cmdStr.includes("gh pr checks")) {
-          checkCallCount++
-          if (checkCallCount === 1) {
-            return JSON.stringify([
-              {
-                name: "CI",
-                state: "IN_PROGRESS",
-                conclusion: "",
-                detailsUrl: "https://ci/1",
-              },
-            ])
-          }
-          return JSON.stringify([
-            {
-              name: "CI",
-              state: "COMPLETED",
-              conclusion: "SUCCESS",
-              detailsUrl: "https://ci/1",
-            },
-          ])
-        }
-        throw new Error(`unexpected: ${cmdStr}`)
-      })
+      mockMergeablePrView()
+      const result = await withSequentialSpawn(
+        [
+          {
+            stdout: JSON.stringify([
+              { name: "CI", state: "PENDING", bucket: "pending", link: "https://ci/1" },
+            ]),
+            stderr: "",
+            exitCode: 8,
+          },
+          {
+            stdout: JSON.stringify([
+              { name: "CI", state: "SUCCESS", bucket: "pass", link: "https://ci/1" },
+            ]),
+            stderr: "",
+            exitCode: 0,
+          },
+        ],
+        async () => {
+          const promise = invokeTool<{
+            status: string
+            failedChecks: unknown[]
+            mergeable: boolean
+          }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 })
+          await vi.advanceTimersByTimeAsync(30_000)
+          const settled = await promise
+          return settled
+        },
+      )
 
-      const promise = invokeTool<{
-        status: string
-        failedChecks: unknown[]
-        mergeable: boolean
-      }>(createUfFinaleCiPollTool(mockExec, "/fake"), { prNumber: 42 })
-
-      // Advance past the 30s poll interval to resolve the pending wait
-      await vi.advanceTimersByTimeAsync(30_000)
-
-      const result = await promise
       expect(result.status).toBe("ok")
       if (result.status === "ok") {
         expect(result.data?.status).toBe("pass")
         expect(result.data?.mergeable).toBe(true)
       }
-      expect(checkCallCount).toBe(2)
     } finally {
       vi.useRealTimers()
     }
@@ -2087,39 +2264,28 @@ describe("uf_finale_ci_poll", () => {
     vi.useFakeTimers()
     try {
       const mockExec: GitExec = () => ""
-      vi.mocked(execSync).mockImplementation((cmd) => {
-        const cmdStr = String(cmd)
-        if (cmdStr.includes("gh pr view")) {
-          return JSON.stringify({
-            mergeable: "MERGEABLE",
-            mergeStateStatus: "CLEAN",
-          })
-        }
-        if (cmdStr.includes("gh pr checks")) {
-          return JSON.stringify([
-            {
-              name: "CI",
-              state: "PENDING",
-              conclusion: "",
-              detailsUrl: "https://ci/1",
-            },
-          ])
-        }
-        throw new Error(`unexpected: ${cmdStr}`)
-      })
-
-      // Use 1-minute timeout to keep test fast
-      const promise = invokeTool(
-        createUfFinaleCiPollTool(mockExec, "/fake"),
-        { prNumber: 42, timeoutMinutes: 1 },
+      mockMergeablePrView()
+      const result = await withSequentialSpawn(
+        [
+          {
+            stdout: JSON.stringify([
+              { name: "CI", state: "PENDING", bucket: "pending", link: "https://ci/1" },
+            ]),
+            stderr: "",
+            exitCode: 8,
+          },
+        ],
+        async () => {
+          const promise = invokeTool(
+            createUfFinaleCiPollTool(mockExec, "/fake"),
+            { prNumber: 42, timeoutMinutes: 1 },
+          )
+          await vi.advanceTimersByTimeAsync(30_000)
+          await vi.advanceTimersByTimeAsync(30_000)
+          return await promise
+        },
       )
 
-      // Each iteration waits 30s. Two iterations (60s total) exceed the
-      // 1-minute timeout, causing the while loop to exit.
-      await vi.advanceTimersByTimeAsync(30_000)
-      await vi.advanceTimersByTimeAsync(30_000)
-
-      const result = await promise
       expect(result.status).toBe("error")
       if (result.status === "error") {
         expect(result.code).toBe("CI_POLL_TIMEOUT")
@@ -2128,6 +2294,37 @@ describe("uf_finale_ci_poll", () => {
       }
     } finally {
       vi.useRealTimers()
+    }
+  })
+
+  it("classifies an aborted/hung invocation as GH_CLI_ERROR", async () => {
+    const mockExec: GitExec = () => ""
+    mockMergeablePrView()
+    // Simulate the per-invocation AbortSignal firing without waiting 30s:
+    // a real timeout rejects the exited wait with an AbortError.
+    const spawn = vi.fn(
+      (): MockSpawnProcess => ({
+        ...mockProcess({ stdout: "", stderr: "", exitCode: 0 }),
+        exited: Promise.reject(
+          new DOMException("The operation was aborted", "AbortError"),
+        ),
+      }),
+    )
+    const restore = patchBunSpawn(spawn)
+    try {
+      const result = await invokeTool(
+        createUfFinaleCiPollTool(mockExec, "/fake"),
+        { prNumber: 42 },
+      )
+
+      expect(result.status).toBe("error")
+      if (result.status === "error") {
+        expect(result.code).toBe("GH_CLI_ERROR")
+        expect(result.retryable).toBe(true)
+        expect(result.message).toContain("aborted")
+      }
+    } finally {
+      restore()
     }
   })
 
@@ -2200,27 +2397,30 @@ describe("uf_finale_ci_poll", () => {
   it("returns GH_CLI_ERROR with stringified non-Error poll error", async () => {
     const mockExec: GitExec = () => ""
     vi.mocked(execSync).mockImplementation((cmd) => {
-      const cmdStr = String(cmd)
-      if (cmdStr.includes("gh pr view")) {
+      if (String(cmd).includes("gh pr view")) {
         throw new Error("skip merge check")
       }
-      if (cmdStr.includes("gh pr checks")) {
-        // Throw a non-Error to exercise the String(pollErr) branch
-        throw "non-error poll failure" // eslint-disable-line no-throw-literal
-      }
-      throw new Error("unexpected")
+      throw new Error(`unexpected shell invocation: ${String(cmd)}`)
     })
+    const spawn = vi.fn((): never => {
+      // Throw a non-Error to exercise the String(pollErr) branch
+      throw "non-error poll failure" // eslint-disable-line no-throw-literal
+    })
+    const restore = patchBunSpawn(spawn)
+    try {
+      const result = await invokeTool(
+        createUfFinaleCiPollTool(mockExec, "/fake"),
+        { prNumber: 42 },
+      )
 
-    const result = await invokeTool(
-      createUfFinaleCiPollTool(mockExec, "/fake"),
-      { prNumber: 42 },
-    )
-
-    expect(result.status).toBe("error")
-    if (result.status === "error") {
-      expect(result.code).toBe("GH_CLI_ERROR")
-      expect(result.retryable).toBe(true)
-      expect(result.message).toContain("non-error poll failure")
+      expect(result.status).toBe("error")
+      if (result.status === "error") {
+        expect(result.code).toBe("GH_CLI_ERROR")
+        expect(result.retryable).toBe(true)
+        expect(result.message).toContain("non-error poll failure")
+      }
+    } finally {
+      restore()
     }
   })
 
@@ -2491,140 +2691,128 @@ describe("terminal-write regression (Requirement 1)", () => {
 
   it("uf_finale_ci_poll writes nothing to the terminal (pass/fail/error)", async () => {
     const mockExec: GitExec = () => ""
+    vi.mocked(execSync).mockImplementation((cmd) => {
+      if (String(cmd).includes("gh pr view")) {
+        return JSON.stringify({
+          mergeable: "MERGEABLE",
+          mergeStateStatus: "CLEAN",
+        })
+      }
+      throw new Error(`unexpected shell invocation: ${String(cmd)}`)
+    })
+
     await expectNoTerminalWrites(async () => {
-      vi.mocked(execSync).mockImplementation((cmd) => {
-        const cmdStr = String(cmd)
-        if (cmdStr.includes("gh pr view")) {
-          return JSON.stringify({
-            mergeable: "MERGEABLE",
-            mergeStateStatus: "CLEAN",
-          })
-        }
-        if (cmdStr.includes("gh pr checks")) {
-          return JSON.stringify([
-            {
-              name: "CI",
-              state: "COMPLETED",
-              conclusion: "SUCCESS",
-              detailsUrl: "https://ci/1",
-            },
-          ])
-        }
-        throw new Error(`unexpected: ${cmdStr}`)
-      })
-      await invokeTool(createUfFinaleCiPollTool(mockExec, "/fake"), {
-        prNumber: 42,
-      })
+      await withGhSpawn(
+        {
+          "pr checks": {
+            stdout: JSON.stringify([
+              { name: "CI", state: "SUCCESS", bucket: "pass", link: "https://ci/1" },
+            ]),
+            stderr: "",
+            exitCode: 0,
+          },
+        },
+        () =>
+          invokeTool(createUfFinaleCiPollTool(mockExec, "/fake"), {
+            prNumber: 42,
+          }),
+      )
 
-      // Fail path: a check with a FAILURE conclusion
-      vi.mocked(execSync).mockImplementation((cmd) => {
-        const cmdStr = String(cmd)
-        if (cmdStr.includes("gh pr view")) {
-          return JSON.stringify({
-            mergeable: "MERGEABLE",
-            mergeStateStatus: "CLEAN",
-          })
-        }
-        if (cmdStr.includes("gh pr checks")) {
-          return JSON.stringify([
-            {
-              name: "Lint",
-              state: "COMPLETED",
-              conclusion: "FAILURE",
-              detailsUrl: "https://ci/lint",
-            },
-          ])
-        }
-        throw new Error(`unexpected: ${cmdStr}`)
-      })
-      await invokeTool(createUfFinaleCiPollTool(mockExec, "/fake"), {
-        prNumber: 42,
-      })
+      await withGhSpawn(
+        {
+          "pr checks": {
+            stdout: JSON.stringify([
+              { name: "Lint", state: "FAILURE", bucket: "fail", link: "https://ci/lint" },
+            ]),
+            stderr: "",
+            exitCode: 1,
+          },
+        },
+        () =>
+          invokeTool(createUfFinaleCiPollTool(mockExec, "/fake"), {
+            prNumber: 42,
+          }),
+      )
 
-      // Error path: gh CLI failure during poll
-      vi.mocked(execSync).mockImplementation(() => {
-        throw new Error("gh: command not found")
-      })
-      await invokeTool(createUfFinaleCiPollTool(mockExec, "/fake"), {
-        prNumber: 42,
-      })
+      await withGhSpawn(
+        {
+          "pr checks": {
+            stdout: "not a json array",
+            stderr: "fatal: HTTP 503 Service Unavailable",
+            exitCode: 1,
+          },
+        },
+        () =>
+          invokeTool(createUfFinaleCiPollTool(mockExec, "/fake"), {
+            prNumber: 42,
+          }),
+      )
     })
   })
 
   it("uf_finale_ci_poll writes nothing to the terminal (pending/timeout)", async () => {
     const mockExec: GitExec = () => ""
+    vi.mocked(execSync).mockImplementation((cmd) => {
+      if (String(cmd).includes("gh pr view")) {
+        return JSON.stringify({
+          mergeable: "MERGEABLE",
+          mergeStateStatus: "CLEAN",
+        })
+      }
+      throw new Error(`unexpected shell invocation: ${String(cmd)}`)
+    })
+
     await expectNoTerminalWrites(async () => {
       vi.useFakeTimers()
       try {
-        let checkCallCount = 0
-        vi.mocked(execSync).mockImplementation((cmd) => {
-          const cmdStr = String(cmd)
-          if (cmdStr.includes("gh pr view")) {
-            return JSON.stringify({
-              mergeable: "MERGEABLE",
-              mergeStateStatus: "CLEAN",
-            })
-          }
-          if (cmdStr.includes("gh pr checks")) {
-            checkCallCount++
-            if (checkCallCount === 1) {
-              return JSON.stringify([
-                {
-                  name: "CI",
-                  state: "IN_PROGRESS",
-                  conclusion: "",
-                  detailsUrl: "https://ci/1",
-                },
-              ])
-            }
-            return JSON.stringify([
-              {
-                name: "CI",
-                state: "COMPLETED",
-                conclusion: "SUCCESS",
-                detailsUrl: "https://ci/1",
-              },
-            ])
-          }
-          throw new Error(`unexpected: ${cmdStr}`)
-        })
-
-        const pendingPromise = invokeTool(
-          createUfFinaleCiPollTool(mockExec, "/fake"),
-          { prNumber: 42 },
+        await withSequentialSpawn(
+          [
+            {
+              stdout: JSON.stringify([
+                { name: "CI", state: "PENDING", bucket: "pending", link: "https://ci/1" },
+              ]),
+              stderr: "",
+              exitCode: 8,
+            },
+            {
+              stdout: JSON.stringify([
+                { name: "CI", state: "SUCCESS", bucket: "pass", link: "https://ci/1" },
+              ]),
+              stderr: "",
+              exitCode: 0,
+            },
+          ],
+          async () => {
+            const pendingPromise = invokeTool(
+              createUfFinaleCiPollTool(mockExec, "/fake"),
+              { prNumber: 42 },
+            )
+            await vi.advanceTimersByTimeAsync(30_000)
+            await pendingPromise
+          },
         )
-        await vi.advanceTimersByTimeAsync(30_000)
-        await pendingPromise
 
         // Timeout path: checks remain pending past the configured limit
-        vi.mocked(execSync).mockImplementation((cmd) => {
-          const cmdStr = String(cmd)
-          if (cmdStr.includes("gh pr view")) {
-            return JSON.stringify({
-              mergeable: "MERGEABLE",
-              mergeStateStatus: "CLEAN",
-            })
-          }
-          if (cmdStr.includes("gh pr checks")) {
-            return JSON.stringify([
-              {
-                name: "CI",
-                state: "PENDING",
-                conclusion: "",
-                detailsUrl: "https://ci/1",
-              },
-            ])
-          }
-          throw new Error(`unexpected: ${cmdStr}`)
-        })
-
-        const timeoutPromise = invokeTool(
-          createUfFinaleCiPollTool(mockExec, "/fake"),
-          { prNumber: 42, timeoutMinutes: 1 },
+        await withSequentialSpawn(
+          [
+            {
+              stdout: JSON.stringify([
+                { name: "CI", state: "PENDING", bucket: "pending", link: "https://ci/1" },
+              ]),
+              stderr: "",
+              exitCode: 8,
+            },
+          ],
+          async () => {
+            const timeoutPromise = invokeTool(
+              createUfFinaleCiPollTool(mockExec, "/fake"),
+              { prNumber: 42, timeoutMinutes: 1 },
+            )
+            await vi.advanceTimersByTimeAsync(30_000)
+            await vi.advanceTimersByTimeAsync(30_000)
+            await timeoutPromise
+          },
         )
-        await vi.advanceTimersByTimeAsync(30_000)
-        await vi.advanceTimersByTimeAsync(30_000)
-        await timeoutPromise
       } finally {
         vi.useRealTimers()
       }

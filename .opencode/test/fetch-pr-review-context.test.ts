@@ -62,8 +62,8 @@ const MOCK_PR_META_FORK = {
 }
 
 const MOCK_CI_CHECKS = [
-  { name: "CI / build", state: "completed", conclusion: "success" },
-  { name: "CI / test", state: "completed", conclusion: "success" },
+  { name: "CI / build", state: "SUCCESS", bucket: "pass" },
+  { name: "CI / test", state: "SUCCESS", bucket: "pass" },
 ]
 
 const MOCK_REPO = { nameWithOwner: "unbound-force/unbound-force" }
@@ -258,27 +258,88 @@ describe("fetch_pr_review_context", () => {
       }
     })
 
-    it("pre-computes ci_pending correctly when all checks completed", async () => {
+    it("pre-computes ci_pending correctly when all checks are terminal", async () => {
       const { parsed, restore } = await callTool()
       try {
         expect(parsed.ci_pending).toBe(false)
+        expect(parsed.ci_checks).toEqual([
+          { name: "CI / build", status: "SUCCESS", conclusion: "pass" },
+          { name: "CI / test", status: "SUCCESS", conclusion: "pass" },
+        ])
+        expect(parsed.warnings as string[]).toHaveLength(0)
       } finally {
         restore()
       }
     })
 
-    it("pre-computes ci_pending correctly when checks are in progress", async () => {
+    it("pre-computes ci_pending correctly when checks are pending", async () => {
       const pendingChecks = [
-        { name: "CI / build", state: "in_progress", conclusion: null },
-        { name: "CI / test", state: "completed", conclusion: "success" },
+        { name: "CI / build", state: "PENDING", bucket: "pending" },
+        { name: "CI / test", state: "SUCCESS", bucket: "pass" },
       ]
       const { parsed, restore } = await callTool({
-        "pr checks": { stdout: JSON.stringify(pendingChecks), stderr: "", exitCode: 0 },
+        "pr checks": { stdout: JSON.stringify(pendingChecks), stderr: "", exitCode: 8 },
       })
       try {
         expect(parsed.ci_pending).toBe(true)
         const warnings = parsed.warnings as string[]
         expect(warnings.some((w: string) => w.includes("CI checks are still in progress"))).toBe(true)
+      } finally {
+        restore()
+      }
+    })
+
+    it("populates ci_checks for a failing PR on exit 1 without degrading", async () => {
+      const failingChecks = [
+        { name: "CI / build", state: "FAILURE", bucket: "fail" },
+      ]
+      const { parsed, restore } = await callTool({
+        "pr checks": { stdout: JSON.stringify(failingChecks), stderr: "", exitCode: 1 },
+      })
+      try {
+        expect(parsed.ci_checks).toEqual([
+          { name: "CI / build", status: "FAILURE", conclusion: "fail" },
+        ])
+        expect(parsed.ci_pending).toBe(false)
+        const warnings = parsed.warnings as string[]
+        expect(warnings.some((w: string) => w.includes("ci_checks degraded"))).toBe(false)
+      } finally {
+        restore()
+      }
+    })
+
+    it("surfaces an unknown bucket verbatim without degrading", async () => {
+      const unknownChecks = [
+        { name: "CI / build", state: "NEUTRAL", bucket: "blocked" },
+      ]
+      const { parsed, restore } = await callTool({
+        "pr checks": { stdout: JSON.stringify(unknownChecks), stderr: "", exitCode: 0 },
+      })
+      try {
+        expect(parsed.ci_checks).toEqual([
+          { name: "CI / build", status: "NEUTRAL", conclusion: "blocked" },
+        ])
+        expect(parsed.ci_pending).toBe(false)
+        const warnings = parsed.warnings as string[]
+        expect(warnings.some((w: string) => w.includes("ci_checks degraded"))).toBe(false)
+      } finally {
+        restore()
+      }
+    })
+
+    it("treats the checkless-PR marker as empty ci_checks without degrading", async () => {
+      const { parsed, restore } = await callTool({
+        "pr checks": {
+          stdout: "",
+          stderr: "no checks reported on the 'feature/x' branch",
+          exitCode: 1,
+        },
+      })
+      try {
+        expect(parsed.ci_checks).toEqual([])
+        expect(parsed.ci_pending).toBe(false)
+        const warnings = parsed.warnings as string[]
+        expect(warnings.some((w: string) => w.includes("ci_checks degraded"))).toBe(false)
       } finally {
         restore()
       }
@@ -480,7 +541,7 @@ describe("fetch_pr_review_context", () => {
     })
 
     it("populates warning for ci_pending", async () => {
-      const pendingChecks = [{ name: "CI / build", state: "queued", conclusion: null }]
+      const pendingChecks = [{ name: "CI / build", state: "PENDING", bucket: "pending" }]
       const { parsed, restore } = await callTool({
         "pr checks": { stdout: JSON.stringify(pendingChecks), stderr: "", exitCode: 0 },
       })
@@ -504,7 +565,7 @@ describe("fetch_pr_review_context", () => {
     })
 
     it("populates both warnings when both conditions apply", async () => {
-      const pendingChecks = [{ name: "CI / lint", state: "in_progress", conclusion: null }]
+      const pendingChecks = [{ name: "CI / lint", state: "PENDING", bucket: "pending" }]
       const largeDiff = Array.from({ length: DIFF_THRESHOLD + 10 }, (_, i) => `+line ${i}`).join("\n")
       const { parsed, restore } = await callTool({
         "pr checks": { stdout: JSON.stringify(pendingChecks), stderr: "", exitCode: 0 },
@@ -719,6 +780,46 @@ describe("fetch_pr_review_context", () => {
         expect(parsed.inline_comments).toEqual([])
         const warnings = parsed.warnings as string[]
         expect(warnings.some((w: string) => w.includes("inline_comments degraded"))).toBe(true)
+      } finally {
+        restore()
+      }
+    })
+  })
+
+  describe("ci_checks sub-call gh schema alignment (FPR-FR-017)", () => {
+    it("degrades the advisory sub-call when pr checks stderr matches the poller's PR-not-found phrases", async () => {
+      const { parsed, restore } = await callTool({
+        "pr checks": { stdout: "", stderr: "Could not resolve to a PullRequest with the number of 42", exitCode: 1 },
+      })
+      try {
+        // The stderr matches uf_finale_ci_poll's PR_CHECKS_NOT_FOUND_PATTERN
+        // ("could not resolve to a pullrequest"), but this sub-call does not
+        // own PR-not-found detection — the preceding gh pr view does. The
+        // sub-call must degrade generically with the stderr carried rather
+        // than surfacing pr_not_found (FPR-FR-017 divergence).
+        expect(parsed.error).toBeUndefined()
+        expect(parsed.ci_checks).toEqual([])
+        const warnings = parsed.warnings as string[]
+        expect(warnings.some((w: string) => w.includes("ci_checks degraded"))).toBe(true)
+        expect(
+          warnings.some((w: string) => w.includes("Could not resolve to a PullRequest with the number of 42")),
+        ).toBe(true)
+      } finally {
+        restore()
+      }
+    })
+
+    it("requests exactly the 3-field name,state,bucket json list from the sub-call", async () => {
+      const { parsed, mockSpawn, restore } = await callTool()
+      try {
+        expect(parsed.error).toBeUndefined()
+        // gh 2.91.0 rejects `conclusion` as a pr checks --json field; the
+        // sub-call requests exactly the 3 fields it maps — never the
+        // poller's 4-field name,state,bucket,link list (FPR-FR-017
+        // divergence from uf_finale_ci_poll).
+        const checksArgs = findGhArgv(mockSpawn, "pr", "checks")
+        expect(checksArgs).toBeDefined()
+        expect(checksArgs).toEqual(["gh", "pr", "checks", "42", "--json", "name,state,bucket"])
       } finally {
         restore()
       }
