@@ -292,6 +292,24 @@ scaffold mirror under `internal/scaffold/assets/uf/schemas/`), so invalid
 values fail closed at load time rather than silently misrouting review
 fan-out.
 
+### Host-fallback model resolution
+
+An agent that appears in neither `runs[<mode>]` nor `advisor[<mode>]`
+for the active mode is planned as a host-fallback run
+(`source: "host"`). Host-fallback runs never consult the matrix
+profiles -- neither the tracked matrix's `standard` profile nor a
+per-developer `profiles.standard` override applies to them. Without a
+direct model bypass they resolve and execute on the parent session's
+active model, and the persisted run carries host-run provenance
+(null `requested_model`, non-null `resolved_parent_model`) so panels
+containing host-fallback entries finalize with their native verdicts.
+To pin such a persona to a profile model, list it in the mode's
+`advisor[<mode>]` array -- the advisor list is the sanctioned pinning
+mechanism. If host resolution fails, the run fails before execution
+with a retryable, sanitized `host_model_unavailable`; `retryable`
+here means the caller may re-invoke the dispatch -- no run file
+exists, so `redispatch_failed_runs` has nothing to target.
+
 ---
 
 ## Delegation Model Matrix

@@ -1991,6 +1991,40 @@ Each entry follows the format: `- <change-name>: <summary>`.
   both run sources. Documentation gate filed as in-repo
   issue #891 and unbound-force/website#360. (Spec:
   openspec/changes/accept-variantless-parent-model/)
+- host-fallback-provenance: review-dispatch host-fallback runs --
+  agents planned with `source: "host"` because they appear in
+  neither `runs[<mode>]` nor `advisor[<mode>]` of
+  `.uf/review-matrix.yaml` -- are finalizable again.
+  `executeDispatchRun` gains a `source === "host"` model-resolution
+  branch symmetric with the advisor host-model inheritance (#693):
+  a host-source run without a direct model bypass resolves the
+  parent session's active model via the shared `resolveHostModel()`,
+  executes on it regardless of any configured profile model (the
+  silent `tier ?? "standard"` default is unreachable for host
+  entries), and persists the RD-FR-008 host-run provenance the
+  finalizer already enforced -- `requested_model`, `provider`,
+  `model_id`, and `variant` null, `resolved_parent_model` non-null.
+  Previously the dispatcher recorded advisor-shaped provenance for
+  host runs when a profile model was configured, or failed them
+  early with non-retryable `tier_model_unavailable` when none was,
+  so `consolidate_dispatch` with provenance rejected every such run
+  with four validation defects and the orchestrating commands fail
+  closed INCONCLUSIVE despite successful native verdicts (9 of 12
+  bulk `/uf.triage-issue` dispatches in unbound-force/gaze,
+  2026-11-01). Host resolution failure now fails the run with
+  retryable, sanitized `host_model_unavailable` (abort signal ->
+  `cancelled`); because the failure is a pre-execution early exit
+  with no run file, `retryable` means caller re-invocation only --
+  nothing for `redispatch_failed_runs` (DR-FR-002) to target. No
+  finalizer, planner, or schema changes; the `advisor[<mode>]` list
+  remains the sanctioned mechanism for pinning a persona to a
+  profile model. Byte-identical scaffold mirror; host-source
+  resolution coverage added to the dispatch-agent-run,
+  dispatch-review-runs, consolidate-dispatch, and dispatch-recovery
+  suites. Documentation gate filed as in-repo issue #913 and
+  unbound-force/website#368; structural-vs-transient failure-class
+  follow-up filed as #914. (Spec:
+  openspec/changes/host-fallback-provenance/, Fixes: #901)
 
 ## Recent Changes
 

@@ -2992,8 +2992,10 @@ export function shouldReclassifyToSuccess(
  *
  * model and tier are mutually exclusive and carry the dispatch_agent_run
  * semantics: model is a direct provider/model-id bypass, tier resolves
- * through the review matrix, and an advisor-source run whose tier profile
- * has no model inherits the host session model.
+ * through the review matrix, a host-source run resolves the parent session
+ * model without consulting the matrix (the tier ?? "standard" default is
+ * unreachable for host entries, RD-FR-037), and an advisor-source run whose
+ * tier profile has no model inherits the host session model.
  */
 export interface ExecuteDispatchRunOptions {
   /** Manifest-declared divisor-* review agent to execute. */
@@ -3025,9 +3027,18 @@ export interface ExecuteDispatchRunOptions {
   readonly manifestMode?: boolean
   /** Run source from the dispatch plan. Defaults to "explicit". */
   readonly source?: Source
-  /** Direct provider/model-id bypass. Mutually exclusive with tier. */
+  /**
+   * Direct provider/model-id bypass. Mutually exclusive with tier. Takes
+   * precedence over source-based resolution: a source "host" entry carrying
+   * a model executes the direct bypass unchanged (design D3).
+   */
   readonly model?: string
-  /** Review matrix profile tier. Mutually exclusive with model. */
+  /**
+   * Review matrix profile tier. Mutually exclusive with model. Unreachable
+   * for host-source entries: the planner emits them with null tier ("use the
+   * active host model"), and the core resolves the parent session model
+   * instead of defaulting to the standard profile (RD-FR-037).
+   */
   readonly tier?: Tier
   /** Direct-model runtime variant. */
   readonly variant?: string
@@ -3147,8 +3158,10 @@ export interface ExecuteDispatchRunOutcome {
  * parent session.
  *
  * Responsibilities, in order: load review policies and validate the agent
- * against the reviewer manifest; resolve the model (direct bypass, review
- * matrix tier, or host-model inheritance for advisor runs); execute the
+ * against the reviewer manifest; resolve the model (direct bypass, host-model
+ * resolution for host-source entries — which never consult the matrix, so the
+ * tier default is unreachable for them — review matrix tier, or host-model
+ * inheritance for advisor runs); execute the
  * child session via the shared executeAgentSession executor; harvest
  * submitted findings and lesson proposals; apply the RD-FR-026
  * post-submission reclassification; and persist the run file to the
@@ -3210,7 +3223,7 @@ export async function executeDispatchRun(
     ))
   }
 
-  // Resolve model: tier-based via review matrix or direct bypass.
+  // Resolve model: direct bypass, host-source resolution, or tier-based via review matrix.
   let selectedModel: ModelIdentity
   let selectedVariant: string | undefined
   let requestedModelLabel: string | null
@@ -3221,6 +3234,37 @@ export async function executeDispatchRun(
     selectedModel = directModelIdentity(options.model)
     selectedVariant = options.variant
     requestedModelLabel = options.model
+  } else if (source === "host") {
+    // Host-source resolution (RD-FR-037, design D1 of host-fallback-provenance,
+    // issue #901): planner host-fallback entries carry null model and null tier
+    // — "use the active host model" — so matrix profiles MUST NOT be consulted
+    // and the tier ?? "standard" default below stays unreachable for host
+    // entries. Mirrors the advisor branch (#693): shared resolveHostModel
+    // lookup, host-run provenance via hostResolvedParent, and retryable
+    // host_model_unavailable / cancelled early exits on failure.
+    try {
+      const hostResult = await resolveHostModel(
+        { client: deps.client, sessionID: context.sessionID, messageID: context.messageID, directory: deps.directory },
+        context.abort,
+      )
+      selectedModel = hostResult.identity
+      selectedVariant = hostResult.variant
+      requestedModelLabel = null
+      hostResolvedParent = {
+        model: `${hostResult.identity.providerID}/${hostResult.identity.modelID}`,
+        variant: hostResult.variant ?? null,
+      }
+    } catch (error: unknown) {
+      if (context.abort.aborted) {
+        return earlyExit(failedResult(earlyProvenance(), "cancelled", "dispatch cancelled", false))
+      }
+      return earlyExit(failedResult(
+        earlyProvenance(),
+        "host_model_unavailable",
+        sanitizeInvocationError(errorText(error)),
+        true,
+      ))
+    }
   } else {
     // Tier-based resolution via review matrix.
     const tier = options.tier ?? "standard"

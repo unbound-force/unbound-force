@@ -256,6 +256,63 @@ describe("dispatch_review_runs", () => {
     })
   })
 
+  describe("host-fallback panel dispatch (RD-FR-037)", () => {
+    it("dispatches a host-fallback plan entry and persists host-run provenance", async () => {
+      await withBun(async () => {
+        const { directory, diffPath } = await scratchProject()
+        const hooks = await ReviewDispatchPlugin.server({
+          client: fakeClient(),
+          directory,
+          worktree: directory,
+        } as unknown as PluginInput)
+
+        // Host-fallback shape exactly as baseRuns plans it for an agent in
+        // neither runs[mode] nor advisor[mode]: null model/tier/variant with
+        // the "use the active host model" reason.
+        const input = makeBaseInput(diffPath, [
+          makePlanEntry({
+            agent: "divisor-guard",
+            sequence: 1,
+            source: "host",
+            tier: null,
+            model: null,
+            variant: null,
+            reason_code: "host-fallback",
+            reason: "no explicit or advisor run; use the active host model",
+          }),
+        ])
+
+        const response = await hooks.tool.dispatch_review_runs.execute(input, toolContext())
+
+        expect(response.output).toContain("dispatch_review_runs")
+        const meta = response.metadata as Record<string, unknown>
+        expect(meta.status).toBe("ok")
+        expect(meta.runs_completed).toBe(1)
+        expect(meta.runs_failed).toBe(0)
+        expect(meta.runs_skipped).toBe(0)
+
+        // RD-FR-037 "Host run inherits the parent model": the persisted run
+        // file carries host-run provenance — null requested_model, provider,
+        // model_id, and variant; non-null resolved_parent_model from the
+        // fake client's host lookup (p/m with active variant).
+        const correlationId = meta.correlation_id as string
+        trackDispatchDir(correlationId)
+        const runFiles = await readdir(dispatchDir(correlationId))
+        expect(runFiles).toContain("run-divisor-guard.json")
+        const run = JSON.parse(
+          await readFile(join(dispatchDir(correlationId), "run-divisor-guard.json"), "utf8"),
+        ) as Record<string, unknown>
+        expect(run.source).toBe("host")
+        expect(run.requested_model).toBeNull()
+        expect(run.provider).toBeNull()
+        expect(run.model_id).toBeNull()
+        expect(run.variant).toBeNull()
+        expect(run.resolved_parent_model).toBe("p/m")
+        expect(run.resolved_parent_variant).toBe("active")
+      })
+    })
+  })
+
   describe("respects max_parallel_runs batch size", () => {
     it("dispatches all 5 entries in batches of 2 and all complete", async () => {
       await withBun(async () => {

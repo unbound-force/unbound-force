@@ -856,6 +856,78 @@ describe("redispatch_failed_runs", () => {
     })
   })
 
+  it("re-dispatches a failed host-source run through host resolution with host-run provenance (RD-FR-037 Re-dispatched host run reuses host resolution)", async () => {
+    // A failed host-fallback run persisted with its original prompt and a
+    // host-fallback plan entry (source "host", null model/tier/variant —
+    // the baseRuns shape). resolvePlanEntryRuntime passes neither model nor
+    // tier, so the re-run MUST resolve the parent session model through the
+    // same shared-core host branch and persist host-run provenance.
+    const failedHostRun = {
+      ...makeRun("divisor-guard", { status: "failed" }),
+      source: "host" as const,
+      requested_model: null,
+      provider: null,
+      model_id: null,
+      variant: null,
+      resolved_parent_model: "p/m",
+      resolved_parent_variant: "active",
+      reported_model: null,
+    }
+    const hostPlanEntry = {
+      ...planEntry("divisor-guard"),
+      reason_code: "host-fallback",
+      reason: "no explicit or advisor run; use the active host model",
+      source: "host" as const,
+      tier: null,
+      model: null,
+      variant: null,
+    }
+    const { correlationId, dir } = await setupSession([failedHostRun], [hostPlanEntry])
+
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await activate(fakeClient(), project)
+
+      const result = await hooks.tool.redispatch_failed_runs.execute(
+        { correlation_id: correlationId },
+        noopContext(),
+      )
+      const data = JSON.parse(result.output)
+      expect(data.status).toBe("ok")
+      expect(data.total_runs).toBe(1)
+      expect(data.redispatched_runs).toBe(1)
+      expect(data.runs[0].agent).toBe("divisor-guard")
+      expect(data.runs[0].outcome).toBe("redispatched")
+      expect(data.runs[0].new_status).toBe("success")
+
+      // The replacement run carries host-run provenance: null requested
+      // model, provider, model_id, and variant; the resolved parent model
+      // from the fake client's host lookup (p/m, active). The persisted
+      // prompt is reused verbatim.
+      const replacement = JSON.parse(await readFile(join(dir, "run-divisor-guard.json"), "utf8"))
+      expect(replacement.status).toBe("success")
+      expect(replacement.source).toBe("host")
+      expect(replacement.prompt).toBe("Original prompt for divisor-guard")
+      expect(replacement.requested_model).toBeNull()
+      expect(replacement.provider).toBeNull()
+      expect(replacement.model_id).toBeNull()
+      expect(replacement.variant).toBeNull()
+      expect(replacement.resolved_parent_model).toBe("p/m")
+      expect(replacement.resolved_parent_variant).toBe("active")
+      expect(replacement.reported_model).toBe("p/m")
+      expect(replacement.model_mismatch).toBe(false)
+
+      // The recovered session finalizes cleanly — the #901 recovery path
+      // that DR-FR-002 could not reach while host runs were unfinalizable.
+      const finalized = JSON.parse(
+        (await hooks.tool.consolidate_dispatch.execute(finalizeArgs(correlationId), noopContext())).output,
+      )
+      expect(finalized.status).toBe("success")
+      expect(finalized.operation_verdict).toBe("APPROVE")
+      expect(finalized.errors).toEqual([])
+    })
+  })
+
   it("refuses named successful runs — including reclassified successes — re-runs a named cancelled run, and reports not_found for a missing agent", async () => {
     // A post-submission-abort run reclassified to success (RD-FR-026)
     // says "success" on disk and MUST never be re-run.
