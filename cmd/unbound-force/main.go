@@ -41,17 +41,39 @@ func main() {
 }
 
 type initParams struct {
-	targetDir   string
-	force       bool
-	divisorOnly bool
-	stealth     bool
-	check       bool
-	lang        string
-	version     string
-	stdout      io.Writer
+	targetDir     string
+	force         bool
+	divisorOnly   bool
+	overridesOnly bool
+	stealth       bool
+	check         bool
+	lang          string
+	version       string
+	stdout        io.Writer
 }
 
 func runInit(p initParams) error {
+	// Overrides-only mode is mutually exclusive with the other init
+	// modes (design D5): --divisor, --force, --check, and --stealth
+	// (whose skip surfaces would make --overrides a silent no-op).
+	// Validated here in the CLI layer so the run fails before any
+	// filesystem write.
+	if p.overridesOnly {
+		conflicts := []struct {
+			flag string
+			set  bool
+		}{
+			{"--divisor", p.divisorOnly},
+			{"--force", p.force},
+			{"--check", p.check},
+			{"--stealth", p.stealth},
+		}
+		for _, c := range conflicts {
+			if c.set {
+				return fmt.Errorf("--overrides cannot be combined with %s", c.flag)
+			}
+		}
+	}
 	lang := p.lang
 	// If --lang was not provided, check config for a language preference.
 	if lang == "" {
@@ -61,14 +83,15 @@ func runInit(p initParams) error {
 		}
 	}
 	_, err := scaffold.Run(scaffold.Options{
-		TargetDir:   p.targetDir,
-		Force:       p.force,
-		DivisorOnly: p.divisorOnly,
-		Stealth:     p.stealth,
-		Check:       p.check,
-		Lang:        lang,
-		Version:     p.version,
-		Stdout:      p.stdout,
+		TargetDir:     p.targetDir,
+		Force:         p.force,
+		DivisorOnly:   p.divisorOnly,
+		OverridesOnly: p.overridesOnly,
+		Stealth:       p.stealth,
+		Check:         p.check,
+		Lang:          lang,
+		Version:       p.version,
+		Stdout:        p.stdout,
 	})
 	return err
 }
@@ -115,10 +138,16 @@ leaving the working tree dirty: scaffolded files are hidden from git via
 is not preserved on re-clone; re-run uf init --stealth to restore it.
 
 Use --check (with --stealth) to verify the git-cleanliness invariant
-without writing any files.`,
+without writing any files.
+
+Use --overrides to create only the two per-developer override
+stubs and the managed .gitignore block; existing override files
+are never modified. It cannot be combined with --divisor,
+--force, --check, or --stealth.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			force, _ := cmd.Flags().GetBool("force")
 			divisorOnly, _ := cmd.Flags().GetBool("divisor")
+			overridesOnly, _ := cmd.Flags().GetBool("overrides")
 			stealth, _ := cmd.Flags().GetBool("stealth")
 			check, _ := cmd.Flags().GetBool("check")
 			lang, _ := cmd.Flags().GetString("lang")
@@ -127,14 +156,15 @@ without writing any files.`,
 				return fmt.Errorf("get working directory: %w", err)
 			}
 			return runInit(initParams{
-				targetDir:   cwd,
-				force:       force,
-				divisorOnly: divisorOnly,
-				stealth:     stealth,
-				check:       check,
-				lang:        lang,
-				version:     version,
-				stdout:      cmd.OutOrStdout(),
+				targetDir:     cwd,
+				force:         force,
+				divisorOnly:   divisorOnly,
+				overridesOnly: overridesOnly,
+				stealth:       stealth,
+				check:         check,
+				lang:          lang,
+				version:       version,
+				stdout:        cmd.OutOrStdout(),
 			})
 		},
 	}
@@ -142,6 +172,7 @@ without writing any files.`,
 	cmd.Flags().Bool("divisor", false, "Deploy only Divisor review agents and convention packs")
 	cmd.Flags().Bool("stealth", false, "Scaffold locally without modifying tracked files or dirtying git (local-only)")
 	cmd.Flags().Bool("check", false, "Verify git-cleanliness without writing (requires --stealth)")
+	cmd.Flags().Bool("overrides", false, "Create only the per-developer override stubs and the managed .gitignore block")
 	cmd.Flags().String("lang", "", "Project language for convention pack (auto-detected if omitted)")
 	return cmd
 }
