@@ -22,7 +22,7 @@
 All tasks modify `internal/scaffold/scaffold.go` or its test
 files and build on each other — run sequentially, no `[P]`.
 
-- [ ] 1.1 Add `extractManagedRegion(content, marker,
+- [x] 1.1 Add `extractManagedRegion(content, marker,
   terminator string)` to `internal/scaffold/scaffold.go`
   (design D7): returns the byte range of the managed block —
   the first line equal to the marker through the first
@@ -37,7 +37,7 @@ files and build on each other — run sequentially, no `[P]`.
   `go test -race -count=1 -run TestExtractManagedRegion
   ./internal/scaffold/`.
 
-- [ ] 1.2 Rewrite `ensureGitignore`
+- [x] 1.2 Rewrite `ensureGitignore`
   (`internal/scaffold/scaffold.go:1432`) onto the helper
   (design D7, SC-FR-014): dispositions in order — no marker
   → append the block (`created`, the existing path); marker +
@@ -54,7 +54,7 @@ files and build on each other — run sequentially, no `[P]`.
   `go test -race -count=1 -run 'TestEnsureGitignore'
   ./internal/scaffold/`.
 
-- [ ] 1.3 Add the closing sentinel to the stealth exclude
+- [x] 1.3 Add the closing sentinel to the stealth exclude
   block (`internal/scaffold/scaffold_stealth.go`, design D8):
   a `stealthExcludeEndMarker` constant; `writeGitInfoExclude`
   writes start marker + escaped canonical paths + sentinel
@@ -79,7 +79,7 @@ Tasks 2.1–2.4 are ordered by dependency (the drift test needs
 the new block and the aligned repo file) — run sequentially,
 no `[P]`.
 
-- [ ] 2.1 Update `gitignoreBlock`
+- [x] 2.1 Update `gitignoreBlock`
   (`internal/scaffold/scaffold.go:1399-1421`, design D6,
   SC-FR-013): add `.uf/sibling-clones/`, `.uf/sibling-cache/`,
   `.uf/feedback/`, and `.uf/progress/` as a workspace-state
@@ -90,14 +90,14 @@ no `[P]`.
   (marker) and final line (`.unbound-force/` terminator) stay
   unchanged. `.gaze/` stays out.
 
-- [ ] 2.2 Sync the repo root `.gitignore`: rewrite the
+- [x] 2.2 Sync the repo root `.gitignore`: rewrite the
   managed region (lines 34–61) to equal the new
   `gitignoreBlock` byte-for-byte — this removes the
   `.uf/dewey/config.yaml` duplicate (lines 40/47) and carries
   the pluralized comment. Leave the non-managed regions
   untouched in this task.
 
-- [ ] 2.3 Add the drift test (SC-FR-013, design D7) in
+- [x] 2.3 Add the drift test (SC-FR-013, design D7) in
   `internal/scaffold/scaffold_test.go`: read the repo root
   `.gitignore` via `findProjectRoot(t)`, extract the managed
   region with `extractManagedRegion` (the same helper as
@@ -106,7 +106,7 @@ no `[P]`.
   Follow the `TestPluginPackageInputs_GitignoreTracks
   CanonicalInputs` pattern for repo-file access.
 
-- [ ] 2.4 Extend the representative-patterns test
+- [x] 2.4 Extend the representative-patterns test
   (`internal/scaffold/scaffold_test.go:8287`, the
   `TestEnsureGitignore_*` pattern list) with
   `.uf/config.yaml`, `.uf/dewey/config.yaml`,
@@ -123,7 +123,7 @@ All tasks modify `internal/scaffold/scaffold.go` or
 `scaffold_test.go` and build on each other — run sequentially,
 no `[P]`.
 
-- [ ] 3.1 Add the `modelMatrixOverrideStub` and
+- [x] 3.1 Add the `modelMatrixOverrideStub` and
   `reviewMatrixOverrideStub` Go string constants to
   `internal/scaffold/scaffold.go` (design D1/D2, SC-FR-011):
   comment-only content — a header naming the file and its
@@ -134,7 +134,7 @@ no `[P]`.
   entries, and a never-commit reminder. No uncommented YAML —
   the content parses to YAML null.
 
-- [ ] 3.2 Add `ensureOverrideStubs(opts *Options)
+- [x] 3.2 Add `ensureOverrideStubs(opts *Options)
   []subToolResult` to `internal/scaffold/scaffold.go`
   (design D3/D4): for each stub, `MkdirAll` `.uf/` as needed
   and write the file only when it does not exist
@@ -142,13 +142,13 @@ no `[P]`.
   injection), reporting created or skipped per file; existing
   files are never read-modified.
 
-- [ ] 3.3 Wire seeding into `Run()` (`internal/scaffold/
+- [x] 3.3 Wire seeding into `Run()` (`internal/scaffold/
   scaffold.go:354-364`): call `ensureOverrideStubs` in the
   non-stealth ensure-branch, after `ensureGitignore`, gated
   on `!opts.DivisorOnly` (SC-FR-011 skip surfaces:
   `--stealth` and `--divisor`).
 
-- [ ] 3.4 Add tests in `internal/scaffold/scaffold_test.go`
+- [x] 3.4 Add tests in `internal/scaffold/scaffold_test.go`
   (SC-FR-011): exact-content creation in a full `Run()`
   (both files equal their constants and appear in the
   summary); hand-edited override preserved byte-for-byte
@@ -165,7 +165,7 @@ Tasks 4.1–4.3 are dependency-ordered (the CLI flag needs the
 `Options` field; the tests need both) — run sequentially, no
 `[P]`.
 
-- [ ] 4.1 Add `OverridesOnly bool` to `Options`
+- [x] 4.1 Add `OverridesOnly bool` to `Options`
   (`internal/scaffold/scaffold.go:56`) with GoDoc, and the
   early-exit path in `Run()` (design D5, SC-FR-012): after
   the Check-mode early return and before stealth setup, when
@@ -174,7 +174,7 @@ Tasks 4.1–4.3 are dependency-ordered (the CLI flag needs the
   asset walk, plugin activation, sub-tools, AGENTS.md
   sections, and migrations never run.
 
-- [ ] 4.2 Add the `--overrides` flag to
+- [x] 4.2 Add the `--overrides` flag to
   `cmd/unbound-force/main.go` (`newInitCmd`, `initParams`,
   `runInit`): flag description "Create only the per-developer
   override stubs and the managed .gitignore block"; conflict
@@ -184,7 +184,7 @@ Tasks 4.1–4.3 are dependency-ordered (the CLI flag needs the
   D5 — the issue's three plus `--stealth`); extend the Long
   help text with the mode paragraph and exclusions.
 
-- [ ] 4.3 Add tests (SC-FR-012): in
+- [x] 4.3 Add tests (SC-FR-012): in
   `cmd/unbound-force/main_test.go`, the conflict matrix (all
   four combinations exit non-zero with the flags named, via
   the `runInit`/`TestInitCmd_*` patterns, asserting the
@@ -206,7 +206,7 @@ Tasks 4.1–4.3 are dependency-ordered (the CLI flag needs the
 Tasks 5.1–5.3 are dependency-ordered — run sequentially, no
 `[P]`.
 
-- [ ] 5.1 Add the `opencodeGitignore` constant and its
+- [x] 5.1 Add the `opencodeGitignore` constant and its
   ensure-style writer to `internal/scaffold/scaffold.go`
   (design D9, SC-FR-015): content exactly `node_modules`,
   `bun.lock`, `.vitest/`, `coverage/` (one per line); merge
@@ -217,7 +217,7 @@ Tasks 5.1–5.3 are dependency-ordered — run sequentially, no
   result, running in full and `--divisor` mode, skipped
   under `--stealth` and in `--overrides` mode.
 
-- [ ] 5.2 Update the canonical `.opencode/.gitignore` to the
+- [x] 5.2 Update the canonical `.opencode/.gitignore` to the
   four canonical lines and the
   `TestPluginPackageInputs_GitignoreTracksCanonicalInputs`
   want-string (`internal/scaffold/scaffold_test.go:1626`);
@@ -226,7 +226,7 @@ Tasks 5.1–5.3 are dependency-ordered — run sequentially, no
   from the repo root `.gitignore` (the scoped file covers
   them).
 
-- [ ] 5.3 Add tests in `internal/scaffold/scaffold_test.go`
+- [x] 5.3 Add tests in `internal/scaffold/scaffold_test.go`
   (SC-FR-015): fresh full-mode `Run()` creates
   `.opencode/.gitignore` with exactly the canonical lines; an
   existing file with a user line and a partial canonical set
@@ -241,7 +241,7 @@ Tasks 5.1–5.3 are dependency-ordered — run sequentially, no
 
 ## 6. Documentation
 
-- [ ] 6.1 [P] Update `docs/cli-reference.md` `uf init`
+- [x] 6.1 [P] Update `docs/cli-reference.md` `uf init`
   section: add the `--overrides` row to the flag table
   (bool, default `false`, "Create only the per-developer
   override stubs and the managed .gitignore block; mutually
@@ -254,7 +254,7 @@ Tasks 5.1–5.3 are dependency-ordered — run sequentially, no
   per-developer: seeded once, never modified, never reset
   by `--force`).
 
-- [ ] 6.2 [P] Update `docs/configuration.md` (SC-FR-010
+- [x] 6.2 [P] Update `docs/configuration.md` (SC-FR-010
   reversal ripple): the four "never seeded" passages —
   the review-matrix table row (line 275), the review-council
   prose (lines 286-288), the model-matrix "deliberately not
@@ -265,14 +265,14 @@ Tasks 5.1–5.3 are dependency-ordered — run sequentially, no
   afterwards, not even by `--force`. Leave the line-406
   gitignore-entry mention accurate as written.
 
-- [ ] 6.3 [P] Add a `CHANGELOG.md` entry under Unreleased →
+- [x] 6.3 [P] Add a `CHANGELOG.md` entry under Unreleased →
   Added for init-override-stubs-gitignore-sync: override
   stub seeding with `--overrides` mode and `--force`
   preservation, the gitignore block sync with in-place
   upgrade semantics, and the `.opencode/.gitignore` sub-tool
   (mention the SC-FR-010 contract amendment).
 
-- [ ] 6.4 [P] Refresh `docs/architecture.md` "Managed files"
+- [x] 6.4 [P] Refresh `docs/architecture.md` "Managed files"
   section (~lines 288-291): the `.gitignore` managed block
   is upgraded in place when it differs (SC-FR-014), not
   merely appended; add the `.opencode/.gitignore` sub-tool
@@ -280,7 +280,7 @@ Tasks 5.1–5.3 are dependency-ordered — run sequentially, no
 
 ## 7. Bookkeeping and verification
 
-- [ ] 7.1 File BOTH documentation-gate tracking issues for
+- [x] 7.1 File BOTH documentation-gate tracking issues for
   this user-facing change (`uf init` behavior and flags):
   the repo-local issue against this repo, referencing
   issues #903 and #902, AND the cross-repo tracking issue
@@ -290,7 +290,7 @@ Tasks 5.1–5.3 are dependency-ordered — run sequentially, no
   upgrade; why it matters; which website pages need
   updating). Record both issue numbers for the PR body.
 
-- [ ] 7.2 Run the full CI-parity gate (MP-023):
+- [x] 7.2 Run the full CI-parity gate (MP-023):
   `make check` — lint, `go test -race -count=1 ./...`,
   build, the scope-based coverage gate, and the TypeScript
   plugin suite (including its 94% statement coverage floor,
@@ -299,7 +299,7 @@ Tasks 5.1–5.3 are dependency-ordered — run sequentially, no
   without modification — any gate conflict is a
   stop-and-report per the AGENTS.md gatekeeping rule.
 
-- [ ] 7.3 Verify constitution alignment against the
+- [x] 7.3 Verify constitution alignment against the
   proposal's assessments: the stubs deploy no
   credential-shaped content (comment-only), every disposition
   is observable in the run summary, no governance or coverage
@@ -307,7 +307,7 @@ Tasks 5.1–5.3 are dependency-ordered — run sequentially, no
   untouched. Record the verification outcome in the change's
   wrap-up notes.
 
-- [ ] 7.4 PR bookkeeping: the PR body MUST close both issues
+- [x] 7.4 PR bookkeeping: the PR body MUST close both issues
   — `/uf.finale` emits `Closes #903` from
   `.openspec.yaml`'s `originating_issue`; ensure `Closes
   #902` is also present in the PR body, carrying both task
