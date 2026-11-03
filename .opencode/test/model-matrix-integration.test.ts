@@ -1018,6 +1018,7 @@ describe("uf_delegate_command model-matrix seam verification", () => {
         "checkpoint_step",
         "phase",
         "timeout",
+        "idle_timeout",
         "task_classification",
         "skill",
         "skill_absent_reason",

@@ -262,6 +262,7 @@ describe("UfWorkflowPlugin", () => {
       "command_path",
       "expected_artifact",
       "feature_dir",
+      "idle_timeout",
       "model",
       "pack",
       "phase",
