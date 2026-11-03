@@ -1256,6 +1256,15 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (`read_diff_chunk`) spec deltas now record the `diff_not_found`
   error code for a missing path inside an allowed directory. (Spec:
   openspec/changes/review-dispatch-consumer-bounds/, Fixes: #943)
+- dispatch-error-summary (#946): a failed `dispatch_review_runs`
+  call now ends its one-line summary with
+  ` — error: <message> (retryable: <bool>)`, the failure message
+  collapsed to one line and cut to 512 characters. Before, the reason
+  (for example `diff_path is required for non-triage modes`) lived
+  only in tool metadata the calling agent cannot see, and one
+  `/uf.address-feedback` run retried the identical call and then
+  queried the opencode database six times to find it. The summary's
+  documented prefix is unchanged. (Fixes: #946)
 - fix-uf-finale-ci-poll-gh-schema: `uf_finale_ci_poll` now works
   against gh 2.91.0. The poll requests the verified
   `name,state,bucket,link` field list through an argument-array

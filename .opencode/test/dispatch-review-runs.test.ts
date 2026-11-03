@@ -5,7 +5,7 @@ import type { PluginInput, ToolContext } from "@opencode-ai/plugin"
 import { afterEach, describe, expect, it } from "vitest"
 
 import ReviewDispatchPlugin from "../plugins/review-dispatch/index.js"
-import { _getSessionCorrelationMap, _getSubmissionStore } from "../plugins/review-dispatch/index.js"
+import { _getSessionCorrelationMap, _getSubmissionStore, dispatchSummaryLine } from "../plugins/review-dispatch/index.js"
 import { withBun } from "./helpers/bun-runtime.js"
 import {
   UUID_RE,
@@ -881,6 +881,53 @@ describe("dispatch_review_runs", () => {
         // Nothing was minted: the session map has no entry for the parent.
         expect(_getSessionCorrelationMap().has("parent-session")).toBe(false)
       })
+    })
+  })
+
+  // Issue #946: the failure message and retryable flag live in metadata,
+  // which never reaches the calling model, so the summary line carries them.
+  describe("error summary carries the failure reason (issue #946)", () => {
+    it("appends the validation message and retryable flag when diff_path is missing", async () => {
+      await withBun(async () => {
+        const { directory, diffPath } = await scratchProject()
+        const hooks = await ReviewDispatchPlugin.server({
+          client: fakeClient(),
+          directory,
+          worktree: directory,
+        } as unknown as PluginInput)
+
+        const { diff_path: _omitted, ...input } = makeBaseInput(diffPath, [makePlanEntry({ agent: "divisor-guard", sequence: 1 })])
+        const response = await hooks.tool.dispatch_review_runs.execute(input as never, toolContext())
+
+        const meta = response.metadata as Record<string, unknown>
+        expect(meta.status).toBe("error")
+        expect(response.output).toMatch(/^dispatch_review_runs: error \(correlation_id none\) — 0 completed, /)
+        expect(response.output).toContain(`— error: ${meta.message as string} (retryable: false)`)
+        expect(response.output).toContain("diff_path is required for non-triage modes")
+        expect(response.output).not.toContain("\n")
+      })
+    })
+
+    it("leaves the ok summary unchanged and bounds a long multi-line message", () => {
+      const base = {
+        correlation_id: "11111111-1111-4111-8111-111111111111",
+        runs_completed: 0,
+        runs_failed: 1,
+        runs_skipped: 0,
+        findings: [],
+        proposals: [],
+        warnings: [],
+      }
+      expect(dispatchSummaryLine({ ...base, status: "ok", message: "ignored" })).not.toContain("error:")
+      const line = dispatchSummaryLine({ ...base, status: "error", message: `first line\n${"x".repeat(600)}` })
+      const tail = line.slice(line.indexOf("— error: ") + "— error: ".length)
+      expect(tail.startsWith("first line x")).toBe(true)
+      expect(tail.endsWith("…")).toBe(true)
+      expect(tail).toHaveLength(513)
+      expect(line).not.toContain("retryable")
+      expect(dispatchSummaryLine({ ...base, status: "error", retryable: true })).toContain(
+        "— error: no failure message reported (retryable: true)",
+      )
     })
   })
 
