@@ -45,9 +45,11 @@
 - [x] 4.3 Run the plugin suite with coverage (floor 94%) and
   `go test ./internal/scaffold/... ./cmd/...` (drift pairs), and
   `openspec validate preflight-declared-output --strict`.
-- [ ] 4.4 File the documentation issues required by the
+- [x] 4.4 File the documentation issues required by the
   documentation gate: one for this repository (the Phase 5
   "Project-declared check output" section and `rendered_output`;
   unbound-force/unbound-force#926 covers only `.uf/preflight.yaml`),
   and a comment extending unbound-force/website#373 to cover
   check-output evidence. Record both in the PR description.
+  Filed unbound-force/unbound-force#951; extended
+  unbound-force/website#373 with a comment.
