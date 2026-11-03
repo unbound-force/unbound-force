@@ -4702,7 +4702,7 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".opencode/commands/opsx-explore.md": true,
 	".opencode/commands/opsx-propose.md": true,
 	// Swarm skills — Spec 008, local-only
-	".opencode/skill/unbound-force-heroes/SKILL.md": true,
+	".opencode/skills/unbound-force-heroes/SKILL.md": true,
 	// Replicator-scaffolded agents and commands — created by replicator init,
 	// not part of the uf binary's scaffold assets
 	".opencode/agents/background-worker.md": true,

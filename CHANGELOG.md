@@ -1231,6 +1231,18 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- skill-dir-migration (#933): `uf init` now migrates the legacy
+  `.opencode/skill/` directory into `.opencode/skills/`, so
+  opencode stops warning about duplicate skills such as
+  `speckit-workflow`. When only the legacy directory exists it is
+  renamed; when both exist, legacy-only files move, byte-identical
+  copies and stale copies of scaffolded skills are removed, and a
+  differing copy of any other skill is kept in place with a
+  conflict warning, never overwritten. `uf_delegate_command` no
+  longer searches `.opencode/skill`, so a stale legacy copy can't
+  be what a skill reference resolves to. This repo's
+  `unbound-force-heroes` skill moves to `.opencode/skills/`.
+  (Fixes: #933)
 - skill-root-file (#934): `uf_delegate_command` now resolves a
   bare `skill` value as a repo skill name first and, when no skill
   root holds it, as a repo-root file, so `Makefile` or

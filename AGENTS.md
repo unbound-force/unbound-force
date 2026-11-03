@@ -81,8 +81,7 @@ unbound-force/
 │   ├── plugins/                      # Plugins registered in opencode.json (invoke-agent, review-dispatch, uf-workflow, uf-finale)
 │   ├── lib/                          # Shared TypeScript plugin library (incl. model-matrix.ts)
 │   ├── test/                         # TypeScript plugin unit/integration/smoke tests
-│   ├── skill/                        # Swarm skills packages
-│   ├── skills/                       # Additional skills packages
+│   ├── skills/                       # Skills packages (uf init migrates legacy skill/)
 │   ├── package.json                  # Plugin npm manifest (locked by package-lock.json)
 │   └── uf/packs/                     # Convention packs
 ├── council-review-action/             # AI code review composite GitHub Action
