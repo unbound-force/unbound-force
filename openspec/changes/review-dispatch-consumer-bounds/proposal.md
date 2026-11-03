@@ -51,9 +51,14 @@ Fixes #941, #945, #943.
   payload schema and `schemas/review-dispatch/v1.0.0.schema.json`
   gain the optional property; existing artifacts stay valid.
 - Deduplicate near-identical proposals across personas before
-  they are persisted or returned: a deterministic token-overlap
-  rule keeps one entry per lesson and reports each merge as a new
-  `duplicate_proposal_merged` warning.
+  they are persisted or returned: a deterministic Jaccard rule with
+  a negation guard keeps one entry per lesson and reports each
+  merge as a new `duplicate_proposal_merged` warning. At most 512
+  proposals persist; the rest are reported as `proposals_overflow`.
+- Add `read_dispatch_artifact`, a bounded paged reader of the
+  artifact by correlation ID, because the file-read tool cuts the
+  artifact's long lines at 2,000 characters. Every consumer reads
+  the artifact through it.
 - The compact finalization result and the summary retrieval keep
   their bounded proposal arrays as a preview. No command stores
   lessons from them any more.
@@ -79,8 +84,9 @@ Fixes #941, #945, #943.
 
 ### Modified Capabilities
 - `review-dispatch`: durable artifact proposals (RD-FR-054),
-  cross-persona proposal deduplication (RD-FR-055), and an
-  artifact-sourced consumer contract (RD-FR-056). Each amends
+  cross-persona proposal deduplication (RD-FR-055), an
+  artifact-sourced consumer contract (RD-FR-056), and a bounded
+  artifact reader (RD-FR-057). Each amends
   requirements of the unarchived `bound-consolidate-dispatch-output`
   change (RD-FR-049 through RD-FR-053).
 - `build-review-prompts` (FR-009, FR-011) and the
@@ -97,9 +103,9 @@ Fixes #941, #945, #943.
   `ReviewDispatchPayloadSchema` (optional `proposals`),
   `artifactPayloadOrder`, proposal deduplication and its warning,
   the warning projection, and the tool description.
-- **Schema**: `schemas/review-dispatch/v1.0.0.schema.json` gains
-  the optional `proposals` property and a `lessonProposal`
-  definition.
+- **Schema**: `schemas/review-dispatch/v1.0.0.schema.json` and its
+  `.uf/schemas/` and scaffold copies gain the optional `proposals`
+  property and a `lessonProposal` definition.
 - **Commands**: `uf.review-council.md` Sections 2, 4, and 5;
   `uf.review-pr.md` Section 5; `uf.unleash.md` Steps 4 and 6;
   `uf.triage-issue.md` Sections 2.3, 2.4, 3.1, and 4.6;

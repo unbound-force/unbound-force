@@ -1234,10 +1234,20 @@ Each entry follows the format: `- <change-name>: <summary>`.
   it instead of from the 512-character tool-result preview. Before,
   all 7 lessons of a `/uf.review-pr 937` run were stored cut
   mid-word. Near-identical proposals across personas are merged
-  first by a deterministic token-overlap rule (the longer text
-  wins), and each merge is reported as a `duplicate_proposal_merged`
-  warning. A failed finalization stores no lesson; the proposals
-  stay in the dispatch store and are reported as stranded.
+  first by a deterministic Jaccard rule with a negation guard (the
+  longer text wins; a lesson and its negation are both kept), and
+  each merge is reported as a `duplicate_proposal_merged` warning.
+  At most 512 proposals persist, the rest reported as
+  `proposals_overflow`. A new `read_dispatch_artifact` tool pages
+  the artifact by correlation ID and section in complete entries
+  under 40 KiB, and every consumer reads through it, because the
+  file-read tool cuts the artifact's long lines at 2,000
+  characters. The schema change is mirrored to `.uf/schemas/` and
+  the scaffold copy, now gated by a parity test. A failed
+  finalization stores no lesson; the proposals stay in the
+  dispatch store and are reported as stranded, as are previewed
+  lessons when an older loaded plugin wrote no
+  `payload.proposals`.
   (Spec: openspec/changes/review-dispatch-consumer-bounds/,
   Fixes: #941)
 - review-dispatch-consumer-bounds (#945): `/uf.triage-issue` and
@@ -1259,7 +1269,8 @@ Each entry follows the format: `- <change-name>: <summary>`.
 - dispatch-error-summary (#946): a failed `dispatch_review_runs`
   call now ends its one-line summary with
   ` — error: <message> (retryable: <bool>)`, the failure message
-  collapsed to one line and cut to 512 characters. Before, the reason
+  collapsed to one line and cut to at most 512 characters including
+  the ellipsis. Before, the reason
   (for example `diff_path is required for non-triage modes`) lived
   only in tool metadata the calling agent cannot see, and one
   `/uf.address-feedback` run retried the identical call and then

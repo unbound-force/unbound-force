@@ -923,7 +923,7 @@ describe("dispatch_review_runs", () => {
       const tail = line.slice(line.indexOf("— error: ") + "— error: ".length)
       expect(tail.startsWith("first line x")).toBe(true)
       expect(tail.endsWith("…")).toBe(true)
-      expect(tail).toHaveLength(513)
+      expect(tail).toHaveLength(512)
       expect(line).not.toContain("retryable")
       expect(dispatchSummaryLine({ ...base, status: "error", retryable: true })).toContain(
         "— error: no failure message reported (retryable: true)",

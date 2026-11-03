@@ -88,10 +88,13 @@ compact result, so every output agrees.
 1. Tokenize `information`: Unicode NFKC, lowercase, split on runs of
    characters that are not letters or digits, and drop a fixed list
    of English stop words. Use the token set.
-2. Two proposals are near-identical when the smaller token set has
-   at least 4 tokens and the overlap coefficient
-   `|A ∩ B| / min(|A|, |B|)` is at least 0.5, or when either set has
-   fewer than 4 tokens and the two token sequences are equal.
+2. A proposal that carries a negation token (`not`, `no`, `never`,
+   `cannot`, `nor`, `without`, or the `t` of an "n't" contraction)
+   never matches one that carries none. Otherwise two proposals are
+   near-identical when both token sets have at least 6 tokens and
+   the Jaccard similarity `|A ∩ B| / |A ∪ B|` is at least 0.3, or
+   when either set has fewer than 6 tokens and the two token
+   sequences are equal.
 3. Walk proposals in collection order. Compare each with the kept
    entries in order; on the first near-identical match keep the
    entry with the longer `information` (the earlier one on a tie)
@@ -104,7 +107,20 @@ compact result, so every output agrees.
 Tags and categories do not take part: the #941 duplicate pair used
 the tags `tool-input-validation` and `opencode-plugins`. The
 threshold comes from that session's 7 stored proposals: the
-duplicate pair scores 0.59 and every other pair scores at most 0.18.
+duplicate pair scores 0.39 and every other pair at most 0.10.
+
+The first revision used the overlap coefficient
+`|A ∩ B| / min(|A|, |B|)` at 0.5. Review showed two false merges:
+"Retry is not safe: finalization is not idempotent" and "Retry is
+safe: finalization is idempotent" scored 1.0, and a short lesson
+whose words recur in a long one was always dropped. Jaccard is
+symmetric, so the subset case scores low, and the negation guard
+separates opposite lessons that share every content word.
+
+After deduplication, at most 512 proposals are kept (the payload
+schema bound). The rest are counted in one `proposals_overflow`
+warning, mirroring `consolidated_findings_overflow`, so the bound
+cannot strand finalization.
 
 Alternatives rejected:
 
@@ -182,6 +198,46 @@ With this change no in-repo command calls `consolidate_dispatch`
 with `detail: "full"`. The mode stays the default for external
 callers and for compatibility.
 
+### D7. A bounded reader replaces file reads of the artifact
+
+The artifact is written with `JSON.stringify(envelope, null, 2)`, so
+every string sits on one line, and opencode's file-read tool cuts
+lines at 2,000 characters. A lesson longer than that would be stored
+shortened again, or the consumer's parse would fail; triage and
+feedback, which now read `runs` only from the artifact, would fail
+closed.
+
+`read_dispatch_artifact` takes a `correlation_id`, a `section`
+(`summary`, `findings`, `advisories`, `proposals`, `runs`), and an
+`offset`. It derives the path from the correlation ID inside the
+dispatch store, rejects symlinks and files over 64 MiB, validates
+the envelope type and the strict payload schema, and returns pages
+of complete entries under 40,960 bytes of compact JSON with a
+`next_offset`. `runs` entries drop their `findings` (each finding is
+already in the `findings` section with its `run_ids`), which keeps a
+run entry small. A single entry larger than the page budget is
+served alone so paging always advances; only a pathological entry
+(16,384 control characters escaped six-fold) can then exceed the
+host window.
+
+Alternatives rejected:
+
+- **`jq` extraction per field in command prose.** Mechanical
+  procedural prose where a tool is feasible violates the
+  Determinism gate.
+- **Write the artifact compactly.** Every string still lands on one
+  line, and the whole file becomes one line.
+
+Consumers whose compact preview shows proposals but whose artifact
+carries none are running an older loaded plugin; they report those
+lessons as stranded rather than "none submitted".
+
+A bounded retry of a timed-out finalization was considered and not
+added: finalization is not idempotent (a second call after a
+persisted first attempt collides on the artifact path and mints a
+new correlation ID), so a tool error stays non-mechanical and fails
+closed, as before.
+
 ### D6. Spec deltas for `diff_not_found` (#943)
 
 The `build-review-prompts` and `review-dispatch-diff-manifest`
@@ -194,13 +250,15 @@ missing path never reaches the read), and RD-FR-034 gains a
 
 ## Risks / Trade-offs
 
-- **False-positive merges.** A 0.5 overlap could merge two distinct
-  lessons on one topic. Every merge is reported as a warning naming
-  both agents, the longer text survives, and the threshold sits
-  well above the 0.18 measured between distinct lessons.
+- **False-positive merges.** A 0.3 Jaccard similarity could merge
+  two distinct lessons on one topic. Every merge is reported as a
+  warning naming both agents, the longer text survives, opposite
+  polarities never merge, and the threshold sits well above the
+  0.10 measured between distinct lessons.
 - **Artifact size.** 512 proposals of 16,384 characters would add
   about 8 MiB. Realistic dispatches carry fewer than 10 proposals
-  of under 2 KB. Consumers already page through the artifact.
+  of under 2 KB. Consumers page through `read_dispatch_artifact`
+  (D7).
 - **Older plugin, newer command.** A command reading an artifact
   written before this change finds no `payload.proposals` and
   stores nothing. The scaffold ships plugin and commands together.

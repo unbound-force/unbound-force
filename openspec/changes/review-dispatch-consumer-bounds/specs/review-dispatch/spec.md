@@ -2,14 +2,14 @@
      change: review-dispatch-consumer-bounds
      originating_issue: 941
      Durable lesson proposals, cross-persona proposal
-     deduplication, and an artifact-sourced consumer contract.
-     Design rationale and rejected alternatives: design.md
-     (D1-D6). -->
+     deduplication, an artifact-sourced consumer contract, and a
+     bounded artifact reader. Design rationale and rejected
+     alternatives: design.md (D1-D7). -->
 
-Requirement numbering: RD-FR-054 through RD-FR-056 are allocated
+Requirement numbering: RD-FR-054 through RD-FR-057 are allocated
 for this change, from the RD-FR-054..058 range that
-`bound-consolidate-dispatch-output` reserved; RD-FR-057 and
-RD-FR-058 stay reserved for future review-dispatch changes.
+`bound-consolidate-dispatch-output` reserved; RD-FR-058 stays
+reserved for future review-dispatch changes.
 
 Amendment and archive order: each requirement below amends one or
 more requirements of the unarchived
@@ -40,7 +40,12 @@ valid, so artifacts written before this change keep validating.
 When `consolidate_dispatch` finalizes (provenance supplied), the
 payload it hands to `finalizeReviewDispatch` MUST carry the
 deduplicated proposals of RD-FR-055 with their full `information`
-text, and MUST omit `proposals` when there are none. The persisted
+text, and MUST omit `proposals` when there are none. When more than
+512 deduplicated proposals remain, it MUST keep the first 512 and
+append one `{type: "proposals_overflow", kept_proposals,
+dropped_proposals}` warning (summary `detail`
+`kept=<n> dropped=<n>`), so the array bound never fails
+finalization. The persisted
 artifact MUST serialize `proposals` after `advisories` and before
 `plan` and `runs`. `warnings` MUST remain result-level observability
 and MUST NOT enter the payload.
@@ -89,6 +94,16 @@ from the artifact.
   `schemas/review-dispatch/v1.0.0.schema.json`
 - **THEN** both accept it
 
+#### Scenario: Proposal overflow is capped, not fatal
+
+- **GIVEN** a dispatch whose successful runs submitted 515 distinct
+  proposals
+- **WHEN** `consolidate_dispatch` finalizes
+- **THEN** finalization succeeds and the artifact carries the first
+  512
+- **AND** one `proposals_overflow` warning reports 512 kept and 3
+  dropped
+
 #### Scenario: Malformed persisted proposal is rejected
 
 - **GIVEN** a finalization payload whose `proposals` entry has an
@@ -113,10 +128,14 @@ Deduplication MUST be deterministic:
    NFKC normalization and lowercasing, split on every run of
    characters that are neither letters nor digits, with a fixed
    list of English stop words removed.
-2. Two proposals are near-identical when both token sets carry at
-   least 4 tokens and `|A ∩ B| / min(|A|, |B|)` is at least 0.5, or
-   when either set carries fewer than 4 tokens and the two
-   proposals' token sequences are equal.
+2. Two proposals are never near-identical when exactly one of them
+   carries a negation token (`not`, `no`, `never`, `cannot`, `nor`,
+   `without`, or the `t` left by an "n't" contraction). Otherwise
+   they are near-identical when both token sets carry at least 6
+   tokens and the Jaccard similarity `|A ∩ B| / |A ∪ B|` is at least
+   0.3, or when either set carries fewer than 6 tokens and the two
+   proposals' token sequences are equal. The symmetric measure keeps
+   a short lesson whose words mostly recur in a longer one.
 3. Proposals are visited in collection order and compared with
    the kept entries in order. On the first near-identical match,
    the entry with the longer `information` (the kept one on a tie)
@@ -127,9 +146,10 @@ Each dropped proposal MUST append one warning
 `{type: "duplicate_proposal_merged", agent, kept_agent}`, where
 `agent` names the dropped entry's agent and `kept_agent` the kept
 entry's. This amends the warning kinds of RD-FR-049 and RD-FR-052
-from five to six: the summary and compact projections compose its
+from five to seven: the summary and compact projections compose its
 `detail` as `agent=<agent> kept=<kept_agent>`, and RD-FR-052
-recovery accepts `duplicate_proposal_merged` as a documented kind.
+recovery accepts `duplicate_proposal_merged` and the RD-FR-054
+`proposals_overflow` as documented kinds.
 
 #### Scenario: Two personas submit the same lesson
 
@@ -152,10 +172,26 @@ recovery accepts `duplicate_proposal_merged` as a documented kind.
 
 #### Scenario: Short proposals match only exactly
 
-- **GIVEN** two proposals whose token sets carry fewer than 4
+- **GIVEN** two proposals whose token sets carry fewer than 6
   tokens and differ in one token
 - **WHEN** `consolidate_dispatch` runs
 - **THEN** both are kept
+
+#### Scenario: A lesson and its negation are both kept
+
+- **GIVEN** "Retry is not safe: finalization is not idempotent" and
+  "Retry is safe: finalization is idempotent", worded otherwise
+  alike
+- **WHEN** `consolidate_dispatch` runs
+- **THEN** both are kept and no merge warning is emitted
+
+#### Scenario: A short lesson inside a long one is kept
+
+- **GIVEN** a one-sentence proposal whose words all recur inside a
+  much longer proposal
+- **WHEN** `consolidate_dispatch` runs
+- **THEN** both are kept, because their Jaccard similarity is below
+  0.3
 
 ### Requirement: Artifact-Sourced Consumer Contract
 
@@ -166,12 +202,16 @@ paragraph of RD-FR-052, and revisits design D5 of
 `bound-consolidate-dispatch-output`.
 
 Every in-repo command that stores dispatch lessons MUST store them
-from the persisted artifact at the compact finalization result's
-`artifact_path`, reading `payload.proposals` in the same single read
-that yields `payload.findings` and `payload.advisories`. It MUST
-call `dewey_store_learning` exactly once per entry, using the
-entry's `information`, `tag`, and `category`. An absent
-`payload.proposals` means no lesson was submitted. It MUST NOT store
+from the persisted artifact, reading `payload.proposals` through the
+RD-FR-057 `read_dispatch_artifact` tool, never with the file-read
+tool. Every artifact read in these commands (findings, advisories,
+proposals, runs) MUST use that tool. It MUST call
+`dewey_store_learning` exactly once per entry, using the entry's
+`information`, `tag`, and `category`. An empty `proposals` section
+means no lesson was submitted, unless the compact result's
+`proposals` preview is non-empty: that means the loaded plugin
+predates durable proposals, and the command MUST store nothing and
+report the previewed lessons as stranded. It MUST NOT store
 a lesson from the summary retrieval, the compact finalization
 result, `dispatch_review_runs`, child transcripts, run files, or the
 session database. When finalization fails, the command MUST store no
@@ -192,8 +232,8 @@ No in-repo command may call `consolidate_dispatch` with
 - `uf.triage-issue.md`: Section 2.3 performs the Section 4.6
   finalization immediately after `dispatch_review_runs`; lesson
   storage (Section 2.4), verdict resolution (Section 3.1), and the
-  `read_assessment_fields` run ids read `payload.runs`,
-  `payload.proposals`, findings, and advisories from the artifact.
+  `read_assessment_fields` run ids read the `runs`, `proposals`,
+  `findings`, and `advisories` sections of the artifact.
   Section 4.6 MUST NOT call `consolidate_dispatch` again.
 - `uf.address-feedback.md`: each Tier 2 item runs its Section 2.3.8
   finalization immediately after its Section 2.3.4 dispatch;
@@ -241,3 +281,71 @@ finding, or proposal. The all-skip and forwarded-`correlation_id`
 - **THEN** it stores no lesson and reports the proposals as
   stranded in the dispatch store
 - **AND** it fabricates no proposal from a preview array
+
+#### Scenario: An older loaded plugin strands previewed lessons
+
+- **GIVEN** a compact result whose `proposals` preview is non-empty
+  and an artifact with no `payload.proposals`
+- **WHEN** a consumer reaches lesson storage
+- **THEN** it stores nothing and reports the previewed lessons as
+  stranded rather than "none submitted"
+
+### Requirement: Bounded Artifact Reader
+
+**ID: RD-FR-057** This requirement MUST be satisfied.
+
+The review-dispatch plugin MUST register a `read_dispatch_artifact`
+tool. Its strict input carries a `correlation_id` (UUID), a
+`section` (`summary`, `findings`, `advisories`, `proposals`, or
+`runs`), and an optional non-negative integer `offset`. The tool
+MUST derive the artifact path as
+`.uf/artifacts/dispatch/<correlation_id>.json` under the project
+root and MUST NOT read any caller-supplied path. It MUST fail
+closed with `{status: "error", code, message}` — code
+`invalid_input`, `not_found`, or `invalid_artifact` — when the
+input fails validation, the file is absent, the file is not a
+regular non-symlink file of at most 64 MiB, the content does not
+parse, `artifact_type` is not `review-dispatch`, or the payload
+fails the strict payload schema.
+
+The `summary` section MUST return the command, mode, verdict,
+`verdict_reason`, run counts, coverage, workflow result, and the
+entry counts of findings, advisories, proposals, and runs. Every
+other section MUST return `{total, offset, entries, next_offset}`
+with complete, untruncated entries starting at `offset`, adding
+entries while the compact serialization stays under 40,960 bytes
+and always returning at least one entry when any remain;
+`next_offset` is null on the last page. `runs` entries MUST omit
+their `findings` and carry `finding_count` instead, because each
+finding appears once in the `findings` section with its `run_ids`.
+
+This replaces reading the artifact with the file-read tool:
+`JSON.stringify(envelope, null, 2)` writes each string on one line,
+and the host's file-read tool cuts lines at 2,000 characters, so a
+long proposal or finding would be stored shortened or fail the
+parse.
+
+#### Scenario: Long proposals page intact
+
+- **GIVEN** an artifact carrying seven proposals of 9,000
+  characters each
+- **WHEN** a consumer calls `read_dispatch_artifact` with
+  `section: "proposals"` and follows `next_offset` until null
+- **THEN** every page is under 40,960 bytes
+- **AND** the seven entries arrive complete and in order
+
+#### Scenario: Runs omit their findings
+
+- **GIVEN** a finalized artifact
+- **WHEN** `section: "runs"` is read
+- **THEN** each entry carries the run's provenance, terminal state,
+  `workflow_verdict`, and `finding_count`, and no `findings`
+
+#### Scenario: Reader fails closed
+
+- **GIVEN** a correlation ID with no artifact, an artifact that does
+  not parse, a symlinked artifact, or a payload that fails the
+  strict schema
+- **WHEN** `read_dispatch_artifact` is called
+- **THEN** it returns `status: "error"` with `not_found` or
+  `invalid_artifact` and no entries

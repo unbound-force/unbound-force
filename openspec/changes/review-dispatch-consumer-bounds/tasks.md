@@ -48,6 +48,19 @@
 - [x] 3.2 [P] `openspec/changes/review-dispatch-diff-manifest/specs/review-dispatch/spec.md`:
       `read_diff_chunk` `diff_not_found` scenario (#943).
 
+## 5. Review follow-ups (design D2, D7)
+
+- [x] 5.1 Copy the updated `schemas/review-dispatch/v1.0.0.schema.json`
+      to `.uf/schemas/` and `internal/scaffold/assets/uf/schemas/`; add `TestSchemaRegistryMatchesUFCopies`.
+- [x] 5.2 Switch deduplication to Jaccard >= 0.3 with a 6-token floor
+      and a negation guard; test the negated and subset pairs.
+- [x] 5.3 Cap persisted proposals at 512 with a `proposals_overflow`
+      warning; test 515 proposals.
+- [x] 5.4 Add `read_dispatch_artifact` (RD-FR-057) with tests, and move
+      every consumer's artifact read onto it, including the older-plugin stranded rule.
+- [x] 5.5 Nits: Section 3.2 reference, 512-character bound including
+      the ellipsis, pre-dedupe proposal count note.
+
 ## 4. Mirror, documentation, CI parity
 
 - [x] 4.1 Copy every edited `.opencode/` file byte-identical into
