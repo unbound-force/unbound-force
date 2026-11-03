@@ -1292,6 +1292,20 @@ Each entry follows the format: `- <change-name>: <summary>`.
   integrity hashes, verified 2026-11-06. Rollback: revert this
   commit to restore zod 4.1.8 and toml 4.2.0.
   (Spec: openspec/changes/stop-shipping-plugin-lock/)
+- push-tool-target (#947): `git_push` and
+  `git_push_force_with_lease` now require `branch` (optional
+  `remote`, default `origin`) and refuse with `BRANCH_MISMATCH`
+  when the checkout is on another branch or a detached HEAD,
+  instead of pushing whatever happened to be checked out. Both
+  push `HEAD:refs/heads/<branch>` with an explicit refspec; the
+  force tool leases on `refs/heads/<branch>:<expected_sha>`
+  (`expected_sha` optional, defaulting to the remote-tracking
+  ref, or "must not exist" when there is none). Both return
+  `{remote, ref, old_sha, new_sha, updated}`, with `updated:
+  false` for an up-to-date no-op. `/uf.finale`, `/uf.fix-ci`
+  and `/uf.rebase-pr` pass `branch`; `/uf.rebase-pr` drops its
+  upstream check and bash fallback and leases on the PR's
+  pre-rebase `headRefOid`. (Fixes: #947)
 - review-dispatch-consumer-bounds (#941): lesson proposals are now
   stored with their full text. `consolidate_dispatch` persists the
   proposals in the dispatch artifact as an optional
