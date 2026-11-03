@@ -1242,30 +1242,38 @@ Each entry follows the format: `- <change-name>: <summary>`.
   longer searches `.opencode/skill`, so a stale legacy copy can't
   be what a skill reference resolves to. This repo's
   `unbound-force-heroes` skill moves to `.opencode/skills/`.
-  (Fixes: #933)
+  Stealth mode skips this migration and the `command/` one,
+  since both run after the stealth restore. (Fixes: #933)
 - skill-root-file (#934): `uf_delegate_command` now resolves a
   bare `skill` value as a repo skill name first and, when no skill
   root holds it, as a repo-root file, so `Makefile` or
   `build-all.sh` no longer fail `SKILL_NOT_FOUND` (`./Makefile`
-  also works as an explicit path). A value with whitespace, such
+  also works as an explicit path). A directory never resolves as
+  a reference. A value with whitespace, such
   as `make plugin-test`, fails `SKILL_NOT_FOUND` with a message
   that commands and make targets are not skill references and
   points to `skill_absent_reason`. `/uf.unleash` states the rule.
   (Fixes: #934)
 - push-tool-target (#947): `git_push` and
   `git_push_force_with_lease` now require `branch` (optional
-  `remote`, default `origin`) and refuse with `BRANCH_MISMATCH`
-  when the checkout is on another branch or a detached HEAD,
+  `remote`, default `origin`; `HEAD` is rejected) and refuse with
+  `BRANCH_MISMATCH` unless `symbolic-ref HEAD` is
+  `refs/heads/<branch>` (a detached HEAD or another branch),
   instead of pushing whatever happened to be checked out. Both
-  push `HEAD:refs/heads/<branch>` with an explicit refspec; the
-  force tool leases on `refs/heads/<branch>:<expected_sha>`
-  (`expected_sha` optional, defaulting to the remote-tracking
-  ref, or "must not exist" when there is none). Both return
-  `{remote, ref, old_sha, new_sha, updated}`, with `updated:
-  false` for an up-to-date no-op. `/uf.finale`, `/uf.fix-ci`
-  and `/uf.rebase-pr` pass `branch`; `/uf.rebase-pr` drops its
-  upstream check and bash fallback and leases on the PR's
-  pre-rebase `headRefOid`. (Fixes: #947)
+  push the verified HEAD commit to `refs/heads/<branch>` with an
+  explicit refspec. The force tool leases on
+  `refs/heads/<branch>:<expected_sha>`; without `expected_sha`
+  it leases on the remote-tracking ref with
+  `--force-if-includes`, so a fetch that pulled in a
+  collaborator's commit cannot be overwritten, or on "must not
+  exist" when there is no tracking ref. An `expected_sha` that
+  isn't a local commit fails `EXPECTED_SHA_UNKNOWN` without
+  pushing. Both return `{remote, ref, old_sha, new_sha,
+  updated}`, with `updated: false` for an up-to-date no-op.
+  `/uf.finale`, `/uf.fix-ci` and `/uf.rebase-pr` pass `branch`;
+  `/uf.fix-ci` and `/uf.rebase-pr` lease on the PR's pre-fetch
+  head SHA, and `/uf.rebase-pr` drops its upstream check and
+  bash fallback. (Fixes: #947)
 - review-dispatch-consumer-bounds (#941): lesson proposals are now
   stored with their full text. `consolidate_dispatch` persists the
   proposals in the dispatch artifact as an optional

@@ -203,6 +203,11 @@ checkout is on another branch — **STOP** and report; never
 switch branches to retry. On success they return `{remote, ref,
 old_sha, new_sha, updated}`: report the ref and SHAs, and treat
 `updated: false` as "already up to date", not as a new push.
+Without `expected_sha`, `git_push_force_with_lease` leases on
+the remote-tracking ref with `--force-if-includes`, so a
+collaborator's commit that a fetch pulled in but the rebase did
+not include is never overwritten: on a lease rejection,
+**STOP** and report — never retry with `--force`.
 
 Use **question tool**: `["Push to remote",
 "Abort -- keep commits local"]`.
