@@ -461,15 +461,18 @@ func Run(opts Options) (*Result, error) {
 	// Migrate legacy .opencode/command/ to .opencode/commands/.
 	// Runs after initSubTools() so files created by specify init,
 	// gaze init, etc. in the old directory are caught and moved.
-	if migResult := migrateCommandDir(&opts); migResult != nil {
-		subResults = append(subResults, *migResult)
-	}
-
-	// Migrate legacy .opencode/skill/ to .opencode/skills/ (#933):
-	// opencode loads both, so a stale legacy copy shadows or
-	// duplicates the scaffolded skill.
-	if migResult := migrateSkillDir(&opts); migResult != nil {
-		subResults = append(subResults, *migResult)
+	// Then migrate legacy .opencode/skill/ to .opencode/skills/
+	// (#933): opencode loads both, so a stale legacy copy shadows
+	// or duplicates the scaffolded skill. Both run after the
+	// stealth restore, so stealth mode skips them: moving tracked
+	// legacy files would leave the tree modified.
+	if !opts.Stealth {
+		if migResult := migrateCommandDir(&opts); migResult != nil {
+			subResults = append(subResults, *migResult)
+		}
+		if migResult := migrateSkillDir(&opts); migResult != nil {
+			subResults = append(subResults, *migResult)
+		}
 	}
 
 	// Remove orphaned old-name command files left behind
@@ -2096,9 +2099,10 @@ func migrateCommandDir(opts *Options) *subToolResult {
 // stale (uf init has just written the current version under
 // skills/); any other differing copy is kept in place with a
 // conflict warning, never overwritten or deleted. Empty legacy
-// directories are removed. Idempotent and re-runnable. Returns nil
-// when there is nothing to migrate (silent no-op). Skipped in
-// DivisorOnly mode, like migrateCommandDir.
+// directories are removed. Idempotent and re-runnable; a rerun
+// that changes nothing reports "skipped". Returns nil when there
+// is nothing to migrate (silent no-op). Skipped in DivisorOnly
+// mode, like migrateCommandDir; Run skips it in stealth mode.
 func migrateSkillDir(opts *Options) *subToolResult {
 	if opts.DivisorOnly {
 		return nil
@@ -2217,7 +2221,7 @@ func migrateSkillDir(opts *Options) *subToolResult {
 		default:
 			_, _ = fmt.Fprintf(opts.Stdout,
 				"  ⚠ skill/%s: conflict — kept both copies; reconcile and remove"+
-					" .opencode/skill/%s (run /uf.init for AI-assisted resolution)\n",
+					" .opencode/skill/%s\n",
 				slashRel, slashRel)
 			conflicts++
 		}
@@ -2229,9 +2233,14 @@ func migrateSkillDir(opts *Options) *subToolResult {
 		_ = os.Remove(filepath.Join(oldDir, dirs[i]))
 	}
 
+	// A rerun that only finds kept conflicts changed nothing.
+	action := "migrated"
+	if moved+duplicates+stale == 0 {
+		action = "skipped"
+	}
 	return &subToolResult{
 		name:   label,
-		action: "migrated",
+		action: action,
 		detail: fmt.Sprintf("moved %d, removed %d duplicates and %d stale scaffold copies, %d conflicts kept, %d warnings",
 			moved, duplicates, stale, conflicts, warned),
 	}
