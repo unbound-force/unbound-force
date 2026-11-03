@@ -2110,10 +2110,12 @@ function resolveToolParam(
 /**
  * Repo skill roots searched for a `skill` value carrying no path
  * separator, in resolution order (delegation-skill-enforcement D2).
- * Both roots exist in this repository; a name present in both resolves
- * to the first root. A future layout change is a one-constant edit.
+ * The legacy `.opencode/skill` root is not searched: `uf init` migrates
+ * it into `.opencode/skills` (#933), so a stale legacy copy can never be
+ * what a reference resolves to. A future layout change is a one-constant
+ * edit.
  */
-const SKILL_ROOTS = [".opencode/skills", ".opencode/skill"] as const
+const SKILL_ROOTS = [".opencode/skills"] as const
 
 /**
  * Resolve a deterministic delegation's skill reference (design D2): a
