@@ -2118,8 +2118,12 @@ const SKILL_ROOTS = [".opencode/skills", ".opencode/skill"] as const
 /**
  * Resolve a deterministic delegation's skill reference (design D2): a
  * value without `/` is a skill name probed under each repo skill root in
- * order — first root wins on collision; a value containing `/` is a
- * repo-relative script path under the standard traversal guard.
+ * order — first root wins on collision — and, when no root holds it, a
+ * repo-root file (`Makefile`, `build-all.sh`); a value containing `/` is
+ * a repo-relative script path (`./Makefile` names a root file
+ * explicitly). Both path forms use the standard traversal guard. A
+ * command string such as `make plugin-test` is never a reference: it
+ * fails SKILL_NOT_FOUND with a pointer to skill_absent_reason.
  * Resolution is an existence check on the injected fileExists dependency
  * — no content is read (the child loads the skill or runs the script
  * through its own tooling). Returns the resolved repo-relative reference
@@ -2135,6 +2139,21 @@ function resolveSkillReference(
   const remediation =
     "Remediation: pass an existing skill name or a repo-relative script path, " +
     "or record skill_absent_reason when no repo skill applies; retrying will not fix this."
+  if (/\s/.test(skill)) {
+    // A command or make target ("make plugin-test") is not a file
+    // reference; name the file that defines it or record the reason.
+    return {
+      ok: false,
+      failureOutput: JSON.stringify(
+        failure(
+          `Skill reference "${skill}" does not resolve: commands and make targets are not ` +
+            "skill references. Reference the script file that defines the procedure " +
+            `(e.g. Makefile) or record skill_absent_reason naming the command. ${remediation}`,
+          { retryable: false, code: "SKILL_NOT_FOUND" },
+        ),
+      ),
+    }
+  }
   if (!skill.includes("/")) {
     // Skill name: probe each root in order; the first existing entry wins
     // (spec scenario: skill-root collision resolves to the first root).
@@ -2144,7 +2163,15 @@ function resolveSkillReference(
         return { ok: true, resolved: candidate }
       }
     }
-    const searchedLocations = SKILL_ROOTS.map((root) => `${root}/${skill}/SKILL.md`).join(", ")
+    // No skill by that name: fall back to a repo-root file (#934).
+    const rootFile = resolveRepoRelative(cwd, skill)
+    if (rootFile !== null && fileExists(rootFile)) {
+      return { ok: true, resolved: skill }
+    }
+    const searchedLocations = [
+      ...SKILL_ROOTS.map((root) => `${root}/${skill}/SKILL.md`),
+      `${skill} (repo-root file)`,
+    ].join(", ")
     return {
       ok: false,
       failureOutput: JSON.stringify(
@@ -2440,7 +2467,8 @@ export function createDelegateCommandTool(
       ),
       skill: DelegateCommandInputSchema.shape.skill.describe(
         "Optional repo skill or script reference named for deterministic-classified work " +
-          "(1-256 chars). Mutually exclusive with skill_absent_reason and valid only with " +
+          "(1-256 chars): a skill name, a repo-root file (Makefile), or a repo-relative " +
+          "script path (scripts/build.sh). Commands and make targets are not references. Mutually exclusive with skill_absent_reason and valid only with " +
           "task_classification \"deterministic\".",
       ),
       skill_absent_reason: DelegateCommandInputSchema.shape.skill_absent_reason.describe(

@@ -1292,6 +1292,15 @@ Each entry follows the format: `- <change-name>: <summary>`.
   integrity hashes, verified 2026-11-06. Rollback: revert this
   commit to restore zod 4.1.8 and toml 4.2.0.
   (Spec: openspec/changes/stop-shipping-plugin-lock/)
+- skill-root-file (#934): `uf_delegate_command` now resolves a
+  bare `skill` value as a repo skill name first and, when no skill
+  root holds it, as a repo-root file, so `Makefile` or
+  `build-all.sh` no longer fail `SKILL_NOT_FOUND` (`./Makefile`
+  also works as an explicit path). A value with whitespace, such
+  as `make plugin-test`, fails `SKILL_NOT_FOUND` with a message
+  that commands and make targets are not skill references and
+  points to `skill_absent_reason`. `/uf.unleash` states the rule.
+  (Fixes: #934)
 - push-tool-target (#947): `git_push` and
   `git_push_force_with_lease` now require `branch` (optional
   `remote`, default `origin`) and refuse with `BRANCH_MISMATCH`
