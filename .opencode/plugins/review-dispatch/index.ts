@@ -590,6 +590,21 @@ const DispatchRunSchema = z
   })
   .strict()
 
+/**
+ * Finalization-input view of a run (issue #931). Run files and invocation
+ * provenance carry `read_only`, and hosts assembling a finalization payload
+ * copy it into each run, but DispatchRunSchema is strict and the artifact run
+ * shape has no such field. Drop exactly that plugin-emitted key before strict
+ * validation; every other unknown run key is still rejected.
+ */
+const FinalizationRunSchema = z.preprocess((value) => {
+  if (value === null || typeof value !== "object" || Array.isArray(value) || !("read_only" in value)) {
+    return value
+  }
+  const { read_only: _readOnly, ...rest } = value as Record<string, unknown>
+  return rest
+}, DispatchRunSchema)
+
 const ConsolidatedFindingSchema = RunFindingSchema.extend({
   run_ids: uniqueArray(UUIDSchema, 64).min(1),
 }).strict()
@@ -841,7 +856,7 @@ const ReviewDispatchPayloadSchema = z
     change_profile: ChangeProfileSchema,
     plan_version: z.literal(1),
     plan: z.array(DispatchPlanEntrySchema).max(512),
-    runs: z.array(DispatchRunSchema).max(64),
+    runs: z.array(FinalizationRunSchema).max(64),
     coverage: CoverageSchema,
     findings: z.array(ConsolidatedFindingSchema).max(512),
     advisories: z.array(AdvisorySchema).max(512),

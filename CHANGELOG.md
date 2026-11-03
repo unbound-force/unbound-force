@@ -1229,6 +1229,14 @@ Each entry follows the format: `- <change-name>: <summary>`.
   Output contract unchanged. (Spec:
   openspec/changes/fix-uf-finale-ci-poll-gh-schema/,
   Fixes: #895, Docs: #925, unbound-force/website#372)
+- finalize-run-read-only (#931): `finalize_review_dispatch` payload
+  validation now strips the
+  plugin-emitted `read_only` key from each run before the strict
+  `DispatchRunSchema` check, instead of rejecting the payload with
+  `Unrecognized key: "read_only"` (54 rejections across 39 sessions,
+  because run files and invocation provenance carry the key and hosts
+  copy it into runs). Any other unknown run key is still rejected,
+  and persisted artifacts never contain `read_only` on runs.
 - review-pr-consolidate-dispatch: `/uf.review-pr` now finalizes every
   dispatch through exactly one `consolidate_dispatch` call per
   finalization attempt, carrying the captured `correlation_id` plus
