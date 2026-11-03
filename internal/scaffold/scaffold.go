@@ -465,6 +465,13 @@ func Run(opts Options) (*Result, error) {
 		subResults = append(subResults, *migResult)
 	}
 
+	// Migrate legacy .opencode/skill/ to .opencode/skills/ (#933):
+	// opencode loads both, so a stale legacy copy shadows or
+	// duplicates the scaffolded skill.
+	if migResult := migrateSkillDir(&opts); migResult != nil {
+		subResults = append(subResults, *migResult)
+	}
+
 	// Remove orphaned old-name command files left behind
 	// after the uf. namespace prefix rename.
 	migrated := cleanupRenamedCommands(opts.Stdout, opts.TargetDir)
@@ -2077,6 +2084,180 @@ func migrateCommandDir(opts *Options) *subToolResult {
 		detail: fmt.Sprintf("moved %d, skipped %d duplicates, %d warnings",
 			moved, skipped, warned),
 	}
+}
+
+// migrateSkillDir moves skills from the legacy .opencode/skill/
+// directory to the canonical .opencode/skills/ directory, so opencode
+// stops loading two copies of the same skill (#933). Handles three
+// cases: atomic rename (only old exists), per-file merge (both
+// exist), and no-op (old does not exist). In a merge, a legacy file
+// with no counterpart is moved; a byte-identical copy is removed; a
+// differing copy of a tool-owned scaffold skill file is removed as
+// stale (uf init has just written the current version under
+// skills/); any other differing copy is kept in place with a
+// conflict warning, never overwritten or deleted. Empty legacy
+// directories are removed. Idempotent and re-runnable. Returns nil
+// when there is nothing to migrate (silent no-op). Skipped in
+// DivisorOnly mode, like migrateCommandDir.
+func migrateSkillDir(opts *Options) *subToolResult {
+	if opts.DivisorOnly {
+		return nil
+	}
+
+	const label = ".opencode/skill/ → skills/"
+	oldDir := filepath.Join(opts.TargetDir, ".opencode", "skill")
+	newDir := filepath.Join(opts.TargetDir, ".opencode", "skills")
+
+	oldInfo, err := os.Lstat(oldDir)
+	if err != nil {
+		return nil
+	}
+	if oldInfo.Mode()&os.ModeSymlink != 0 {
+		return &subToolResult{
+			name:   ".opencode/skill/",
+			action: "skipped",
+			detail: "symlink detected; manual migration required",
+		}
+	}
+
+	// Case: only old dir exists — atomic rename.
+	if _, statErr := os.Stat(newDir); os.IsNotExist(statErr) {
+		if renameErr := os.Rename(oldDir, newDir); renameErr != nil {
+			return &subToolResult{
+				name:   label,
+				action: "failed",
+				detail: fmt.Sprintf("rename: %v", renameErr),
+			}
+		}
+		return &subToolResult{
+			name:   label,
+			action: "migrated",
+			detail: fmt.Sprintf("%d skills renamed", countSubdirs(newDir)),
+		}
+	}
+
+	// Case: both dirs exist — per-file merge.
+	var files, dirs []string
+	walkErr := filepath.WalkDir(oldDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(oldDir, path)
+		if relErr != nil {
+			return relErr
+		}
+		switch {
+		case d.IsDir():
+			dirs = append(dirs, rel)
+		case d.Type()&os.ModeSymlink != 0:
+			// Symlinks stay for manual migration; the legacy
+			// directory then survives the cleanup below.
+			_, _ = fmt.Fprintf(opts.Stdout,
+				"  ⚠ skill/%s: symlink — manual migration required\n", filepath.ToSlash(rel))
+		default:
+			files = append(files, rel)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return &subToolResult{
+			name:   label,
+			action: "failed",
+			detail: fmt.Sprintf("read old dir: %v", walkErr),
+		}
+	}
+
+	var moved, duplicates, stale, conflicts, warned int
+	for _, rel := range files {
+		slashRel := filepath.ToSlash(rel)
+		oldPath := filepath.Join(oldDir, rel)
+		newPath := filepath.Join(newDir, rel)
+
+		if _, statErr := os.Stat(newPath); statErr != nil {
+			// File only in old dir — move it.
+			if mkErr := os.MkdirAll(filepath.Dir(newPath), 0o755); mkErr != nil {
+				_, _ = fmt.Fprintf(opts.Stdout,
+					"  ⚠ skill/%s: move failed: %v\n", slashRel, mkErr)
+				warned++
+				continue
+			}
+			if moveErr := moveFile(oldPath, newPath, opts); moveErr != nil {
+				_, _ = fmt.Fprintf(opts.Stdout,
+					"  ⚠ skill/%s: move failed: %v\n", slashRel, moveErr)
+				warned++
+				continue
+			}
+			moved++
+			continue
+		}
+
+		oldContent, rErr := opts.ReadFile(oldPath)
+		if rErr != nil {
+			_, _ = fmt.Fprintf(opts.Stdout,
+				"  ⚠ skill/%s: read failed: %v\n", slashRel, rErr)
+			warned++
+			continue
+		}
+		newContent, rErr := opts.ReadFile(newPath)
+		if rErr != nil {
+			_, _ = fmt.Fprintf(opts.Stdout,
+				"  ⚠ skill/%s: read failed: %v\n", slashRel, rErr)
+			warned++
+			continue
+		}
+		switch {
+		case bytes.Equal(oldContent, newContent):
+			_ = os.Remove(oldPath)
+			duplicates++
+		case isScaffoldSkillFile(slashRel):
+			// Tool-owned scaffold skill: skills/ holds the
+			// current version, so the legacy copy is stale.
+			_ = os.Remove(oldPath)
+			stale++
+		default:
+			_, _ = fmt.Fprintf(opts.Stdout,
+				"  ⚠ skill/%s: conflict — kept both copies; reconcile and remove"+
+					" .opencode/skill/%s (run /uf.init for AI-assisted resolution)\n",
+				slashRel, slashRel)
+			conflicts++
+		}
+	}
+
+	// Remove emptied directories deepest-first; non-empty ones
+	// (conflicts, symlinks) fail to remove and stay.
+	for i := len(dirs) - 1; i >= 0; i-- {
+		_ = os.Remove(filepath.Join(oldDir, dirs[i]))
+	}
+
+	return &subToolResult{
+		name:   label,
+		action: "migrated",
+		detail: fmt.Sprintf("moved %d, removed %d duplicates and %d stale scaffold copies, %d conflicts kept, %d warnings",
+			moved, duplicates, stale, conflicts, warned),
+	}
+}
+
+// isScaffoldSkillFile reports whether a path relative to the skills
+// directory names a file uf init scaffolds (a tool-owned embedded
+// asset under opencode/skills/).
+func isScaffoldSkillFile(slashRel string) bool {
+	_, err := fs.Stat(assets, "assets/opencode/skills/"+slashRel)
+	return err == nil
+}
+
+// countSubdirs counts the immediate subdirectories of dir.
+func countSubdirs(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			count++
+		}
+	}
+	return count
 }
 
 // moveFile moves a file from src to dst. Uses os.Rename first

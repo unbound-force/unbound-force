@@ -1103,7 +1103,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
 // ---------------------------------------------------------------------------
 
 describe("uf_delegate_command skill resolution", () => {
-  it("resolves a skill name present only under the second root (.opencode/skill/)", async () => {
+  it("does not resolve a skill present only under the legacy .opencode/skill/ root (#933)", async () => {
     const fake = fakeClient()
     const reads = fakeReadText({})
     const artifact = fakeFileExists([".opencode/skill/unbound-force-heroes/SKILL.md"])
@@ -1120,15 +1120,14 @@ describe("uf_delegate_command skill resolution", () => {
       skill: "unbound-force-heroes",
     })
 
-    // The name misses the first root, hits the second, and the run proceeds.
-    expect(result.status).toBe("ok")
-    expect(fake.calls.prompts).toHaveLength(1)
-    // Both roots are probed in order (D2: .opencode/skills/ then
-    // .opencode/skill/) through the injected FileExists only.
+    // uf init migrates the legacy root into .opencode/skills/, so the
+    // plugin never probes it: a legacy-only copy fails closed.
+    expect(result.status === "error" && result.code).toBe("SKILL_NOT_FOUND")
     expect(artifact.calls).toEqual([
       resolve(FAKE_CWD, ".opencode/skills/unbound-force-heroes/SKILL.md"),
-      resolve(FAKE_CWD, ".opencode/skill/unbound-force-heroes/SKILL.md"),
+      resolve(FAKE_CWD, "unbound-force-heroes"),
     ])
+    expect(fake.calls.creates).toHaveLength(0)
     expect(existsSync).not.toHaveBeenCalled()
   })
 
@@ -1153,7 +1152,6 @@ describe("uf_delegate_command skill resolution", () => {
     // Skill roots are probed first; the root file is the fallback.
     expect(artifact.calls).toEqual([
       resolve(FAKE_CWD, ".opencode/skills/Makefile/SKILL.md"),
-      resolve(FAKE_CWD, ".opencode/skill/Makefile/SKILL.md"),
       resolve(FAKE_CWD, "Makefile"),
     ])
     expect(deliveredPrompt(fake.calls)).toContain("Required skill: Makefile\n\n")
@@ -1225,7 +1223,7 @@ describe("uf_delegate_command skill resolution", () => {
     expect(fake.calls.creates).toHaveLength(0)
   })
 
-  it("resolves a same-name collision across the roots to the first root", async () => {
+  it("resolves the .opencode/skills/ copy when a stale legacy copy also exists", async () => {
     const fake = fakeClient()
     const reads = fakeReadText({})
     const artifact = fakeFileExists([
@@ -1245,8 +1243,8 @@ describe("uf_delegate_command skill resolution", () => {
       skill: "colliding-skill",
     })
 
-    // First root wins (spec scenario): probing stops at the
-    // .opencode/skills/ entry — the second root is never consulted...
+    // The .opencode/skills/ entry wins: probing stops there and the
+    // legacy .opencode/skill/ copy is never consulted...
     expect(result.status).toBe("ok")
     expect(artifact.calls).toEqual([
       resolve(FAKE_CWD, ".opencode/skills/colliding-skill/SKILL.md"),
@@ -1342,20 +1340,18 @@ describe("uf_delegate_command skill resolution", () => {
     if (result.status === "error") {
       expect(result.code).toBe("SKILL_NOT_FOUND")
       expect(result.retryable).toBe(false)
-      // The envelope names every searched location (both skill roots
+      // The envelope names every searched location (the skill root
       // and the repo-root file fallback).
       expect(result.message).toBe(
         'Skill reference "does-not-exist" does not resolve. ' +
-          "Searched: .opencode/skills/does-not-exist/SKILL.md, .opencode/skill/does-not-exist/SKILL.md, " +
-          "does-not-exist (repo-root file). " +
+          "Searched: .opencode/skills/does-not-exist/SKILL.md, does-not-exist (repo-root file). " +
           "Remediation: pass an existing skill name or a repo-relative script path, " +
           "or record skill_absent_reason when no repo skill applies; retrying will not fix this.",
       )
     }
-    // Both roots, then the root file, were probed before failing closed.
+    // The skill root, then the root file, were probed before failing closed.
     expect(artifact.calls).toEqual([
       resolve(FAKE_CWD, ".opencode/skills/does-not-exist/SKILL.md"),
-      resolve(FAKE_CWD, ".opencode/skill/does-not-exist/SKILL.md"),
       resolve(FAKE_CWD, "does-not-exist"),
     ])
     // Fail-closed before host-model resolution and the child spawn: no
