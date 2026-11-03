@@ -879,7 +879,7 @@ from the pre-flight gate below):
       (docs authorship is judgment work)]
     skill: [repo skill or script reference that performs the
       change end-to-end -- only when deterministic]
-    skill_absent_reason: [what was searched and what was
+    skill_absent_reason: [<=512 chars: what was searched and what was
       found -- only when deterministic and no repo skill or
       script applies; never together with skill]
     checkpoint_step: "implement"
@@ -1003,7 +1003,10 @@ its Local Tool Detection phase to discover additional
      deterministic classification; mutually exclusive with
      `skill_absent_reason`.
    - `skill_absent_reason`: a substantive reason stating
-     what was searched and what was found. Valid only with a
+     what was searched and what was found, in one or two
+     sentences of at most 512 characters (longer values
+     fail with `INVALID_INPUT`; name the searched
+     locations, not their contents). Valid only with a
      deterministic classification; mutually exclusive with
      `skill`.
 
@@ -1099,7 +1102,7 @@ For each iteration (up to 3 total):
        the usual case for diagnosing a broken test]
      skill: [repo skill or script reference that performs
        the fix end-to-end -- only when deterministic]
-     skill_absent_reason: [what was searched and what was
+     skill_absent_reason: [<=512 chars: what was searched and what was
        found -- only when deterministic and no repo skill
        or script applies; never together with skill]
      feature_dir: FEATURE_DIR
@@ -1178,7 +1181,7 @@ its spent budget the same way, from its budget-only
        deterministic or judgment, per the step above]
      skill: [repo skill or script reference that performs
        the task end-to-end -- only when deterministic]
-     skill_absent_reason: [what was searched and what was
+     skill_absent_reason: [<=512 chars: what was searched and what was
        found -- only when deterministic and no repo skill or
        script applies; never together with skill]
      feature_dir: FEATURE_DIR
@@ -1672,7 +1675,7 @@ not read the saved file.
          applying prose findings, which is authorship work]
        skill: [repo skill or script reference that performs
          the fix end-to-end -- only when deterministic]
-       skill_absent_reason: [what was searched and what was
+       skill_absent_reason: [<=512 chars: what was searched and what was
          found -- only when deterministic and no repo skill
          or script applies; never together with skill]
        feature_dir: FEATURE_DIR

@@ -1247,6 +1247,12 @@ Each entry follows the format: `- <change-name>: <summary>`.
   classified against the canonical roots (macOS `/var` vs.
   `/private/var`), and missing paths outside the allowed directories
   still fail `path_validation_failed`.
+- skill-absent-reason-limit (#935): `/uf.unleash` now states the
+  512-character limit on `skill_absent_reason` in the field
+  definition and in every `uf_delegate_command` call template, so
+  thorough reasons no longer fail with `INVALID_INPUT` (5 rejections
+  at 517–699 characters). The Swarm-path `forge_spawn_subtask`
+  template is unchanged.
 - review-pr-consolidate-dispatch: `/uf.review-pr` now finalizes every
   dispatch through exactly one `consolidate_dispatch` call per
   finalization attempt, carrying the captured `correlation_id` plus
