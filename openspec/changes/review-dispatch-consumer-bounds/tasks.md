@@ -56,5 +56,5 @@
       `(Spec: openspec/changes/review-dispatch-consumer-bounds, Fixes: #N)` tails.
 - [ ] 4.3 Documentation-gate assessment; file the docs issue for the
       user-facing artifact and consumer change before merge.
-- [ ] 4.4 CI parity: `make plugin-test` and
+- [x] 4.4 CI parity: `make plugin-test` and
       `go test -race -count=1 ./...` both pass.
