@@ -249,9 +249,9 @@ describe("plugin integration with a fake OpenCode client", () => {
         },
         {} as never,
       )
-      const finalized = JSON.parse(finalizeOutput) as { status: string; review_verdict: { council_decision: string } }
+      const finalized = JSON.parse(finalizeOutput) as { status: string; review_verdict: string }
       expect(finalized.status).toBe("success")
-      expect(finalized.review_verdict.council_decision).toBe("CHANGES_REQUESTED")
+      expect(finalized.review_verdict).toBe("CHANGES_REQUESTED")
       expect(await readFile(join(project, ".uf/artifacts/dispatch/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.json"), "utf8")).toContain(
         '"hero": "the-divisor"',
       )

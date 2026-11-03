@@ -2776,7 +2776,12 @@ export function createFinalizeReviewDispatchTool(
       provenance: ArtifactProvenanceSchema,
     },
     async execute(args): Promise<string> {
-      return `${JSON.stringify(await finalizeReviewDispatch(args, dependencies), null, 2)}\n`
+      // The compact finalization result identifies the persisted artifact and
+      // carries the outcome (RD-FR-051); it never echoes the artifact body.
+      const result = await finalizeReviewDispatch(args, dependencies)
+      return `${JSON.stringify(
+        buildCompactFinalization(result, args.payload.run_counts, [], []),
+      )}\n`
     },
   })
 }
@@ -3770,6 +3775,10 @@ const ConsolidateDispatchInputSchema = z
     // precedence over the session map so consolidation can run standalone from
     // a fresh parent session (cross-session recovery, issue #751).
     correlation_id: UUIDSchema.optional(),
+    // Retrieval shape (RD-FR-049): "summary" returns the bounded
+    // observability-first projection used by command retrieval; "full" (the
+    // default) preserves the complete payload for finalization.
+    detail: z.enum(["summary", "full"]).optional(),
   })
   .strict()
 
@@ -3950,6 +3959,330 @@ function buildAdvisories(
       description: f.description,
       run_ids: f.run_ids,
     }))
+}
+
+/**
+ * Bounded retrieval limits (RD-FR-049). Summary entries are slim projections;
+ * complete findings and advisories remain in the persisted artifact written by
+ * finalization. The byte budget is enforced by construction: the builder
+ * serializes compactly, measures the UTF-8 length, and drops trailing entries
+ * in a fixed order until the result is strictly under budget.
+ */
+export const SUMMARY_LIMITS = {
+  findings: 15,
+  advisories: 15,
+  proposals: 10,
+  warnings: 5,
+  severityChars: 16,
+  categoryChars: 128,
+  descriptionChars: 512,
+  fileChars: 256,
+  informationChars: 512,
+  tagChars: 128,
+  agentChars: 128,
+  verdictReasonChars: 512,
+  warningKindChars: 64,
+  warningDetailChars: 256,
+  maxBytes: 40 * 1024,
+} as const
+
+const LESSON_CATEGORY_VALUES = [
+  "decision",
+  "pattern",
+  "gotcha",
+  "context",
+  "reference",
+] as const
+
+interface TruncatedText {
+  readonly text: string
+  readonly truncated: boolean
+}
+
+function truncateText(value: string, max: number): TruncatedText {
+  if (value.length <= max) return { text: value, truncated: false }
+  return { text: value.slice(0, max), truncated: true }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
+function asCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0
+}
+
+function projectSummaryFinding(
+  finding: unknown,
+): Record<string, unknown> {
+  const record = asRecord(finding)
+  const severity = truncateText(String(record.severity ?? ""), SUMMARY_LIMITS.severityChars)
+  const category = truncateText(String(record.category ?? ""), SUMMARY_LIMITS.categoryChars)
+  const description = truncateText(
+    String(record.description ?? ""),
+    SUMMARY_LIMITS.descriptionChars,
+  )
+  const file = typeof record.file === "string"
+    ? truncateText(record.file, SUMMARY_LIMITS.fileChars)
+    : { text: null as string | null, truncated: false }
+  const line = typeof record.line === "number" ? record.line : null
+  const result: Record<string, unknown> = {
+    severity: severity.text,
+    category: category.text,
+    description: description.text,
+    file: file.text,
+    line,
+  }
+  if (
+    severity.truncated ||
+    category.truncated ||
+    description.truncated ||
+    file.truncated
+  ) {
+    result.truncated = true
+  }
+  return result
+}
+
+function projectSummaryAdvisory(
+  advisory: unknown,
+): Record<string, unknown> {
+  const record = asRecord(advisory)
+  const severity = truncateText(String(record.severity ?? ""), SUMMARY_LIMITS.severityChars)
+  const description = truncateText(
+    String(record.description ?? ""),
+    SUMMARY_LIMITS.descriptionChars,
+  )
+  const result: Record<string, unknown> = {
+    severity: severity.text,
+    description: description.text,
+  }
+  if (severity.truncated || description.truncated) result.truncated = true
+  return result
+}
+
+function projectSummaryProposal(
+  proposal: unknown,
+): Record<string, unknown> {
+  const record = asRecord(proposal)
+  const agent = truncateText(String(record.agent ?? ""), SUMMARY_LIMITS.agentChars)
+  const information = truncateText(
+    String(record.information ?? ""),
+    SUMMARY_LIMITS.informationChars,
+  )
+  const tag = truncateText(String(record.tag ?? ""), SUMMARY_LIMITS.tagChars)
+  const result: Record<string, unknown> = {
+    agent: agent.text,
+    information: information.text,
+    tag: tag.text,
+  }
+  if (
+    typeof record.category === "string" &&
+    (LESSON_CATEGORY_VALUES as readonly string[]).includes(record.category)
+  ) {
+    result.category = record.category
+  }
+  if (agent.truncated || information.truncated || tag.truncated) {
+    result.truncated = true
+  }
+  return result
+}
+
+function projectSummaryWarning(
+  warning: unknown,
+): Record<string, unknown> | null {
+  const record = asRecord(warning)
+  const type = record.type
+  if (typeof type !== "string") return null
+  const agent = typeof record.agent === "string" ? record.agent : ""
+  const run = typeof record.run_id === "string" ? record.run_id : ""
+  let detail: string
+  switch (type) {
+    case "orphaned_submissions_excluded":
+      detail = `agent=${agent} run=${run} findings=${asCount(record.discarded_findings)} proposals=${asCount(record.discarded_proposals)}`
+      break
+    case "invalid_submissions_excluded":
+      detail = `agent=${agent} run=${run} invalid=${asCount(record.invalid_findings) + asCount(record.invalid_proposals)}`
+      break
+    case "run_findings_overflow":
+      detail = `agent=${agent} kept=${asCount(record.kept_findings)} dropped=${asCount(record.overflow_findings)}`
+      break
+    case "consolidated_findings_overflow":
+      detail = `kept=${asCount(record.kept_findings)} dropped=${asCount(record.dropped_findings)}`
+      break
+    case "empty_coverage_attestation":
+      detail = `agent=${agent}`
+      break
+    default:
+      return null
+  }
+  const kind = truncateText(type, SUMMARY_LIMITS.warningKindChars)
+  const composed = truncateText(detail, SUMMARY_LIMITS.warningDetailChars)
+  const result: Record<string, unknown> = {
+    kind: kind.text,
+    detail: composed.text,
+  }
+  if (kind.truncated || composed.truncated) result.truncated = true
+  return result
+}
+
+interface SummaryRetrievalInput {
+  readonly correlation_id: string
+  readonly proposals: readonly unknown[]
+  readonly warnings: readonly unknown[]
+  readonly verdict: string
+  readonly verdict_reason: string
+  readonly run_counts: unknown
+  readonly coverage: unknown
+  readonly findings: readonly unknown[]
+  readonly advisories: readonly unknown[]
+}
+
+/**
+ * Build the bounded observability-first summary retrieval (RD-FR-049).
+ * Ordering and the post-assembly byte budget are part of the contract: the
+ * loop drops trailing entries findings -> advisories -> proposals -> warnings
+ * until the compact serialization is strictly under 40,960 bytes.
+ */
+export function buildSummaryRetrieval(
+  input: SummaryRetrievalInput,
+): Record<string, unknown> {
+  const findings = input.findings
+    .slice(0, SUMMARY_LIMITS.findings)
+    .map(projectSummaryFinding)
+  const advisories = input.advisories
+    .slice(0, SUMMARY_LIMITS.advisories)
+    .map(projectSummaryAdvisory)
+  const proposals = input.proposals
+    .slice(0, SUMMARY_LIMITS.proposals)
+    .map(projectSummaryProposal)
+  const warnings = input.warnings
+    .slice(0, SUMMARY_LIMITS.warnings)
+    .map(projectSummaryWarning)
+    .filter((warning): warning is Record<string, unknown> => warning !== null)
+
+  let findingsTruncated = input.findings.length > SUMMARY_LIMITS.findings
+  let advisoriesTruncated = input.advisories.length > SUMMARY_LIMITS.advisories
+  let proposalsTruncated = input.proposals.length > SUMMARY_LIMITS.proposals
+  let warningsTruncated = input.warnings.length > SUMMARY_LIMITS.warnings
+
+  const assemble = (): Record<string, unknown> => {
+    const result: Record<string, unknown> = {
+      correlation_id: input.correlation_id,
+    }
+    if (proposals.length > 0) result.proposals = proposals
+    if (warnings.length > 0) result.warnings = warnings
+    result.verdict = input.verdict
+    result.verdict_reason = truncateText(
+      input.verdict_reason,
+      SUMMARY_LIMITS.verdictReasonChars,
+    ).text
+    result.run_counts = input.run_counts
+    result.coverage = input.coverage
+    result.findings = findings
+    result.advisories = advisories
+    if (findingsTruncated) result.findings_truncated = true
+    if (advisoriesTruncated) result.advisories_truncated = true
+    if (proposalsTruncated) result.proposals_truncated = true
+    if (warningsTruncated) result.warnings_truncated = true
+    return result
+  }
+
+  let result = assemble()
+  const size = (value: unknown): number =>
+    new TextEncoder().encode(JSON.stringify(value)).length
+  while (size(result) >= SUMMARY_LIMITS.maxBytes) {
+    if (findings.length > 0) {
+      findings.pop()
+      findingsTruncated = true
+    } else if (advisories.length > 0) {
+      advisories.pop()
+      advisoriesTruncated = true
+    } else if (proposals.length > 0) {
+      proposals.pop()
+      proposalsTruncated = true
+    } else if (warnings.length > 0) {
+      warnings.pop()
+      warningsTruncated = true
+    } else {
+      break
+    }
+    result = assemble()
+  }
+  return result
+}
+
+/**
+ * Build the full retrieval payload with observability-first ordering
+ * (RD-FR-050): cheap scalar and observability fields precede the large arrays,
+ * while runs stays ahead of plan, findings, and advisories.
+ */
+export function buildFullRetrieval(
+  payload: ReviewDispatchPayload,
+  proposals: readonly unknown[],
+  warnings: readonly unknown[],
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {
+    command: payload.command,
+    mode: payload.mode,
+    full: payload.full,
+    input_context: payload.input_context,
+    change_profile: payload.change_profile,
+    plan_version: payload.plan_version,
+    correlation_id: payload.correlation_id,
+  }
+  if (proposals.length > 0) result.proposals = proposals
+  if (warnings.length > 0) result.warnings = warnings
+  result.verdict = payload.verdict
+  result.verdict_reason = payload.verdict_reason
+  result.run_counts = payload.run_counts
+  result.coverage = payload.coverage
+  result.runs = payload.runs
+  result.plan = payload.plan
+  result.findings = payload.findings
+  result.advisories = payload.advisories
+  result.workflow_result = payload.workflow_result
+  return result
+}
+
+/**
+ * Build the compact finalization response (RD-FR-051). The persisted artifact
+ * remains the only place the full projection (findings, advisories, plan,
+ * runs) is echoed; this result carries the outcome, the scalar review verdict,
+ * and the bounded observability arrays.
+ */
+export function buildCompactFinalization(
+  result: FinalizeReviewDispatchResult,
+  runCounts: unknown,
+  proposals: readonly unknown[],
+  warnings: readonly unknown[],
+): Record<string, unknown> {
+  const projectedProposals = proposals
+    .slice(0, SUMMARY_LIMITS.proposals)
+    .map(projectSummaryProposal)
+  const projectedWarnings = warnings
+    .slice(0, SUMMARY_LIMITS.warnings)
+    .map(projectSummaryWarning)
+    .filter((warning): warning is Record<string, unknown> => warning !== null)
+  const compact: Record<string, unknown> = {
+    status: result.status,
+    operation_verdict: result.operation_verdict,
+    correlation_id: result.correlation_id,
+    artifact_path: result.artifact_path,
+    review_verdict: result.review_verdict?.council_decision ?? null,
+    run_counts: runCounts,
+  }
+  if (projectedProposals.length > 0) compact.proposals = projectedProposals
+  if (projectedWarnings.length > 0) compact.warnings = projectedWarnings
+  if (proposals.length > SUMMARY_LIMITS.proposals) compact.proposals_truncated = true
+  if (warnings.length > SUMMARY_LIMITS.warnings) compact.warnings_truncated = true
+  compact.calculated_assessment = result.calculated_assessment === null
+    ? null
+    : { authoritative: result.calculated_assessment.authoritative }
+  compact.errors = result.errors
+  return compact
 }
 
 /**
@@ -4513,25 +4846,44 @@ export function createConsolidateDispatchTool(
         )
         return {
           output: JSON.stringify(
-            // warnings ride along on the finalization wrapper only — the
-            // payload handed to finalizeReviewDispatch stays schema-exact.
-            // The key is omitted when empty, mirroring proposals (PR #776).
-            { ...result, proposals: collectedProposals.length > 0 ? collectedProposals : undefined, warnings: warnings.length > 0 ? warnings : undefined },
-            null,
-            2,
+            // warnings and proposals ride along on the compact finalization
+            // wrapper only — the payload handed to finalizeReviewDispatch
+            // stays schema-exact (RD-FR-051).
+            buildCompactFinalization(
+              result,
+              runCounts,
+              collectedProposals,
+              warnings,
+            ),
           ),
         }
       }
 
+      const detail = input.detail ?? "full"
       return {
-        output: JSON.stringify(
-          // The payload stays schema-exact; warnings (and proposals) are
-          // result-level observability the caller strips before external
-          // finalization. Both keys are omitted when empty (PR #776).
-          { ...payload, proposals: collectedProposals.length > 0 ? collectedProposals : undefined, warnings: warnings.length > 0 ? warnings : undefined },
-          null,
-          2,
-        ),
+        output:
+          detail === "summary"
+            ? JSON.stringify(
+                // Bounded observability-first projection (RD-FR-049): the
+                // persisted artifact carries the complete findings.
+                buildSummaryRetrieval({
+                  correlation_id: correlationId,
+                  proposals: collectedProposals,
+                  warnings,
+                  verdict: projectedVerdict,
+                  verdict_reason: verdictReason,
+                  run_counts: runCounts,
+                  coverage: sessionMetadata.coverage,
+                  findings: consolidatedFindings,
+                  advisories,
+                }),
+              )
+            : JSON.stringify(
+                // Full retrieval with observability-first ordering (RD-FR-050).
+                buildFullRetrieval(payload, collectedProposals, warnings),
+                null,
+                2,
+              ),
       }
     },
   })

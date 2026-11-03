@@ -35,7 +35,7 @@ func TestCommandContracts_ReviewCouncil(t *testing.T) {
 		{name: "council verdict precedence", all: []string{"any blocking successful run yields `request changes`", "otherwise any advisory yields `approve with advisories`", "otherwise yield `approve`", "failed runs never vote"}},
 		{name: "per-finding human decision gate", all: []string{"mandatory gate: human confirmation required", "one at a time, in severity order (critical, high, medium, low)", "apply suggested fix", "override & continue", "show more context", "pause & exit", "apply all remaining low/medium fixes", "never edit spec files or waive findings without explicit per-finding human confirmation", "human-directed consented edit, not an autonomous auto-fix", "must not proceed past a high/critical finding without"}},
 		{name: "no-success cause precedence", all: []string{"availability-only provider, model, or runtime causes yield `unavailable`", "policy, plan, budget, limit, persistence, calculation, or mixed cause yields `inconclusive`", "both no-success results block automated progression"}},
-		{name: "finalizer and dual artifacts", all: []string{"finalize every iteration through a single deterministic `consolidate_dispatch` call", "never call `finalize_review_dispatch` yourself", "the canonical review-verdict v2 projection (`review_verdict`)", "classify the failure from the structured response alone", "non-authoritative human context"}},
+		{name: "finalizer and dual artifacts", all: []string{"finalize every iteration through a single deterministic `consolidate_dispatch` call", "never call `finalize_review_dispatch` yourself", "the scalar review verdict (`review_verdict`)", "classify the failure from the structured response alone", "non-authoritative human context"}},
 		{name: "iterative rerun semantics", all: []string{"re-resolve immutable input context", "recompute and validate the complete plan", "rerun all included plan runs, not only prior blockers", "three iterations are exceeded"}},
 	}
 
@@ -180,7 +180,7 @@ func TestCommandContracts_AddressFeedback(t *testing.T) {
 		{name: "strictest recommendation", all: []string{"any successful run says `accept`, that persona says `accept`", "any `accept` yields native `accept`", "`accept` is stricter than `author-decides`"}},
 		{name: "failures non-voting", all: []string{"failures are terminal, informational, and non-voting", "create no findings, advisories, or stronger recommendation"}},
 		{name: "planned no-success", all: []string{"availability-only causes produce native, generic, and canonical `unavailable`", "policy, plan, budget, limit, persistence, calculation, or mixed cause", "native, generic, and canonical `inconclusive`", "retain the item for explicit human handling", "must not be converted to `author-decides`"}},
-		{name: "tier two finalization", all: []string{"finalize every tier 2 item, including plan or no-success failures, with a single `consolidate_dispatch` call", "\"workflow_id\": \"uf.address-feedback\"", "never call `finalize_review_dispatch` yourself", "the canonical review-verdict v2 projection (`review_verdict`)"}},
+		{name: "tier two finalization", all: []string{"finalize every tier 2 item, including plan or no-success failures, with a single `consolidate_dispatch` call", "\"workflow_id\": \"uf.address-feedback\"", "never call `finalize_review_dispatch` yourself", "the scalar review verdict (`review_verdict`)"}},
 		{name: "feedback triage artifact", all: []string{".uf/artifacts/feedback-triage/pr-<pr_number>-round-<m>.json", "existing feedback-triage artifact", "emitted in addition to each tier 2 `review-dispatch` artifact"}},
 	}
 
@@ -334,7 +334,7 @@ func TestCommandContracts_CorrelationIdForwarding(t *testing.T) {
 			name: "uf.review-council.md",
 			clauses: []commandClause{
 				{name: "dispatch-step capture and forwarding", all: []string{"capture the `correlation_id` reported in that one-line summary", "pass it as `correlation_id` on every subsequent consolidation call in this workflow", "the Section 4 retrieval, the Section 5 finalization, and every identical-call retry", "forward it unconditionally, never conditioned on in-process session-map state"}},
-				{name: "retrieval forwards the captured id", all: []string{"passing the captured `correlation_id` from Section 2"}},
+				{name: "retrieval forwards the captured id", all: []string{"and the captured `correlation_id`"}},
 				{name: "retry forwards the same captured id", all: []string{"passing the same captured `correlation_id`"}},
 				{name: "finalization forwards the captured id", all: []string{"with the captured `correlation_id` from Section 2 and provenance as its only arguments"}},
 				{name: "finalization retry forwards the same captured id", all: []string{"same captured `correlation_id`, same provenance, no changes"}},

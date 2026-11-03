@@ -4,7 +4,6 @@ All notable changes to this project are documented in this file.
 Each entry follows the format: `- <change-name>: <summary>`.
 
 ## Unreleased
-
 ### Added
 - preflight-project-checks: projects can declare their own
   deterministic pre-flight checks in a new project-owned
@@ -27,6 +26,30 @@ Each entry follows the format: `- <change-name>: <summary>`.
   causality column only in `soft-gate`, and a check that floods
   past the 64 MiB output budget fails as an ordinary exit, not a
   timeout. (Spec: openspec/changes/preflight-project-checks/)
+- bound-consolidate-dispatch-output: `consolidate_dispatch` gains a
+  `detail` parameter (`summary` | `full`, default `full`). The summary
+  retrieval is observability-first — `correlation_id`, `proposals`, and
+  `warnings` precede `findings` and `advisories` — and bounded by
+  construction: slim entry projections (15 findings, 15 advisories, 10
+  proposals, 5 warnings) plus a post-assembly compact-serialization
+  byte check that drops trailing entries until the result is strictly
+  under 40 KiB (40,960 bytes), setting per-entry `truncated` markers
+  and four top-level flags. The full-mode payload reorders the same
+  observability fields ahead of `verdict` and the large arrays while
+  keeping `runs` ahead of `plan`/`findings`/`advisories`. Finalization
+  now returns a compact result (status, outcome, correlation id,
+  artifact path, scalar review verdict, run counts, bounded
+  proposals/warnings, calculated-assessment authority, errors) instead
+  of echoing the artifact body; findings and advisories are read once
+  from the persisted artifact. The five consumer commands document the
+  compact contract and a deterministic truncation-notice recovery
+  (parse-first, strict notice shape, realpath confinement, schema
+  validation). BREAKING: finalization responses no longer carry
+  `review_dispatch` or an object `review_verdict` /
+  `calculated_assessment.payload`; read the artifact at `artifact_path`
+  for the full projection and treat `review_verdict` as the scalar
+  council decision. (Spec:
+  openspec/changes/bound-consolidate-dispatch-output/, Fixes: #922)
 - init-override-stubs-gitignore-sync: `uf init` now seeds both
   per-developer override stubs (`.uf/model-matrix.override.yaml`
   and `.uf/review-matrix.override.yaml`) create-only-if-absent
