@@ -290,11 +290,12 @@ When `--phase pr`, the gate MUST check:
 
 The `gate` command MUST exit with code 0 when all checks
 for the requested phase pass. It MUST exit with code 1
-when any check fails. It MUST exit with code 2 when an
-internal error occurs (e.g., invalid arguments beyond
-phase/format validation, filesystem permission denied,
-unexpected failures). It MUST always produce output
-(text or JSON) before exiting.
+when any check fails or arguments are invalid (phase,
+format, and directory validation per GATE-FR-002,
+GATE-FR-003, and GATE-FR-010). It MUST exit with code 2
+when an internal error occurs (e.g., filesystem
+permission denied, unexpected failures). It MUST always
+produce output (text or JSON) before exiting.
 
 Check results (JSON or text) MUST be written to stdout.
 Validation errors (invalid phase, invalid format,
