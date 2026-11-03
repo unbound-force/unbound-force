@@ -255,12 +255,17 @@ optional files SHOULD surface as warnings but not fail
 the tool. I/O errors on required files (diff_path) MUST
 fail with a structured error.
 
-#### Scenario: Diff file not found
+#### Scenario: Diff file not readable
 
-- **GIVEN** `diff_path` points to a non-existent file
+- **GIVEN** `diff_path` names an existing file inside the
+  allowed scope that cannot be read
 - **WHEN** `build_review_prompts` is called
 - **THEN** the tool returns a failed result with error
   code `diff_read_failed` and a sanitized error message
+
+A `diff_path` that does not exist is classified by FR-011
+before any read: inside the allowed scope it fails with
+`diff_not_found`, outside it with `path_validation_failed`.
 
 ### Requirement: FR-010 Response contract content
 
@@ -293,9 +298,40 @@ project root directory or the system temp directory
 MUST be rejected with a structured error result
 containing error code `path_validation_failed`.
 
+A `diff_path` that does not exist but whose location
+(the nearest existing ancestor canonicalized, with the
+missing suffix joined back on) lies inside one of these
+scopes MUST be rejected with error code `diff_not_found`
+instead. Its message MUST quote the supplied path and
+tell the caller to copy the path exactly from the prompt
+or manifest rather than retype it. A missing path whose
+location lies outside the scopes MUST still fail with
+`path_validation_failed`. Neither failure reads any file.
+
 #### Scenario: Path traversal rejected
 
 - **GIVEN** `diff_path` is `../../etc/shadow`
+- **WHEN** `build_review_prompts` is called
+- **THEN** the tool returns a failed result with error
+  code `path_validation_failed`
+
+#### Scenario: Missing path inside the allowed scope
+
+- **GIVEN** `diff_path` names a file that does not exist
+  in a directory inside the project root or the system
+  temp directory (for example a mistyped temp file name)
+- **WHEN** `build_review_prompts` is called
+- **THEN** the tool returns a failed result with error
+  code `diff_not_found`
+- **AND** the message quotes the supplied path and says to
+  copy the path exactly rather than retype it
+- **AND** no file is read
+
+#### Scenario: Missing path outside the allowed scope
+
+- **GIVEN** `diff_path` names a non-existent file whose
+  location resolves outside the project root and the
+  system temp directory
 - **WHEN** `build_review_prompts` is called
 - **THEN** the tool returns a failed result with error
   code `path_validation_failed`
