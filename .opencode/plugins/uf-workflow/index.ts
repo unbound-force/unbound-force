@@ -5428,7 +5428,7 @@ export function createPreflightDeclaredDependencies(): PreflightDeclaredDependen
  * binaries on PATH and the `run` executable, applies the diff-scope
  * filter, runs each in-scope check as an argv list without a shell, maps
  * `required`/`advisory` onto statuses, and returns structured results
- * plus tool-rendered Execution Results rows.
+ * plus tool-rendered Execution Results rows and per-check output blocks.
  *
  * Failure codes: INVALID_PREFLIGHT_CONFIG (no check ran),
  * PREFLIGHT_DECLARED_FAILED (unexpected error).
@@ -5440,10 +5440,12 @@ export function createPreflightDeclaredChecksTool(cwd: string, deps: PreflightDe
       "Validates the file, skips checks whose requires/run are unavailable or whose " +
       "paths miss the branch diff, runs the rest without a shell, and returns " +
       "{mode, config_present, scope, checks[], required_failures[], verdict, " +
-      "baseline_method, rendered}. In soft-gate mode required failures are " +
+      "baseline_method, rendered, rendered_output}. In soft-gate mode required failures are " +
       "re-run in a merge-base worktree and classified branch-caused / " +
       "pre-existing / unknown. `rendered` holds the Execution Results rows to " +
-      "insert verbatim; `verdict` is the declared checks' contribution to the " +
+      "insert verbatim; `rendered_output` holds one fenced, untrusted-labelled " +
+      "output block per check that ran with output, to insert verbatim under " +
+      "\"Project-declared check output\"; `verdict` is the declared checks' contribution to the " +
       "pre-flight verdict; advisory rows never affect it. Failure code " +
       "INVALID_PREFLIGHT_CONFIG means the file is invalid and no check ran.",
     args: {
