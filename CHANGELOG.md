@@ -1237,6 +1237,16 @@ Each entry follows the format: `- <change-name>: <summary>`.
   because run files and invocation provenance carry the key and hosts
   copy it into runs). Any other unknown run key is still rejected,
   and persisted artifacts never contain `read_only` on runs.
+- diff-path-not-found (#932): `read_diff_chunk` and
+  `build_review_prompts` now report a missing `diff_path` inside an
+  allowed directory as `diff_not_found`, quoting the received path
+  and telling the reviewer to copy it rather than retype it,
+  instead of `path_validation_failed` ("resolves outside allowed
+  directories"). In session history, 22 of 24 such rejections were
+  mistyped temp paths. A mistyped directory segment is still
+  classified against the canonical roots (macOS `/var` vs.
+  `/private/var`), and missing paths outside the allowed directories
+  still fail `path_validation_failed`.
 - review-pr-consolidate-dispatch: `/uf.review-pr` now finalizes every
   dispatch through exactly one `consolidate_dispatch` call per
   finalization attempt, carrying the captured `correlation_id` plus

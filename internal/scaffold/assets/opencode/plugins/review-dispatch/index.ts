@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer"
 import { createHash, randomUUID } from "node:crypto"
 import { chmod, link, mkdir, open, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 
 import { tool, type PluginInput, type PluginModule, type ToolContext } from "@opencode-ai/plugin"
 import { z } from "zod"
@@ -5290,46 +5290,65 @@ function wrapUntrusted(content: string, sectionName: string): string {
   ].join("\n")
 }
 
-/** Validate that a path resolves within allowed directories (follows symlinks). */
-async function validateDiffPath(diffPath: string, projectRoot: string): Promise<string | null> {
+type DiffPathError = "path_validation_failed" | "diff_not_found"
+
+/** Canonicalize a path, falling back to its lexical resolution (macOS: /var -> /private/var). */
+async function canonicalOrResolved(path: string): Promise<string> {
   try {
-    const resolved = await realpath(resolve(diffPath))
-    // Canonicalize comparison targets too (macOS: /var -> /private/var)
-    let canonicalRoot: string
-    try {
-      canonicalRoot = await realpath(projectRoot)
-    } catch {
-      canonicalRoot = resolve(projectRoot)
-    }
-    let canonicalTmp: string
-    try {
-      canonicalTmp = await realpath(tmpdir())
-    } catch {
-      canonicalTmp = tmpdir()
-    }
-    // Also allow the system /tmp directory (macOS: /tmp -> /private/tmp).
-    // Agents commonly write to /tmp rather than the user-specific $TMPDIR.
-    let canonicalSystemTmp: string
-    try {
-      canonicalSystemTmp = await realpath("/tmp")
-    } catch {
-      canonicalSystemTmp = "/tmp"
-    }
-    if (
-      !resolved.startsWith(canonicalRoot + "/") &&
-      !resolved.startsWith(canonicalTmp + "/") &&
-      !resolved.startsWith(canonicalSystemTmp + "/") &&
-      resolved !== canonicalRoot &&
-      resolved !== canonicalTmp &&
-      resolved !== canonicalSystemTmp
-    ) {
+    return await realpath(path)
+  } catch {
+    return resolve(path)
+  }
+}
+
+/**
+ * Validate that a path resolves within allowed directories (follows symlinks).
+ * A missing file whose location lies inside an allowed directory reports
+ * `diff_not_found` rather than `path_validation_failed` (issue #932): models
+ * mistype long temp paths, and the outside-allowed message hid that. Nothing
+ * is read on either failure, and a missing path outside the allowed
+ * directories still fails `path_validation_failed`.
+ */
+async function validateDiffPath(diffPath: string, projectRoot: string): Promise<DiffPathError | null> {
+  // Also allow the system /tmp directory (macOS: /tmp -> /private/tmp).
+  // Agents commonly write to /tmp rather than the user-specific $TMPDIR.
+  const allowedRoots = await Promise.all([projectRoot, tmpdir(), "/tmp"].map(canonicalOrResolved))
+  const isAllowed = (candidate: string): boolean =>
+    allowedRoots.some((root) => candidate === root || candidate.startsWith(root + "/"))
+  const lexical = resolve(diffPath)
+  try {
+    return isAllowed(await realpath(lexical)) ? null : "path_validation_failed"
+  } catch (error: unknown) {
+    if (!isErrno(error, "ENOENT")) {
       return "path_validation_failed"
     }
-    return null
-  } catch {
-    // File does not exist or is not accessible — path validation cannot confirm safety
+    // Canonicalize the nearest existing ancestor so a mistyped directory
+    // segment still compares against the canonical allowed roots.
+    let ancestor = dirname(lexical)
+    const missing = [basename(lexical)]
+    while (ancestor !== dirname(ancestor)) {
+      try {
+        const location = join(await realpath(ancestor), ...missing)
+        return isAllowed(location) ? "diff_not_found" : "path_validation_failed"
+      } catch {
+        missing.unshift(basename(ancestor))
+        ancestor = dirname(ancestor)
+      }
+    }
     return "path_validation_failed"
   }
+}
+
+/** Fail-closed output for a diff path rejected by validateDiffPath. */
+function diffPathFailure(code: DiffPathError, diffPath: string): { error: string; code: DiffPathError } {
+  return code === "diff_not_found"
+    ? {
+        error:
+          `diff_path ${JSON.stringify(diffPath)} does not exist. ` +
+          "Copy the path exactly from the prompt or manifest; do not retype it.",
+        code,
+      }
+    : { error: "diff_path resolves outside allowed directories", code }
 }
 
 interface BuildReviewPromptsResult {
@@ -5454,11 +5473,7 @@ async function buildReviewPrompts(
     // FR-011: Path validation (follows symlinks via realpath)
     const pathError = await validateDiffPath(args.diff_path, projectRoot)
     if (pathError) {
-      return {
-        ok: false,
-        error: "diff_path resolves outside allowed directories",
-        code: "path_validation_failed",
-      }
+      return { ok: false, ...diffPathFailure(pathError, args.diff_path) }
     }
 
     // Read diff file
@@ -5876,7 +5891,8 @@ async function readDiffChunk(
   //    dirs, symlink-followed). No diff content is read on failure.
   const pathError = await validateDiffPath(args.diff_path, projectRoot)
   if (pathError !== null) {
-    return fail("diff_path resolves outside allowed directories", "path_validation_failed")
+    const { error, code } = diffPathFailure(pathError, args.diff_path)
+    return fail(error, code)
   }
 
   // 2. Load the sibling manifest (design D5: persisted beside the diff,

@@ -404,8 +404,8 @@ describe("build_review_prompts", () => {
 
       const data = JSON.parse(result.output)
       expect(data.error).toBeDefined()
-      // Non-existent files fail realpath validation (cannot confirm path safety)
-      expect(data.code).toBe("path_validation_failed")
+      // A missing file inside an allowed directory is reported precisely (issue #932)
+      expect(data.code).toBe("diff_not_found")
     })
   })
 
