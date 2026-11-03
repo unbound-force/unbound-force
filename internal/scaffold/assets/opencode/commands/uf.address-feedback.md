@@ -390,19 +390,21 @@ dispatches all included plan runs in parallel batches:
 
 The tool returns a one-line counts summary only — `dispatch_review_runs:
 <status> (correlation_id <id>) — <completed> completed, <failed> failed,
-<skipped> skipped, <findings> findings, <proposals> proposals`. Capture
-the `correlation_id` reported in that one-line summary and pass it as
+<skipped> skipped, <findings> findings, <proposals> proposals`. Its
+`<proposals>` count is taken before `consolidate_dispatch` merges
+near-identical proposals, so the artifact may hold fewer. Capture the
+`correlation_id` reported in that one-line summary and pass it as
 `correlation_id` on every subsequent consolidation call for that
 feedback item's dispatch — the Section 2.3.8 finalization that runs
 right after the item's dispatch, and every identical-call retry. This
 command dispatches once per feedback item, so each item's dispatch has
 its own `correlation_id`; the capture and forwarding are scoped per
 item, not global to the workflow. Forward it unconditionally, never
-conditioned on in-process session-map state. The machine-readable tool metadata
-carries the same ID as a secondary channel for harnesses that surface
-it. The `findings`, `proposals`, and `warnings` arrays exist only in
-tool metadata, which never reaches the calling model. Route all array
-data through the artifact persisted by the item's Section 2.3.8
+conditioned on in-process session-map state. The machine-readable tool
+metadata carries the same ID as a secondary channel for harnesses that
+surface it. The `findings`, `proposals`, and `warnings` arrays exist
+only in tool metadata, which never reaches the calling model. Route all
+array data through the artifact persisted by the item's Section 2.3.8
 finalization.
 
 Sibling evidence is acquired exactly once and reused for all Tier 2 items
@@ -450,8 +452,9 @@ recommendation.
 #### 2.3.5 Consolidate With the Strictest Successful Recommendation
 
 Consolidation reads the `payload.runs` array of the artifact persisted
-by the item's Section 2.3.8 finalization, which runs immediately after
-Section 2.3.4 completes and before this consolidation. When that
+by the item's Section 2.3.8 finalization, through
+`read_dispatch_artifact` with `section: "runs"`, which runs immediately
+after Section 2.3.4 completes and before this consolidation. When that
 finalization fails closed, no artifact exists and the item fails closed
 before any consolidation, as Section 2.3.8 describes.
 
@@ -491,27 +494,30 @@ required, so the item is neither skipped nor lost.
 #### 2.3.7 Store Lesson Proposals
 
 Only the parent command stores lesson proposals. They come from the
-`payload.proposals` array of the item's artifact, read once after the
-Section 2.3.8 finalization together with `payload.runs`,
-`payload.findings`, and `payload.advisories`. Each entry is a
+`payload.proposals` array of the item's artifact, read through
+`read_dispatch_artifact` with `section: "proposals"` after the Section
+2.3.8 finalization, as that section describes. Each entry is a
 full-length proposal already submitted by a child agent via
 `submit_lesson_proposal`, with near-identical proposals across personas
 merged by `consolidate_dispatch` (each merge is reported as a
 `duplicate_proposal_merged` warning). Never source the proposals from
 `dispatch_review_runs` or from the compact finalization result's capped
-`proposals` preview. This command makes no no-provenance retrieval
-call: a `detail: "full"` retrieval is unbounded, and the host truncates
-it at ordinary review sizes.
+`proposals` preview. This command makes no no-provenance retrieval call:
+a `detail: "full"` retrieval is unbounded, and the host truncates it at
+ordinary review sizes.
 
-Each proposal carries the validated shape `{agent, information, tag,
-category}` as defined by the review-dispatch dispatch artifact schema —
-there is no `reference` field. For each proposal in `payload.proposals`,
-call `dewey_store_learning` exactly once using the proposal's
-`information` and `tag`, with the proposal's `category` as the learning
-category. An absent `payload.proposals` means no lesson was submitted.
-If Dewey is unavailable, record an informational skip and do not change
-the recommendation. Never store raw `> learn:` text or child-supplied
-tags, categories, or hashes.
+Each proposal carries the validated shape
+`{agent, information, tag, category}` as defined by the review-dispatch
+dispatch artifact schema — there is no `reference` field. For each
+proposal in `payload.proposals`, call `dewey_store_learning` exactly
+once using the proposal's `information` and `tag`, with the proposal's
+`category` as the learning category. An empty `proposals` section means
+no lesson was submitted — unless the compact result's `proposals`
+preview is non-empty, which means the loaded plugin predates durable
+proposals: then store nothing and report the previewed lessons as
+stranded. If Dewey is unavailable, record an informational skip and do
+not change the recommendation. Never store raw `> learn:` text or
+child-supplied tags, categories, or hashes.
 
 **Missing-artifact behavior.** When the item has no artifact, lesson
 storage and consolidation are bounded and never fabricated:
@@ -599,14 +605,15 @@ The compact finalization result is authoritative for the outcome. On
 `artifact_path`, the scalar review verdict (`review_verdict`), run
 counts, `calculated_assessment.authoritative`, `errors`, and the bounded
 `proposals` and `warnings` arrays directly from the result. Read the
-authoritative full data — findings, advisories, plan, and runs (each
-run's `workflow_verdict` is that persona's native verdict) — once from
-the persisted artifact at `artifact_path` (its `payload.findings`,
-`payload.advisories`, and `payload.proposals`). The artifact persists
-those three arrays before `plan` and `runs`. When the file-read tool
-returns only part of the file, keep reading from the next offset until
-the closing brace; if the whole file cannot be read and parsed as one
-JSON object, fail closed rather than report partial findings. Do not
+authoritative full data — findings, advisories, lesson proposals, and
+runs (each run's `workflow_verdict` is that persona's native verdict) —
+once from the persisted artifact through `read_dispatch_artifact`, never
+with the file-read tool, whose line limit cuts long artifact lines: call
+it with the result's `correlation_id` and `section` set to `findings`,
+`advisories`, `proposals`, or `runs`, repeating with
+`offset: <next_offset>` until `next_offset` is null. Entries arrive
+complete; `runs` entries omit their findings. If any call returns
+`status: "error"`, fail closed rather than report partial data. Do not
 recompute, re-derive, or re-map any of them, and do not alter the
 tool-computed verdict, `verdict_reason`, run counts, findings, or
 advisories.

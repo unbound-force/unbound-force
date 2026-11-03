@@ -393,10 +393,10 @@ func TestCommandContracts_ArtifactSourcedLessons(t *testing.T) {
 		}},
 		{name: "uf.review-council.md", clauses: []commandClause{
 			{name: "lessons after finalization", all: []string{"after the section 5 finalization of this iteration succeeds, read the artifact's `payload.proposals` array", "never store lessons from it"}},
-			{name: "merge warning kind", all: []string{"`duplicate_proposal_merged` is discarded without failing"}},
+			{name: "merge and overflow warning kinds", all: []string{"`duplicate_proposal_merged`, or `proposals_overflow` is discarded without failing"}},
 		}},
 		{name: "uf.unleash.md", clauses: []commandClause{
-			{name: "lessons from the artifact", all: []string{"store the dispatch's lessons from the same artifact read", "never store from the compact result's capped `proposals` preview"}},
+			{name: "lessons from the artifact", all: []string{"store the dispatch's lessons from the `proposals` section", "never store from the preview"}},
 		}},
 		{name: "uf.triage-issue.md", clauses: []commandClause{
 			{name: "finalize first", all: []string{"immediately after `dispatch_review_runs` completes, run the section 4.6 finalization", "this command makes no no-provenance retrieval call"}},
@@ -413,7 +413,11 @@ func TestCommandContracts_ArtifactSourcedLessons(t *testing.T) {
 			assertCommandCopies(t, command.name, true, command.clauses)
 			for _, copy := range loadCommandCopies(t, command.name, true) {
 				normalized := normalizeCommandText(copy.text)
-				for _, stale := range []string{"the artifact does not persist proposals", "call `consolidate_dispatch` exactly once without provenance"} {
+				// Artifact reads go through the bounded reader (RD-FR-057), and an
+				// older loaded plugin strands previewed lessons (issue #941 review).
+				assertNormalizedContains(t, copy.name, normalized, "bounded artifact reader", "`read_dispatch_artifact`")
+				assertNormalizedContains(t, copy.name, normalized, "old-plugin stranding", "the loaded plugin predates durable proposals")
+				for _, stale := range []string{"the artifact does not persist proposals", "call `consolidate_dispatch` exactly once without provenance", "keep reading from the next offset until the closing brace", "continue from the next offset"} {
 					if strings.Contains(normalized, stale) {
 						t.Errorf("%s retains stale lesson-sourcing prose %q", copy.name, stale)
 					}

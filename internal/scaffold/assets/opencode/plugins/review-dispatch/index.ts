@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer"
 import { createHash, randomUUID } from "node:crypto"
-import { chmod, link, mkdir, open, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
+import { chmod, link, lstat, mkdir, open, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 
@@ -848,6 +848,14 @@ const WorkflowResultSchema = z.discriminatedUnion("kind", [
 ])
 
 /**
+ * Cardinality bound of the persisted payload.proposals array (RD-FR-054).
+ * consolidate_dispatch keeps the first MAX_PAYLOAD_PROPOSALS deduplicated
+ * proposals and reports the rest as a proposals_overflow warning, so the
+ * bound can never strand finalization.
+ */
+const MAX_PAYLOAD_PROPOSALS = 512
+
+/**
  * Lesson proposal persisted in the dispatch artifact (RD-FR-054): the
  * submit_lesson_proposal shape plus the submitting agent, kept at full length
  * so consumers store complete lessons from the artifact rather than from the
@@ -875,7 +883,7 @@ const ReviewDispatchPayloadSchema = z
     coverage: CoverageSchema,
     findings: z.array(ConsolidatedFindingSchema).max(512),
     advisories: z.array(AdvisorySchema).max(512),
-    proposals: z.array(PayloadLessonProposalSchema).max(512).optional(),
+    proposals: z.array(PayloadLessonProposalSchema).max(MAX_PAYLOAD_PROPOSALS).optional(),
     verdict: GenericVerdictSchema,
     verdict_reason: z.string().min(1).max(4096),
     run_counts: RunCountsSchema,
@@ -4200,6 +4208,9 @@ function projectSummaryWarning(
     case "empty_coverage_attestation":
       detail = `agent=${agent}`
       break
+    case "proposals_overflow":
+      detail = `kept=${asCount(record.kept_proposals)} dropped=${asCount(record.dropped_proposals)}`
+      break
     case "duplicate_proposal_merged":
       detail = `agent=${agent} kept=${typeof record.kept_agent === "string" ? record.kept_agent : ""}`
       break
@@ -4451,23 +4462,45 @@ interface DuplicateProposalMergedWarning {
 }
 
 /**
+ * Machine-readable consolidate_dispatch warning: the deduplicated proposals
+ * exceeded the persisted cardinality bound (MAX_PAYLOAD_PROPOSALS). The first
+ * entries are kept and the dropped remainder is counted, mirroring
+ * consolidated_findings_overflow. Result observability only; it MUST NOT flow
+ * into the finalization payload.
+ */
+interface ProposalsOverflowWarning {
+  readonly type: "proposals_overflow"
+  readonly kept_proposals: number
+  readonly dropped_proposals: number
+}
+
+/**
  * English function words ignored when comparing proposals (RD-FR-055). Fixed
- * so deduplication is deterministic; negations are deliberately kept.
+ * so deduplication is deterministic; negations are deliberately kept, and
+ * PROPOSAL_NEGATION_WORDS separates a lesson from its opposite.
  */
 const PROPOSAL_STOP_WORDS = new Set([
   "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is",
   "it", "its", "of", "on", "or", "that", "the", "this", "to", "with",
 ])
 
-/** Minimum token-set size for overlap matching; smaller sets must match exactly. */
-const PROPOSAL_MIN_OVERLAP_TOKENS = 4
+/**
+ * Negation words: two proposals whose texts disagree on carrying one are never
+ * merged, so "retry is safe" and "retry is not safe" both survive. `t` is the
+ * token the splitter leaves from "n't" contractions.
+ */
+const PROPOSAL_NEGATION_WORDS = new Set(["cannot", "never", "no", "nor", "not", "t", "without"])
+
+/** Minimum token-set size for similarity matching; smaller sets must match exactly. */
+const PROPOSAL_MIN_SIMILARITY_TOKENS = 6
 
 /**
- * Overlap coefficient at or above which two proposals are near-identical.
- * Calibrated on issue #941's session: its duplicate pair scored 0.58 and every
- * distinct pair at most 0.18.
+ * Jaccard similarity at or above which two proposals are near-identical. The
+ * symmetric measure keeps a short lesson whose words mostly recur in a long
+ * one. Calibrated on issue #941's session: its duplicate pair scored 0.39 and
+ * every distinct pair at most 0.10.
  */
-const PROPOSAL_DUPLICATE_OVERLAP = 0.5
+const PROPOSAL_DUPLICATE_JACCARD = 0.3
 
 /** Normalized content tokens of one proposal's information text. */
 function proposalTokens(information: string): string[] {
@@ -4480,17 +4513,19 @@ function proposalTokens(information: string): string[] {
 
 /** Whether two token lists describe the same lesson (RD-FR-055 rule 2). */
 function nearIdenticalTokens(a: readonly string[], b: readonly string[]): boolean {
+  if (a.some((token) => PROPOSAL_NEGATION_WORDS.has(token)) !== b.some((token) => PROPOSAL_NEGATION_WORDS.has(token))) {
+    return false
+  }
   const setA = new Set(a)
   const setB = new Set(b)
-  const smaller = Math.min(setA.size, setB.size)
-  if (smaller < PROPOSAL_MIN_OVERLAP_TOKENS) {
+  if (Math.min(setA.size, setB.size) < PROPOSAL_MIN_SIMILARITY_TOKENS) {
     return a.length === b.length && a.every((token, index) => token === b[index])
   }
   let shared = 0
   for (const token of setA) {
     if (setB.has(token)) shared += 1
   }
-  return shared / smaller >= PROPOSAL_DUPLICATE_OVERLAP
+  return shared / (setA.size + setB.size - shared) >= PROPOSAL_DUPLICATE_JACCARD
 }
 
 /**
@@ -4885,6 +4920,7 @@ export function createConsolidateDispatchTool(
         | RunFindingsOverflowWarning
         | ConsolidatedFindingsOverflowWarning
         | DuplicateProposalMergedWarning
+        | ProposalsOverflowWarning
       )[] = [
         ...runs
           .filter((run) => run.status !== "success" && (run.findings.length > 0 || run.proposals.length > 0))
@@ -4915,8 +4951,15 @@ export function createConsolidateDispatchTool(
           })),
         ),
       )
-      const collectedProposals = deduplicated.proposals
       warnings.push(...deduplicated.warnings)
+      const collectedProposals = deduplicated.proposals.slice(0, MAX_PAYLOAD_PROPOSALS)
+      if (deduplicated.proposals.length > MAX_PAYLOAD_PROPOSALS) {
+        warnings.push({
+          type: "proposals_overflow",
+          kept_proposals: collectedProposals.length,
+          dropped_proposals: deduplicated.proposals.length - MAX_PAYLOAD_PROPOSALS,
+        })
+      }
 
       // Deduplicate findings across successful runs only, then enforce the
       // finalizer's top-level cardinality bound (ReviewDispatchPayloadSchema
@@ -6184,6 +6227,155 @@ function createReadDiffChunkTool(projectRoot: string): ReturnType<typeof tool> {
   })
 }
 
+// ── read_dispatch_artifact ───────────────────────────────────
+
+/**
+ * Byte budget of one read_dispatch_artifact page (RD-FR-057): the same
+ * 40 KiB bound the summary retrieval uses, under the host's ~50 KiB
+ * tool-output window. A page always carries at least one entry so paging
+ * always advances.
+ */
+const ARTIFACT_PAGE_MAX_BYTES = 40 * 1024
+
+/** Largest artifact file read_dispatch_artifact will parse. */
+const ARTIFACT_MAX_FILE_BYTES = 64 * 1024 * 1024
+
+const ReadDispatchArtifactInputSchema = z
+  .object({
+    correlation_id: UUIDSchema.describe("correlation_id of a finalized dispatch (the compact result's correlation_id)."),
+    section: z
+      .enum(["summary", "findings", "advisories", "proposals", "runs"])
+      .describe("summary for scalars and counts, or one array to page through."),
+    offset: z.number().int().nonnegative().optional().describe("Entry offset to start from; pass the previous next_offset."),
+  })
+  .strict()
+
+/** Fail-closed read_dispatch_artifact result. */
+function artifactReadError(code: "invalid_input" | "not_found" | "invalid_artifact", message: string): Record<string, unknown> {
+  return { status: "error", code, message }
+}
+
+/**
+ * Read one bounded section of a persisted review-dispatch artifact
+ * (RD-FR-057). The path is derived from the correlation ID inside the
+ * project's dispatch store, so no caller-supplied path is read; the file must
+ * be a regular non-symlink file, parse as a review-dispatch envelope, and
+ * pass the strict payload schema. Array sections page by entry under
+ * ARTIFACT_PAGE_MAX_BYTES of compact JSON; runs omit their findings (each
+ * finding lives once in the findings section with its run_ids) and carry a
+ * finding_count instead.
+ * @param rawInput Untrusted tool arguments.
+ * @param projectRoot Project worktree holding `.uf/artifacts/dispatch/`.
+ * @returns A structured page, summary, or fail-closed error.
+ */
+export async function readDispatchArtifact(rawInput: unknown, projectRoot: string): Promise<Record<string, unknown>> {
+  const parsed = ReadDispatchArtifactInputSchema.safeParse(rawInput)
+  if (!parsed.success) {
+    return artifactReadError("invalid_input", `input validation failed: ${formatValidationError(parsed.error)}`)
+  }
+  const { correlation_id: correlationId, section } = parsed.data
+  const offset = parsed.data.offset ?? 0
+  const path = join(resolve(projectRoot, DISPATCH_ARTIFACT_DIRECTORY), `${correlationId}.json`)
+  let text: string
+  try {
+    const info = await lstat(path)
+    if (!info.isFile()) {
+      return artifactReadError("invalid_artifact", "artifact is not a regular file")
+    }
+    if (info.size > ARTIFACT_MAX_FILE_BYTES) {
+      return artifactReadError("invalid_artifact", `artifact exceeds ${ARTIFACT_MAX_FILE_BYTES} bytes`)
+    }
+    text = await readFile(path, "utf8")
+  } catch (error: unknown) {
+    return isErrno(error, "ENOENT")
+      ? artifactReadError("not_found", `no finalized artifact for correlation_id ${correlationId}`)
+      : artifactReadError("invalid_artifact", `read artifact: ${errorMessage(error)}`)
+  }
+  let envelope: Record<string, unknown>
+  try {
+    envelope = asRecord(JSON.parse(text))
+  } catch (error: unknown) {
+    return artifactReadError("invalid_artifact", `parse artifact: ${errorMessage(error)}`)
+  }
+  if (envelope.artifact_type !== REVIEW_DISPATCH_ARTIFACT_TYPE) {
+    return artifactReadError("invalid_artifact", "artifact_type is not review-dispatch")
+  }
+  const payload = ReviewDispatchPayloadSchema.safeParse(envelope.payload)
+  if (!payload.success) {
+    return artifactReadError("invalid_artifact", `payload validation failed: ${formatValidationError(payload.error)}`)
+  }
+  const data = payload.data
+  const proposals = data.proposals ?? []
+  if (section === "summary") {
+    return {
+      status: "ok",
+      correlation_id: data.correlation_id,
+      section,
+      command: data.command,
+      mode: data.mode,
+      verdict: data.verdict,
+      verdict_reason: data.verdict_reason,
+      run_counts: data.run_counts,
+      coverage: data.coverage,
+      workflow_result: data.workflow_result,
+      counts: {
+        findings: data.findings.length,
+        advisories: data.advisories.length,
+        proposals: proposals.length,
+        runs: data.runs.length,
+      },
+    }
+  }
+  const entries: readonly unknown[] =
+    section === "findings"
+      ? data.findings
+      : section === "advisories"
+        ? data.advisories
+        : section === "proposals"
+          ? proposals
+          : data.runs.map(({ findings, ...run }) => ({ ...run, finding_count: findings.length }))
+  const page: unknown[] = []
+  const result: Record<string, unknown> = {
+    status: "ok",
+    correlation_id: data.correlation_id,
+    section,
+    total: entries.length,
+    offset,
+    entries: page,
+    next_offset: null,
+  }
+  let index = offset
+  while (index < entries.length) {
+    page.push(entries[index])
+    if (page.length > 1 && Buffer.byteLength(JSON.stringify(result), "utf8") >= ARTIFACT_PAGE_MAX_BYTES) {
+      page.pop()
+      break
+    }
+    index += 1
+  }
+  result.next_offset = index < entries.length ? index : null
+  return result
+}
+
+/** Creates the read_dispatch_artifact tool (RD-FR-057). */
+function createReadDispatchArtifactTool(projectRoot: string): ReturnType<typeof tool> {
+  return tool({
+    description:
+      "Read one bounded section of a finalized review-dispatch artifact by correlation_id, instead of reading " +
+      "the artifact file (its pretty-printed lines can exceed the file-read tool's line limit). section " +
+      "\"summary\" returns command, mode, verdict, verdict_reason, run_counts, coverage, workflow_result, and " +
+      "the entry counts of findings, advisories, proposals, and runs. section \"findings\", \"advisories\", " +
+      "\"proposals\", or \"runs\" returns { total, offset, entries, next_offset } with full, untruncated entries " +
+      "under 40,960 bytes of compact JSON per page (at least one entry); call again with offset: next_offset " +
+      "until next_offset is null. runs entries omit findings and carry finding_count. Errors return " +
+      "{ status: \"error\", code: invalid_input | not_found | invalid_artifact, message }; fail closed on any error.",
+    args: ReadDispatchArtifactInputSchema.shape,
+    async execute(args): Promise<{ readonly output: string }> {
+      return { output: JSON.stringify(await readDispatchArtifact(args, projectRoot)) }
+    },
+  })
+}
+
 // ── dispatch_review_runs implementation ──────────────────────
 
 /**
@@ -6554,7 +6746,8 @@ function createDispatchReviewRunsTool(
       "Capture the correlation_id this tool reports (in the one-line summary and machine-readable metadata) " +
       "and pass it as correlation_id on every subsequent consolidate_dispatch call in the same workflow. " +
       "An error summary also ends with \" — error: <message> (retryable: <bool>)\", the failure message " +
-      "collapsed to one line and cut to 512 characters.",
+      "collapsed to one line and cut to at most 512 characters including the ellipsis. Its proposals count is " +
+      "taken before consolidate_dispatch merges near-identical proposals, so the artifact may hold fewer.",
     args: DispatchReviewRunsInputSchema.shape,
     async execute(
       args,
@@ -6584,12 +6777,14 @@ const DISPATCH_SUMMARY_MESSAGE_CHARS = 512
 export function dispatchSummaryLine(result: z.infer<typeof DispatchReviewRunsOutputSchema>): string {
   const summary = `dispatch_review_runs: ${result.status} (correlation_id ${result.correlation_id ?? "none"}) — ${result.runs_completed} completed, ${result.runs_failed} failed, ${result.runs_skipped} skipped, ${result.findings.length} findings, ${result.proposals.length} proposals`
   if (result.status === "ok") return summary
-  const message = truncateText(
-    (result.message ?? "no failure message reported").replace(/\s+/g, " ").trim(),
-    DISPATCH_SUMMARY_MESSAGE_CHARS,
-  )
+  const flat = (result.message ?? "no failure message reported").replace(/\s+/g, " ").trim()
+  // A cut message keeps DISPATCH_SUMMARY_MESSAGE_CHARS in total, ellipsis included.
+  const message =
+    flat.length > DISPATCH_SUMMARY_MESSAGE_CHARS
+      ? `${truncateText(flat, DISPATCH_SUMMARY_MESSAGE_CHARS - 1).text}…`
+      : flat
   const retryable = result.retryable === undefined ? "" : ` (retryable: ${result.retryable})`
-  return `${summary} — error: ${message.text}${message.truncated ? "…" : ""}${retryable}`
+  return `${summary} — error: ${message}${retryable}`
 }
 
 // ── Operation window records (RD-FR-031) ─────────────────────
@@ -9315,6 +9510,7 @@ export const ReviewDispatchPlugin = {
       tool: {
         build_review_prompts: createBuildReviewPromptsTool(projectRoot),
         read_diff_chunk: createReadDiffChunkTool(projectRoot),
+        read_dispatch_artifact: createReadDispatchArtifactTool(projectRoot),
         plan_review_dispatch: createPlanReviewDispatchTool(dependencies),
         finalize_review_dispatch: createFinalizeReviewDispatchTool(createFinalizationDependencies(projectRoot)),
         acquire_sibling_evidence: createAcquireSiblingEvidenceTool(

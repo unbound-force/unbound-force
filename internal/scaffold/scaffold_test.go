@@ -2213,6 +2213,48 @@ func TestSCFR001_CanonicalAssetSurfaceMatchesMirrors(t *testing.T) {
 	}
 }
 
+// TestSchemaRegistryMatchesUFCopies verifies that every top-level schema
+// file in schemas/<type>/ that also ships under .uf/schemas/<type>/ is
+// byte-identical there. TestSCFR001_CanonicalAssetSurfaceMatchesMirrors only
+// compares the embedded asset with the .uf copy, so a registry edit that
+// skipped .uf (issue #941 review) went unnoticed.
+func TestSchemaRegistryMatchesUFCopies(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+	registry, err := filepath.Glob(filepath.Join(root, "schemas", "*", "*.json"))
+	if err != nil {
+		t.Fatalf("glob schema registry: %v", err)
+	}
+	compared := 0
+	for _, source := range registry {
+		rel, err := filepath.Rel(filepath.Join(root, "schemas"), source)
+		if err != nil {
+			t.Fatalf("relativize %s: %v", source, err)
+		}
+		copyPath := filepath.Join(root, ".uf", "schemas", rel)
+		copyData, err := os.ReadFile(copyPath)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("read %s: %v", copyPath, err)
+		}
+		sourceData, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatalf("read %s: %v", source, err)
+		}
+		compared++
+		if !bytes.Equal(sourceData, copyData) {
+			t.Errorf("schemas/%s drifted from .uf/schemas/%s", rel, rel)
+		}
+	}
+	if compared == 0 {
+		t.Fatal("no schema registry file has a .uf/schemas copy; expected at least review-dispatch")
+	}
+}
+
 func TestSCFR001_SiblingTemplateAndLiveOnlyTestReviewExclusions(t *testing.T) {
 	paths, err := assetPaths()
 	if err != nil {

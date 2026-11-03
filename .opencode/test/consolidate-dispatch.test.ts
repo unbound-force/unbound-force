@@ -2644,15 +2644,67 @@ describe("consolidate_dispatch durable and deduplicated proposals (RD-FR-054, RD
 
   it("keeps the earlier entry on a length tie and the longer entry otherwise", () => {
     const tie = deduplicateProposals([
-      { agent: "divisor-guard", information: "alpha beta gamma delta", tag: "a" },
-      { agent: "divisor-sre", information: "delta gamma beta alpha", tag: "b" },
+      { agent: "divisor-guard", information: "alpha beta gamma delta epsilon zeta", tag: "a" },
+      { agent: "divisor-sre", information: "zeta epsilon delta gamma beta alpha", tag: "b" },
     ])
     expect(tie.proposals.map((proposal) => proposal.agent)).toEqual(["divisor-guard"])
     const longer = deduplicateProposals([
-      { agent: "divisor-guard", information: "alpha beta gamma delta", tag: "a" },
-      { agent: "divisor-sre", information: "alpha beta gamma delta epsilon", tag: "b" },
+      { agent: "divisor-guard", information: "alpha beta gamma delta epsilon zeta", tag: "a" },
+      { agent: "divisor-sre", information: "alpha beta gamma delta epsilon zeta eta", tag: "b" },
     ])
     expect(longer.proposals.map((proposal) => proposal.agent)).toEqual(["divisor-sre"])
     expect(longer.warnings).toEqual([{ type: "duplicate_proposal_merged", agent: "divisor-guard", kept_agent: "divisor-sre" }])
   })
+
+  it("never merges a lesson with its negation", () => {
+    const result = deduplicateProposals([
+      { agent: "divisor-guard", information: "Retry is not safe: finalization is not idempotent across correlation attempts.", tag: "a" },
+      { agent: "divisor-sre", information: "Retry is safe: finalization is idempotent across correlation attempts.", tag: "b" },
+      { agent: "divisor-adversary", information: "Retries aren't safe because finalization isn't idempotent across correlation attempts.", tag: "c" },
+      { agent: "divisor-testing", information: "Retries are safe because finalization is idempotent across correlation attempts.", tag: "d" },
+    ])
+    // Same-polarity rewordings merge (longer kept); opposite polarities never do.
+    expect(result.proposals.map((proposal) => proposal.agent)).toEqual(["divisor-adversary", "divisor-testing"])
+    expect(result.warnings).toEqual([
+      { type: "duplicate_proposal_merged", agent: "divisor-guard", kept_agent: "divisor-adversary" },
+      { type: "duplicate_proposal_merged", agent: "divisor-sre", kept_agent: "divisor-testing" },
+    ])
+    const pair = deduplicateProposals([result.proposals[0], result.proposals[1]])
+    expect(pair.proposals).toHaveLength(2)
+  })
+
+  it("keeps a short lesson whose words recur inside a longer one", () => {
+    const short = "Bound every tool output before the host truncates it."
+    const long =
+      "Bound every tool output before the host truncates it, and persist the complete record in the artifact so " +
+      "consumers page through it with a dedicated reader instead of the file tool, whose line limit cuts long " +
+      "JSON strings, and report each cut field explicitly rather than silently storing the shortened text."
+    const result = deduplicateProposals([
+      { agent: "divisor-guard", information: short, tag: "a" },
+      { agent: "divisor-sre", information: long, tag: "b" },
+    ])
+    expect(result.proposals.map((proposal) => proposal.agent)).toEqual(["divisor-guard", "divisor-sre"])
+    expect(result.warnings).toEqual([])
+  })
+
+  it("keeps the first 512 deduplicated proposals and reports the overflow", async () => {
+    const projectRoot = await scratchRoot()
+    const proposals = Array.from({ length: 515 }, (_, index) => ({
+      information: `lesson ${index} token${index} alpha${index} beta${index} gamma${index} delta${index}`,
+      tag: "overflow",
+    }))
+    await setupDispatchSession([runFixture({ agent: "divisor-guard", proposals })], { plan: explicitRunPlan("divisor-guard") })
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+
+    const full = JSON.parse((await tool.execute({}, noopContext())).output)
+    expect(full.proposals).toHaveLength(512)
+    expect(full.warnings).toEqual([{ type: "proposals_overflow", kept_proposals: 512, dropped_proposals: 3 }])
+    const summary = JSON.parse((await tool.execute({ detail: "summary" }, noopContext())).output)
+    expect(summary.warnings).toEqual([{ kind: "proposals_overflow", detail: "kept=512 dropped=3" }])
+
+    const compact = JSON.parse((await tool.execute({ provenance: provenance() }, noopContext())).output)
+    expect(compact.status).toBe("success")
+    expect((await readPersistedArtifact(compact)).payload.proposals).toHaveLength(512)
+  })
+
 })

@@ -269,13 +269,15 @@ The tool's caller-visible output is a one-line counts summary only:
 dispatch_review_runs: <status> (correlation_id <id>) — <completed> completed, <failed> failed, <skipped> skipped, <findings> findings, <proposals> proposals
 ```
 
-Capture the `correlation_id` reported in that one-line summary and pass
-it as `correlation_id` on every subsequent consolidation call in this
-workflow — the Section 4.6 finalization that Section 2.3 runs right
-after dispatch, and every identical-call retry. Forward it
-unconditionally, never conditioned on in-process session-map state. The machine-readable tool
-metadata carries the same ID as a secondary channel for harnesses that
-surface it.
+Its `<proposals>` count is taken before `consolidate_dispatch` merges
+near-identical proposals, so the artifact may hold fewer. Capture the
+`correlation_id` reported in that one-line summary and pass it as
+`correlation_id` on every subsequent consolidation call in this workflow
+— the Section 4.6 finalization that Section 2.3 runs right after
+dispatch, and every identical-call retry. Forward it unconditionally,
+never conditioned on in-process session-map state. The machine-readable
+tool metadata carries the same ID as a secondary channel for harnesses
+that surface it.
 
 The `findings`, `proposals`, and `warnings` arrays exist only in tool
 metadata, which never reaches the calling model. Never consume them
@@ -292,14 +294,15 @@ a second time. This command makes no no-provenance retrieval call: a
 `detail: "full"` retrieval is unbounded, and the host truncates it at
 ordinary review sizes.
 
-On `status: "success"`, read the persisted artifact at `artifact_path`
-once: its `payload.runs` (each run's `run_id`, `agent`, terminal state,
-and run-recorded `workflow_verdict`), `payload.findings`,
-`payload.advisories`, and `payload.proposals`. When the file-read tool
-returns only part of the file, keep reading from the next offset until
-the closing brace; if the whole file cannot be read and parsed as one
-JSON object, fail closed as below. Use this single artifact read for
-Section 2.4 proposal storage, Phase 3 verdict resolution, and the
+On `status: "success"`, read the persisted artifact once through
+`read_dispatch_artifact`, never with the file-read tool, whose line
+limit cuts long artifact lines: call it with the result's
+`correlation_id` and `section` set to `runs` (each run's `run_id`,
+`agent`, terminal state, and run-recorded `workflow_verdict`; findings
+omitted), `findings`, `advisories`, and `proposals`, repeating each with
+`offset: <next_offset>` until `next_offset` is null. If any call returns
+`status: "error"`, fail closed as below. Use this single artifact read
+for Section 2.4 proposal storage, Phase 3 verdict resolution, and the
 Section 4.7 report; do not re-read it.
 
 **Finalization failure behavior.** Finalization failures are bounded
@@ -385,8 +388,11 @@ category. If Dewey is unavailable, record an informational skip and do
 not change triage results. Never store raw `> learn:` text or
 child-supplied tags, categories, or hashes.
 
-If `payload.proposals` is absent, record that no lesson proposals were
-submitted and continue without error.
+If the `proposals` section is empty, record that no lesson proposals
+were submitted and continue without error — unless the compact result's
+`proposals` preview is non-empty, which means the loaded plugin predates
+durable proposals: then store nothing and report the previewed lessons
+as stranded.
 
 ---
 
@@ -451,10 +457,10 @@ At least one successful persona assessment is required. If none remains:
 - return **INCONCLUSIVE** for any policy, plan, budget, limit, persistence,
   calculation, or mixed cause.
 
-Both outcomes block automated actions, MUST NOT classify the issue as VALID or
-INVALID, and request retry or human review. Skip label, comment, and child-issue
-mutations. The dispatch was already finalized in Section 2.3; continue to
-Section 4.5 and the Section 4.6 report.
+Both outcomes block automated actions, MUST NOT classify the issue as
+VALID or INVALID, and request retry or human review. Skip label,
+comment, and child-issue mutations. The dispatch was already finalized
+in Section 2.3; continue to Sections 4.5 through 4.7.
 
 ### 3.3 Category Resolution
 
@@ -1133,14 +1139,15 @@ The compact finalization result is authoritative for the outcome. On
 `artifact_path`, the scalar review verdict (`review_verdict`), run
 counts, `calculated_assessment.authoritative`, `errors`, and the bounded
 `proposals` and `warnings` arrays directly from the result. Read the
-authoritative full data — findings, advisories, plan, and runs (each
-run's `workflow_verdict` is that persona's native verdict) — once from
-the persisted artifact at `artifact_path` (its `payload.findings`,
-`payload.advisories`, and `payload.proposals`). The artifact persists
-those three arrays before `plan` and `runs`. When the file-read tool
-returns only part of the file, keep reading from the next offset until
-the closing brace; if the whole file cannot be read and parsed as one
-JSON object, fail closed rather than report partial findings. This is
+authoritative full data — findings, advisories, lesson proposals, and
+runs (each run's `workflow_verdict` is that persona's native verdict) —
+once from the persisted artifact through `read_dispatch_artifact`, never
+with the file-read tool, whose line limit cuts long artifact lines: call
+it with the result's `correlation_id` and `section` set to `findings`,
+`advisories`, `proposals`, or `runs`, repeating with
+`offset: <next_offset>` until `next_offset` is null. Entries arrive
+complete; `runs` entries omit their findings. If any call returns
+`status: "error"`, fail closed rather than report partial data. This is
 the Section 2.3 artifact read; do not repeat it. Do not recompute,
 re-derive, or re-map any of them, and do not alter the tool-computed
 verdict, `verdict_reason`, run counts, findings, or advisories.

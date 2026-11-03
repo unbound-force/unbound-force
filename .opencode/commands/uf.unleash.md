@@ -708,22 +708,25 @@ sections instead of embedding their text.
 **Processing results**:
 
 - Read the authoritative full data once from the persisted
-  artifact at `artifact_path` returned by the finalization
-  call (`payload.findings` and `payload.advisories`); the
-  compact result carries the outcome, the scalar
-  `review_verdict`, and run counts, never the projection.
-  The artifact lists findings and advisories before `plan`
-  and `runs`; if a read returns part of the file, continue
-  from the next offset, and fail closed if the whole file
-  cannot be read and parsed as one JSON object.
-- Store the dispatch's lessons from the same artifact read:
-  for each entry of `payload.proposals` (full text,
-  already merged across personas by `consolidate_dispatch`),
-  call `dewey_store_learning` once with its `information`,
-  `tag`, and `category`. An absent array means no lesson was
-  submitted. Never store from the compact result's capped
-  `proposals` preview. Skip storage when the finalization
-  failed or Dewey is unavailable, and say so in the report.
+  artifact through `read_dispatch_artifact` (never the
+  file-read tool, whose line limit cuts long artifact lines):
+  call it with the finalization result's `correlation_id` and
+  `section` `findings`, `advisories`, then `proposals`,
+  repeating each with `offset: <next_offset>` until
+  `next_offset` is null, and fail closed if any call returns
+  `status: "error"`. The compact result carries the outcome,
+  the scalar `review_verdict`, and run counts, never the
+  projection.
+- Store the dispatch's lessons from the `proposals` section:
+  for each entry (full text, already merged across personas by
+  `consolidate_dispatch`), call `dewey_store_learning` once
+  with its `information`, `tag`, and `category`. An empty
+  section means no lesson was submitted, unless the compact
+  result's `proposals` preview is non-empty: then the loaded
+  plugin predates durable proposals, so store nothing and
+  report the previewed lessons as stranded. Never store from
+  the preview. Skip storage when the finalization failed or
+  Dewey is unavailable, and say so in the report.
 - Parse the entire finalization response as one JSON
   object first. If it parses, it is complete — ignore any
   truncation-shaped text inside it. If it does not parse,
@@ -1642,20 +1645,23 @@ text.
    `**Files Reviewed**:` attestation) strictly above —
    below-threshold prompt assembly is unchanged.
 
-Read the authoritative full data once from the persisted artifact at
-`artifact_path` returned by the finalization call (`payload.findings`
-and `payload.advisories`); the compact result carries the outcome, the
-scalar `review_verdict`, and run counts, never the projection. The
-artifact lists findings and advisories before `plan` and `runs`; if a
-read returns part of the file, continue from the next offset, and fail
-closed if the whole file cannot be read and parsed as one JSON object.
-Store the dispatch's lessons from the same artifact read: for each
-entry of `payload.proposals` (full text, already merged across personas
-by `consolidate_dispatch`), call `dewey_store_learning` once with its
-`information`, `tag`, and `category`. An absent array means no lesson
-was submitted. Never store from the compact result's capped `proposals`
-preview. Skip storage when the finalization failed or Dewey is
-unavailable, and say so in the report.
+Read the authoritative full data once from the persisted artifact
+through `read_dispatch_artifact` (never the file-read tool, whose line
+limit cuts long artifact lines): call it with the finalization result's
+`correlation_id` and `section` `findings`, `advisories`, then
+`proposals`, repeating each with `offset: <next_offset>` until
+`next_offset` is null, and fail closed if any call returns
+`status: "error"`. The compact result carries the outcome, the scalar
+`review_verdict`, and run counts, never the projection. Store the
+dispatch's lessons from the `proposals` section: for each entry (full
+text, already merged across personas by `consolidate_dispatch`), call
+`dewey_store_learning` once with its `information`, `tag`, and
+`category`. An empty section means no lesson was submitted, unless the
+compact result's `proposals` preview is non-empty: then the loaded
+plugin predates durable proposals, so store nothing and report the
+previewed lessons as stranded. Never store from the preview. Skip
+storage when the finalization failed or Dewey is unavailable, and say so
+in the report.
 
 Parse the entire finalization response as one JSON object first. If it
 parses, it is complete — ignore any truncation-shaped text inside it. If
