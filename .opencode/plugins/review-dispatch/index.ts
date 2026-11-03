@@ -5324,6 +5324,8 @@ async function validateDiffPath(diffPath: string, projectRoot: string): Promise<
     }
     // Canonicalize the nearest existing ancestor so a mistyped directory
     // segment still compares against the canonical allowed roots.
+    // `missing` stays ordered outermost-first (unshift) so joining it onto
+    // the canonical ancestor rebuilds the original path.
     let ancestor = dirname(lexical)
     const missing = [basename(lexical)]
     while (ancestor !== dirname(ancestor)) {

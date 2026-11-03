@@ -1252,7 +1252,7 @@ func TestUnleashCommand_ToolRoutingContracts(t *testing.T) {
 		for _, param := range []string{
 			"task_classification:",
 			"skill: [repo skill or script reference",
-			"skill_absent_reason: [what was searched",
+			"skill_absent_reason: [<=512 chars: what was searched",
 		} {
 			if !strings.Contains(parallelExecution, param) {
 				t.Errorf("implement spawn call block missing %s parameter", param)

@@ -1237,8 +1237,8 @@ its spent budget the same way, from its budget-only
             deterministic or judgment, per the step above]
           skill: [repo skill or script reference that performs
             the task end-to-end -- only when deterministic]
-          skill_absent_reason: [what was searched and what was
-            found -- only when deterministic and no repo skill or
+          skill_absent_reason: [<=512 chars: what was searched and what
+            was found -- only when deterministic and no repo skill or
             script applies; never together with skill]
           files: [files from the task]
           project_path: [the worktree path]

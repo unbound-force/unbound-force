@@ -281,6 +281,29 @@ describe("read_diff_chunk (RD-FR-034)", () => {
     })
   })
 
+  it("non-ENOENT realpath failures fail closed as path_validation_failed", async () => {
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await ReviewDispatchPlugin.server({
+        client: { session: {} },
+        directory: project,
+        worktree: project,
+      } as unknown as PluginInput)
+
+      // A regular file used as a directory segment makes realpath fail
+      // with ENOTDIR, which must not be reclassified as diff_not_found.
+      const file = join(project, "not-a-dir.txt")
+      await writeFile(file, "x")
+      const result = await hooks.tool.read_diff_chunk.execute(
+        { diff_path: join(file, "review.patch"), chunk_id: "any#1" },
+        toolContext(project),
+      )
+      const data = JSON.parse(result.output)
+      expect(data.code).toBe("path_validation_failed")
+      expect(data.content).toBeUndefined()
+    })
+  })
+
   it("missing diff paths outside the allowed directories still fail path_validation_failed", async () => {
     await withBun(async () => {
       const project = await scratchProject()
