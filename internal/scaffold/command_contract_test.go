@@ -423,6 +423,17 @@ func TestCommandContracts_ArtifactSourcedLessons(t *testing.T) {
 	}
 }
 
+// TestCommandContracts_ReviewPrSelfAuthoredMapping pins issue #942: the
+// self-authored PR case maps APPROVE and REQUEST CHANGES to COMMENT before
+// the first POST, and the 422 fallback stays for other causes.
+func TestCommandContracts_ReviewPrSelfAuthoredMapping(t *testing.T) {
+	assertCommandCopies(t, "uf.review-pr.md", true, []commandClause{
+		{name: "author field fetched", all: []string{"--json title,body,author,files,", "the pr author's login (`author.login`)"}},
+		{name: "mapped before the gate", all: []string{"viewer login equals the step 2 pr author login (`author.login`)", "map approve and request changes to `comment` before the gate"}},
+		{name: "fallback kept", all: []string{"if `gh api` returns http 403, 404, or 422", "this fallback covers every other cause"}},
+	})
+}
+
 func TestCommandContracts_CanonicalScaffoldParity(t *testing.T) {
 	root := findProjectRoot(t)
 	if root == "" {

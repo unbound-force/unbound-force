@@ -99,10 +99,11 @@ If no open PR exists for the current branch: **STOP** with error:
 Retrieve PR metadata — base/head refs and SHAs, changed files, diff stats:
 
 ```bash
-gh pr view <PR_NUMBER> --json title,body,files,additions,deletions,baseRefName,baseRefOid,headRefName,headRefOid,labels,milestone,commits,reviewDecision,reviewRequests
+gh pr view <PR_NUMBER> --json title,body,author,files,additions,deletions,baseRefName,baseRefOid,headRefName,headRefOid,labels,milestone,commits,reviewDecision,reviewRequests
 ```
 
-Record all values. Resolve the immutable input context:
+Record all values, including the PR author's login (`author.login`),
+which Step 8c compares with the viewer login. Resolve the immutable input context:
 
 ```
 kind: pr
@@ -1064,6 +1065,17 @@ Map the council verdict to the GitHub API event type:
 | INCONCLUSIVE | Do not post |
 | UNAVAILABLE | Do not post |
 
+**Self-authored PR.** GitHub rejects `APPROVE` and `REQUEST_CHANGES`
+on the viewer's own pull request with HTTP 422. When the Step 3.10-iii
+viewer login equals the Step 2 PR author login (`author.login`),
+compared exactly, map APPROVE and REQUEST CHANGES to `COMMENT` before
+the gate and start the review body with the verdict note
+`**Council verdict: <verdict>** (posted as COMMENT: GitHub does not
+allow approving or requesting changes on your own pull request).`
+The gate prints the mapped event and uses the COMMENT option set. If
+either login is unavailable, keep the table mapping; the Step 8d
+fallback still covers the 422.
+
 **VISIBILITY DIRECTIVE**: Before invoking the question tool, print
 the full verdict context (verdict type, review body, and all inline
 comments) as plain assistant output.
@@ -1131,8 +1143,9 @@ interpolating into shell arguments. Remove the temporary file after
 posting, on ALL exit paths.
 
 **Graceful degradation**: If `gh api` returns HTTP 403, 404, or 422:
-fall back to posting as `"event": "COMMENT"` with a note. If the
-fallback also fails, inform the user their token lacks write
-permissions.
+fall back to posting as `"event": "COMMENT"` with a note. The
+self-authored case is mapped before the first POST (Step 8c); this
+fallback covers every other cause. If the fallback also fails, inform
+the user their token lacks write permissions.
 
 </protect>
