@@ -147,6 +147,7 @@ func TestCheckSpecExists_Speckit(t *testing.T) {
 
 func TestCheckSpecExists_Missing(t *testing.T) {
 	dir := t.TempDir()
+	pinGitCeiling(t, dir)
 
 	r := checkSpecExists(testCtx(dir))
 	if r.Passed {
@@ -182,6 +183,7 @@ func TestCheckPlanExists_Speckit(t *testing.T) {
 
 func TestCheckPlanExists_Missing(t *testing.T) {
 	dir := t.TempDir()
+	pinGitCeiling(t, dir)
 
 	r := checkPlanExists(testCtx(dir))
 	if r.Passed {
@@ -217,6 +219,7 @@ func TestCheckTasksExist_Speckit(t *testing.T) {
 
 func TestCheckTasksExist_Missing(t *testing.T) {
 	dir := t.TempDir()
+	pinGitCeiling(t, dir)
 
 	r := checkTasksExist(testCtx(dir))
 	if r.Passed {
@@ -285,6 +288,21 @@ func TestCheckCoverageStrategy_NoFiles(t *testing.T) {
 	r := checkCoverageStrategy(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail when no task/plan files exist, got pass")
+	}
+}
+
+func TestCheckCoverageStrategy_LongLine(t *testing.T) {
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		// A single line longer than bufio.Scanner's 64KiB default
+		// token limit must be ordinary check input, not an internal
+		// error: the strategy appearing after it is still detected.
+		"tasks.md": "# Tasks\n" + strings.Repeat("x", 128*1024) + "\n## Coverage Strategy\nUnit tests.\n",
+	})
+
+	r := checkCoverageStrategy(testCtx(dir))
+	if !r.Passed {
+		t.Errorf("expected pass with coverage strategy after a long line, got fail: %s", r.Message)
 	}
 }
 
@@ -426,6 +444,7 @@ func TestCheckReviewPass_NoMarker(t *testing.T) {
 
 func TestCheckReviewPass_NoFile(t *testing.T) {
 	dir := t.TempDir()
+	pinGitCeiling(t, dir)
 
 	r := checkReviewPass(testCtx(dir))
 	if r.Passed {
@@ -452,6 +471,7 @@ func TestCheckReviewRun_SpeckitLayout(t *testing.T) {
 
 func TestCheckReviewRun_NoFile(t *testing.T) {
 	dir := t.TempDir()
+	pinGitCeiling(t, dir)
 
 	r := checkReviewRun(testCtx(dir))
 	if r.Passed {
@@ -669,8 +689,12 @@ func TestCheckNotOnMain_DetachedHead(t *testing.T) {
 
 	dir := t.TempDir()
 	initGitRepo(t, dir, "main")
-	// Detach HEAD.
+	// Detach HEAD. Pin the CI-ref recovery env so an ambient
+	// GITHUB_REF_NAME (for example "main" on a push event) cannot
+	// flip the resolution on CI runners.
 	runGit(t, dir, "checkout", "--detach")
+	t.Setenv("GITHUB_HEAD_REF", "")
+	t.Setenv("GITHUB_REF_NAME", "")
 
 	r := checkNotOnMain(testCtx(dir))
 	if !r.Passed {
@@ -726,6 +750,7 @@ func TestRun_SpecifyPhase_Pass(t *testing.T) {
 
 func TestRun_ImplementPhase_Fail(t *testing.T) {
 	dir := t.TempDir()
+	pinGitCeiling(t, dir)
 	// Empty directory — all checks should fail.
 
 	var stdout, stderr bytes.Buffer
@@ -1023,6 +1048,80 @@ func TestFormatJSON_ValidOutput(t *testing.T) {
 	}
 	if decoded.Checks[0].Name != "spec-exists" || !decoded.Checks[0].Passed || decoded.Checks[0].Message != "Spec found" {
 		t.Errorf("unexpected check: %+v", decoded.Checks[0])
+	}
+}
+
+// TestFormatJSON_WireContractKeys asserts the raw JSON wire keys of
+// the gate report. Struct round-trips (TestFormatJSON_ValidOutput)
+// cannot detect json-tag drift — both sides use the same struct — so
+// this test pins the machine-readable contract GATE-FR-003 declares
+// stable across minor versions.
+func TestFormatJSON_WireContractKeys(t *testing.T) {
+	report := &GateReport{
+		Version:     SchemaVersion,
+		ToolVersion: "v1.2.3",
+		Producer:    ProducerName,
+		Timestamp:   "2026-09-08T12:00:00Z",
+		Branch:      "opsx/test",
+		Commit:      "0123456789abcdef",
+		Phase:       "specify",
+		Passed:      true,
+		Checks: []CheckResult{
+			{Name: "spec-exists", Passed: true, Message: "Spec found"},
+		},
+		Summary: Summary{Total: 1, Passed: 1, Failed: 0},
+	}
+
+	var buf bytes.Buffer
+	if err := FormatJSON(report, &buf); err != nil {
+		t.Fatalf("FormatJSON error: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatalf("invalid JSON output: %v", err)
+	}
+
+	wantKeys := []string{
+		"version", "tool_version", "producer", "timestamp",
+		"branch", "commit", "phase", "passed", "checks", "summary",
+	}
+	for _, key := range wantKeys {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("wire output missing key %q: %s", key, buf.String())
+		}
+	}
+	if len(raw) != len(wantKeys) {
+		t.Errorf("expected exactly %d top-level keys, got %d: %s",
+			len(wantKeys), len(raw), buf.String())
+	}
+
+	var checks []map[string]json.RawMessage
+	if err := json.Unmarshal(raw["checks"], &checks); err != nil {
+		t.Fatalf("invalid checks array: %v", err)
+	}
+	for _, key := range []string{"name", "passed", "message"} {
+		if _, ok := checks[0][key]; !ok {
+			t.Errorf("checks[0] missing key %q: %s", key, buf.String())
+		}
+	}
+	if len(checks[0]) != 3 {
+		t.Errorf("expected exactly 3 keys in checks[0], got %d: %s",
+			len(checks[0]), buf.String())
+	}
+
+	var summary map[string]json.RawMessage
+	if err := json.Unmarshal(raw["summary"], &summary); err != nil {
+		t.Fatalf("invalid summary object: %v", err)
+	}
+	for _, key := range []string{"total", "passed", "failed"} {
+		if _, ok := summary[key]; !ok {
+			t.Errorf("summary missing key %q: %s", key, buf.String())
+		}
+	}
+	if len(summary) != 3 {
+		t.Errorf("expected exactly 3 keys in summary, got %d: %s",
+			len(summary), buf.String())
 	}
 }
 
@@ -1429,6 +1528,123 @@ func TestRun_PRPhase_Pass(t *testing.T) {
 	}
 }
 
+// TestRun_QuickBranch_FailsArtifactChecks covers the quick-branch
+// resolution mode through Run() itself (GATE-FR-012): the quick tier
+// carries no spec artifacts, so an unrelated change's artifacts must
+// not satisfy its checks, and the report provenance must name the
+// quick branch.
+func TestRun_QuickBranch_FailsArtifactChecks(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"proposal.md": "# Proposal",
+	})
+	initGitRepo(t, dir, "quick/some-change")
+	t.Setenv("GITHUB_HEAD_REF", "")
+	t.Setenv("GITHUB_REF_NAME", "")
+
+	report, err := Run(Options{TargetDir: dir, Phase: "specify"})
+	if err == nil {
+		t.Fatal("expected error for failing checks")
+	}
+	if report == nil {
+		t.Fatal("expected report even on failure")
+	}
+	if report.Passed {
+		t.Error("expected report.Passed=false on quick branch")
+	}
+	if report.Branch != "quick/some-change" {
+		t.Errorf("expected branch provenance quick/some-change, got %q", report.Branch)
+	}
+	specExists := false
+	for _, c := range report.Checks {
+		if c.Name == "spec-exists" {
+			specExists = !c.Passed
+		}
+	}
+	if !specExists {
+		t.Errorf("expected spec-exists to fail on quick branch, got: %+v", report.Checks)
+	}
+}
+
+// TestRun_DetachedHead_RecoversCIRef covers the detached-HEAD
+// CI-recovery resolution mode through Run() itself (GATE-FR-012):
+// the branch recovered from GITHUB_HEAD_REF drives both artifact
+// resolution and the report's branch provenance.
+func TestRun_DetachedHead_RecoversCIRef(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	// aaa-first lacks the artifact; zzz-active has it. Passing
+	// proves the run resolved the CI-named change, not the
+	// alphabetical first.
+	scaffoldOpenSpecChange(t, dir, "aaa-first", map[string]string{
+		"notes.md": "# Notes",
+	})
+	scaffoldOpenSpecChange(t, dir, "zzz-active", map[string]string{
+		"proposal.md": "# Proposal",
+	})
+	initGitRepo(t, dir, "main")
+	runGit(t, dir, "checkout", "--detach")
+	t.Setenv("GITHUB_HEAD_REF", "opsx/zzz-active")
+	t.Setenv("GITHUB_REF_NAME", "123/merge")
+
+	report, err := Run(Options{TargetDir: dir, Phase: "specify"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !report.Passed {
+		t.Errorf("expected pass via CI-recovered change, got: %+v", report.Checks)
+	}
+	if report.Branch != "opsx/zzz-active" {
+		t.Errorf("expected CI-recovered branch provenance opsx/zzz-active, got %q", report.Branch)
+	}
+}
+
+// TestRun_PRPhase_DetachedHead_CIRefMain_Fails pins the branch
+// protection semantics in detached CI contexts: when the recovered
+// CI ref is main, the not-on-main check must fail (previously the
+// check re-ran git itself and only ever saw the literal "HEAD").
+func TestRun_PRPhase_DetachedHead_CIRefMain_Fails(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"tasks.md": "# Tasks\n- [x] Task 1\n<!-- code-review: passed -->",
+	})
+	initGitRepo(t, dir, "opsx/test-change")
+	runGit(t, dir, "checkout", "--detach")
+	t.Setenv("GITHUB_HEAD_REF", "main")
+	t.Setenv("GITHUB_REF_NAME", "")
+
+	report, err := Run(Options{TargetDir: dir, Phase: "pr"})
+	if err == nil {
+		t.Fatal("expected error for not-on-main failure")
+	}
+	if report == nil {
+		t.Fatal("expected report even on failure")
+	}
+	notOnMain := false
+	for _, c := range report.Checks {
+		if c.Name == "not-on-main" {
+			notOnMain = !c.Passed
+		}
+	}
+	if !notOnMain {
+		t.Errorf("expected not-on-main to fail on recovered main ref, got: %+v", report.Checks)
+	}
+	if report.Branch != "main" {
+		t.Errorf("expected branch provenance main, got %q", report.Branch)
+	}
+}
+
 // --- findTasksFile tests ---
 
 func TestFindTasksFile_OpenSpec(t *testing.T) {
@@ -1787,5 +2003,81 @@ func TestResolveChange_DetachedHead_NoCIRef_FallsBack(t *testing.T) {
 		t.Fatalf("find tasks file: %v", err)
 	} else if !strings.HasSuffix(path, filepath.Join("aaa-first", "tasks.md")) {
 		t.Errorf("expected alphabetical fallback to aaa-first, got %s", path)
+	}
+}
+
+// TestResolveChange_DetachedHead_HeadRefPrecedence covers the
+// combination GATE-FR-012's ordering exists for: both CI variables
+// populated with different values, as on a pull_request event where
+// GITHUB_REF_NAME is the merge ref. GITHUB_HEAD_REF must win.
+func TestResolveChange_DetachedHead_HeadRefPrecedence(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	scaffoldOpenSpecChange(t, dir, "zzz-active", map[string]string{
+		"proposal.md": "# Proposal",
+	})
+	initGitRepo(t, dir, "main")
+	runGit(t, dir, "checkout", "--detach")
+	t.Setenv("GITHUB_HEAD_REF", "opsx/zzz-active")
+	t.Setenv("GITHUB_REF_NAME", "123/merge")
+
+	res := resolveChange(dir)
+	if !res.Strict || res.Name != "zzz-active" {
+		t.Errorf("expected GITHUB_HEAD_REF to win over the merge ref, got %+v", res)
+	}
+	if res.Branch != "opsx/zzz-active" {
+		t.Errorf("expected effective branch opsx/zzz-active, got %q", res.Branch)
+	}
+}
+
+// TestResolveChange_DetachedHead_MergeRefFallsBack pins that a
+// merge-style GITHUB_REF_NAME (no CI head ref) names no change and
+// maps to the unmapped fallback, as documented in ciBranchRef.
+func TestResolveChange_DetachedHead_MergeRefFallsBack(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	scaffoldOpenSpecChange(t, dir, "aaa-first", map[string]string{
+		"tasks.md": "# Tasks",
+	})
+	initGitRepo(t, dir, "main")
+	runGit(t, dir, "checkout", "--detach")
+	t.Setenv("GITHUB_HEAD_REF", "")
+	t.Setenv("GITHUB_REF_NAME", "123/merge")
+
+	res := resolveChange(dir)
+	if res.Strict || res.Quick || res.Name != "" {
+		t.Errorf("expected unmapped fallback for merge ref, got %+v", res)
+	}
+	if res.Branch != "123/merge" {
+		t.Errorf("expected effective branch 123/merge, got %q", res.Branch)
+	}
+}
+
+// TestResolveChange_DetachedHead_UnsafeCIRefRejected verifies the
+// Constitution V input validation on CI-provided refs: traversal and
+// absolute-path values are ignored rather than flowing into artifact
+// path construction.
+func TestResolveChange_DetachedHead_UnsafeCIRefRejected(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	scaffoldOpenSpecChange(t, dir, "aaa-first", map[string]string{
+		"tasks.md": "# Tasks",
+	})
+	initGitRepo(t, dir, "main")
+	runGit(t, dir, "checkout", "--detach")
+
+	for _, ref := range []string{"../../evil", "/abs/path", `opsx\evil`, "opsx//evil", "opsx/./evil"} {
+		t.Setenv("GITHUB_HEAD_REF", ref)
+		t.Setenv("GITHUB_REF_NAME", "")
+		res := resolveChange(dir)
+		if res.Branch != "HEAD" || res.Strict || res.Name != "" {
+			t.Errorf("expected unsafe CI ref %q to be ignored (unmapped fallback), got %+v", ref, res)
+		}
 	}
 }

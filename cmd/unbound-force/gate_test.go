@@ -112,10 +112,19 @@ func TestRunGate_InvalidPhase(t *testing.T) {
 	if exitCode(err) != 1 {
 		t.Errorf("expected exit code 1 for invalid phase, got %d", exitCode(err))
 	}
+	// GATE-FR-002: the error message lists the valid phases.
+	for _, phase := range gate.ValidPhases() {
+		if !strings.Contains(err.Error(), phase) {
+			t.Errorf("expected valid phase %q in error, got: %v", phase, err)
+		}
+	}
 }
 
 func TestRunGate_UnrecognizedFormat_FallsToText(t *testing.T) {
 	dir := t.TempDir()
+	// Pin git discovery so the fallback-path resolution does not
+	// depend on ambient repository state.
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 
 	var stdout, stderr bytes.Buffer
 	// Note: format validation lives in RunE (Cobra level), covered
@@ -165,6 +174,9 @@ func TestRunGate_NonExistentDir(t *testing.T) {
 
 func TestRunGate_CheckFailure_ExitCode1(t *testing.T) {
 	dir := t.TempDir()
+	// Pin git discovery so the fallback-path resolution does not
+	// depend on ambient repository state.
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	// Empty directory — specify phase will fail.
 
 	var stdout, stderr bytes.Buffer
@@ -467,6 +479,9 @@ func TestNewGateCmd_ValidationError_StreamSeparation(t *testing.T) {
 func TestNewGateCmd_CheckFailure_StreamSeparation(t *testing.T) {
 	// Empty directory — the specify check fails.
 	dir := t.TempDir()
+	// Pin git discovery so the fallback-path resolution does not
+	// depend on ambient repository state.
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	cmd := newGateCmd()
 	var out, errBuf bytes.Buffer
 	cmd.SetOut(&out)

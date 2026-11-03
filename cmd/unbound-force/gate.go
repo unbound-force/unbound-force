@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -130,13 +129,10 @@ metadata (schema version, producer, tool version, timestamp, branch, commit).`,
 					format)
 			}
 
-			if dir == "" || dir == "." {
-				cwd, err := os.Getwd()
-				if err != nil {
-					return fmt.Errorf("get working directory: %w", err)
-				}
-				dir = cwd
-			}
+			// --dir passes through as-is: gate.Run owns the default
+			// ("." resolves via filepath.Abs) so a Getwd failure is
+			// classified as an internal error (exit 2) on every path
+			// (GATE-FR-009), not exit 1 from a CLI-side pre-resolution.
 
 			err := runGate(gateParams{
 				targetDir: dir,

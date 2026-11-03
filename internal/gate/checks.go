@@ -1,12 +1,9 @@
 package gate
 
 import (
-	"bufio"
-	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -96,6 +93,12 @@ type changeResolution struct {
 	// unavailable or the directory is not a repository).
 	Branch string
 
+	// BranchErr records why branch detection failed ("" means
+	// detection succeeded). Checks that consume branch identity
+	// (not-on-main) report this failure; artifact resolution
+	// proceeds as if the branch were unmapped.
+	BranchErr error
+
 	// Name is the change directory the branch maps to ("" when the
 	// branch names no change).
 	Name string
@@ -141,22 +144,22 @@ type runContext struct {
 // GITHUB_REF_NAME on push events) before applying the fallback, so
 // headless CI runs keep strict branch-keyed resolution (design R1).
 func resolveChange(dir string) changeResolution {
-	branch := detectBranch(dir)
-	if branch == "HEAD" {
+	branch, branchErr := detectBranch(dir)
+	if branchErr == nil && branch == "HEAD" {
 		if ref := ciBranchRef(); ref != "" {
 			branch = ref
 		}
 	}
 	if active := activeChangeName(branch, openspecChangesBase); active != "" {
-		return changeResolution{Branch: branch, Name: active, Base: openspecChangesBase, Strict: true}
+		return changeResolution{Branch: branch, BranchErr: branchErr, Name: active, Base: openspecChangesBase, Strict: true}
 	}
 	if active := activeChangeName(branch, speckitBase); active != "" {
-		return changeResolution{Branch: branch, Name: active, Base: speckitBase, Strict: true}
+		return changeResolution{Branch: branch, BranchErr: branchErr, Name: active, Base: speckitBase, Strict: true}
 	}
 	if name, ok := strings.CutPrefix(branch, "quick/"); ok && name != "" {
-		return changeResolution{Branch: branch, Strict: true, Quick: true}
+		return changeResolution{Branch: branch, BranchErr: branchErr, Strict: true, Quick: true}
 	}
-	return changeResolution{Branch: branch}
+	return changeResolution{Branch: branch, BranchErr: branchErr}
 }
 
 // ciBranchRef returns the branch name a CI runner reports for this
@@ -164,12 +167,37 @@ func resolveChange(dir string) changeResolution {
 // request events expose the head branch through GITHUB_HEAD_REF and
 // push events expose the pushed branch through GITHUB_REF_NAME.
 // Refs that name no change (for example PR merge refs like
-// "123/merge") simply map to the unmapped fallback.
+// "123/merge") simply map to the unmapped fallback. The value is
+// external input (Constitution V): refs that could alter path
+// resolution when joined into artifact paths are rejected rather
+// than trusted.
 func ciBranchRef() string {
-	if ref := strings.TrimSpace(os.Getenv("GITHUB_HEAD_REF")); ref != "" {
-		return ref
+	ref := strings.TrimSpace(os.Getenv("GITHUB_HEAD_REF"))
+	if ref == "" {
+		ref = strings.TrimSpace(os.Getenv("GITHUB_REF_NAME"))
 	}
-	return strings.TrimSpace(os.Getenv("GITHUB_REF_NAME"))
+	if !validCIRef(ref) {
+		return ""
+	}
+	return ref
+}
+
+// validCIRef reports whether ref is safe to use for change
+// resolution: no absolute paths, backslashes, traversal, or empty
+// path components that could escape the artifact base directories.
+func validCIRef(ref string) bool {
+	if ref == "" {
+		return false
+	}
+	if filepath.IsAbs(ref) || strings.Contains(ref, "\\") {
+		return false
+	}
+	for _, part := range strings.Split(ref, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 // regularFile reports whether path exists and is a regular file.
@@ -422,17 +450,15 @@ func changeArtifacts(dir, base, change string, names []string) ([]string, error)
 }
 
 // hasCoverageStrategy scans a file for coverage strategy
-// indicators per GATE-FR-006.
+// indicators per GATE-FR-006. The file is read whole, matching the
+// sibling checks that consume the same artifacts: artifact content
+// is check input, never an internal error.
 func hasCoverageStrategy(path string) (bool, error) {
-	f, err := os.Open(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = f.Close() }()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
+	for _, line := range strings.Split(string(content), "\n") {
 		lower := strings.ToLower(line)
 
 		// Heading containing "coverage" (case-insensitive).
@@ -452,11 +478,6 @@ func hasCoverageStrategy(path string) (bool, error) {
 			return true, nil
 		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		return false, err
-	}
-
 	return false, nil
 }
 
@@ -577,47 +598,25 @@ func checkReviewPass(ctx runContext) CheckResult {
 	}
 }
 
-// checkNotOnMain verifies the current git branch is not main
-// per GATE-FR-008. Uses exec.CommandContext with a bounded timeout and
-// explicit argument separation (no shell invocation) per
-// Constitution V.
+// checkNotOnMain verifies the run's resolved branch is not main per
+// GATE-FR-008. It consumes the once-per-run branch resolution
+// (design D2, GATE-FR-012) so the check, the report provenance,
+// and every other check observe the same branch — including
+// detached CI checkouts whose branch was recovered from
+// GITHUB_HEAD_REF or GITHUB_REF_NAME.
 func checkNotOnMain(ctx runContext) CheckResult {
-	gitCtx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(gitCtx, "git", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = ctx.dir
-
-	out, err := cmd.Output()
-	if err != nil {
-		// Distinguish between git not found and other errors.
-		if _, lookErr := exec.LookPath("git"); lookErr != nil {
-			return CheckResult{
-				Name:    "not-on-main",
-				Passed:  false,
-				Message: "git is not available — run 'uf doctor' to check tool availability",
-			}
-		}
-		detail := err.Error()
-		if gitCtx.Err() != nil {
-			detail = fmt.Sprintf("git did not respond within %s", gitCommandTimeout)
-		} else {
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
-				detail = strings.TrimSpace(string(exitErr.Stderr))
-			}
-		}
+	if ctx.res.BranchErr != nil {
 		return CheckResult{
 			Name:    "not-on-main",
 			Passed:  false,
-			Message: fmt.Sprintf("Cannot determine git branch: %s (is this a git repository?)", detail),
+			Message: ctx.res.BranchErr.Error(),
 		}
 	}
 
-	branch := strings.TrimSpace(string(out))
-
-	// Detached HEAD returns "HEAD" — this passes since it is
-	// not main (GATE-FR-008 scenario: Detached HEAD state).
-	if branch == "main" {
+	// A detached HEAD without a CI ref resolves to the literal
+	// "HEAD" — this passes since it is not main (GATE-FR-008
+	// scenario: Detached HEAD state).
+	if ctx.res.Branch == "main" {
 		return CheckResult{
 			Name:    "not-on-main",
 			Passed:  false,
@@ -628,7 +627,7 @@ func checkNotOnMain(ctx runContext) CheckResult {
 	return CheckResult{
 		Name:    "not-on-main",
 		Passed:  true,
-		Message: fmt.Sprintf("Current branch is %s", branch),
+		Message: fmt.Sprintf("Current branch is %s", ctx.res.Branch),
 	}
 }
 

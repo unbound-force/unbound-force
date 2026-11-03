@@ -2,6 +2,7 @@ package gate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -177,31 +178,62 @@ func computeSummary(results []CheckResult) Summary {
 	return s
 }
 
-// detectBranch returns the current git branch name, or an empty
-// string if git is unavailable, times out, or the directory is not
-// a git repository. Best-effort per D4.
-func detectBranch(dir string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+// errGitUnavailable reports that the git binary is not on PATH.
+var errGitUnavailable = errors.New("git is not available — run 'uf doctor' to check tool availability")
+
+// execGit runs git with the given arguments in dir under a bounded
+// timeout with explicit argument separation (no shell invocation,
+// Constitution V), returning trimmed stdout. Failures distinguish
+// git being unavailable, timeouts, and command errors with stderr
+// detail, so best-effort and strict callers share one contract.
+func execGit(dir string, args ...string) (string, error) {
+	gitCtx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd := exec.CommandContext(gitCtx, "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		return ""
+		return "", gitError(gitCtx, err)
 	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(string(out)), nil
+}
+
+// gitError classifies a failed git invocation: git missing from
+// PATH, a timeout, or the command's own failure with stderr detail.
+func gitError(gitCtx context.Context, err error) error {
+	if _, lookErr := exec.LookPath("git"); lookErr != nil {
+		return errGitUnavailable
+	}
+	if gitCtx.Err() != nil {
+		return fmt.Errorf("git did not respond within %s", gitCommandTimeout)
+	}
+	detail := err.Error()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+		detail = strings.TrimSpace(string(exitErr.Stderr))
+	}
+	return fmt.Errorf("git failed: %s", detail)
+}
+
+// detectBranch returns the current git branch name ("HEAD" for a
+// detached HEAD) and a detailed error when detection fails: git
+// unavailable, timeout, or not a git repository. The error is
+// carried on the change resolution so checks that consume branch
+// identity report the same failure the run observed (design D2).
+func detectBranch(dir string) (string, error) {
+	branch, err := execGit(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("cannot determine git branch: %w", err)
+	}
+	return branch, nil
 }
 
 // detectCommit returns the checked HEAD commit, or an empty string when git
 // is unavailable, times out, or the directory is not a repository.
 func detectCommit(dir string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	commit, err := execGit(dir, "rev-parse", "HEAD")
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	return commit
 }
