@@ -1237,6 +1237,7 @@ Each entry follows the format: `- <change-name>: <summary>`.
   because run files and invocation provenance carry the key and hosts
   copy it into runs). Any other unknown run key is still rejected,
   and persisted artifacts never contain `read_only` on runs.
+  (Fixes: #931)
 - diff-path-not-found (#932): `read_diff_chunk` and
   `build_review_prompts` now report a missing `diff_path` inside an
   allowed directory as `diff_not_found`, quoting the received path
@@ -1246,18 +1247,19 @@ Each entry follows the format: `- <change-name>: <summary>`.
   mistyped temp paths. A mistyped directory segment is still
   classified against the canonical roots (macOS `/var` vs.
   `/private/var`), and missing paths outside the allowed directories
-  still fail `path_validation_failed`.
+  still fail `path_validation_failed`. (Fixes: #932)
 - skill-absent-reason-limit (#935): `/uf.unleash` now states the
   512-character limit on `skill_absent_reason` in the field
-  definition and in every `uf_delegate_command` call template, so
-  thorough reasons no longer fail with `INVALID_INPUT` (5 rejections
-  at 517–699 characters). The Swarm-path `forge_spawn_subtask`
-  template is unchanged.
+  definition and in every `uf_delegate_command` and Swarm-path
+  `replicator_forge_spawn_subtask` call template, so thorough
+  reasons no longer fail with `INVALID_INPUT` (5 rejections at
+  517–699 characters). (Fixes: #935)
 - checkpoint-phase-validation (#936): the `checkpoint` tool now
   validates `phase` inside `execute` (the host does not enforce the
   args shape), so a bare `phase: 5` fails with `INVALID_INPUT`
   naming the expected shape instead of the misleading
   `requires step "implement-phase-undefined"` `CHECKPOINT_ERROR`.
+  (Fixes: #936)
 - review-pr-consolidate-dispatch: `/uf.review-pr` now finalizes every
   dispatch through exactly one `consolidate_dispatch` call per
   finalization attempt, carrying the captured `correlation_id` plus
