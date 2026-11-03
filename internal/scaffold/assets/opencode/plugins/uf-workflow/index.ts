@@ -9,7 +9,6 @@ import { z } from "zod"
 import {
   DEFAULT_TIMEOUT_MILLISECONDS,
   PromptSchema,
-  TimeoutSchema,
   directModelIdentity,
   executeAgentSession,
   resolveHostModel,
@@ -17,6 +16,7 @@ import {
   type InvocationProvenance,
   type InvocationUsage,
   type ModelIdentity,
+  type TimeoutDetails,
 } from "../../lib/agent-executor.js"
 import { classifyBranch } from "../../lib/branch-classification.js"
 import {
@@ -1843,6 +1843,42 @@ const PLAN_ARTIFACT_STOP_MESSAGE =
 const TASKS_ARTIFACT_STOP_MESSAGE =
   "Task generation failed -- tasks.md was not created. Check the agent output for errors."
 
+/**
+ * Wall-clock ceiling for prompt-only delegations, matching the executor
+ * TimeoutSchema bound shared with invoke_agent.
+ */
+export const MAX_PROMPT_DELEGATION_TIMEOUT_MS = 1_800_000
+
+/**
+ * Wall-clock ceiling for command-path delegations (4 hours;
+ * delegation-timeout-budgets D3). Command files own durable checkpoints,
+ * so the idle timeout is the primary stall detector and the wall clock
+ * is a backstop.
+ */
+export const MAX_COMMAND_DELEGATION_TIMEOUT_MS = 14_400_000
+
+/** Default idle (no-progress) window for every delegation (design D2). */
+export const DEFAULT_DELEGATE_IDLE_TIMEOUT_MS = 600_000
+
+/** Bounds accepted for idle_timeout. */
+export const MIN_DELEGATE_IDLE_TIMEOUT_MS = 60_000
+export const MAX_DELEGATE_IDLE_TIMEOUT_MS = 1_800_000
+
+/**
+ * Durable progress a timed-out command-path delegation left behind
+ * (design D4), read through the same readState path get_progress uses.
+ */
+export interface DelegateResumeState {
+  /** State command name (command file basename without .md). */
+  command: string
+  /** Progress state key (sanitized current branch). */
+  key: string
+  /** The state's current_step, or null when no state exists. */
+  last_checkpoint_step: string | null
+  /** Recorded steps, empty when no state exists. */
+  completed_steps: string[]
+}
+
 /** Structured output from uf_delegate_command. */
 export interface DelegateCommandData {
   /** Agent the command or task was delegated to. */
@@ -2004,7 +2040,16 @@ const DelegateCommandInputSchema = z
     expected_artifact: z.string().min(1).max(1024).optional(),
     checkpoint_step: z.string().min(1).max(128).optional(),
     phase: z.number().int().min(1).max(1000).optional(),
-    timeout: TimeoutSchema.optional(),
+    // Delegation-timeout-budgets D3: the ceiling depends on delegation
+    // kind, so the shared bound is the command-path ceiling and the
+    // superRefine below holds prompt-only calls to the executor bound.
+    timeout: z.number().int().positive().max(MAX_COMMAND_DELEGATION_TIMEOUT_MS).optional(),
+    idle_timeout: z
+      .number()
+      .int()
+      .min(MIN_DELEGATE_IDLE_TIMEOUT_MS)
+      .max(MAX_DELEGATE_IDLE_TIMEOUT_MS)
+      .optional(),
     // Delegation-skill-enforcement D1: the caller classifies the delegated
     // work and the tool validates the declared answer's consequences.
     // Absence of a skill reference is expressed by omitting the field or
@@ -2074,6 +2119,21 @@ const DelegateCommandInputSchema = z
         message:
           "prompt-only delegation (no command_path) must declare task_classification -- " +
           "classify the work as deterministic or judgment before delegating",
+      })
+    }
+    // Delegation-timeout-budgets D3: only command-path delegations, whose
+    // command files own durable checkpoints, may exceed the executor bound.
+    if (
+      input.command_path === undefined &&
+      input.timeout !== undefined &&
+      input.timeout > MAX_PROMPT_DELEGATION_TIMEOUT_MS
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["timeout"],
+        message:
+          `prompt-only delegation timeout must not exceed ${MAX_PROMPT_DELEGATION_TIMEOUT_MS} ms -- ` +
+          "only command-path delegations may run longer",
       })
     }
     // D1: name the skill, or record why none exists -- never both.
@@ -2372,6 +2432,29 @@ function expectedArtifactStopMessage(expectedArtifact: string): string {
 }
 
 /**
+ * Read the durable progress a timed-out command-path delegation left
+ * behind (delegation-timeout-budgets D4): the state command is the
+ * command file's basename without `.md`, keyed by the current branch
+ * exactly as get_progress derives it. Any read failure yields null so
+ * the timeout itself is never masked.
+ */
+function readDelegateResumeState(exec: GitExec, cwd: string, commandPath: string): DelegateResumeState | null {
+  try {
+    const command = basename(commandPath).replace(/\.md$/, "")
+    const key = resolveKey(exec, cwd)
+    const state = readState(cwd, key, sanitizeSlug(command))
+    return {
+      command,
+      key,
+      last_checkpoint_step: state?.current_step ?? null,
+      completed_steps: state?.completed_steps ?? [],
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
  * Production classifier agent-engine spawn (model-matrix-delegation design
  * D5, MM-FR-005): runs the hidden model-matrix-classifier subagent through
  * the shared executeAgentSession session path with the invocation's
@@ -2471,7 +2554,9 @@ async function spawnClassifierAgentSession(
  *   variant-fallback and structural-failure semantics verbatim
  * - the child session runs through the shared executeAgentSession executor
  *   (host model resolution via parent introspection, parenting, abort
- *   linkage, timeout — default 600,000 ms) and expected_artifact is
+ *   linkage, timeout — default 600,000 ms, up to 14,400,000 ms for
+ *   command-path calls, clamped to any inherited parent budget; idle
+ *   timeout default 600,000 ms) and expected_artifact is
  *   verified after the run; a missing artifact returns the command's exact
  *   STOP message (EXPECTED_ARTIFACT_MISSING)
  * - on success (child completed and artifact verified when supplied) the
@@ -2484,6 +2569,10 @@ async function spawnClassifierAgentSession(
  *   D7, MM-FR-007): selection_source always, plus pack, capability,
  *   model, confidence, and fallback_reason when non-null -- both also
  *   surfaced in the success envelope
+ * - limit-ended runs (delegation-timeout-budgets D4) return
+ *   DELEGATE_FAILED with the executor's `timeout` details and, for
+ *   command-path calls, `resume` (state key, last checkpoint step,
+ *   completed steps) so callers resume instead of restarting
  *
  * @param exec Git executor used to derive the auto-checkpoint state key.
  * @param cwd Repository root used for repo-relative path resolution.
@@ -2539,7 +2628,13 @@ export function createDelegateCommandTool(
           "for per-task delegation (same numbering as the implement exit variants).",
       ),
       timeout: DelegateCommandInputSchema.shape.timeout.describe(
-        "Optional run timeout in milliseconds (bounded to 1_800_000; default 600_000).",
+        "Optional wall-clock run timeout in milliseconds (default 600_000). Bounded to 14_400_000 " +
+          "for command-path delegations and 1_800_000 for prompt-only delegations. Inside another " +
+          "delegation the timeout is clamped to the parent's remaining budget.",
+      ),
+      idle_timeout: DelegateCommandInputSchema.shape.idle_timeout.describe(
+        "Optional idle (no-progress) timeout in milliseconds (60_000-1_800_000; default 600_000). " +
+          "The run aborts only when no session in the child's subtree changed for this long.",
       ),
       task_classification: DelegateCommandInputSchema.shape.task_classification.describe(
         "Optional classification of the delegated work: \"deterministic\" or \"judgment\". " +
@@ -2895,6 +2990,7 @@ export function createDelegateCommandTool(
             directory: context.directory,
             parentAbort: context.abort,
             timeoutMilliseconds: input.timeout ?? DEFAULT_TIMEOUT_MILLISECONDS,
+            idleTimeoutMilliseconds: input.idle_timeout ?? DEFAULT_DELEGATE_IDLE_TIMEOUT_MS,
           },
           input.agent,
           promptText,
@@ -2916,12 +3012,22 @@ export function createDelegateCommandTool(
           // executor created one, so callers can inspect the failed or
           // wedged child subtree directly from the delegation result
           // (the field is omitted when no child session ever existed).
+          // Limit-ended runs also carry the timeout classification and,
+          // for command-path delegations, the durable resume state
+          // (delegation-timeout-budgets D4).
           return {
-            output: JSON.stringify(
-              result.childSessionID !== undefined
-                ? { ...envelope, child_session_id: result.childSessionID }
-                : envelope,
-            ),
+            output: JSON.stringify({
+              ...envelope,
+              ...(result.childSessionID !== undefined ? { child_session_id: result.childSessionID } : {}),
+              ...(result.timeout !== undefined
+                ? {
+                    timeout: result.timeout satisfies TimeoutDetails,
+                    ...(input.command_path !== undefined
+                      ? { resume: readDelegateResumeState(exec, cwd, input.command_path) }
+                      : {}),
+                  }
+                : {}),
+            }),
           }
         }
 

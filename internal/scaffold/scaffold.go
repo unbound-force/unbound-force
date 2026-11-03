@@ -733,6 +733,7 @@ func isToolOwned(relPath string) bool {
 	}
 	if relPath == "opencode/lib/agent-executor.ts" ||
 		relPath == "opencode/lib/branch-classification.ts" ||
+		relPath == "opencode/lib/delegation-budget.ts" ||
 		relPath == "opencode/lib/model-matrix.ts" ||
 		relPath == "opencode/lib/preflight-declared.ts" ||
 		relPath == "opencode/lib/review-dispatch-artifact.ts" ||
@@ -828,6 +829,7 @@ func isDivisorAsset(relPath string) bool {
 	}
 	if relPath == "opencode/lib/agent-executor.ts" ||
 		relPath == "opencode/lib/branch-classification.ts" ||
+		relPath == "opencode/lib/delegation-budget.ts" ||
 		relPath == "opencode/lib/model-matrix.ts" ||
 		relPath == "opencode/lib/preflight-declared.ts" ||
 		relPath == "opencode/lib/review-dispatch-artifact.ts" ||

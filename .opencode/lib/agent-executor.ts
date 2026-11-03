@@ -1,6 +1,16 @@
 import { type PluginInput } from "@opencode-ai/plugin"
 import { z } from "zod"
 
+import {
+  ACTIVE_WINDOW_MS,
+  DEFAULT_IDLE_POLL_MS,
+  clampToBudget,
+  probeSubtreeActivity,
+  registerDeadline,
+  resolveInheritedDeadline,
+  unregisterDeadline,
+} from "./delegation-budget.js"
+
 // ── Constants ────────────────────────────────────────────────
 
 export const MAX_ERROR_LENGTH = 4_096
@@ -74,6 +84,34 @@ export interface InvocationProvenance {
   readonly read_only: boolean
 }
 
+/**
+ * Which limit ended a run (delegation-timeout-budgets D4): the wall
+ * clock, the idle (no-progress) window, or an exhausted inherited
+ * budget that prevented the run from starting.
+ */
+export type TimeoutKind = "wall_clock" | "idle" | "budget"
+
+/** Limit details attached to runs that ended by a timeout (design D4). */
+export interface TimeoutDetails {
+  readonly kind: TimeoutKind
+  /** Wall clock actually applied, after any budget clamp. */
+  readonly effective_ms: number
+  /** Wall clock the caller requested. */
+  readonly requested_ms: number
+  /** True when the inherited parent budget reduced the wall clock. */
+  readonly budget_clamped: boolean
+  /** Idle window, or null when the idle watchdog was disabled. */
+  readonly idle_timeout_ms: number | null
+  /** Milliseconds from run start to the abort. */
+  readonly elapsed_ms: number
+  /** Milliseconds since the last observed activity change, or null when never probed. */
+  readonly last_progress_ms_ago: number | null
+  /** Progress observed within ACTIVE_WINDOW_MS of the abort; null when never probed. */
+  readonly child_active: boolean | null
+  /** A question tool call was pending in the subtree at the last probe. */
+  readonly pending_question: boolean
+}
+
 /** Observable result from exactly one policy-free agent invocation. */
 export interface InvokeAgentResult {
   readonly status: "success" | "failed" | "cancelled"
@@ -83,6 +121,8 @@ export interface InvokeAgentResult {
   readonly provenance: InvocationProvenance
   /** Child session ID created by the executor (absent on early validation failures). */
   readonly childSessionID?: string
+  /** Limit details, present only when a timeout or exhausted budget ended the run. */
+  readonly timeout?: TimeoutDetails
 }
 
 /** Injected dependencies for the shared executor's child session lifecycle. */
@@ -92,6 +132,16 @@ export interface ExecutorDependencies {
   readonly directory: string
   readonly parentAbort: AbortSignal
   readonly timeoutMilliseconds: number
+  /**
+   * Idle (no-progress) window; when set, the child's session subtree is
+   * probed for activity and the run aborts with idle_timeout once no
+   * change has been observed for this long (design D2).
+   */
+  readonly idleTimeoutMilliseconds?: number
+  /** Activity probe interval (default DEFAULT_IDLE_POLL_MS). */
+  readonly idlePollMilliseconds?: number
+  /** Clock seam for budget and idle arithmetic (default Date.now). */
+  readonly now?: () => number
 }
 
 /** Context required for host model resolution via parent session introspection. */
@@ -303,7 +353,11 @@ export async function resolveHostModel(
  *
  * Owns: abort controller setup, child session create/prompt,
  * response parsing (text, usage, mismatch), timeout, cancellation,
- * and cleanup. Does NOT own: input validation, manifest checking,
+ * and cleanup, plus the delegation-timeout-budgets limits: the wall
+ * clock is clamped to any inherited parent budget (D1), the child's
+ * deadline is registered for nested runs, the optional idle watchdog
+ * aborts a child whose session subtree stops changing (D2), and
+ * limit-ended results carry `timeout` details (D4). Does NOT own: input validation, manifest checking,
  * model resolution, host introspection, or prompt file reading.
  *
  * @param deps Injected client, session context, and timeout boundary.
@@ -324,8 +378,55 @@ export async function executeAgentSession(
   read_only: boolean,
   provenance: InvocationProvenance,
 ): Promise<InvokeAgentResult> {
+  const now = deps.now ?? Date.now
+  const startedAt = now()
+  const idleMilliseconds = deps.idleTimeoutMilliseconds
+
+  // Hierarchical budget (delegation-timeout-budgets D1): a nested run
+  // never outlives the deadline its parent child session registered.
+  const inheritedDeadline = await resolveInheritedDeadline(
+    deps.client,
+    deps.sessionID,
+    deps.directory,
+    deps.parentAbort,
+  )
+  const budget = clampToBudget(deps.timeoutMilliseconds, inheritedDeadline, startedAt)
+  const effectiveMilliseconds = budget.effectiveMs
+
+  let lastProgressAt = startedAt
+  let lastFingerprint: string | null = null
+  let probed = false
+  let pendingQuestion = false
+  const timeoutDetails = (kind: TimeoutKind): TimeoutDetails => {
+    const at = now()
+    return {
+      kind,
+      effective_ms: effectiveMilliseconds,
+      requested_ms: deps.timeoutMilliseconds,
+      budget_clamped: budget.clamped,
+      idle_timeout_ms: idleMilliseconds ?? null,
+      elapsed_ms: at - startedAt,
+      last_progress_ms_ago: probed ? at - lastProgressAt : null,
+      child_active: !probed ? null : kind !== "idle" && at - lastProgressAt <= ACTIVE_WINDOW_MS,
+      pending_question: pendingQuestion,
+    }
+  }
+
+  if (budget.exhausted) {
+    return {
+      ...failedResult(
+        provenance,
+        "budget_exhausted",
+        `parent delegation budget exhausted (${budget.effectiveMs} ms left after the reserve); ` +
+          "return to the caller so it can resume from durable state",
+        false,
+      ),
+      timeout: timeoutDetails("budget"),
+    }
+  }
+
   const linkedAbort = new AbortController()
-  let abortCause: "cancelled" | "timeout" | null = null
+  let abortCause: "cancelled" | "timeout" | "idle" | null = null
   let childID: string | null = null
   let cleanupAbort = Promise.resolve()
 
@@ -359,7 +460,43 @@ export async function executeAgentSession(
     abortCause = "timeout"
     linkedAbort.abort(new Error("invoke_agent run timed out"))
     abortChild()
-  }, deps.timeoutMilliseconds)
+  }, effectiveMilliseconds)
+
+  // Idle watchdog (design D2): a changed subtree fingerprint is progress;
+  // a failed probe neither resets nor advances the idle clock, so only a
+  // successful, unchanged sample can end the run.
+  let sampling = false
+  const sample = async (): Promise<void> => {
+    if (sampling || childID === null || abortCause !== null || idleMilliseconds === undefined) {
+      return
+    }
+    sampling = true
+    try {
+      const activity = await probeSubtreeActivity(deps.client, childID, deps.directory, linkedAbort.signal)
+      if (activity === null || abortCause !== null) {
+        return
+      }
+      probed = true
+      pendingQuestion = activity.pendingQuestion
+      const at = now()
+      if (activity.fingerprint !== lastFingerprint) {
+        lastFingerprint = activity.fingerprint
+        lastProgressAt = at
+        return
+      }
+      if (at - lastProgressAt >= idleMilliseconds) {
+        abortCause = "idle"
+        linkedAbort.abort(new Error("invoke_agent run made no progress"))
+        abortChild()
+      }
+    } finally {
+      sampling = false
+    }
+  }
+  const idlePoll =
+    idleMilliseconds === undefined
+      ? undefined
+      : setInterval(() => void sample(), deps.idlePollMilliseconds ?? DEFAULT_IDLE_POLL_MS)
 
   if (deps.parentAbort.aborted) {
     cancelFromParent()
@@ -384,6 +521,8 @@ export async function executeAgentSession(
     if (childID === null) {
       return failedResult(provenance, "child_create_failed", responseFailure("create child session", created), true)
     }
+    // Nested runs inside this child inherit its absolute deadline (D1).
+    registerDeadline(childID, startedAt + effectiveMilliseconds)
     if (linkedAbort.signal.aborted) {
       abortChild()
       throw linkedAbort.signal.reason
@@ -447,7 +586,21 @@ export async function executeAgentSession(
     return withChild({ status: "success", text, usage, error: null, provenance })
   } catch (error: unknown) {
     if (abortCause === "timeout") {
-      return withChild(failedResult(provenance, "timeout", "invoke_agent run timed out", true))
+      return withChild({
+        ...failedResult(provenance, "timeout", "invoke_agent run timed out", true),
+        timeout: timeoutDetails("wall_clock"),
+      })
+    }
+    if (abortCause === "idle") {
+      return withChild({
+        ...failedResult(
+          provenance,
+          "idle_timeout",
+          `invoke_agent run made no progress for ${idleMilliseconds} ms`,
+          true,
+        ),
+        timeout: timeoutDetails("idle"),
+      })
     }
     if (abortCause === "cancelled") {
       return withChild(failedResult(provenance, "cancelled", "invoke_agent run was cancelled", false, "cancelled"))
@@ -455,6 +608,12 @@ export async function executeAgentSession(
     return withChild(failedResult(provenance, "invocation_failed", errorText(error), true))
   } finally {
     clearTimeout(timeout)
+    if (idlePoll !== undefined) {
+      clearInterval(idlePoll)
+    }
+    if (childID !== null) {
+      unregisterDeadline(childID)
+    }
     deps.parentAbort.removeEventListener("abort", cancelFromParent)
     await cleanupAbort
   }

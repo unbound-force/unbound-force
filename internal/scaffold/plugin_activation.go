@@ -222,6 +222,7 @@ func stageReviewPluginSources(opts *Options, stageRoot string) error {
 		ufFinalePluginAsset,
 		"opencode/lib/agent-executor.ts",
 		"opencode/lib/branch-classification.ts",
+		"opencode/lib/delegation-budget.ts",
 		"opencode/lib/model-matrix.ts",
 		"opencode/lib/preflight-declared.ts",
 		"opencode/lib/review-dispatch-artifact.ts",
