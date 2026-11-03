@@ -5440,14 +5440,14 @@ export function createPreflightDeclaredChecksTool(cwd: string, deps: PreflightDe
       "Validates the file, skips checks whose requires/run are unavailable or whose " +
       "paths miss the branch diff, runs the rest without a shell, and returns " +
       "{mode, config_present, scope, checks[], required_failures[], verdict, " +
-      "baseline_method, rendered, rendered_output}. In soft-gate mode required failures are " +
-      "re-run in a merge-base worktree and classified branch-caused / " +
+      "baseline_method, rendered, rendered_output}. In soft-gate mode required " +
+      "failures are re-run in a merge-base worktree and classified branch-caused / " +
       "pre-existing / unknown. `rendered` holds the Execution Results rows to " +
       "insert verbatim; `rendered_output` holds one fenced, untrusted-labelled " +
       "output block per check that ran with output, to insert verbatim under " +
-      "\"Project-declared check output\"; `verdict` is the declared checks' contribution to the " +
-      "pre-flight verdict; advisory rows never affect it. Failure code " +
-      "INVALID_PREFLIGHT_CONFIG means the file is invalid and no check ran.",
+      "\"Project-declared check output\"; `verdict` is the declared checks' " +
+      "contribution to the pre-flight verdict; advisory rows never affect it. Failure " +
+      "code INVALID_PREFLIGHT_CONFIG means the file is invalid and no check ran.",
     args: {
       mode: z.enum(PREFLIGHT_MODES).describe("Pre-flight execution policy chosen by the consuming command."),
     },

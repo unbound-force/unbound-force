@@ -141,8 +141,9 @@ merge-base baseline classification) and returns:
   Execution Results table (its columns already match the
   mode), insert a non-empty `rendered_output` verbatim as
   the Phase 5 "Project-declared check output" section
-  (omit the section when it is empty), and combine `verdict` with the detected tools' verdict:
-  the overall result is FAIL if either is FAIL.
+  (omit the section when it is empty), and combine
+  `verdict` with the detected tools' verdict: the overall
+  result is FAIL if either is FAIL.
 
 Declared checks are complete after this call. Do not run
 them again in Phases 2a–4b, map them to CI checks, or
