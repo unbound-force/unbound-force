@@ -1158,6 +1158,27 @@ describe("uf_delegate_command skill resolution", () => {
     expect(deliveredPrompt(fake.calls)).toContain("run the script at Makefile")
   })
 
+  it("does not resolve a directory as a root-file or path reference", async () => {
+    const artifact = fakeFileExists(["docs", "scripts/tools"])
+    const directories = new Set([resolve(FAKE_CWD, "docs"), resolve(FAKE_CWD, "scripts/tools")])
+    const deps: DelegateCommandDependencies = {
+      client: fakeClient().client,
+      modelMatrix: matrixFreeDeps,
+      readText: fakeReadText({}).readText,
+      fileExists: artifact.fileExists,
+      isDirectory: (path: string) => directories.has(path),
+    }
+
+    for (const skill of ["docs", "scripts/tools"]) {
+      const result = await invokeDelegate(recordingExec().exec, deps, {
+        prompt: "Run it.",
+        task_classification: "deterministic",
+        skill,
+      })
+      expect(result.status === "error" && result.code).toBe("SKILL_NOT_FOUND")
+    }
+  })
+
   it("prefers a skill over a same-name repo-root file", async () => {
     const fake = fakeClient()
     const artifact = fakeFileExists([".opencode/skills/build/SKILL.md", "build"])
@@ -2298,7 +2319,7 @@ describe("uf_delegate_command audit trail", () => {
       fileExists: artifact.fileExists,
     }
     const reason =
-      'searched .opencode/skills/ and .opencode/skill/ for a "rename" skill; none exists for this one-off'
+      'searched .opencode/skills/ and the repo root for a "rename" skill or script; none exists for this one-off'
 
     const result = await invokeDelegate(recordingExec("opsx/delegation-skill-enforcement").exec, deps, {
       prompt: "Rename the variable across the module.",
@@ -2631,7 +2652,7 @@ describe("uf_delegate_command seam verification", () => {
       fileExists: artifact.fileExists,
     }
     const reason =
-      'searched .opencode/skills/ and .opencode/skill/ for a rename skill; none exists for this one-off'
+      'searched .opencode/skills/ and the repo root for a rename skill or script; none exists for this one-off'
 
     const result = await invokeDelegate(recordingExec().exec, deps, {
       prompt: "Rename the variable across the module.",

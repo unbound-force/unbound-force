@@ -625,14 +625,15 @@ export function createGitFetchTool(exec: GitExec, cwd: string) {
 
 /**
  * Git ref-name argument guard for the push tools: non-empty, no leading
- * `-` (option injection), no whitespace, no `:` (refspec separator).
+ * `-` (option injection), no whitespace, no `:` (refspec separator), and
+ * not `HEAD` (which would create refs/heads/HEAD on the remote).
  */
 const PushRefNameSchema = z
   .string()
   .min(1)
   .max(255)
-  .refine((value) => !value.startsWith("-") && !/[\s:]/.test(value), {
-    message: "must not start with '-' or contain whitespace or ':'",
+  .refine((value) => !value.startsWith("-") && !/[\s:]/.test(value) && value !== "HEAD", {
+    message: "must not be HEAD, start with '-', or contain whitespace or ':'",
   })
 
 const GitPushInputSchema = z.object({
@@ -666,16 +667,24 @@ export interface GitPushData {
 
 /**
  * Refuse a push whose `branch` is not the checked-out branch: the push
- * source is HEAD, so a checkout switched underneath the caller would
- * otherwise push the wrong commits under the named ref. Returns the
+ * source is the HEAD commit, so a checkout switched underneath the
+ * caller would otherwise push the wrong commits under the named ref.
+ * Compares full ref names (`symbolic-ref`, which fails on a detached
+ * HEAD) so a same-name tag cannot make the check ambiguous. Returns the
  * failure-output JSON, or null when HEAD is on `branch`.
  */
 function pushBranchMismatchOutput(exec: GitExec, cwd: string, branch: string): string | null {
-  const current = exec(["rev-parse", "--abbrev-ref", "HEAD"], cwd)
-  if (current === branch) {
+  let current: string | null
+  try {
+    current = exec(["symbolic-ref", "-q", "HEAD"], cwd)
+  } catch {
+    current = null
+  }
+  if (current === `refs/heads/${branch}`) {
     return null
   }
-  const actual = current === "HEAD" ? "a detached HEAD" : `branch "${current}"`
+  const actual =
+    current === null || current === "" ? "a detached HEAD" : `branch "${current.replace(/^refs\/heads\//, "")}"`
   return JSON.stringify(
     failure(`Refusing to push "${branch}": the checkout is on ${actual}`, {
       retryable: false,
@@ -726,7 +735,7 @@ export function createGitPushTool(exec: GitExec, cwd: string) {
   return tool({
     description:
       "Push the checked-out branch to the remote with an explicit refspec " +
-      "(HEAD:refs/heads/<branch>). Refuses with BRANCH_MISMATCH when the " +
+      "(<HEAD sha>:refs/heads/<branch>). Refuses with BRANCH_MISMATCH when the " +
       "checkout is not on `branch`. Returns {remote, ref, old_sha, new_sha, " +
       "updated}; updated is false when the remote was already up to date.",
     args: {
@@ -735,7 +744,7 @@ export function createGitPushTool(exec: GitExec, cwd: string) {
       ),
       remote: z.string().optional().describe("Remote name (default: origin)"),
       setUpstream: z.boolean().optional().describe(
-        "Set upstream tracking (--set-upstream <remote> <branch>)",
+        "Set upstream tracking to <remote>/<branch> after the push",
       ),
     },
     async execute(args) {
@@ -752,16 +761,12 @@ export function createGitPushTool(exec: GitExec, cwd: string) {
           return { output: mismatch }
         }
         const newSha = exec(["rev-parse", "HEAD"], cwd)
-        const output = exec(
-          [
-            "push",
-            "--porcelain",
-            ...(setUpstream ? ["--set-upstream"] : []),
-            remote,
-            `HEAD:${ref}`,
-          ],
-          cwd,
-        )
+        // Push the verified commit, not HEAD, so a checkout switched
+        // after the branch check cannot change what is pushed.
+        const output = exec(["push", "--porcelain", remote, `${newSha}:${ref}`], cwd)
+        if (setUpstream) {
+          exec(["branch", `--set-upstream-to=${remote}/${branch}`, branch], cwd)
+        }
         // A fast-forward summary is "<old>..<new>"; the old commit is an
         // ancestor of HEAD, so it resolves locally to its full SHA.
         const data = pushReport(remote, ref, newSha, output, (summary) => {
@@ -787,21 +792,25 @@ export function createGitPushTool(exec: GitExec, cwd: string) {
 export function createGitPushForceWithLeaseTool(exec: GitExec, cwd: string) {
   return tool({
     description:
-      "Force-push the checked-out branch with an explicit lease: runs " +
-      "git push --force-with-lease=refs/heads/<branch>:<expected_sha> " +
-      "<remote> HEAD:refs/heads/<branch>. Refuses with BRANCH_MISMATCH when " +
-      "the checkout is not on `branch`. Returns {remote, ref, old_sha, " +
-      "new_sha, updated}; updated is false when the remote was already up " +
-      "to date.",
+      "Force-push the checked-out branch under a lease: runs git push " +
+      "--force-with-lease=refs/heads/<branch>:<expected_sha> <remote> " +
+      "<HEAD sha>:refs/heads/<branch>. Without expected_sha the lease is the " +
+      "remote-tracking ref plus --force-if-includes, so a fetch that moved " +
+      "it to a commit never integrated locally is rejected. Refuses with " +
+      "BRANCH_MISMATCH when the checkout is not on `branch`, and with " +
+      "EXPECTED_SHA_UNKNOWN when expected_sha is not a local commit. Returns " +
+      "{remote, ref, old_sha, new_sha, updated}; updated is false when the " +
+      "remote was already up to date.",
     args: {
       branch: z.string().describe(
         "Branch to push; MUST be the currently checked-out branch",
       ),
       remote: z.string().optional().describe("Remote name (default: origin)"),
       expected_sha: z.string().optional().describe(
-        "Commit SHA the remote branch is expected to hold (the lease). " +
-          "Default: the local remote-tracking ref <remote>/<branch>, or " +
-          "\"must not exist\" when there is none",
+        "Commit SHA the remote branch is expected to hold (the lease); " +
+          "record it before any fetch. Default: the remote-tracking ref " +
+          "<remote>/<branch> with --force-if-includes, or \"must not exist\" " +
+          "when there is none",
       ),
     },
     async execute(args) {
@@ -818,27 +827,36 @@ export function createGitPushForceWithLeaseTool(exec: GitExec, cwd: string) {
           return { output: mismatch }
         }
         let expected = ""
+        let leaseArgs: string[]
         if (parsed.value.expected_sha !== undefined) {
-          expected = exec(["rev-parse", "--verify", `${parsed.value.expected_sha}^{commit}`], cwd)
+          try {
+            expected = exec(["rev-parse", "--verify", `${parsed.value.expected_sha}^{commit}`], cwd)
+          } catch {
+            return {
+              output: JSON.stringify(
+                failure(
+                  `expected_sha "${parsed.value.expected_sha}" is not a commit in the local ` +
+                    "repository; fetch it or pass the full SHA of a known commit. Nothing was pushed.",
+                  { retryable: false, code: "EXPECTED_SHA_UNKNOWN" },
+                ),
+              ),
+            }
+          }
+          leaseArgs = [`--force-with-lease=${ref}:${expected}`]
         } else {
           try {
             expected = exec(["rev-parse", "--verify", `refs/remotes/${remote}/${branch}`], cwd)
+            // git ignores --force-if-includes with an explicit expect
+            // value, so the default lease names only the ref.
+            leaseArgs = [`--force-with-lease=${ref}`, "--force-if-includes"]
           } catch {
             // No remote-tracking ref: lease on the branch not existing yet.
             expected = ""
+            leaseArgs = [`--force-with-lease=${ref}:`]
           }
         }
         const newSha = exec(["rev-parse", "HEAD"], cwd)
-        const output = exec(
-          [
-            "push",
-            "--porcelain",
-            `--force-with-lease=${ref}:${expected}`,
-            remote,
-            `HEAD:${ref}`,
-          ],
-          cwd,
-        )
+        const output = exec(["push", "--porcelain", ...leaseArgs, remote, `${newSha}:${ref}`], cwd)
         // An accepted leased push replaced exactly the expected value.
         const data = pushReport(remote, ref, newSha, output, () => expected || null)
         return { output: JSON.stringify(success(data)) }
@@ -1861,6 +1879,11 @@ export interface DelegateCommandDependencies {
   /** File-existence checker for expected-artifact verification. */
   readonly fileExists: FileExists
   /**
+   * Directory checker for skill references naming a path (#934 review):
+   * an existing directory is not a script. Default: statSync-backed.
+   */
+  readonly isDirectory?: (path: string) => boolean
+  /**
    * Model-matrix selection dependencies (model-matrix-delegation designs
    * D1/D2/D5, tasks 5.1-5.4). Grouped so existing test sites extend with
    * one line instead of five, mirroring the review-dispatch dependency
@@ -2107,6 +2130,15 @@ function resolveToolParam(
   return { ok: true, abs }
 }
 
+/** Default directory checker: true only for an existing directory. */
+function defaultIsDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 /**
  * Repo skill roots searched for a `skill` value carrying no path
  * separator, in resolution order (delegation-skill-enforcement D2).
@@ -2137,7 +2169,10 @@ function resolveSkillReference(
   cwd: string,
   skill: string,
   fileExists: FileExists,
+  isDirectory: (path: string) => boolean = defaultIsDirectory,
 ): { ok: true; resolved: string } | { ok: false; failureOutput: string } {
+  // A path-form reference must name a file: a directory is not a script.
+  const isFileReference = (abs: string): boolean => fileExists(abs) && !isDirectory(abs)
   const remediation =
     "Remediation: pass an existing skill name or a repo-relative script path, " +
     "or record skill_absent_reason when no repo skill applies; retrying will not fix this."
@@ -2167,7 +2202,7 @@ function resolveSkillReference(
     }
     // No skill by that name: fall back to a repo-root file (#934).
     const rootFile = resolveRepoRelative(cwd, skill)
-    if (rootFile !== null && fileExists(rootFile)) {
+    if (rootFile !== null && isFileReference(rootFile)) {
       return { ok: true, resolved: skill }
     }
     const searchedLocations = [
@@ -2190,7 +2225,7 @@ function resolveSkillReference(
   if (!pathParam.ok) {
     return { ok: false, failureOutput: pathParam.failureOutput }
   }
-  if (!fileExists(pathParam.abs)) {
+  if (!isFileReference(pathParam.abs)) {
     return {
       ok: false,
       failureOutput: JSON.stringify(
@@ -2554,7 +2589,7 @@ export function createDelegateCommandTool(
         // audit trail (task 1.5).
         let resolvedSkill: string | null = null
         if (input.skill !== undefined) {
-          const skillRef = resolveSkillReference(cwd, input.skill, deps.fileExists)
+          const skillRef = resolveSkillReference(cwd, input.skill, deps.fileExists, deps.isDirectory)
           if (!skillRef.ok) {
             return { output: skillRef.failureOutput }
           }

@@ -214,3 +214,57 @@ func TestMigrateSkillDir_DivisorOnlySkips(t *testing.T) {
 	}
 	assertFileContent(t, dir, ".opencode/skill/a/SKILL.md", "a")
 }
+
+func TestMigrateSkillDir_RerunWithKeptConflictReportsSkipped(t *testing.T) {
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/skills/custom/SKILL.md", "new")
+	createFile(t, dir, ".opencode/skill/custom/SKILL.md", "edited")
+	opts, _ := newSkillMigrationOpts(dir)
+
+	first := migrateSkillDir(opts)
+	second := migrateSkillDir(opts)
+
+	for i, result := range []*subToolResult{first, second} {
+		if result == nil || result.action != "skipped" {
+			t.Errorf("run %d: expected skipped (nothing changed), got %+v", i+1, result)
+		}
+	}
+	assertFileContent(t, dir, ".opencode/skill/custom/SKILL.md", "edited")
+}
+
+// TestRun_MigratesLegacySkillDirExceptStealth runs the full init and
+// checks the legacy skill directory is migrated in normal mode and left
+// untouched in stealth mode, which runs after the stealth restore and
+// must not reshape the tree.
+func TestRun_MigratesLegacySkillDirExceptStealth(t *testing.T) {
+	for _, stealth := range []bool{false, true} {
+		t.Run(map[bool]string{false: "normal", true: "stealth"}[stealth], func(t *testing.T) {
+			dir := t.TempDir()
+			initGitDir(t, dir)
+			createFile(t, dir, ".opencode/skill/legacy-only/SKILL.md", "legacy")
+			createFile(t, dir, ".opencode/skill/speckit-workflow/SKILL.md", "old scaffold version")
+
+			var buf bytes.Buffer
+			// Stealth refuses tracked .opencode/ paths up front, so the
+			// legacy files are untracked here; stealth still must not
+			// move them.
+			g := newStealthGitFake()
+			opts := newStealthOpts(dir, g, &buf)
+			opts.Stealth = stealth
+			if _, err := Run(opts); err != nil {
+				t.Fatalf("Run() error: %v", err)
+			}
+
+			if stealth {
+				assertFileContent(t, dir, ".opencode/skill/legacy-only/SKILL.md", "legacy")
+				assertFileContent(t, dir, ".opencode/skill/speckit-workflow/SKILL.md", "old scaffold version")
+				return
+			}
+			assertFileContent(t, dir, ".opencode/skills/legacy-only/SKILL.md", "legacy")
+			assertAbsent(t, dir, ".opencode/skill")
+			if !strings.Contains(buf.String(), ".opencode/skill/ → skills/") {
+				t.Errorf("expected migration summary line, got:\n%s", buf.String())
+			}
+		})
+	}
+}

@@ -182,6 +182,10 @@ a pre-existing local branch may carry stale tracking), and leases on
 - Lease rejection (`GIT_PUSH_FORCE_ERROR`, stale info): the remote
   head moved since Phase 2. **STOP** and report; never retry with a
   refreshed lease or `--force`.
+- `EXPECTED_SHA_UNKNOWN`: `<HEAD_SHA>` is not a local commit, so
+  nothing was pushed and the remote may not have moved. Fetch the
+  head ref from `HEAD_REPO` (as in Phase 3) and call again with the
+  same `<HEAD_SHA>`.
 - Success returns `{remote, ref, old_sha, new_sha, updated}`. Report
   them; `updated: false` means the remote already held the rebased
   head, and nothing was pushed.
