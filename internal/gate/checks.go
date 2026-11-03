@@ -514,7 +514,7 @@ func loadTasksFile(ctx runContext) (rel string, content []byte, message string, 
 // review has been executed.
 var reviewMarkers = []string{
 	"<!-- spec-review: passed -->",
-	"<!-- code-review: passed -->",
+	codeReviewMarker,
 }
 
 // checkReviewRun looks for any review marker in tasks.md per

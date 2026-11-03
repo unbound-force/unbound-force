@@ -1,5 +1,5 @@
 <!-- Requirement allocation: this delta owns GATE-FR-001 through
-GATE-FR-011. GATE-FR-012 through GATE-FR-099 are reserved for future
+GATE-FR-012. GATE-FR-013 through GATE-FR-099 are reserved for future
 gate-command changes. Other capability requirements are allocated in
 their respective OpenSpec deltas. -->
 

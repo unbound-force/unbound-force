@@ -24,7 +24,9 @@
 
 - [x] 2.1 Create `internal/gate/checks.go` with check
   functions. Each function has signature
-  `func(dir string) CheckResult`:
+  `func(ctx runContext) CheckResult`, accepting the project
+  directory and the run's once-per-run change resolution
+  (GATE-FR-011 as amended):
   - `checkSpecExists`: probe openspec
     `proposal.md` and speckit `spec.md` (GATE-FR-004)
   - `checkPlanExists`: probe openspec `design.md`

@@ -41,6 +41,12 @@ checks derived from the constitution:
 - `--format json`: Machine-readable JSON output with structured
   check results, pass/fail status, and exit code semantics
 - `--dir`: Target directory (defaults to cwd)
+- Branch-aware artifact resolution (GATE-FR-012): checks for
+  `opsx/<name>` and `NNN-<name>` branches validate that change
+  only; `quick/<name>` branches fail all artifact checks (no
+  spec artifacts); a detached HEAD recovers the branch from
+  `GITHUB_HEAD_REF`/`GITHUB_REF_NAME`; unmapped branches fall
+  back to the first alphabetical match
 - Exit code 0: all checks pass. Exit code 1: one or more checks
   fail or arguments are invalid. Exit code 2: internal error
   (unexpected filesystem or output failure).
