@@ -971,6 +971,15 @@ checkpoint (`REBASED`):
   rejected and unbounded `--force` is forbidden;
   force-with-lease is the only rewrite-safe push.
 
+Either tool takes `{branch: <HEAD_REF>, remote: <HEAD_REMOTE>}`
+and pushes `HEAD:refs/heads/<HEAD_REF>` with an explicit
+refspec; the lease defaults to the `<HEAD_REMOTE>/<HEAD_REF>`
+remote-tracking ref. A `BRANCH_MISMATCH` refusal means the
+checkout left `<HEAD_REF>`: **STOP** and report it — never
+switch branches to retry. Success returns `{remote, ref,
+old_sha, new_sha, updated}`; report the SHAs, and treat
+`updated: false` as nothing pushed (CI will not re-run).
+
 The command MUST NEVER merge base into head — no push path
 substitutes a merge, and no option offers it (design D2). Only
 the PR's own head branch is pushed, to `<HEAD_REMOTE>`;

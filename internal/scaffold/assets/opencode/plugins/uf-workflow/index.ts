@@ -623,28 +623,159 @@ export function createGitFetchTool(exec: GitExec, cwd: string) {
   })
 }
 
+/**
+ * Git ref-name argument guard for the push tools: non-empty, no leading
+ * `-` (option injection), no whitespace, no `:` (refspec separator).
+ */
+const PushRefNameSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine((value) => !value.startsWith("-") && !/[\s:]/.test(value), {
+    message: "must not start with '-' or contain whitespace or ':'",
+  })
+
+const GitPushInputSchema = z.object({
+  branch: PushRefNameSchema,
+  remote: PushRefNameSchema.optional(),
+  setUpstream: z.boolean().optional(),
+})
+
+const GitPushForceWithLeaseInputSchema = z.object({
+  branch: PushRefNameSchema,
+  remote: PushRefNameSchema.optional(),
+  expected_sha: z
+    .string()
+    .regex(/^[0-9a-fA-F]{7,64}$/, "must be a 7-64 character hex commit SHA")
+    .optional(),
+})
+
+/**
+ * Structured output shared by git_push and git_push_force_with_lease.
+ * `old_sha` is the remote ref's value before the push (null when the
+ * push created the branch); `updated` is false when the remote already
+ * held `new_sha`, so a no-op push is distinguishable from an update.
+ */
+export interface GitPushData {
+  readonly remote: string
+  readonly ref: string
+  readonly old_sha: string | null
+  readonly new_sha: string
+  readonly updated: boolean
+}
+
+/**
+ * Refuse a push whose `branch` is not the checked-out branch: the push
+ * source is HEAD, so a checkout switched underneath the caller would
+ * otherwise push the wrong commits under the named ref. Returns the
+ * failure-output JSON, or null when HEAD is on `branch`.
+ */
+function pushBranchMismatchOutput(exec: GitExec, cwd: string, branch: string): string | null {
+  const current = exec(["rev-parse", "--abbrev-ref", "HEAD"], cwd)
+  if (current === branch) {
+    return null
+  }
+  const actual = current === "HEAD" ? "a detached HEAD" : `branch "${current}"`
+  return JSON.stringify(
+    failure(`Refusing to push "${branch}": the checkout is on ${actual}`, {
+      retryable: false,
+      code: "BRANCH_MISMATCH",
+    }),
+  )
+}
+
+/**
+ * Porcelain status flag and summary for `ref` from `git push
+ * --porcelain` output, or null when no status line names the ref.
+ */
+function pushStatusLine(output: string, ref: string): { flag: string; summary: string } | null {
+  for (const line of output.split("\n")) {
+    const fields = line.split("\t")
+    if (fields.length >= 3 && fields[1].endsWith(`:${ref}`)) {
+      return { flag: fields[0].trim(), summary: fields[2] }
+    }
+  }
+  return null
+}
+
+/**
+ * Build the push report from porcelain output. `=` means the remote
+ * already held HEAD (no-op), `*` means the push created the ref, and any
+ * other accepted status updated it from `oldSha(summary)`.
+ */
+function pushReport(
+  remote: string,
+  ref: string,
+  newSha: string,
+  output: string,
+  oldSha: (summary: string) => string | null,
+): GitPushData {
+  const status = pushStatusLine(output, ref)
+  if (status?.flag === "=") {
+    return { remote, ref, old_sha: newSha, new_sha: newSha, updated: false }
+  }
+  if (status?.flag === "*") {
+    return { remote, ref, old_sha: null, new_sha: newSha, updated: true }
+  }
+  const old = oldSha(status?.summary ?? "")
+  return { remote, ref, old_sha: old, new_sha: newSha, updated: old !== newSha }
+}
+
 /** Factory for the git_push tool. */
 export function createGitPushTool(exec: GitExec, cwd: string) {
   return tool({
     description:
-      "Push commits to the remote repository. " +
-      "Optionally set upstream tracking for a branch.",
+      "Push the checked-out branch to the remote with an explicit refspec " +
+      "(HEAD:refs/heads/<branch>). Refuses with BRANCH_MISMATCH when the " +
+      "checkout is not on `branch`. Returns {remote, ref, old_sha, new_sha, " +
+      "updated}; updated is false when the remote was already up to date.",
     args: {
-      setUpstream: z.boolean().optional().describe(
-        "Set upstream tracking (--set-upstream origin <branch>)",
+      branch: z.string().describe(
+        "Branch to push; MUST be the currently checked-out branch",
       ),
-      branch: z.string().optional().describe(
-        "Branch name (required when setUpstream is true)",
+      remote: z.string().optional().describe("Remote name (default: origin)"),
+      setUpstream: z.boolean().optional().describe(
+        "Set upstream tracking (--set-upstream <remote> <branch>)",
       ),
     },
-    execute: async (args: { setUpstream?: boolean; branch?: string }) => {
+    async execute(args) {
+      const parsed = parseToolInput(GitPushInputSchema, args)
+      if (!parsed.ok) {
+        return { output: parsed.failureOutput }
+      }
+      const { branch, setUpstream } = parsed.value
+      const remote = parsed.value.remote ?? "origin"
+      const ref = `refs/heads/${branch}`
       try {
-        const gitArgs =
-          args.setUpstream && args.branch
-            ? ["push", "--set-upstream", "origin", args.branch]
-            : ["push"]
-        exec(gitArgs, cwd)
-        return { output: JSON.stringify(success({ success: true })) }
+        const mismatch = pushBranchMismatchOutput(exec, cwd, branch)
+        if (mismatch !== null) {
+          return { output: mismatch }
+        }
+        const newSha = exec(["rev-parse", "HEAD"], cwd)
+        const output = exec(
+          [
+            "push",
+            "--porcelain",
+            ...(setUpstream ? ["--set-upstream"] : []),
+            remote,
+            `HEAD:${ref}`,
+          ],
+          cwd,
+        )
+        // A fast-forward summary is "<old>..<new>"; the old commit is an
+        // ancestor of HEAD, so it resolves locally to its full SHA.
+        const data = pushReport(remote, ref, newSha, output, (summary) => {
+          const abbrev = summary.split("..")[0]
+          if (!/^[0-9a-f]+$/i.test(abbrev)) {
+            return null
+          }
+          try {
+            return exec(["rev-parse", "--verify", `${abbrev}^{commit}`], cwd)
+          } catch {
+            return null
+          }
+        })
+        return { output: JSON.stringify(success(data)) }
       } catch (err: unknown) {
         return { output: failureFromError(err, "GIT_PUSH_ERROR", true) }
       }
@@ -656,22 +787,63 @@ export function createGitPushTool(exec: GitExec, cwd: string) {
 export function createGitPushForceWithLeaseTool(exec: GitExec, cwd: string) {
   return tool({
     description:
-      "Force-push with lease safety. Pushes to the remote using " +
-      "--force-with-lease to prevent overwriting others' work.",
-    execute: async () => {
+      "Force-push the checked-out branch with an explicit lease: runs " +
+      "git push --force-with-lease=refs/heads/<branch>:<expected_sha> " +
+      "<remote> HEAD:refs/heads/<branch>. Refuses with BRANCH_MISMATCH when " +
+      "the checkout is not on `branch`. Returns {remote, ref, old_sha, " +
+      "new_sha, updated}; updated is false when the remote was already up " +
+      "to date.",
+    args: {
+      branch: z.string().describe(
+        "Branch to push; MUST be the currently checked-out branch",
+      ),
+      remote: z.string().optional().describe("Remote name (default: origin)"),
+      expected_sha: z.string().optional().describe(
+        "Commit SHA the remote branch is expected to hold (the lease). " +
+          "Default: the local remote-tracking ref <remote>/<branch>, or " +
+          "\"must not exist\" when there is none",
+      ),
+    },
+    async execute(args) {
+      const parsed = parseToolInput(GitPushForceWithLeaseInputSchema, args)
+      if (!parsed.ok) {
+        return { output: parsed.failureOutput }
+      }
+      const { branch } = parsed.value
+      const remote = parsed.value.remote ?? "origin"
+      const ref = `refs/heads/${branch}`
       try {
-        exec(["push", "--force-with-lease"], cwd)
-        return { output: JSON.stringify(success({ success: true })) }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        return {
-          output: JSON.stringify(
-            failure(msg, {
-              retryable: false,
-              code: "GIT_PUSH_FORCE_ERROR",
-            }),
-          ),
+        const mismatch = pushBranchMismatchOutput(exec, cwd, branch)
+        if (mismatch !== null) {
+          return { output: mismatch }
         }
+        let expected = ""
+        if (parsed.value.expected_sha !== undefined) {
+          expected = exec(["rev-parse", "--verify", `${parsed.value.expected_sha}^{commit}`], cwd)
+        } else {
+          try {
+            expected = exec(["rev-parse", "--verify", `refs/remotes/${remote}/${branch}`], cwd)
+          } catch {
+            // No remote-tracking ref: lease on the branch not existing yet.
+            expected = ""
+          }
+        }
+        const newSha = exec(["rev-parse", "HEAD"], cwd)
+        const output = exec(
+          [
+            "push",
+            "--porcelain",
+            `--force-with-lease=${ref}:${expected}`,
+            remote,
+            `HEAD:${ref}`,
+          ],
+          cwd,
+        )
+        // An accepted leased push replaced exactly the expected value.
+        const data = pushReport(remote, ref, newSha, output, () => expected || null)
+        return { output: JSON.stringify(success(data)) }
+      } catch (err: unknown) {
+        return { output: failureFromError(err, "GIT_PUSH_FORCE_ERROR") }
       }
     },
   })
