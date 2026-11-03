@@ -199,6 +199,30 @@ describe("finalize review dispatch semantics", () => {
     expect(result.artifact_path).toBeNull()
   })
 
+  it("strips plugin-emitted read_only from runs instead of rejecting the payload (issue #931)", async () => {
+    const directory = await scratchDirectory()
+    const payload = emptySuccessfulPayload()
+    const runs = payload.runs.map((run) => ({ ...run, read_only: true }))
+
+    const result = await finalize({ ...payload, runs } as unknown as ReviewDispatchPayload, dependencies(directory))
+
+    expect(result.errors).toEqual([])
+    expect(result.status).toBe("success")
+    const artifact = JSON.parse(await readFile(result.artifact_path!, "utf8")) as { payload: { runs: object[] } }
+    expect(artifact.payload.runs.every((run) => !("read_only" in run))).toBe(true)
+  })
+
+  it("still rejects other unknown run keys", async () => {
+    const directory = await scratchDirectory()
+    const payload = emptySuccessfulPayload()
+    const runs = payload.runs.map((run) => ({ ...run, read_only: true, unexpected: true }))
+
+    const result = await finalize({ ...payload, runs } as unknown as ReviewDispatchPayload, dependencies(directory))
+
+    expect(result.status).toBe("failed")
+    expect(result.errors.join(" ")).toContain('Unrecognized key: "unexpected"')
+  })
+
   it("accepts a local input context with the uncommitted flag", async () => {
     const directory = await scratchDirectory()
     const payload = emptySuccessfulPayload()
