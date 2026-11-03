@@ -195,12 +195,15 @@ parented child sessions:
    outcome on disk: a PR URL; the PR stays open for
    human review; `Closes #N` threads via
    `originating_issue` in `.openspec.yaml`; the tree
-   returns to `main`. Set `timeout: 600000` (10 minutes):
-   the child's work before the commit-approval gate is
-   bounded (branch gate, staging, commit message prep),
-   and the wedge at that gate is the designed handoff —
-   the timeout bounds the orchestrator's wait before
-   gate-timeout recovery engages. Omit
+   returns to `main`. Set `timeout: 600000` (10 minutes)
+   and `idle_timeout: 300000` (5 minutes): the child's
+   work before the commit-approval gate is bounded
+   (branch gate, staging, commit message prep), and the
+   wedge at that gate is the designed handoff — the idle
+   timeout ends the wait at the gate with
+   `timeout.pending_question: true`, and the wall clock
+   bounds the rest before gate-timeout recovery engages.
+   Omit
    `task_classification`, `checkpoint_step`, and
    `expected_artifact` as above.
 
@@ -264,16 +267,24 @@ delegations add `resume` (`last_checkpoint_step`,
   above.
 - `timeout.kind: "idle"` without a pending question —
   the child stalled (typically provider latency):
-  re-delegate `/uf.unleash` once as a resume, the
-  mid-pipeline re-run class in Unleash Paused-Exit
-  Handling step 4, with the prompt also naming
-  `resume.last_checkpoint_step`. A second idle timeout
+  re-delegate the same command once as a resume (for
+  `/uf.unleash`, the mid-pipeline re-run class in
+  Unleash Paused-Exit Handling step 4), with the prompt
+  also naming `resume.last_checkpoint_step`. When that
+  step is null, no durable progress exists and the
+  re-run is effectively a fresh start: the prompt MUST
+  re-carry the description and issue reference(s), as
+  for the tier-routing variants. A second idle timeout
   on the same item routes through the blocked-item
   protocol.
-- `timeout.kind: "wall_clock"` — the 4-hour backstop
-  fired: route through the blocked-item protocol and
-  relay `child_session_id`, `timeout.child_active`, and
+- `timeout.kind: "wall_clock"` — the wall-clock
+  backstop fired: route through the blocked-item
+  protocol and relay `child_session_id`,
+  `timeout.child_active`, and
   `resume.last_checkpoint_step`.
+- `timeout.kind: "budget"` — not expected at the
+  orchestrator (it has no budgeted parent); treat it
+  as `wall_clock`.
 
 When `resume.last_checkpoint_step` is non-null, NEVER
 restart the item fresh on `main`: durable progress
