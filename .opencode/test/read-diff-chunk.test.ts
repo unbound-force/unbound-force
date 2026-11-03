@@ -255,6 +255,50 @@ describe("read_diff_chunk (RD-FR-034)", () => {
     })
   })
 
+  it("mistyped diff paths inside allowed directories report diff_not_found (issue #932)", async () => {
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await ReviewDispatchPlugin.server({
+        client: { session: {} },
+        directory: project,
+        worktree: project,
+      } as unknown as PluginInput)
+
+      // Corrupted UUID file name, and a corrupted directory segment above it.
+      for (const diffPath of [
+        join(tmpdir(), "opencode", "review-diff-9221-a8b4cf665030.patch"),
+        join(tmpdir(), "opencode-mistyped-dir", "review-diff-0000.patch"),
+      ]) {
+        const result = await hooks.tool.read_diff_chunk.execute(
+          { diff_path: diffPath, chunk_id: "any#1" },
+          toolContext(project),
+        )
+        const data = JSON.parse(result.output)
+        expect(data.code).toBe("diff_not_found")
+        expect(data.error).toContain(JSON.stringify(diffPath))
+        expect(data.content).toBeUndefined()
+      }
+    })
+  })
+
+  it("missing diff paths outside the allowed directories still fail path_validation_failed", async () => {
+    await withBun(async () => {
+      const project = await scratchProject()
+      const hooks = await ReviewDispatchPlugin.server({
+        client: { session: {} },
+        directory: project,
+        worktree: project,
+      } as unknown as PluginInput)
+
+      const result = await hooks.tool.read_diff_chunk.execute(
+        { diff_path: "/etc/uf-no-such-diff.patch", chunk_id: "any#1" },
+        toolContext(project),
+      )
+      const data = JSON.parse(result.output)
+      expect(data.code).toBe("path_validation_failed")
+    })
+  })
+
   it("file selector for a real but non-manifest file is rejected (no arbitrary filesystem access)", async () => {
     await withBun(async () => {
       const project = await scratchProject()
