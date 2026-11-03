@@ -5769,6 +5769,40 @@ func TestDivisorAgents_NoBareFRReferences(t *testing.T) {
 	}
 }
 
+// TestUnleashCommand_SkillReferenceRule pins the uf_delegate_command
+// `skill` resolution rule in uf.unleash.md (#934): a bare value is a
+// skill name first and a repo-root file second, and make targets or
+// commands are not valid references (they point to
+// skill_absent_reason). Both the embedded mirror and the canonical
+// command file are checked.
+func TestUnleashCommand_SkillReferenceRule(t *testing.T) {
+	content, err := assetContent("opencode/commands/uf.unleash.md")
+	if err != nil {
+		t.Fatalf("read embedded uf.unleash.md: %v", err)
+	}
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatalf("project root not found")
+	}
+	canonical, err := os.ReadFile(filepath.Join(root, ".opencode", "commands", "uf.unleash.md"))
+	if err != nil {
+		t.Fatalf("read canonical uf.unleash.md: %v", err)
+	}
+	for label, text := range map[string]string{"embedded": string(content), "canonical": string(canonical)} {
+		for _, phrase := range []string{
+			"repo skill name first, then as a repo-root file",
+			"(`Makefile`, `build-all.sh`)",
+			"`./Makefile` names a root file",
+			"`make plugin-test` are not valid `skill` values",
+			"record the command in\n     `skill_absent_reason`",
+		} {
+			if !strings.Contains(text, phrase) {
+				t.Errorf("%s uf.unleash.md missing skill reference rule phrase %q", label, phrase)
+			}
+		}
+	}
+}
+
 // TestDivisorGuard_DelegationDisciplineSpawnParameters pins the
 // guard's Deterministic Delegation Discipline after the
 // spawn-classification parameterization: the Swarm-path checklist
