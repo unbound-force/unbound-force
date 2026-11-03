@@ -1265,6 +1265,13 @@ Each entry follows the format: `- <change-name>: <summary>`.
   `/uf.address-feedback` run retried the identical call and then
   queried the opencode database six times to find it. The summary's
   documented prefix is unchanged. (Fixes: #946)
+- review-pr-self-authored (#942): `/uf.review-pr` now fetches the PR
+  `author` in Step 2 and, when the viewer login equals it, maps
+  APPROVE and REQUEST CHANGES to `COMMENT` with a verdict note
+  before the first POST, instead of posting, getting HTTP 422 ("Can
+  not request changes on your own pull request"), and rewriting the
+  payload. The 403/404/422 `COMMENT` fallback stays for other
+  causes. (Fixes: #942)
 - fix-uf-finale-ci-poll-gh-schema: `uf_finale_ci_poll` now works
   against gh 2.91.0. The poll requests the verified
   `name,state,bucket,link` field list through an argument-array
