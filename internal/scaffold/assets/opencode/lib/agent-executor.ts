@@ -465,15 +465,19 @@ export async function executeAgentSession(
   // Idle watchdog (design D2): a changed subtree fingerprint is progress;
   // a failed probe neither resets nor advances the idle clock, so only a
   // successful, unchanged sample can end the run.
+  // `settled` flips as soon as the child's prompt returns (and again in
+  // finally), so a probe still in flight when the run ends can never
+  // abort a finished child or relabel its result as idle_timeout.
   let sampling = false
+  let settled = false
   const sample = async (): Promise<void> => {
-    if (sampling || childID === null || abortCause !== null || idleMilliseconds === undefined) {
+    if (settled || sampling || childID === null || abortCause !== null || idleMilliseconds === undefined) {
       return
     }
     sampling = true
     try {
       const activity = await probeSubtreeActivity(deps.client, childID, deps.directory, linkedAbort.signal)
-      if (activity === null || abortCause !== null) {
+      if (activity === null || settled || abortCause !== null) {
         return
       }
       probed = true
@@ -540,6 +544,7 @@ export async function executeAgentSession(
       body,
       signal: linkedAbort.signal,
     })
+    settled = true
     // Reclassify abort-driven empty responses as cancellation, not prompt failure.
     if (linkedAbort.signal.aborted) {
       throw linkedAbort.signal.reason
@@ -607,6 +612,7 @@ export async function executeAgentSession(
     }
     return withChild(failedResult(provenance, "invocation_failed", errorText(error), true))
   } finally {
+    settled = true
     clearTimeout(timeout)
     if (idlePoll !== undefined) {
       clearInterval(idlePoll)

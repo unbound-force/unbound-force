@@ -143,7 +143,12 @@ interface PartLike {
   readonly type?: unknown
   readonly tool?: unknown
   readonly text?: unknown
-  readonly state?: { readonly status?: unknown; readonly output?: unknown }
+  readonly state?: {
+    readonly status?: unknown
+    readonly output?: unknown
+    readonly title?: unknown
+    readonly metadata?: unknown
+  }
 }
 
 interface MessageLike {
@@ -155,10 +160,26 @@ interface MessageLike {
   readonly parts?: readonly PartLike[]
 }
 
+/** Serialized length of a running tool's metadata; 0 when absent or unserializable. */
+function metadataLength(metadata: unknown): number {
+  if (metadata === undefined || metadata === null) {
+    return 0
+  }
+  try {
+    return JSON.stringify(metadata)?.length ?? 0
+  } catch {
+    return 0
+  }
+}
+
 /**
  * Fingerprint one session's latest message: message id, completion,
  * error presence, part count, and the last part's id, type, tool
- * status, and text/output length (streaming grows the length).
+ * status, title, and text/output/metadata length. Streaming grows the
+ * text length, and a running tool streams through its state metadata
+ * (bash keeps live output in `state.metadata.output`; the running
+ * state has no `output` field), so a long command that keeps printing
+ * counts as progress.
  */
 export function messageFingerprint(sessionID: string, message: MessageLike | undefined): string {
   if (message === undefined) {
@@ -168,6 +189,7 @@ export function messageFingerprint(sessionID: string, message: MessageLike | und
   const last = parts[parts.length - 1]
   const textLength = typeof last?.text === "string" ? last.text.length : 0
   const outputLength = typeof last?.state?.output === "string" ? last.state.output.length : 0
+  const streamedLength = textLength + outputLength + metadataLength(last?.state?.metadata)
   return [
     sessionID,
     String(message.info?.id ?? ""),
@@ -177,7 +199,8 @@ export function messageFingerprint(sessionID: string, message: MessageLike | und
     String(last?.id ?? ""),
     String(last?.type ?? ""),
     String(last?.state?.status ?? ""),
-    String(textLength + outputLength),
+    typeof last?.state?.title === "string" ? last.state.title : "",
+    String(streamedLength),
   ].join(":")
 }
 
@@ -189,8 +212,12 @@ function isPendingQuestion(message: MessageLike | undefined): boolean {
 
 /**
  * Sample the activity of `rootID` and its descendant sessions
- * (breadth-first over `session.children`, newest first, capped at
- * MAX_PROBE_SESSIONS). Returns null when the client lacks the probe
+ * (depth-first over `session.children`, newest child first, capped at
+ * MAX_PROBE_SESSIONS; two requests per session). Depth-first matters:
+ * a long-lived child accumulates finished direct children (classifier
+ * and reviewer sessions), and a breadth-first walk would spend the cap
+ * on them before reaching the active grandchild under the newest one.
+ * Returns null when the client lacks the probe
  * endpoints or any request fails, so callers never mistake an
  * unreachable API for a stalled child.
  */
@@ -204,12 +231,12 @@ export async function probeSubtreeActivity(
     return null
   }
   try {
-    const queue = [rootID]
+    const stack = [rootID]
     const seen = new Set<string>()
     const prints: string[] = []
     let pendingQuestion = false
-    while (queue.length > 0 && seen.size < MAX_PROBE_SESSIONS) {
-      const id = queue.shift() as string
+    while (stack.length > 0 && seen.size < MAX_PROBE_SESSIONS) {
+      const id = stack.pop() as string
       if (seen.has(id)) {
         continue
       }
@@ -226,13 +253,12 @@ export async function probeSubtreeActivity(
         return null
       }
       // The child count rides in the fingerprint so a newly spawned
-      // session registers as progress even past the session cap, and
-      // newest children are probed first: long-lived children accumulate
-      // finished sessions, and the active one is the most recent.
+      // session registers as progress even past the session cap. Children
+      // are pushed oldest first so the newest (the active one) pops next.
       prints.push(`${id}#${children.data.length}`)
-      const newestFirst = [...children.data].sort((a, b) => (b.time?.created ?? 0) - (a.time?.created ?? 0))
-      for (const child of newestFirst) {
-        queue.push(child.id)
+      const oldestFirst = [...children.data].sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0))
+      for (const child of oldestFirst) {
+        stack.push(child.id)
       }
     }
     return { fingerprint: prints.join("|"), pendingQuestion }
