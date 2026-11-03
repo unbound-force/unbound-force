@@ -6552,7 +6552,9 @@ function createDispatchReviewRunsTool(
       "When per_run_timeout_ms is omitted, each run's timeout is derived from the work being dispatched " +
       "(review-matrix base window, prompt size, plan tier, and parallelism), bounded by 1,800,000 ms. " +
       "Capture the correlation_id this tool reports (in the one-line summary and machine-readable metadata) " +
-      "and pass it as correlation_id on every subsequent consolidate_dispatch call in the same workflow.",
+      "and pass it as correlation_id on every subsequent consolidate_dispatch call in the same workflow. " +
+      "An error summary also ends with \" — error: <message> (retryable: <bool>)\", the failure message " +
+      "collapsed to one line and cut to 512 characters.",
     args: DispatchReviewRunsInputSchema.shape,
     async execute(
       args,
@@ -6562,10 +6564,32 @@ function createDispatchReviewRunsTool(
       // D3: the summary carries the correlation ID (rendered as "none" for
       // the pre-parse validation-failure result, which mints nothing) so the
       // dispatch session is addressable from the prose output alone.
-      const summary = `dispatch_review_runs: ${result.status} (correlation_id ${result.correlation_id ?? "none"}) — ${result.runs_completed} completed, ${result.runs_failed} failed, ${result.runs_skipped} skipped, ${result.findings.length} findings, ${result.proposals.length} proposals`
-      return { output: summary, metadata: result }
+      return { output: dispatchSummaryLine(result), metadata: result }
     },
   })
+}
+
+/** Maximum characters of a failure message carried on the summary line (issue #946). */
+const DISPATCH_SUMMARY_MESSAGE_CHARS = 512
+
+/**
+ * Render the one-line dispatch_review_runs summary. The documented prefix
+ * (status, correlation_id, counts) is stable; a non-ok result appends its
+ * failure message, collapsed to one line and bounded, plus `retryable` when
+ * known, because the metadata channel never reaches the calling model
+ * (issue #946).
+ * @param result Aggregate dispatch result.
+ * @returns The caller-visible summary line.
+ */
+export function dispatchSummaryLine(result: z.infer<typeof DispatchReviewRunsOutputSchema>): string {
+  const summary = `dispatch_review_runs: ${result.status} (correlation_id ${result.correlation_id ?? "none"}) — ${result.runs_completed} completed, ${result.runs_failed} failed, ${result.runs_skipped} skipped, ${result.findings.length} findings, ${result.proposals.length} proposals`
+  if (result.status === "ok") return summary
+  const message = truncateText(
+    (result.message ?? "no failure message reported").replace(/\s+/g, " ").trim(),
+    DISPATCH_SUMMARY_MESSAGE_CHARS,
+  )
+  const retryable = result.retryable === undefined ? "" : ` (retryable: ${result.retryable})`
+  return `${summary} — error: ${message.text}${message.truncated ? "…" : ""}${retryable}`
 }
 
 // ── Operation window records (RD-FR-031) ─────────────────────
