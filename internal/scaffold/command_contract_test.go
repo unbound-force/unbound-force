@@ -344,9 +344,8 @@ func TestCommandContracts_CorrelationIdForwarding(t *testing.T) {
 		{
 			name: "uf.triage-issue.md",
 			clauses: []commandClause{
-				{name: "dispatch-step capture and forwarding", all: []string{"capture the `correlation_id` reported in that one-line summary", "pass it as `correlation_id` on every subsequent consolidation call in this workflow", "the Section 2.3 retrieval, the Section 4.6 finalization, and every identical-call retry", "forward it unconditionally, never conditioned on in-process session-map state"}},
-				{name: "retrieval forwards the captured id", all: []string{"passing the captured `correlation_id` from the one-line summary"}},
-				{name: "retry forwards the same captured id", all: []string{"passing the same captured `correlation_id`"}},
+				{name: "dispatch-step capture and forwarding", all: []string{"capture the `correlation_id` reported in that one-line summary", "pass it as `correlation_id` on every subsequent consolidation call in this workflow", "the Section 4.6 finalization that Section 2.3 runs right after dispatch, and every identical-call retry", "forward it unconditionally, never conditioned on in-process session-map state"}},
+				{name: "finalize-first forwards the captured id", all: []string{"passing the captured `correlation_id` from the one-line summary"}},
 				{name: "finalization forwards the captured id", all: []string{"with the captured `correlation_id` from the Section 2.3 one-line summary and provenance as its only arguments"}},
 				{name: "finalization retry forwards the same captured id", all: []string{"same provenance, same captured `correlation_id`, no changes"}},
 				{name: "not-found with the forwarded id is permanent", all: []string{"consolidation carrying the forwarded `correlation_id` for a dispatch that executed runs", "with the ID forwarded, `not_found` means no persisted dispatch session exists", "a plugin-process or tool-session split can no longer produce it", "a `not_found` lacking the forwarded `correlation_id` indicates the capture step was skipped"}},
@@ -355,9 +354,7 @@ func TestCommandContracts_CorrelationIdForwarding(t *testing.T) {
 		{
 			name: "uf.address-feedback.md",
 			clauses: []commandClause{
-				{name: "dispatch-step capture and per-item forwarding", all: []string{"capture the `correlation_id` reported in that one-line summary", "pass it as `correlation_id` on every subsequent consolidation call for that feedback item's dispatch", "the Section 2.3.7 retrieval, the Section 2.3.8 finalization, and every identical-call retry", "the capture and forwarding are scoped per item, not global to the workflow", "forward it unconditionally, never conditioned on in-process session-map state"}},
-				{name: "retrieval forwards the item's captured id", all: []string{"passing the item's captured `correlation_id` from Section 2.3.4"}},
-				{name: "retry forwards the same captured per-item id", all: []string{"passing the same captured per-item `correlation_id`"}},
+				{name: "dispatch-step capture and per-item forwarding", all: []string{"capture the `correlation_id` reported in that one-line summary", "pass it as `correlation_id` on every subsequent consolidation call for that feedback item's dispatch", "the Section 2.3.8 finalization that runs right after the item's dispatch, and every identical-call retry", "the capture and forwarding are scoped per item, not global to the workflow", "forward it unconditionally, never conditioned on in-process session-map state"}},
 				{name: "finalization forwards the item's captured id", all: []string{"the item's captured `correlation_id` from Section 2.3.4 passed as the `correlation_id` argument"}},
 				{name: "finalization retry forwards the same captured per-item id", all: []string{"same provenance, same captured per-item `correlation_id`, no changes"}},
 				{name: "not-found with the forwarded id is permanent", all: []string{"consolidation carrying the forwarded `correlation_id` for a dispatch that executed runs", "with the ID forwarded, `not_found` means no persisted dispatch session exists", "a plugin-process or tool-session split can no longer produce it", "a `not_found` lacking the forwarded `correlation_id` indicates the capture step was skipped"}},
@@ -378,6 +375,50 @@ func TestCommandContracts_CorrelationIdForwarding(t *testing.T) {
 		command := command
 		t.Run(command.name, func(t *testing.T) {
 			assertCommandCopies(t, command.name, true, command.clauses)
+		})
+	}
+}
+
+// TestCommandContracts_ArtifactSourcedLessons pins RD-FR-056 (issues #941
+// and #945): every lesson-storing command stores from the persisted
+// artifact's payload.proposals, never from a capped preview, and no command
+// makes the unbounded no-provenance full retrieval.
+func TestCommandContracts_ArtifactSourcedLessons(t *testing.T) {
+	commands := []struct {
+		name    string
+		clauses []commandClause
+	}{
+		{name: "uf.review-pr.md", clauses: []commandClause{
+			{name: "lessons from the artifact", all: []string{"lessons come from the artifact's `payload.proposals` array", "never from the compact result's preview"}},
+		}},
+		{name: "uf.review-council.md", clauses: []commandClause{
+			{name: "lessons after finalization", all: []string{"after the section 5 finalization of this iteration succeeds, read the artifact's `payload.proposals` array", "never store lessons from it"}},
+			{name: "merge warning kind", all: []string{"`duplicate_proposal_merged` is discarded without failing"}},
+		}},
+		{name: "uf.unleash.md", clauses: []commandClause{
+			{name: "lessons from the artifact", all: []string{"store the dispatch's lessons from the same artifact read", "never store from the compact result's capped `proposals` preview"}},
+		}},
+		{name: "uf.triage-issue.md", clauses: []commandClause{
+			{name: "finalize first", all: []string{"immediately after `dispatch_review_runs` completes, run the section 4.6 finalization", "this command makes no no-provenance retrieval call"}},
+			{name: "runs from the artifact", all: []string{"from the `payload.runs` array of the artifact read in section 2.3", "for each proposal in `payload.proposals`"}},
+		}},
+		{name: "uf.address-feedback.md", clauses: []commandClause{
+			{name: "finalize first", all: []string{"run it immediately after the item's section 2.3.4 dispatch completes", "this command makes no no-provenance retrieval call"}},
+			{name: "runs from the artifact", all: []string{"consolidation reads the `payload.runs` array of the artifact persisted by the item's section 2.3.8 finalization", "for each proposal in `payload.proposals`"}},
+		}},
+	}
+	for _, command := range commands {
+		command := command
+		t.Run(command.name, func(t *testing.T) {
+			assertCommandCopies(t, command.name, true, command.clauses)
+			for _, copy := range loadCommandCopies(t, command.name, true) {
+				normalized := normalizeCommandText(copy.text)
+				for _, stale := range []string{"the artifact does not persist proposals", "call `consolidate_dispatch` exactly once without provenance"} {
+					if strings.Contains(normalized, stale) {
+						t.Errorf("%s retains stale lesson-sourcing prose %q", copy.name, stale)
+					}
+				}
+			}
 		})
 	}
 }

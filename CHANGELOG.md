@@ -1222,6 +1222,40 @@ Each entry follows the format: `- <change-name>: <summary>`.
   openspec/changes/command-prose-pilot/)
 
 ### Fixed
+- review-dispatch-consumer-bounds (#941): lesson proposals are now
+  stored with their full text. `consolidate_dispatch` persists the
+  proposals in the dispatch artifact as an optional
+  `payload.proposals` array (after `advisories`, before `plan` and
+  `runs`; declared in the Zod payload schema and
+  `schemas/review-dispatch/v1.0.0.schema.json`, so older artifacts
+  stay valid), and every lesson-storing command
+  (`/uf.review-council`, `/uf.review-pr`, `/uf.triage-issue`,
+  `/uf.address-feedback`, `/uf.unleash` Steps 4 and 6) stores from
+  it instead of from the 512-character tool-result preview. Before,
+  all 7 lessons of a `/uf.review-pr 937` run were stored cut
+  mid-word. Near-identical proposals across personas are merged
+  first by a deterministic token-overlap rule (the longer text
+  wins), and each merge is reported as a `duplicate_proposal_merged`
+  warning. A failed finalization stores no lesson; the proposals
+  stay in the dispatch store and are reported as stranded.
+  (Spec: openspec/changes/review-dispatch-consumer-bounds/,
+  Fixes: #941)
+- review-dispatch-consumer-bounds (#945): `/uf.triage-issue` and
+  `/uf.address-feedback` no longer make the unbounded
+  no-provenance `detail: "full"` retrieval, which the host
+  truncated at ordinary review sizes (4 of 7 retrievals of 42–51 KB
+  in one `/uf.address-feedback` run) and which then failed the item
+  closed. Both commands now finalize immediately after
+  `dispatch_review_runs` and read `runs`, findings, advisories, and
+  proposals once from the artifact at `artifact_path`. A failed
+  finalization now fails the invocation or item closed before any
+  GitHub mutation. (Spec:
+  openspec/changes/review-dispatch-consumer-bounds/, Fixes: #945)
+- review-dispatch-consumer-bounds (#943): the `build-review-prompts`
+  (FR-009, FR-011) and `review-dispatch-diff-manifest`
+  (`read_diff_chunk`) spec deltas now record the `diff_not_found`
+  error code for a missing path inside an allowed directory. (Spec:
+  openspec/changes/review-dispatch-consumer-bounds/, Fixes: #943)
 - fix-uf-finale-ci-poll-gh-schema: `uf_finale_ci_poll` now works
   against gh 2.91.0. The poll requests the verified
   `name,state,bucket,link` field list through an argument-array

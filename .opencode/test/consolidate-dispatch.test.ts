@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { describe, expect, it, afterEach } from "vitest"
 
-import { ReviewDispatchPlugin, createConsolidateDispatchTool, createFinalizationDependencies, _getSessionCorrelationMap, finalizeReviewDispatch } from "../plugins/review-dispatch/index.js"
+import { ReviewDispatchPlugin, createConsolidateDispatchTool, createFinalizationDependencies, _getSessionCorrelationMap, finalizeReviewDispatch, deduplicateProposals } from "../plugins/review-dispatch/index.js"
 import { withBun } from "./helpers/bun-runtime.js"
 import {
   dispatchParentContext,
@@ -2522,5 +2522,137 @@ describe("consolidate_dispatch detail modes and compact finalization (RD-FR-049,
     expect(compact.review_verdict).toBe("APPROVED")
     expect(compact.errors.join(" ")).toContain("injected link failure")
     expect(compact).not.toHaveProperty("review_dispatch")
+  })
+})
+
+describe("consolidate_dispatch durable and deduplicated proposals (RD-FR-054, RD-FR-055)", () => {
+  // The duplicate pair stored twice in issue #941's session
+  // (ses_e5dc3b9ccffevg6G3PMguRoAe3), worded and tagged differently.
+  const HOST_ARGS_LESSON_A =
+    "OpenCode plugin hosts do not enforce a tool's declared Zod arg shape before execute runs: structurally invalid " +
+    "arguments (e.g., checkpoint `phase: 5` where an object {number, verdict, inventory} is declared) reach execute " +
+    "and surface as misleading derived values. Fix pattern: extract the arg schema as one shared constant, " +
+    "re-validate inside execute through the plugin's parseToolInput helper, and return INVALID_INPUT."
+  const HOST_ARGS_LESSON_B =
+    "The OpenCode plugin host does not enforce a tool's declared zod `args` shape before `execute()` runs — the " +
+    "declaration is documentation-grade for object-valued args. An arg that execute() destructures must be " +
+    "re-validated inside execute through the plugin's shared `parseToolInput` seam; otherwise malformed input such " +
+    "as a bare `phase: 5` surfaces as downstream type garbage instead of a shape-naming INVALID_INPUT error."
+  const PATH_LESSON =
+    "When improving error taxonomy in a fail-closed path validator, preserve the read invariant rather than just " +
+    "the error codes: content is read only when realpath fully resolves the entire path inside the allowed roots."
+
+  function provenance() {
+    return { branch: "opsx/review-dispatch-consumer-bounds", commit: "b".repeat(40), workflow_id: "uf.review-council" }
+  }
+
+  async function scratchRoot(): Promise<string> {
+    const projectRoot = join(tmpdir(), `consolidate-proposals-${randomUUID()}`)
+    await mkdir(projectRoot, { recursive: true })
+    cleanupDirs.push(projectRoot)
+    return projectRoot
+  }
+
+  it("persists full-length proposals after advisories while the compact result stays a preview", async () => {
+    const projectRoot = await scratchRoot()
+    const information = "Persist the whole lesson. ".repeat(120)
+    await setupDispatchSession(
+      [runFixture({ agent: "divisor-guard", proposals: [{ information, tag: "review-dispatch", category: "gotcha" }] })],
+      { plan: explicitRunPlan("divisor-guard") },
+    )
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+    const compact = JSON.parse((await tool.execute({ provenance: provenance() }, noopContext())).output)
+
+    expect(compact.status).toBe("success")
+    expect(compact.proposals[0].information).toHaveLength(512)
+    expect(compact.proposals[0].truncated).toBe(true)
+    const artifact = await readPersistedArtifact(compact)
+    expect(artifact.payload.proposals).toEqual([
+      { agent: "divisor-guard", information, tag: "review-dispatch", category: "gotcha" },
+    ])
+    const keys = Object.keys(artifact.payload)
+    expect(keys.indexOf("proposals")).toBe(keys.indexOf("advisories") + 1)
+    expect(keys.indexOf("proposals")).toBeLessThan(keys.indexOf("plan"))
+    expect(keys.indexOf("proposals")).toBeLessThan(keys.indexOf("runs"))
+  })
+
+  it("omits payload.proposals from the artifact when no lesson was submitted", async () => {
+    const projectRoot = await scratchRoot()
+    await setupDispatchSession([runFixture({ agent: "divisor-guard" })], { plan: explicitRunPlan("divisor-guard") })
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+    const compact = JSON.parse((await tool.execute({ provenance: provenance() }, noopContext())).output)
+
+    const artifact = await readPersistedArtifact(compact)
+    expect(artifact.payload).not.toHaveProperty("proposals")
+  })
+
+  it("merges the #941 duplicate pair across personas and reports the merge", async () => {
+    const projectRoot = await scratchRoot()
+    await setupDispatchSession(
+      [
+        runFixture({ agent: "divisor-adversary", proposals: [{ information: HOST_ARGS_LESSON_A, tag: "tool-input-validation" }] }),
+        runFixture({
+          agent: "divisor-architect",
+          proposals: [
+            { information: HOST_ARGS_LESSON_B, tag: "opencode-plugins", category: "gotcha" },
+            { information: PATH_LESSON, tag: "path-validation" },
+          ],
+        }),
+      ],
+      { plan: explicitRunPlan("divisor-adversary", "divisor-architect") },
+    )
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+
+    const summary = JSON.parse((await tool.execute({ detail: "summary" }, noopContext())).output)
+    const full = JSON.parse((await tool.execute({}, noopContext())).output)
+    const compact = JSON.parse((await tool.execute({ provenance: provenance() }, noopContext())).output)
+    const artifact = await readPersistedArtifact(compact)
+
+    const longer = HOST_ARGS_LESSON_A.length >= HOST_ARGS_LESSON_B.length ? "divisor-adversary" : "divisor-architect"
+    const shorter = longer === "divisor-adversary" ? "divisor-architect" : "divisor-adversary"
+    const persisted = artifact.payload.proposals as Array<{ agent: string; information: string }>
+    expect(persisted.map((proposal) => proposal.agent)).toEqual([longer, "divisor-architect"])
+    expect(persisted[1].information).toBe(PATH_LESSON)
+    expect(full.proposals).toEqual(persisted)
+    expect(summary.proposals.map((proposal: { agent: string }) => proposal.agent)).toEqual([longer, "divisor-architect"])
+    expect(full.warnings).toEqual([{ type: "duplicate_proposal_merged", agent: shorter, kept_agent: longer }])
+    expect(summary.warnings).toEqual([{ kind: "duplicate_proposal_merged", detail: `agent=${shorter} kept=${longer}` }])
+    expect(compact.warnings).toEqual(summary.warnings)
+  })
+
+  it("keeps distinct lessons in collection order without a merge warning", () => {
+    const proposals = [
+      { agent: "divisor-guard", information: HOST_ARGS_LESSON_A, tag: "a" },
+      { agent: "divisor-sre", information: PATH_LESSON, tag: "b" },
+    ]
+    const result = deduplicateProposals(proposals)
+    expect(result.proposals).toEqual(proposals)
+    expect(result.warnings).toEqual([])
+  })
+
+  it("matches proposals with fewer than four tokens only on an equal token sequence", () => {
+    const result = deduplicateProposals([
+      { agent: "divisor-guard", information: "Prefer tabs", tag: "a" },
+      { agent: "divisor-sre", information: "Prefer spaces", tag: "b" },
+      { agent: "divisor-adversary", information: "prefer TABS", tag: "c" },
+    ])
+    expect(result.proposals.map((proposal) => proposal.agent)).toEqual(["divisor-guard", "divisor-sre"])
+    expect(result.warnings).toEqual([{ type: "duplicate_proposal_merged", agent: "divisor-adversary", kept_agent: "divisor-guard" }])
+  })
+
+  it("keeps the earlier entry on a length tie and the longer entry otherwise", () => {
+    const tie = deduplicateProposals([
+      { agent: "divisor-guard", information: "alpha beta gamma delta", tag: "a" },
+      { agent: "divisor-sre", information: "delta gamma beta alpha", tag: "b" },
+    ])
+    expect(tie.proposals.map((proposal) => proposal.agent)).toEqual(["divisor-guard"])
+    const longer = deduplicateProposals([
+      { agent: "divisor-guard", information: "alpha beta gamma delta", tag: "a" },
+      { agent: "divisor-sre", information: "alpha beta gamma delta epsilon", tag: "b" },
+    ])
+    expect(longer.proposals.map((proposal) => proposal.agent)).toEqual(["divisor-sre"])
+    expect(longer.warnings).toEqual([{ type: "duplicate_proposal_merged", agent: "divisor-guard", kept_agent: "divisor-sre" }])
   })
 })

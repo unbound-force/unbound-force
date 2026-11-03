@@ -471,13 +471,12 @@ describe("finalize strict schema boundaries", () => {
     }
   })
 
-  it("rejects consolidate result-wrapper observability fields on the payload", async () => {
-    // consolidate_dispatch returns { ...result, proposals?, warnings? }
-    // (each key omitted when empty — PR #776): the observability added by
-    // this change rides on the result
-    // wrapper only. A caller that forwards those wrapper fields as
-    // payload keys must be rejected — ReviewDispatchPayloadSchema is
-    // strict at the root too.
+  it("rejects consolidate result-wrapper warnings on the payload", async () => {
+    // consolidate_dispatch returns warnings on the result wrapper only
+    // (omitted when empty — PR #776). A caller that forwards them as a
+    // payload key must be rejected — ReviewDispatchPayloadSchema is strict
+    // at the root too. Proposals, by contrast, are a payload field since
+    // RD-FR-054 and are accepted (next test).
     const data = payload()
     const injected = data as unknown as Record<string, unknown>
     injected.warnings = [
@@ -494,9 +493,37 @@ describe("finalize strict schema boundaries", () => {
     const errors = await errorsFor(data)
     expect(errors).toHaveLength(1)
     expect(errors[0]).toContain("validate review dispatch input: ")
-    expect(errors[0]).toContain('payload: Unrecognized keys:')
-    expect(errors[0]).toContain('"warnings"')
-    expect(errors[0]).toContain('"proposals"')
+    expect(errors[0]).toContain('payload: Unrecognized key: "warnings"')
+    expect(errors[0]).not.toContain('"proposals"')
+  })
+
+  it("persists well-formed payload proposals and rejects malformed ones (RD-FR-054)", async () => {
+    const information = "x".repeat(16_384)
+    const data = payload() as unknown as Record<string, unknown>
+    data.proposals = [{ agent: "divisor-guard", information, tag: "review-dispatch", category: "gotcha" }]
+    const finalized = await finalizeReviewDispatch(
+      { payload: data as unknown as ReturnType<typeof payload>, provenance: provenance() },
+      dependencies(await scratchDirectory()),
+    )
+    expect(finalized.status).toBe("success")
+    const persisted = finalized.review_dispatch?.payload as unknown as Record<string, unknown>
+    expect(persisted.proposals).toEqual([{ agent: "divisor-guard", information, tag: "review-dispatch", category: "gotcha" }])
+    const keys = Object.keys(persisted)
+    expect(keys.indexOf("proposals")).toBe(keys.indexOf("advisories") + 1)
+    expect(keys.indexOf("proposals")).toBeLessThan(keys.indexOf("plan"))
+
+    for (const malformed of [
+      { agent: "divisor-guard", information: "lesson", tag: "review-dispatch", reference: "x" },
+      { agent: "divisor-guard", information: "lesson", tag: "" },
+      { agent: "divisor-guard", information: "lesson", tag: "t", category: "insight" },
+      { agent: "divisor-guard", information: "x".repeat(16_385), tag: "t" },
+    ]) {
+      const bad = payload() as unknown as Record<string, unknown>
+      bad.proposals = [malformed]
+      const errors = await errorsFor(bad as unknown as ReturnType<typeof payload>)
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toContain("payload.proposals.0")
+    }
   })
 
   it("rejects the compact finalization wrapper submitted as a payload", async () => {

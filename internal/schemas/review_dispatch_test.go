@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/unbound-force/unbound-force/internal/artifacts"
@@ -452,6 +453,75 @@ func TestReviewVerdictCompatibility_MajorBoundary(t *testing.T) {
 			}
 			if !test.compatible && err == nil {
 				t.Error("major mismatch must return migration error")
+			}
+		})
+	}
+}
+
+// TestReviewDispatchSchema_LessonProposals verifies the optional
+// payload.proposals array (RD-FR-054, issue #941): a payload without it
+// and one with a well-formed full-length proposal validate, and malformed
+// proposals are rejected.
+func TestReviewDispatchSchema_LessonProposals(t *testing.T) {
+	schemaData, err := os.ReadFile(filepath.Join(
+		repoSchemasDir(), "review-dispatch", "v1.0.0.schema.json",
+	))
+	if err != nil {
+		t.Fatalf("read review-dispatch schema: %v", err)
+	}
+	sampleData, err := os.ReadFile(filepath.Join(
+		repoSchemasDir(), "review-dispatch", "samples", "sample-review-dispatch.json",
+	))
+	if err != nil {
+		t.Fatalf("read review-dispatch sample: %v", err)
+	}
+
+	withProposal := func(proposal map[string]any) []byte {
+		t.Helper()
+		var payload map[string]any
+		if err := json.Unmarshal(sampleData, &payload); err != nil {
+			t.Fatalf("decode review-dispatch sample: %v", err)
+		}
+		payload["proposals"] = []any{proposal}
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("encode payload: %v", err)
+		}
+		return encoded
+	}
+	valid := func() map[string]any {
+		return map[string]any{
+			"agent":       "divisor-architect",
+			"information": strings.Repeat("x", 16384),
+			"tag":         "review-dispatch",
+			"category":    "gotcha",
+		}
+	}
+
+	if err := schemas.ValidateBytes(schemaData, sampleData); err != nil {
+		t.Fatalf("payload without proposals must validate: %v", err)
+	}
+	if err := schemas.ValidateBytes(schemaData, withProposal(valid())); err != nil {
+		t.Fatalf("full-length proposal must validate: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "unknown key", mutate: func(p map[string]any) { p["reference"] = "x" }},
+		{name: "empty tag", mutate: func(p map[string]any) { p["tag"] = "" }},
+		{name: "unknown category", mutate: func(p map[string]any) { p["category"] = "insight" }},
+		{name: "non-divisor agent", mutate: func(p map[string]any) { p["agent"] = "cobalt-crush" }},
+		{name: "information over limit", mutate: func(p map[string]any) { p["information"] = strings.Repeat("x", 16385) }},
+		{name: "missing information", mutate: func(p map[string]any) { delete(p, "information") }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			proposal := valid()
+			test.mutate(proposal)
+			if err := schemas.ValidateBytes(schemaData, withProposal(proposal)); err == nil {
+				t.Fatal("expected schema rejection")
 			}
 		})
 	}

@@ -847,6 +847,21 @@ const WorkflowResultSchema = z.discriminatedUnion("kind", [
   TestReviewResultSchema,
 ])
 
+/**
+ * Lesson proposal persisted in the dispatch artifact (RD-FR-054): the
+ * submit_lesson_proposal shape plus the submitting agent, kept at full length
+ * so consumers store complete lessons from the artifact rather than from the
+ * capped tool-result preview.
+ */
+const PayloadLessonProposalSchema = z
+  .object({
+    agent: AgentNameSchema,
+    information: z.string().min(1).max(16_384),
+    tag: z.string().min(1).max(128),
+    category: z.enum(["decision", "pattern", "gotcha", "context", "reference"]).optional(),
+  })
+  .strict()
+
 const ReviewDispatchPayloadSchema = z
   .object({
     command: z.enum(["review-council", "triage-issue", "address-feedback", "speckit-testreview"]),
@@ -860,6 +875,7 @@ const ReviewDispatchPayloadSchema = z
     coverage: CoverageSchema,
     findings: z.array(ConsolidatedFindingSchema).max(512),
     advisories: z.array(AdvisorySchema).max(512),
+    proposals: z.array(PayloadLessonProposalSchema).max(512).optional(),
     verdict: GenericVerdictSchema,
     verdict_reason: z.string().min(1).max(4096),
     run_counts: RunCountsSchema,
@@ -2589,8 +2605,9 @@ function envelopeFor(
 
 /**
  * Reorders a payload for persistence so a reader that only sees the head of
- * the artifact still gets the decision, findings, and advisories: plan and
- * runs (which repeat every run's findings) come last. Values are unchanged.
+ * the artifact still gets the decision, findings, advisories, and lesson
+ * proposals: plan and runs (which repeat every run's findings) come last.
+ * Values are unchanged; an absent proposals array stays absent (RD-FR-054).
  */
 function artifactPayloadOrder(payload: ReviewDispatchPayload): ReviewDispatchPayload {
   return {
@@ -2608,6 +2625,7 @@ function artifactPayloadOrder(payload: ReviewDispatchPayload): ReviewDispatchPay
     workflow_result: payload.workflow_result,
     findings: payload.findings,
     advisories: payload.advisories,
+    ...(payload.proposals === undefined ? {} : { proposals: payload.proposals }),
     plan: payload.plan,
     runs: payload.runs,
   }
@@ -4182,6 +4200,9 @@ function projectSummaryWarning(
     case "empty_coverage_attestation":
       detail = `agent=${agent}`
       break
+    case "duplicate_proposal_merged":
+      detail = `agent=${agent} kept=${typeof record.kept_agent === "string" ? record.kept_agent : ""}`
+      break
     default:
       return null
   }
@@ -4416,6 +4437,94 @@ interface InvalidSubmissionsExcludedWarning {
 }
 
 /**
+ * Machine-readable consolidate_dispatch warning: a lesson proposal was dropped
+ * as a near-identical duplicate of another proposal in the same dispatch
+ * (RD-FR-055). `agent` names the dropped entry's agent and `kept_agent` the
+ * surviving entry's, so no merge is silent. This shape is consolidate-result
+ * observability only; it MUST NOT flow into the finalization payload, whose
+ * strict schema rejects unknown top-level keys.
+ */
+interface DuplicateProposalMergedWarning {
+  readonly type: "duplicate_proposal_merged"
+  readonly agent: string
+  readonly kept_agent: string
+}
+
+/**
+ * English function words ignored when comparing proposals (RD-FR-055). Fixed
+ * so deduplication is deterministic; negations are deliberately kept.
+ */
+const PROPOSAL_STOP_WORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is",
+  "it", "its", "of", "on", "or", "that", "the", "this", "to", "with",
+])
+
+/** Minimum token-set size for overlap matching; smaller sets must match exactly. */
+const PROPOSAL_MIN_OVERLAP_TOKENS = 4
+
+/**
+ * Overlap coefficient at or above which two proposals are near-identical.
+ * Calibrated on issue #941's session: its duplicate pair scored 0.58 and every
+ * distinct pair at most 0.18.
+ */
+const PROPOSAL_DUPLICATE_OVERLAP = 0.5
+
+/** Normalized content tokens of one proposal's information text. */
+function proposalTokens(information: string): string[] {
+  return information
+    .normalize("NFKC")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((token) => token.length > 0 && !PROPOSAL_STOP_WORDS.has(token))
+}
+
+/** Whether two token lists describe the same lesson (RD-FR-055 rule 2). */
+function nearIdenticalTokens(a: readonly string[], b: readonly string[]): boolean {
+  const setA = new Set(a)
+  const setB = new Set(b)
+  const smaller = Math.min(setA.size, setB.size)
+  if (smaller < PROPOSAL_MIN_OVERLAP_TOKENS) {
+    return a.length === b.length && a.every((token, index) => token === b[index])
+  }
+  let shared = 0
+  for (const token of setA) {
+    if (setB.has(token)) shared += 1
+  }
+  return shared / smaller >= PROPOSAL_DUPLICATE_OVERLAP
+}
+
+/**
+ * Drop near-identical lesson proposals across personas (RD-FR-055). Visits
+ * proposals in collection order; on the first near-identical kept entry the
+ * longer information text (the kept one on a tie) holds the kept slot. Agent,
+ * tag, and category never affect matching. Each drop yields one warning.
+ * @param proposals Collected proposals in run order.
+ * @returns The kept proposals and one duplicate_proposal_merged warning per drop.
+ */
+export function deduplicateProposals<T extends { readonly agent: string; readonly information: string }>(
+  proposals: readonly T[],
+): { readonly proposals: T[]; readonly warnings: DuplicateProposalMergedWarning[] } {
+  const kept: { proposal: T; tokens: string[] }[] = []
+  const warnings: DuplicateProposalMergedWarning[] = []
+  for (const proposal of proposals) {
+    const tokens = proposalTokens(proposal.information)
+    const match = kept.find((entry) => nearIdenticalTokens(entry.tokens, tokens))
+    if (match === undefined) {
+      kept.push({ proposal, tokens })
+      continue
+    }
+    if (proposal.information.length > match.proposal.information.length) {
+      warnings.push({ type: "duplicate_proposal_merged", agent: match.proposal.agent, kept_agent: proposal.agent })
+      match.proposal = proposal
+      match.tokens = tokens
+    } else {
+      warnings.push({ type: "duplicate_proposal_merged", agent: proposal.agent, kept_agent: match.proposal.agent })
+    }
+  }
+  return { proposals: kept.map((entry) => entry.proposal), warnings }
+}
+
+/**
  * Cardinality bounds the finalizer's payload schemas declare — per-run
  * findings (DispatchRunSchema) and consolidated findings
  * (ReviewDispatchPayloadSchema), both 512. The schema declarations are the
@@ -4594,8 +4703,11 @@ export function createConsolidateDispatchTool(
       "to 256, categories, tags, and agents to 128, warning kinds to 64 and details to 256, any shortened " +
       "entry carries truncated: true, and trailing entries are dropped until the compact JSON is under " +
       "40,960 bytes. detail: \"summary\" combined with provenance is rejected. " +
-      "Lesson proposals submitted by child agents are collected and returned in a top-level proposals array; " +
-      "call dewey_store_learning for each. " +
+      "Lesson proposals submitted by child agents are collected, near-identical proposals across personas are " +
+      "merged (each merge reported as a duplicate_proposal_merged warning naming agent and kept_agent), and " +
+      "the full-length proposals are persisted in the artifact's payload.proposals (after advisories, before " +
+      "plan and runs) on finalization. The proposals arrays in tool results are a capped preview: store lessons " +
+      "with dewey_store_learning from the artifact's payload.proposals, never from the preview. " +
       "Findings and proposals harvested from non-success runs are excluded from the payload and reported in a " +
       "top-level warnings array as orphaned_submissions_excluded entries (agent, run_id, discarded counts); " +
       "harvested findings or proposals that fail their schemas are likewise excluded and reported as " +
@@ -4606,7 +4718,7 @@ export function createConsolidateDispatchTool(
       "successful manifest-mode runs whose persisted final text carries a missing or empty `**Files Reviewed**:` " +
       "coverage attestation are reported as empty_coverage_attestation warnings (advisory quality signal only, " +
       "no finding and no verdict change); when " +
-      "finalizing externally, submit the payload without the top-level proposals and warnings observability fields. " +
+      "finalizing externally, submit the payload without the top-level warnings observability field. " +
       "Automatically resolves the dispatch session from prior dispatch_agent_run calls; pass correlation_id " +
       "explicitly to consolidate a dispatch started by a different session (e.g. after a restart).",
     args: ConsolidateDispatchInputSchema.shape,
@@ -4772,6 +4884,7 @@ export function createConsolidateDispatchTool(
         | InvalidSubmissionsExcludedWarning
         | RunFindingsOverflowWarning
         | ConsolidatedFindingsOverflowWarning
+        | DuplicateProposalMergedWarning
       )[] = [
         ...runs
           .filter((run) => run.status !== "success" && (run.findings.length > 0 || run.proposals.length > 0))
@@ -4789,10 +4902,21 @@ export function createConsolidateDispatchTool(
         ...findingsOverflowWarnings,
       ]
 
-      // Collect lesson proposals from successful runs only, tagged with agent name.
-      const collectedProposals = validatedSuccessRuns.flatMap((run) =>
-        run.proposals.map((p) => ({ agent: run.agent, information: p.information, tag: p.tag, category: p.category })),
+      // Collect lesson proposals from successful runs only, tagged with agent
+      // name, then merge near-identical lessons across personas once so the
+      // artifact and every tool result carry the same set (RD-FR-055).
+      const deduplicated = deduplicateProposals(
+        validatedSuccessRuns.flatMap((run) =>
+          run.proposals.map((p) => ({
+            agent: run.agent,
+            information: p.information,
+            tag: p.tag,
+            category: p.category as z.infer<typeof PayloadLessonProposalSchema>["category"],
+          })),
+        ),
       )
+      const collectedProposals = deduplicated.proposals
+      warnings.push(...deduplicated.warnings)
 
       // Deduplicate findings across successful runs only, then enforce the
       // finalizer's top-level cardinality bound (ReviewDispatchPayloadSchema
@@ -4907,6 +5031,9 @@ export function createConsolidateDispatchTool(
         coverage: sessionMetadata.coverage,
         findings: consolidatedFindings,
         advisories,
+        // Full-length proposals persist in the artifact (RD-FR-054); the
+        // tool-result arrays below are a capped preview.
+        ...(collectedProposals.length > 0 ? { proposals: collectedProposals } : {}),
         verdict: projectedVerdict,
         verdict_reason: verdictReason,
         run_counts: runCounts,
@@ -4922,9 +5049,10 @@ export function createConsolidateDispatchTool(
         )
         return {
           output: JSON.stringify(
-            // warnings and proposals ride along on the compact finalization
-            // wrapper only — the payload handed to finalizeReviewDispatch
-            // stays schema-exact (RD-FR-051).
+            // warnings ride along on the compact finalization wrapper only —
+            // the payload handed to finalizeReviewDispatch stays schema-exact
+            // (RD-FR-051). The proposals here are a capped preview of the
+            // persisted payload.proposals (RD-FR-054).
             buildCompactFinalization(
               result,
               runCounts,
