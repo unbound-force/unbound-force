@@ -1132,6 +1132,99 @@ describe("uf_delegate_command skill resolution", () => {
     expect(existsSync).not.toHaveBeenCalled()
   })
 
+  it("resolves a bare repo-root file name when no skill root holds it (#934)", async () => {
+    const fake = fakeClient()
+    const reads = fakeReadText({})
+    const artifact = fakeFileExists(["Makefile"])
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: reads.readText,
+      fileExists: artifact.fileExists,
+    }
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Run the plugin-test target.",
+      task_classification: "deterministic",
+      skill: "Makefile",
+    })
+
+    expect(result.status).toBe("ok")
+    // Skill roots are probed first; the root file is the fallback.
+    expect(artifact.calls).toEqual([
+      resolve(FAKE_CWD, ".opencode/skills/Makefile/SKILL.md"),
+      resolve(FAKE_CWD, ".opencode/skill/Makefile/SKILL.md"),
+      resolve(FAKE_CWD, "Makefile"),
+    ])
+    expect(deliveredPrompt(fake.calls)).toContain("Required skill: Makefile\n\n")
+    expect(deliveredPrompt(fake.calls)).toContain("run the script at Makefile")
+  })
+
+  it("prefers a skill over a same-name repo-root file", async () => {
+    const fake = fakeClient()
+    const artifact = fakeFileExists([".opencode/skills/build/SKILL.md", "build"])
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: fakeReadText({}).readText,
+      fileExists: artifact.fileExists,
+    }
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Build it.",
+      task_classification: "deterministic",
+      skill: "build",
+    })
+
+    expect(result.status).toBe("ok")
+    expect(artifact.calls).toEqual([resolve(FAKE_CWD, ".opencode/skills/build/SKILL.md")])
+  })
+
+  it("does not resolve a bare `..` outside the repository root", async () => {
+    const artifact = fakeFileExists([])
+    const deps: DelegateCommandDependencies = {
+      client: fakeClient().client,
+      modelMatrix: matrixFreeDeps,
+      readText: fakeReadText({}).readText,
+      fileExists: (path: string) => path === resolve(FAKE_CWD, "..") || artifact.fileExists(path),
+    }
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Escape.",
+      task_classification: "deterministic",
+      skill: "..",
+    })
+
+    expect(result.status === "error" && result.code).toBe("SKILL_NOT_FOUND")
+  })
+
+  it("rejects a command or make target as SKILL_NOT_FOUND without probing", async () => {
+    const fake = fakeClient()
+    const artifact = fakeFileExists(["Makefile"])
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: fakeReadText({}).readText,
+      fileExists: artifact.fileExists,
+    }
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Run the plugin tests.",
+      task_classification: "deterministic",
+      skill: "make plugin-test",
+    })
+
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("SKILL_NOT_FOUND")
+      expect(result.retryable).toBe(false)
+      expect(result.message).toContain("commands and make targets are not skill references")
+      expect(result.message).toContain("skill_absent_reason")
+    }
+    expect(artifact.calls).toEqual([])
+    expect(fake.calls.creates).toHaveLength(0)
+  })
+
   it("resolves a same-name collision across the roots to the first root", async () => {
     const fake = fakeClient()
     const reads = fakeReadText({})
@@ -1249,18 +1342,21 @@ describe("uf_delegate_command skill resolution", () => {
     if (result.status === "error") {
       expect(result.code).toBe("SKILL_NOT_FOUND")
       expect(result.retryable).toBe(false)
-      // The envelope names every searched location (both skill roots).
+      // The envelope names every searched location (both skill roots
+      // and the repo-root file fallback).
       expect(result.message).toBe(
         'Skill reference "does-not-exist" does not resolve. ' +
-          "Searched: .opencode/skills/does-not-exist/SKILL.md, .opencode/skill/does-not-exist/SKILL.md. " +
+          "Searched: .opencode/skills/does-not-exist/SKILL.md, .opencode/skill/does-not-exist/SKILL.md, " +
+          "does-not-exist (repo-root file). " +
           "Remediation: pass an existing skill name or a repo-relative script path, " +
           "or record skill_absent_reason when no repo skill applies; retrying will not fix this.",
       )
     }
-    // Both roots were probed in order before failing closed.
+    // Both roots, then the root file, were probed before failing closed.
     expect(artifact.calls).toEqual([
       resolve(FAKE_CWD, ".opencode/skills/does-not-exist/SKILL.md"),
       resolve(FAKE_CWD, ".opencode/skill/does-not-exist/SKILL.md"),
+      resolve(FAKE_CWD, "does-not-exist"),
     ])
     // Fail-closed before host-model resolution and the child spawn: no
     // parent introspection, no session activity, no aborts, no state I/O,

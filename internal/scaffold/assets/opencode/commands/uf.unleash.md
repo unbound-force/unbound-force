@@ -1017,6 +1017,14 @@ its Local Tool Detection phase to discover additional
    - `skill`: a repo skill name or repo-relative script path
      that performs the work end-to-end. Valid only with a
      deterministic classification; mutually exclusive with
+     `skill_absent_reason`. A value without `/` resolves as a
+     repo skill name first, then as a repo-root file
+     (`Makefile`, `build-all.sh`); a value with `/` is a
+     repo-relative path (`./Makefile` names a root file
+     explicitly). Make targets and commands such as
+     `make plugin-test` are not valid `skill` values:
+     reference the file that defines them (`Makefile`) and
+     name the target in `prompt`, or record the command in
      `skill_absent_reason`.
    - `skill_absent_reason`: a substantive reason stating
      what was searched and what was found, in one or two
