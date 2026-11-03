@@ -294,14 +294,18 @@ function cell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, " ")
 }
 
+/** Length of the longest run of consecutive backticks in `text` (0 when none). */
+function longestBacktickRun(text: string): number {
+  return Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length))
+}
+
 /**
  * Wrap a value in a code span that its own backticks cannot close: the
  * fence is one backtick longer than the longest backtick run inside, and
  * a value starting or ending with a backtick is space-padded (CommonMark).
  */
 function codeSpan(value: string): string {
-  const longestRun = Math.max(0, ...(value.match(/`+/g) ?? []).map((run) => run.length))
-  const fence = "`".repeat(longestRun + 1)
+  const fence = "`".repeat(longestBacktickRun(value) + 1)
   const pad = value.startsWith("`") || value.endsWith("`") ? " " : ""
   return `${fence}${pad}${cell(value)}${pad}${fence}`
 }
@@ -335,8 +339,7 @@ export function renderDeclaredOutput(checks: readonly DeclaredCheckResult[]): st
   return checks
     .filter((check) => check.exit_code !== null && check.output.trim().length > 0)
     .map((check) => {
-      const longestRun = Math.max(0, ...(check.output.match(/`+/g) ?? []).map((run) => run.length))
-      const fence = "`".repeat(Math.max(3, longestRun + 1))
+      const fence = "`".repeat(Math.max(3, longestBacktickRun(check.output) + 1))
       const exit = check.timed_out ? `exit ${check.exit_code}, timed out` : `exit ${check.exit_code}`
       const body = check.output.endsWith("\n") ? check.output : `${check.output}\n`
       return [

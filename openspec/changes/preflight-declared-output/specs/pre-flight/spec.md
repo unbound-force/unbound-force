@@ -74,7 +74,9 @@ longest backtick run in the output.
 The Phase 5 report MUST have a "Project-declared check output"
 section in every mode. Pre-flight MUST insert a non-empty
 `rendered_output` there verbatim, MUST omit the section when it is
-empty, and MUST NOT summarize, re-fence or trim it.
+empty, and MUST NOT summarize, re-fence or trim it. This
+supersedes PF-FR-020's clause that pre-flight "MUST include each
+non-PASS check's `output`".
 
 #### Scenario: Output reaches divisors
 
