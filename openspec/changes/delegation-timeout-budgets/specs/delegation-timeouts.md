@@ -46,7 +46,13 @@ error code `idle_timeout` (retryable) only after no activity change
 has been observed for the idle window and at least one probe has
 succeeded since the last observed change. A failed probe MUST NOT
 reset or advance the idle clock. Activity in any descendant session
-MUST count as progress for the child.
+MUST count as progress for the child, including growth of a running
+tool's streamed `state.metadata` (for example bash output). The
+probe MUST walk the subtree depth-first, newest child first, so an
+active grandchild is reached even when the child has more finished
+direct children than the session cap. A probe that completes after
+the child's prompt returned MUST NOT abort the child or change the
+run's result.
 
 `uf_delegate_command` MUST accept `idle_timeout` (60,000 -
 1,800,000 ms) and MUST default it to 600,000 ms.
@@ -64,6 +70,14 @@ MUST count as progress for the child.
   idle timeout
 - **WHEN** no session in the subtree changes for 10 minutes
 - **THEN** the child is aborted with `idle_timeout`
+
+#### Scenario: Long command still printing
+
+- **GIVEN** a delegation with a 10-minute idle timeout
+- **AND** a child running a 15-minute bash command whose
+  `state.metadata.output` grows every minute
+- **WHEN** 15 minutes pass
+- **THEN** the delegation is not aborted
 
 #### Scenario: Probe unavailable
 

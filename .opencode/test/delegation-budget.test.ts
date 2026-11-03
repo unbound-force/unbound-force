@@ -1,5 +1,5 @@
 import type { PluginInput } from "@opencode-ai/plugin"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { executeAgentSession, type InvocationProvenance } from "../lib/agent-executor.js"
 import {
@@ -195,11 +195,26 @@ describe("messageFingerprint", () => {
     expect(running).not.toBe(output)
   })
 
-  it("records completion and error presence", () => {
+  it("changes when a running tool's metadata output or title changes", () => {
+    const tool = (title: string, output: string) =>
+      messageFingerprint(
+        "s",
+        message("m", [{ id: "t", type: "tool", tool: "bash", state: { status: "running", title, metadata: { output } } }]),
+      )
+    expect(tool("go test", "a")).not.toBe(tool("go test", "ab"))
+    expect(tool("go test", "a")).not.toBe(tool("go vet", "a"))
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    expect(
+      messageFingerprint("s", message("m", [{ id: "t", type: "tool", state: { status: "running", metadata: circular } }])),
+    ).toBe("s:m:::1:t:tool:running::0")
+  })
+
+    it("records completion and error presence", () => {
     const open = messageFingerprint("s", message("m", []))
     const failed = messageFingerprint("s", message("m", [], { error: { name: "x" } }))
     expect(open).not.toBe(failed)
-    expect(messageFingerprint("s", { parts: [] })).toBe("s::::0::::0")
+    expect(messageFingerprint("s", { parts: [] })).toBe("s::::0:::::0")
   })
 })
 
@@ -229,7 +244,27 @@ describe("probeSubtreeActivity", () => {
     expect((await probeSubtreeActivity(fake.client, "root", DIRECTORY, signal))?.pendingQuestion).toBe(false)
   })
 
-  it("caps the number of probed sessions", async () => {
+  it("reaches the active grandchild under the newest of many finished children", async () => {
+    const sessions: Record<string, FakeSession> = {}
+    const ids = Array.from({ length: MAX_PROBE_SESSIONS + 8 }, (_unused, index) => `c${index}`)
+    ids.forEach((id, index) => {
+      sessions[id] = { created: index }
+    })
+    const newest = ids[ids.length - 1]
+    sessions[newest] = { created: ids.length, children: ["grandchild"] }
+    sessions.root = { children: ids }
+    let text = "a"
+    sessions.grandchild = { latest: message("g", [{ id: "p", type: "text", text }]) }
+    const fake = treeClient({ sessions })
+    const first = await probeSubtreeActivity(fake.client, "root", DIRECTORY, signal)
+    expect(fake.probed.slice(0, 3)).toEqual(["root", newest, "grandchild"])
+    text = "ab"
+    sessions.grandchild = { latest: message("g", [{ id: "p", type: "text", text }]) }
+    const second = await probeSubtreeActivity(fake.client, "root", DIRECTORY, signal)
+    expect(second?.fingerprint).not.toBe(first?.fingerprint)
+  })
+
+    it("caps the number of probed sessions", async () => {
     const ids = Array.from({ length: MAX_PROBE_SESSIONS + 5 }, (_unused, index) => `c${index}`)
     const sessions: Record<string, FakeSession> = { root: { children: [...ids, "root"] } }
     const fake = treeClient({ sessions })
@@ -261,19 +296,19 @@ const PROVENANCE: InvocationProvenance = {
 }
 
 interface ExecutorFakeOptions {
-  /** Parent session id registered or walked for an inherited deadline. */
-  readonly parentID?: string
   /** Returns the child's latest message on each probe (undefined = probe failure). */
   readonly latest?: () => Record<string, unknown> | undefined
+  /** Delay before the Nth (1-based) probe answers, in ms (default 0). */
+  readonly probeDelayMs?: (call: number) => number
   /** Child prompt resolves after this many ms instead of hanging. */
   readonly resolveAfterMs?: number
 }
 
 /** Executor-facing fake: child creation, a hanging prompt, abort, and probe endpoints. */
 function executorClient(options: ExecutorFakeOptions = {}) {
-  const calls = { creates: 0, aborts: 0, deadlineDuringRun: undefined as number | undefined }
+  const calls = { creates: 0, aborts: 0, probes: 0, deadlineDuringRun: undefined as number | undefined }
   const session = {
-    get: async () => ({ data: { id: "parent", parentID: options.parentID } }),
+    get: async () => ({ data: { id: "parent" } }),
     create: async () => {
       calls.creates++
       return { data: { id: "exec-child" } }
@@ -302,6 +337,11 @@ function executorClient(options: ExecutorFakeOptions = {}) {
     },
     children: async () => ({ data: [] }),
     messages: async () => {
+      calls.probes++
+      const delay = options.probeDelayMs?.(calls.probes) ?? 0
+      if (delay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delay))
+      }
       const latest = options.latest?.()
       if (latest === undefined) {
         throw new Error("probe failed")
@@ -312,14 +352,11 @@ function executorClient(options: ExecutorFakeOptions = {}) {
   return { client: { session } as unknown as Client, calls }
 }
 
+const POLL_MS = 1_000
+
 function run(
   client: Client,
-  extra: {
-    timeoutMilliseconds?: number
-    idleTimeoutMilliseconds?: number
-    now?: () => number
-    parentAbort?: AbortSignal
-  } = {},
+  extra: { timeoutMilliseconds?: number; idleTimeoutMilliseconds?: number; parentAbort?: AbortSignal } = {},
 ) {
   return executeAgentSession(
     {
@@ -329,8 +366,7 @@ function run(
       parentAbort: extra.parentAbort ?? new AbortController().signal,
       timeoutMilliseconds: extra.timeoutMilliseconds ?? 60_000,
       idleTimeoutMilliseconds: extra.idleTimeoutMilliseconds,
-      idlePollMilliseconds: 1,
-      now: extra.now,
+      idlePollMilliseconds: POLL_MS,
     },
     "cobalt-crush-dev",
     "prompt",
@@ -342,6 +378,13 @@ function run(
 }
 
 describe("executeAgentSession budgets and idle watchdog", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it("fails fast with budget_exhausted when the parent budget is spent", async () => {
     register("parent", Date.now() + BUDGET_RESERVE_MS + 1_000)
     const fake = executorClient()
@@ -355,31 +398,33 @@ describe("executeAgentSession budgets and idle watchdog", () => {
   })
 
   it("clamps a nested run to the parent budget and registers the child deadline", async () => {
-    const clock = 1_000_000
-    register("parent", clock + BUDGET_RESERVE_MS + MIN_NESTED_BUDGET_MS)
+    const start = Date.now()
+    register("parent", start + BUDGET_RESERVE_MS + MIN_NESTED_BUDGET_MS)
     const controller = new AbortController()
     const fake = executorClient()
-    const pending = run(fake.client, { timeoutMilliseconds: 1_800_000, now: () => clock, parentAbort: controller.signal })
-    while (fake.calls.deadlineDuringRun === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 1))
-    }
+    const pending = run(fake.client, { timeoutMilliseconds: 1_800_000, parentAbort: controller.signal })
+    await vi.advanceTimersByTimeAsync(0)
     // The child inherits the clamped absolute deadline, not the request.
-    expect(fake.calls.deadlineDuringRun).toBe(clock + MIN_NESTED_BUDGET_MS)
+    expect(fake.calls.deadlineDuringRun).toBe(start + MIN_NESTED_BUDGET_MS)
     controller.abort(new Error("stop"))
     const result = await pending
     expect(result.error?.code).toBe("cancelled")
     expect(result.timeout).toBeUndefined()
+    expect(registeredDeadline("exec-child")).toBeUndefined()
   })
 
   it("reports a plain wall-clock timeout with no probe data", async () => {
-    const result = await run(executorClient().client, { timeoutMilliseconds: 5 })
+    const pending = run(executorClient().client, { timeoutMilliseconds: 5_000 })
+    await vi.advanceTimersByTimeAsync(5_000)
+    const result = await pending
     expect(result.error?.code).toBe("timeout")
     expect(result.timeout).toMatchObject({
       kind: "wall_clock",
-      effective_ms: 5,
-      requested_ms: 5,
+      effective_ms: 5_000,
+      requested_ms: 5_000,
       budget_clamped: false,
       idle_timeout_ms: null,
+      elapsed_ms: 5_000,
       last_progress_ms_ago: null,
       child_active: null,
       pending_question: false,
@@ -387,54 +432,93 @@ describe("executeAgentSession budgets and idle watchdog", () => {
   })
 
   it("aborts a stalled child with idle_timeout after an unchanged probe", async () => {
-    let clock = 0
     const fake = executorClient({ latest: () => message("m", [{ id: "p", type: "text", text: "same" }]) })
-    const pending = run(fake.client, {
-      idleTimeoutMilliseconds: 50,
-      now: () => {
-        clock += 20
-        return clock
-      },
-    })
+    const pending = run(fake.client, { idleTimeoutMilliseconds: 10_000 })
+    await vi.advanceTimersByTimeAsync(15_000)
     const result = await pending
     expect(result.error?.code).toBe("idle_timeout")
     expect(result.error?.retryable).toBe(true)
-    expect(result.error?.message).toBe("invoke_agent run made no progress for 50 ms")
-    expect(result.timeout?.kind).toBe("idle")
-    expect(result.timeout?.child_active).toBe(false)
-    expect(result.timeout?.idle_timeout_ms).toBe(50)
+    expect(result.error?.message).toBe("invoke_agent run made no progress for 10000 ms")
+    expect(result.timeout).toMatchObject({ kind: "idle", child_active: false, idle_timeout_ms: 10_000 })
+    // First probe at 1 s records the baseline; the unchanged probe at 11 s ends the run.
+    expect(result.timeout?.elapsed_ms).toBe(11_000)
     expect(result.childSessionID).toBe("exec-child")
     expect(fake.calls.aborts).toBe(1)
     // The child's deadline is removed once the run ends.
     expect(registeredDeadline("exec-child")).toBeUndefined()
   })
 
-  it("keeps an active child alive and reports it active on wall-clock timeout", async () => {
+  it("keeps a child with streaming text alive and reports it active on wall-clock timeout", async () => {
     let counter = 0
     const fake = executorClient({
       latest: () => message("m", [{ id: "p", type: "text", text: "x".repeat(++counter) }]),
     })
-    const result = await run(fake.client, { timeoutMilliseconds: 40, idleTimeoutMilliseconds: 1 })
+    const pending = run(fake.client, { timeoutMilliseconds: 20_000, idleTimeoutMilliseconds: 5_000 })
+    await vi.advanceTimersByTimeAsync(20_000)
+    const result = await pending
     expect(result.error?.code).toBe("timeout")
     expect(result.timeout?.kind).toBe("wall_clock")
     expect(result.timeout?.child_active).toBe(true)
-    expect(result.timeout?.last_progress_ms_ago).not.toBeNull()
+    expect(result.timeout?.last_progress_ms_ago).toBe(1_000)
+  })
+
+  it("counts a running tool's streamed metadata output as progress", async () => {
+    // Bash keeps live output in state.metadata.output; the running tool
+    // state carries no top-level output field.
+    let output = ""
+    const fake = executorClient({
+      latest: () => {
+        output += "ok  pkg\n"
+        return message("m", [
+          { id: "bash", type: "tool", tool: "bash", state: { status: "running", title: "go test", metadata: { output } } },
+        ])
+      },
+    })
+    const pending = run(fake.client, { timeoutMilliseconds: 20_000, idleTimeoutMilliseconds: 5_000 })
+    await vi.advanceTimersByTimeAsync(20_000)
+    const result = await pending
+    expect(result.error?.code).toBe("timeout")
+    expect(result.timeout?.child_active).toBe(true)
   })
 
   it("never idle-aborts when every probe fails", async () => {
-    const fake = executorClient({ latest: () => undefined })
-    const result = await run(fake.client, { timeoutMilliseconds: 30, idleTimeoutMilliseconds: 1 })
+    const pending = run(executorClient({ latest: () => undefined }).client, {
+      timeoutMilliseconds: 10_000,
+      idleTimeoutMilliseconds: 2_000,
+    })
+    await vi.advanceTimersByTimeAsync(10_000)
+    const result = await pending
     expect(result.error?.code).toBe("timeout")
     expect(result.timeout?.child_active).toBeNull()
   })
 
   it("returns success without timeout details when the child finishes", async () => {
     const fake = executorClient({
-      resolveAfterMs: 5,
+      resolveAfterMs: 5_000,
       latest: () => message("m", [{ id: "p", type: "text", text: "same" }]),
     })
-    const result = await run(fake.client, { idleTimeoutMilliseconds: 60_000 })
+    const pending = run(fake.client, { idleTimeoutMilliseconds: 60_000 })
+    await vi.advanceTimersByTimeAsync(5_000)
+    const result = await pending
     expect(result.status).toBe("success")
     expect(result.timeout).toBeUndefined()
+  })
+
+  it("ignores a probe that answers after the child finished", async () => {
+    // Probes at 1 s and 2 s answer at once; the 3 s probe answers at 5 s,
+    // after the prompt resolved at 3.5 s, unchanged and past the idle window.
+    const fake = executorClient({
+      resolveAfterMs: 3_500,
+      probeDelayMs: (call) => (call === 3 ? 2_000 : 0),
+      latest: () => message("m", [{ id: "p", type: "text", text: "same" }]),
+    })
+    const pending = run(fake.client, { idleTimeoutMilliseconds: 2_000 })
+    await vi.advanceTimersByTimeAsync(3_500)
+    const result = await pending
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(result.status).toBe("success")
+    expect(result.timeout).toBeUndefined()
+    expect(fake.calls.probes).toBe(3)
+    expect(fake.calls.aborts).toBe(0)
   })
 })

@@ -84,15 +84,24 @@ number of nested calls is unknown in advance).
 When set, the executor polls the child's session subtree every 30
 seconds (injectable) and computes an activity fingerprint:
 
-- Breadth-first over `session.children`, starting at the child,
-  bounded to 32 sessions.
+- Depth-first over `session.children`, starting at the child,
+  newest child first, bounded to 32 sessions. Depth-first matters:
+  a long-lived child accumulates finished direct children
+  (classifier and reviewer sessions), and a breadth-first walk
+  would spend the cap on them before reaching the active
+  grandchild under the newest one.
 - For each session, the latest message (`session.messages` with
   `limit: 1`): message id, completion time, error presence, part
-  count, and the last part's id, type, tool state status, and
-  text length.
+  count, and the last part's id, type, tool state status, tool
+  title, and the combined length of its text, `state.output`, and
+  serialized `state.metadata`.
 
 A changed fingerprint is progress. Streaming tokens grow the text
-length; tool calls start and finish; nested sessions appear. A
+length; tool calls start and finish; a running tool streams
+through its metadata (bash keeps live output in
+`state.metadata.output`, since the running state has no `output`
+field), so a long test run that keeps printing is progress; nested
+sessions appear. A
 parent blocked on a nested `uf_delegate_command` is credited with
 its grandchild's progress, which is how the parent's limit
 "accounts for" its children. When no change has been observed for
@@ -102,7 +111,16 @@ A failed probe neither resets nor advances the idle clock; an
 idle abort additionally requires at least one successful probe
 since the last observed change, so an unreachable API never kills
 a working child. Clients without the probe endpoints (test fakes)
-never trip the idle path.
+never trip the idle path. A probe still in flight when the child's
+prompt returns is ignored (a `settled` flag set on return and in
+`finally`), so it cannot abort a finished child or relabel its
+result.
+
+A running non-question tool does not pause the idle clock. Pausing
+would also hide the permission-ask wedge (a parented child blocked
+on a permission prompt sits in a running tool with no output) for
+the full wall clock; a silent tool longer than the idle window is
+instead handled by the per-call `idle_timeout` override.
 
 The probe also reports `pending_question`: the latest part of some
 session in the subtree is a running `question` tool call. That is
@@ -191,7 +209,16 @@ When `resume.last_checkpoint_step` is non-null, the orchestrator
 MUST NOT restart the item fresh on `main`. Delegation 2
 (`/uf.finale`) keeps `timeout: 600000`; its designed commit-gate
 wedge now usually ends as an idle timeout with
-`pending_question: true`, which the same branch handles.
+`pending_question: true`, which the same branch handles. Because
+the idle window must be shorter than the wall clock to fire,
+Delegation 2 sets `idle_timeout: 300000` (5 minutes): long enough
+for staging and commit-message preparation, and it ends the gate
+wait with `pending_question: true` before the 10-minute wall
+clock. `kind: "budget"` cannot occur at the orchestrator (it has
+no budgeted parent) and is treated as `wall_clock`. An idle
+timeout whose `resume.last_checkpoint_step` is null resumes from
+nothing, so that re-run is effectively a fresh start and its
+prompt re-carries the description and issue reference(s).
 
 ## Risks / Trade-offs
 
@@ -199,9 +226,17 @@ wedge now usually ends as an idle timeout with
   the idle window. Mitigation: 10-minute default, per-call
   override up to 30 minutes, and abort only after a confirming
   probe.
-- **Probe cost**: up to 33 requests per child every 30 seconds.
+- **Probe cost**: two requests per probed session (`messages` and
+  `children`), so up to 64 requests per child every 30 seconds.
   Bounded by the 32-session cap and only for
   `uf_delegate_command` children.
+- **Clamped review-run provenance**: `dispatch_review_runs`
+  records its derived per-run timeout in the run file before the
+  executor applies the budget clamp, so a clamped run's recorded
+  `timeout.effective_ms` overstates the applied limit. The
+  executor result's `timeout.budget_clamped` and `effective_ms`
+  are authoritative; recording the clamped value in the run file
+  is left to the review-dispatch owners.
 - **`messages` ordering**: the probe relies on `limit` returning
   the most recent messages (OpenCode 1.19 behavior). If a host
   returned the oldest instead, the fingerprint would only change
