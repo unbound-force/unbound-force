@@ -374,6 +374,32 @@ function recordAutoCheckpoint(
 // Checkpoint tool factories (exported for testability)
 // ---------------------------------------------------------------------------
 
+/** Phase-scoped checkpoint argument shape (`implement-phase-<number>` records). */
+const PhaseCheckpointArgSchema = z.object({
+  number: z.number().int().min(1).max(1000),
+  verdict: z.enum(["green", "failed"]),
+  inventory: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(512),
+        classification: z.enum([
+          "pre-existing",
+          "environmental",
+          "change-caused",
+        ]),
+      }),
+    )
+    .max(200)
+    .default([]),
+})
+
+/**
+ * Validation for the checkpoint tool's `phase` argument inside execute: the
+ * host does not enforce the args shape, and a bare `phase: 5` previously
+ * surfaced as "requires step implement-phase-undefined" (issue #936).
+ */
+const CheckpointPhaseInputSchema = z.object({ phase: PhaseCheckpointArgSchema.optional() })
+
 /** Factory for the checkpoint tool (FR-001). */
 export function createCheckpointTool(exec: GitExec, cwd: string) {
   return tool({
@@ -393,24 +419,7 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
       key: z.string().optional().describe(
         "Optional state key override; defaults to sanitized current git branch",
       ),
-      phase: z
-        .object({
-          number: z.number().int().min(1).max(1000),
-          verdict: z.enum(["green", "failed"]),
-          inventory: z
-            .array(
-              z.object({
-                name: z.string().min(1).max(512),
-                classification: z.enum([
-                  "pre-existing",
-                  "environmental",
-                  "change-caused",
-                ]),
-              }),
-            )
-            .max(200)
-            .default([]),
-        })
+      phase: PhaseCheckpointArgSchema
         .optional()
         .describe(
           "Optional phase-scoped record; requires step implement-phase-<number>. " +
@@ -433,14 +442,11 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
           dataToMerge = JSON.parse(args.data) as Record<string, unknown>
         }
 
-        const phaseRecord =
-          args.phase === undefined
-            ? undefined
-            : {
-                number: args.phase.number,
-                verdict: args.phase.verdict,
-                inventory: args.phase.inventory ?? [],
-              }
+        const parsedPhase = parseToolInput(CheckpointPhaseInputSchema, { phase: args.phase })
+        if (!parsedPhase.ok) {
+          return { output: parsedPhase.failureOutput }
+        }
+        const phaseRecord = parsedPhase.value.phase
 
         const state = upsertCheckpointStep(
           cwd,

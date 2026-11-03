@@ -1253,6 +1253,11 @@ Each entry follows the format: `- <change-name>: <summary>`.
   thorough reasons no longer fail with `INVALID_INPUT` (5 rejections
   at 517–699 characters). The Swarm-path `forge_spawn_subtask`
   template is unchanged.
+- checkpoint-phase-validation (#936): the `checkpoint` tool now
+  validates `phase` inside `execute` (the host does not enforce the
+  args shape), so a bare `phase: 5` fails with `INVALID_INPUT`
+  naming the expected shape instead of the misleading
+  `requires step "implement-phase-undefined"` `CHECKPOINT_ERROR`.
 - review-pr-consolidate-dispatch: `/uf.review-pr` now finalizes every
   dispatch through exactly one `consolidate_dispatch` call per
   finalization attempt, carrying the captured `correlation_id` plus

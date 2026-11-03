@@ -646,6 +646,19 @@ describe("checkpoint tool (FR-001)", () => {
     }
   })
 
+  it("rejects a non-object phase with a shape error instead of implement-phase-undefined (issue #936)", async () => {
+    const result = await invokeTool<ProgressState>(
+      createCheckpointTool(branchExec, tmpDir),
+      { command: "uf.unleash", step: "implement", phase: 5 },
+    )
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("INVALID_INPUT")
+      expect(result.message).toContain("phase")
+      expect(result.message).not.toContain("undefined")
+    }
+  })
+
   it("records a phase-scoped checkpoint with verdict and inventory", async () => {
     const result = await invokeTool<ProgressState>(
       createCheckpointTool(branchExec, tmpDir),
