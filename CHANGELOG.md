@@ -6,6 +6,19 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- preflight-declared-output: `uf_preflight_declared_checks` now
+  returns `rendered_output`, one tool-rendered block per declared
+  check that ran with output, whatever its status, so advisory
+  passes such as bash-impact `IMPACT` rows are kept. Each block is
+  labelled with the check name, status and exit code, marked as
+  untrusted tool output, and fenced one backtick longer than any
+  backtick run in the output, so the output cannot close its
+  block. Pre-flight Phase 5 gains a "Project-declared check output"
+  section that holds this text verbatim (omitted when empty). The
+  output therefore reaches divisors through `pre_flight_results`,
+  not just the status rows (determinism pack DE-003). Skill size:
+  589 -> 598 lines (+9). (Spec:
+  openspec/changes/preflight-declared-output/)
 - preflight-project-checks: projects can declare their own
   deterministic pre-flight checks in a new project-owned
   `.uf/preflight.yaml` (`name`, `run`, `args`, `requires`,
