@@ -291,11 +291,18 @@ outcomes, with:
   workflow ID `speckit-testreview:<head_sha>`.
 
 Use the finalizer response as authoritative. It persists the additive
-`review-dispatch` artifact and returns mapped canonical `review-verdict`
-version 2 data. A validation or persistence failure changes the operation to
-failing `INCONCLUSIVE`, retains any calculated assessment as non-authoritative
-human-only context, blocks automated progression, and never fabricates a
-finding or canonical artifact.
+`review-dispatch` artifact and returns a compact result: `status`,
+`operation_verdict`, `correlation_id`, `artifact_path`, the scalar canonical
+decision `review_verdict` (`APPROVED`, `CHANGES_REQUESTED`, `ESCALATED`,
+`INCONCLUSIVE`, `UNAVAILABLE`, or null), `run_counts`,
+`calculated_assessment` (null or `{ authoritative }`), and `errors`. It does
+not echo the payload or a persona verdict projection; the persisted payload
+lives at `artifact_path`. A validation or persistence failure changes the
+operation to failing `INCONCLUSIVE`, retains the scalar `review_verdict` and
+the native result computed in Section 3.5 as non-authoritative human-only
+context (`calculated_assessment.authoritative: false` marks a persistence
+failure; null marks a validation rejection), blocks automated progression,
+and never fabricates a finding or canonical artifact.
 
 ### 4. Format Testability Report
 

@@ -704,7 +704,7 @@ func TestConsolidateDispatchFinalizationContractGates(t *testing.T) {
 			"Presentation-only grouping",
 			"These transformations are presentation-only: they govern presenting the GitHub review comment and the terminal report ONLY",
 			"never merge, filter, re-order, or otherwise alter the findings, contributing run ids, verdicts, run counts, or advisories in finalization data",
-			"the authoritative full data (findings, advisories, plan, runs, and the full verdict projection) lives in the persisted artifact at `artifact_path`",
+			"the authoritative full data (findings, advisories, plan, and runs, where each run's `workflow_verdict` is that persona's native verdict) lives in the persisted artifact at `artifact_path`",
 		})
 	})
 
@@ -13069,6 +13069,11 @@ func TestReviewDispatchCommands_TruncationNoticeHandling(t *testing.T) {
 		}
 		if !strings.Contains(string(content), "truncation notice") {
 			t.Errorf("%s MUST document truncation-notice handling (RD-FR-052, issue #922)", command)
+		}
+		// Parse-first rule: notice detection runs only when the response
+		// fails to parse, so notice-shaped finding text is never misread.
+		if !strings.Contains(strings.Join(strings.Fields(string(content)), " "), "as one JSON object") {
+			t.Errorf("%s MUST parse the whole response as one JSON object before scanning for a truncation notice", command)
 		}
 	}
 }

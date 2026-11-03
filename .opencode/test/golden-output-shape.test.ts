@@ -1176,20 +1176,22 @@ const PLAN_SITES: ReadonlyArray<{ readonly site: string; readonly args: Record<s
   },
 ]
 
-/** consolidate_dispatch sessions for the four documented call sites. */
+/** consolidate_dispatch sessions for the six documented finalization call sites. */
 const CONSOLIDATE_SITES: ReadonlyArray<{
   readonly site: string
   readonly command: "review-council" | "triage-issue" | "address-feedback"
-  readonly mode: "code" | "triage" | "feedback"
+  readonly mode: "code" | "specs" | "triage" | "feedback"
   readonly metadataOverrides: Record<string, unknown>
 }> = [
   { site: "uf.review-council.md:424", command: "review-council", mode: "code", metadataOverrides: {} },
   { site: "uf.review-pr.md:527", command: "review-council", mode: "code", metadataOverrides: {} },
   { site: "uf.triage-issue.md:1091", command: "triage-issue", mode: "triage", metadataOverrides: TRIAGE_METADATA_OVERRIDES },
   { site: "uf.address-feedback.md:561", command: "address-feedback", mode: "feedback", metadataOverrides: {} },
+  { site: "uf.unleash.md:696 (Step 4)", command: "review-council", mode: "specs", metadataOverrides: {} },
+  { site: "uf.unleash.md:1621 (Step 6)", command: "review-council", mode: "code", metadataOverrides: {} },
 ]
 
-describe("golden output shapes -- review-dispatch registry (15 documented sites)", () => {
+describe("golden output shapes -- review-dispatch registry (18 documented sites)", () => {
   it.each(PLAN_SITES)(
     "plan_review_dispatch [$site] returns a ready plan with workflow_result null and empty errors",
     async ({ args }) => {
@@ -1281,6 +1283,33 @@ describe("golden output shapes -- review-dispatch registry (15 documented sites)
       expect(result.correlation_id).toBe(correlationId)
     },
   )
+
+  it("consolidate_dispatch [uf.review-council.md Section 4] returns the bounded summary retrieval", async () => {
+    const directory = await makeScratchProject()
+    const registry = await loadRegistry(ReviewDispatchPlugin, directory)
+    const correlationId = await setupGoldenDispatchSession("review-council", "code", {})
+
+    const summary = await callEnvelopeTool<Record<string, unknown>>(
+      registry,
+      "consolidate_dispatch",
+      { correlation_id: correlationId, detail: "summary" },
+      toolContext("golden-session"),
+    )
+    // RD-FR-049: exactly the summary field set (empty optional keys omitted),
+    // no dispatch body, and no artifact — a retrieval persists nothing.
+    expect(Object.keys(summary)).toEqual([
+      "correlation_id",
+      "verdict",
+      "verdict_reason",
+      "run_counts",
+      "coverage",
+      "findings",
+      "advisories",
+    ])
+    expect(summary.correlation_id).toBe(correlationId)
+    expect(summary.verdict).toBe("APPROVE")
+    await expect(stat(join(directory, ".uf/artifacts/dispatch"))).rejects.toThrow()
+  })
 
   it.each([
     { site: "speckit.testreview.md:278", command: "speckit-testreview", mode: "test", workflowResult: { kind: "test-review", value: "APPROVE" } },

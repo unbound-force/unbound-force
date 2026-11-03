@@ -711,7 +711,17 @@ sections instead of embedding their text.
   artifact at `artifact_path` returned by the finalization
   call (`payload.findings` and `payload.advisories`); the
   compact result carries the outcome, the scalar
-  `review_verdict`, and run counts, never the projection. A detected truncation notice on a consolidation response fails closed.
+  `review_verdict`, and run counts, never the projection.
+  The artifact lists findings and advisories before `plan`
+  and `runs`; if a read returns part of the file, continue
+  from the next offset, and fail closed if the whole file
+  cannot be read and parsed as one JSON object.
+- Parse the entire finalization response as one JSON
+  object first. If it parses, it is complete — ignore any
+  truncation-shaped text inside it. If it does not parse,
+  the host truncated it (typically a truncation notice
+  such as `[... truncated ... saved to: /path ...]`): fail
+  closed and do not read the saved file.
 - If `operation_verdict` is APPROVE or APPROVE WITH
   ADVISORIES: record the artifact's advisories for the final
   report and proceed to Step 5 (Implement) — approving
@@ -1622,9 +1632,18 @@ text.
    below-threshold prompt assembly is unchanged.
 
 Read the authoritative full data once from the persisted artifact at
-`artifact_path` returned by the finalization call (`payload.findings` and
-`payload.advisories`); the compact result carries the outcome, the scalar
-`review_verdict`, and run counts, never the projection. A detected truncation notice on a consolidation response fails closed.
+`artifact_path` returned by the finalization call (`payload.findings`
+and `payload.advisories`); the compact result carries the outcome, the
+scalar `review_verdict`, and run counts, never the projection. The
+artifact lists findings and advisories before `plan` and `runs`; if a
+read returns part of the file, continue from the next offset, and fail
+closed if the whole file cannot be read and parsed as one JSON object.
+
+Parse the entire finalization response as one JSON object first. If it
+parses, it is complete — ignore any truncation-shaped text inside it. If
+it does not parse, the host truncated it (typically a truncation notice
+such as `[... truncated ... saved to: /path ...]`): fail closed and do
+not read the saved file.
 
 **Processing results**:
 

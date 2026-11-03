@@ -2286,3 +2286,241 @@ describe("consolidate_dispatch latest-dispatch resolution (RD-CR-001, issue #794
     })
   })
 })
+
+describe("consolidate_dispatch detail modes and compact finalization (RD-FR-049, RD-FR-051)", () => {
+  const SUMMARY_KEY_ORDER = [
+    "correlation_id",
+    "proposals",
+    "warnings",
+    "verdict",
+    "verdict_reason",
+    "run_counts",
+    "coverage",
+    "findings",
+    "advisories",
+    "findings_truncated",
+    "advisories_truncated",
+    "proposals_truncated",
+    "warnings_truncated",
+  ]
+  const COMPACT_KEY_ORDER = [
+    "status",
+    "operation_verdict",
+    "correlation_id",
+    "artifact_path",
+    "review_verdict",
+    "run_counts",
+    "proposals",
+    "warnings",
+    "proposals_truncated",
+    "warnings_truncated",
+    "calculated_assessment",
+    "errors",
+  ]
+  const BODY_KEYS = ["plan", "runs", "input_context", "change_profile", "plan_version", "workflow_result", "command", "mode", "full"]
+
+  /** Keys of `actual` must appear in the same relative order as in `order`. */
+  function expectKeyOrder(actual: Record<string, unknown>, order: readonly string[]) {
+    const keys = Object.keys(actual)
+    expect(keys.every((key) => order.includes(key))).toBe(true)
+    expect(keys).toEqual(order.filter((key) => keys.includes(key)))
+  }
+
+  function provenance() {
+    return { branch: "opsx/bound-consolidate-dispatch-output", commit: "b".repeat(40), workflow_id: "uf.review-council" }
+  }
+
+  async function scratchRoot(): Promise<string> {
+    const projectRoot = join(tmpdir(), `consolidate-detail-${randomUUID()}`)
+    await mkdir(projectRoot, { recursive: true })
+    cleanupDirs.push(projectRoot)
+    return projectRoot
+  }
+
+  async function artifactFiles(projectRoot: string): Promise<string[]> {
+    const { readdir } = await import("node:fs/promises")
+    try {
+      return await readdir(join(projectRoot, ".uf", "artifacts", "dispatch"))
+    } catch {
+      return []
+    }
+  }
+
+  it("registers detail, provenance, and correlation_id on the tool surface", () => {
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    expect(Object.keys(tool.args).sort()).toEqual(["correlation_id", "detail", "provenance"])
+    expect(tool.description).toContain("detail")
+    expect(tool.description).toContain("artifact_path")
+    expect(tool.description).not.toContain("When omitted, returns the payload JSON")
+  })
+
+  it("returns only the summary field set, omitting empty optional keys", async () => {
+    const correlationId = await setupDispatchSession([
+      runFixture({
+        agent: "divisor-guard",
+        findings: [
+          { severity: "HIGH", category: "security", description: "Missing auth", root_cause: "No middleware", file: "api.ts", line: 10 },
+        ],
+      }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({ detail: "summary" }, noopContext())
+    const summary = JSON.parse(result.output)
+
+    expect(Object.keys(summary)).toEqual([
+      "correlation_id",
+      "verdict",
+      "verdict_reason",
+      "run_counts",
+      "coverage",
+      "findings",
+      "advisories",
+    ])
+    expect(summary.correlation_id).toBe(correlationId)
+    expect(summary.verdict).toBe("REQUEST CHANGES")
+    expect(summary.findings).toEqual([
+      { severity: "HIGH", category: "security", description: "Missing auth", file: "api.ts", line: 10 },
+    ])
+    for (const key of [...BODY_KEYS, "artifact_path"]) {
+      expect(summary).not.toHaveProperty(key)
+    }
+    // Retrieval-only output is compact JSON, not pretty-printed.
+    expect(result.output).not.toContain("\n")
+  })
+
+  it("places proposals and warnings ahead of findings in a summary", async () => {
+    await setupDispatchSession([
+      runFixture({
+        agent: "divisor-guard",
+        findings: validFindings(2),
+        proposals: [{ information: "Keep summaries bounded.", tag: "review-dispatch", category: "pattern" }],
+      }),
+      runFixture({
+        agent: "divisor-adversary",
+        status: "failed",
+        error: { code: "provider_error", message: "upstream failed", retryable: false },
+        findings: validFindings(1, 10),
+      }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const summary = JSON.parse((await tool.execute({ detail: "summary" }, noopContext())).output)
+
+    expectKeyOrder(summary, SUMMARY_KEY_ORDER)
+    expect(summary.proposals).toEqual([
+      { agent: "divisor-guard", information: "Keep summaries bounded.", tag: "review-dispatch", category: "pattern" },
+    ])
+    expect(summary.warnings).toHaveLength(1)
+    expect(summary.warnings[0].kind).toBe("orphaned_submissions_excluded")
+    expect(summary.warnings[0].detail).toMatch(/^agent=divisor-adversary run=[0-9a-f-]+ findings=1 proposals=0$/)
+  })
+
+  it("keeps the full shape when detail is omitted or explicitly full", async () => {
+    await setupDispatchSession([runFixture({ agent: "divisor-guard" })])
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+
+    const omitted = JSON.parse((await tool.execute({}, noopContext())).output)
+    const explicit = JSON.parse((await tool.execute({ detail: "full" }, noopContext())).output)
+
+    for (const key of BODY_KEYS) {
+      expect(omitted).toHaveProperty(key)
+    }
+    expect(explicit).toEqual(omitted)
+    // Full mode omits both observability keys when empty.
+    expect(omitted).not.toHaveProperty("proposals")
+    expect(omitted).not.toHaveProperty("warnings")
+  })
+
+  it("rejects detail summary combined with provenance and persists nothing", async () => {
+    const projectRoot = await scratchRoot()
+    await setupDispatchSession([runFixture({ agent: "divisor-guard" })], { plan: explicitRunPlan("divisor-guard") })
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+    const result = await tool.execute({ detail: "summary", provenance: provenance() }, noopContext())
+
+    expect(result.output).toContain("consolidate_dispatch validation failed")
+    expect(result.output).toContain("detail: summary is only valid without provenance")
+    expect(await artifactFiles(projectRoot)).toEqual([])
+  })
+
+  it("rejects an unknown detail value before reading any session", async () => {
+    // The correlation has no dispatch directory: a schema-first rejection
+    // reports a validation failure rather than not_found.
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute(
+      { detail: "everything", correlation_id: randomUUID() } as unknown as Record<string, never>,
+      noopContext(),
+    )
+
+    expect(result.output).toContain("consolidate_dispatch validation failed")
+    expect(result.output).not.toContain("not_found")
+  })
+
+  it("returns the compact result on successful finalization", async () => {
+    const projectRoot = await scratchRoot()
+    const correlationId = await setupDispatchSession(
+      [runFixture({ agent: "divisor-guard", proposals: [{ information: "Lesson", tag: "tag" }] })],
+      { plan: explicitRunPlan("divisor-guard") },
+    )
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+    const compact = JSON.parse((await tool.execute({ provenance: provenance() }, noopContext())).output)
+
+    expectKeyOrder(compact, COMPACT_KEY_ORDER)
+    expect(compact.status).toBe("success")
+    expect(compact.correlation_id).toBe(correlationId)
+    expect(compact.review_verdict).toBe("APPROVED")
+    expect(compact.calculated_assessment).toEqual({ authoritative: true })
+    expect(compact).not.toHaveProperty("review_dispatch")
+
+    const artifact = await readPersistedArtifact(compact)
+    expect(compact.run_counts).toEqual(artifact.payload.run_counts)
+    // Findings and advisories are persisted ahead of plan and runs so a
+    // head-only read of the artifact still reaches them.
+    const payloadKeys = Object.keys(artifact.payload)
+    expect(payloadKeys.indexOf("advisories")).toBeLessThan(payloadKeys.indexOf("plan"))
+    expect(payloadKeys.indexOf("findings")).toBeLessThan(payloadKeys.indexOf("runs"))
+  })
+
+  it("returns a null calculated_assessment on validation rejection", async () => {
+    const projectRoot = await scratchRoot()
+    await setupDispatchSession([runFixture({ agent: "divisor-guard" })], { plan: explicitRunPlan("divisor-guard") })
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+    // The commit does not match input_context.head_sha: semantic rejection.
+    const compact = JSON.parse(
+      (await tool.execute({ provenance: { ...provenance(), commit: "c".repeat(40) } }, noopContext())).output,
+    )
+
+    expect(compact.status).toBe("failed")
+    expect(compact.artifact_path).toBeNull()
+    expect(compact.calculated_assessment).toBeNull()
+    expect(compact.review_verdict).toBeNull()
+    expect(compact.errors.length).toBeGreaterThan(0)
+    expect(await artifactFiles(projectRoot)).toEqual([])
+  })
+
+  it("keeps the calculated decision on persistence failure without a payload body", async () => {
+    const projectRoot = await scratchRoot()
+    await setupDispatchSession([runFixture({ agent: "divisor-guard" })], { plan: explicitRunPlan("divisor-guard") })
+
+    const failingLink = {
+      ...createFinalizationDependencies(projectRoot),
+      link: async (): Promise<void> => {
+        throw Object.assign(new Error("EIO: injected link failure"), { code: "EIO" })
+      },
+    }
+    const tool = createConsolidateDispatchTool(failingLink)
+    const compact = JSON.parse((await tool.execute({ provenance: provenance() }, noopContext())).output)
+
+    expectKeyOrder(compact, COMPACT_KEY_ORDER)
+    expect(compact.status).toBe("failed")
+    expect(compact.artifact_path).toBeNull()
+    expect(compact.calculated_assessment).toEqual({ authoritative: false })
+    // RD-FR-051: a projected verdict exists, so the scalar is present.
+    expect(compact.review_verdict).toBe("APPROVED")
+    expect(compact.errors.join(" ")).toContain("injected link failure")
+    expect(compact).not.toHaveProperty("review_dispatch")
+  })
+})

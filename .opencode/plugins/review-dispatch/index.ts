@@ -2572,6 +2572,32 @@ function envelopeFor(
   }
 }
 
+/**
+ * Reorders a payload for persistence so a reader that only sees the head of
+ * the artifact still gets the decision, findings, and advisories: plan and
+ * runs (which repeat every run's findings) come last. Values are unchanged.
+ */
+function artifactPayloadOrder(payload: ReviewDispatchPayload): ReviewDispatchPayload {
+  return {
+    command: payload.command,
+    mode: payload.mode,
+    full: payload.full,
+    input_context: payload.input_context,
+    change_profile: payload.change_profile,
+    plan_version: payload.plan_version,
+    correlation_id: payload.correlation_id,
+    verdict: payload.verdict,
+    verdict_reason: payload.verdict_reason,
+    run_counts: payload.run_counts,
+    coverage: payload.coverage,
+    workflow_result: payload.workflow_result,
+    findings: payload.findings,
+    advisories: payload.advisories,
+    plan: payload.plan,
+    runs: payload.runs,
+  }
+}
+
 async function persistEnvelope(
   input: z.output<typeof FinalizeInputSchema>,
   dependencies: FinalizationDependencies,
@@ -2581,7 +2607,7 @@ async function persistEnvelope(
   await dependencies.mkdir(directory, { recursive: true, mode: 0o750 })
   await dependencies.chmod(directory, 0o750)
   const correlationID = input.payload.correlation_id
-  const payload = { ...input.payload, correlation_id: correlationID }
+  const payload = artifactPayloadOrder({ ...input.payload, correlation_id: correlationID })
   const timestamp = dependencies.now().toISOString()
   const envelope = envelopeFor(payload, input.provenance, timestamp)
   const targetPath = join(directory, `${correlationID}.json`)
@@ -3770,17 +3796,40 @@ async function readRunFiles(dir: string): Promise<ReadonlyArray<RunFileReadResul
 
 const ConsolidateDispatchInputSchema = z
   .object({
-    provenance: ArtifactProvenanceSchema.optional(),
+    provenance: ArtifactProvenanceSchema.optional().describe(
+      "When provided, consolidate_dispatch calls finalize_review_dispatch internally " +
+        "and returns the compact finalization result. Requires branch (e.g. opsx/foo), " +
+        "commit (40-char SHA), and workflow_id (e.g. uf.review-council). " +
+        "Must not be combined with detail: \"summary\".",
+    ),
     // Optional explicit dispatch correlation_id (design D3, task 4.1): takes
     // precedence over the session map so consolidation can run standalone from
     // a fresh parent session (cross-session recovery, issue #751).
-    correlation_id: UUIDSchema.optional(),
+    correlation_id: UUIDSchema.optional().describe(
+      "Optional explicit dispatch correlation_id; takes precedence over the " +
+        "session's automatically resolved one. Use it to consolidate a dispatch " +
+        "started by a different (e.g. restarted) parent session.",
+    ),
     // Retrieval shape (RD-FR-049): "summary" returns the bounded
     // observability-first projection used by command retrieval; "full" (the
     // default) preserves the complete payload for finalization.
-    detail: z.enum(["summary", "full"]).optional(),
+    detail: z.enum(["summary", "full"]).optional().describe(
+      "Retrieval shape without provenance: \"full\" (default) returns the complete " +
+        "finalization-ready payload; \"summary\" returns the bounded observability-first " +
+        "projection. \"summary\" is only valid without provenance.",
+    ),
   })
   .strict()
+  .superRefine((input, ctx) => {
+    // RD-FR-049: summary is retrieval-only; it must never reach finalization.
+    if (input.detail === "summary" && input.provenance !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["detail"],
+        message: "detail: summary is only valid without provenance",
+      })
+    }
+  })
 
 /**
  * Normalize a file path for deduplication: lowercase, forward-slash, trim whitespace.
@@ -4001,7 +4050,10 @@ interface TruncatedText {
 
 function truncateText(value: string, max: number): TruncatedText {
   if (value.length <= max) return { text: value, truncated: false }
-  return { text: value.slice(0, max), truncated: true }
+  // Never split a surrogate pair: drop a trailing lone high surrogate.
+  const cut = value.slice(0, max)
+  const last = cut.charCodeAt(cut.length - 1)
+  return { text: last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut, truncated: true }
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -4271,7 +4323,12 @@ export function buildCompactFinalization(
     operation_verdict: result.operation_verdict,
     correlation_id: result.correlation_id,
     artifact_path: result.artifact_path,
-    review_verdict: result.review_verdict?.council_decision ?? null,
+    // A persistence failure leaves review_verdict null; the calculated
+    // (non-authoritative) projection still carries the decision (RD-FR-051).
+    review_verdict:
+      result.review_verdict?.council_decision ??
+      result.calculated_assessment?.review_verdict.council_decision ??
+      null,
     run_counts: runCounts,
   }
   if (projectedProposals.length > 0) compact.proposals = projectedProposals
@@ -4506,7 +4563,22 @@ export function createConsolidateDispatchTool(
       "collect lesson proposals, and optionally finalize the dispatch artifact in one step. " +
       "Reads session metadata (command, mode, plan, coverage, etc.) from the file persisted by the first " +
       "dispatch_agent_run call. When provenance is provided, calls finalize_review_dispatch internally " +
-      "(no LLM round-trip) and returns the finalization result directly. When omitted, returns the payload JSON. " +
+      "(no LLM round-trip) and returns a compact finalization result in this key order: status, " +
+      "operation_verdict, correlation_id, artifact_path, review_verdict (scalar canonical decision or null), " +
+      "run_counts, optional proposals / warnings / proposals_truncated / warnings_truncated, " +
+      "calculated_assessment (null on validation rejection, otherwise { authoritative } — false when " +
+      "persistence failed), errors. The full findings, advisories, plan, and runs live only in the persisted " +
+      "artifact at artifact_path. When provenance is omitted, detail selects the retrieval shape: " +
+      "\"full\" (default) returns the finalization-ready payload with correlation_id, proposals, and warnings " +
+      "ahead of verdict, runs, plan, findings, and advisories; \"summary\" returns only correlation_id, " +
+      "proposals, warnings, verdict, verdict_reason (at most 512 characters), run_counts, coverage, findings, " +
+      "advisories, and the findings_truncated / advisories_truncated / proposals_truncated / " +
+      "warnings_truncated flags, capped at 15 findings ({severity, category, description, file, line}), " +
+      "15 advisories ({severity, description}), 10 proposals ({agent, information, tag, category?}), and " +
+      "5 warnings ({kind, detail}); descriptions and proposal information are cut to 512 characters, files " +
+      "to 256, categories, tags, and agents to 128, warning kinds to 64 and details to 256, any shortened " +
+      "entry carries truncated: true, and trailing entries are dropped until the compact JSON is under " +
+      "40,960 bytes. detail: \"summary\" combined with provenance is rejected. " +
       "Lesson proposals submitted by child agents are collected and returned in a top-level proposals array; " +
       "call dewey_store_learning for each. " +
       "Findings and proposals harvested from non-success runs are excluded from the payload and reported in a " +
@@ -4522,18 +4594,7 @@ export function createConsolidateDispatchTool(
       "finalizing externally, submit the payload without the top-level proposals and warnings observability fields. " +
       "Automatically resolves the dispatch session from prior dispatch_agent_run calls; pass correlation_id " +
       "explicitly to consolidate a dispatch started by a different session (e.g. after a restart).",
-    args: {
-      provenance: ArtifactProvenanceSchema.optional().describe(
-        "When provided, consolidate_dispatch calls finalize_review_dispatch internally " +
-          "and returns the finalization result. Requires branch (e.g. opsx/foo), " +
-          "commit (40-char SHA), and workflow_id (e.g. uf.review-council).",
-      ),
-      correlation_id: UUIDSchema.optional().describe(
-        "Optional explicit dispatch correlation_id; takes precedence over the " +
-          "session's automatically resolved one. Use it to consolidate a dispatch " +
-          "started by a different (e.g. restarted) parent session.",
-      ),
-    },
+    args: ConsolidateDispatchInputSchema.shape,
     async execute(args, context): Promise<{ readonly output: string }> {
       const parsed = ConsolidateDispatchInputSchema.safeParse(args)
       if (!parsed.success) {

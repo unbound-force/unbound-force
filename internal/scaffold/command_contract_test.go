@@ -196,7 +196,7 @@ func TestCommandContracts_SpeckitTestReview(t *testing.T) {
 		{name: "planned invocation only", all: []string{"call `invoke_agent` for every executable entry", "for `explicit` and `advisor` entries", "for `host`, omit both fields", "never substitute a project, agent, provider, or other default"}},
 		{name: "failure behavior", all: []string{"failed and non-success terminal runs do not vote or increase severity", "must not fabricate findings or advisories"}},
 		{name: "no-success blocking", all: []string{"with zero successful assessments", "return `unavailable` only when every blocking cause is provider, model, or runtime availability", "policy, plan, budget, limit, persistence, calculation, or mixed cause returns `inconclusive`", "both results block automated progression"}},
-		{name: "finalization", all: []string{"call `finalize_review_dispatch` exactly once", "command `speckit-testreview`", "persists the additive `review-dispatch` artifact", "canonical `review-verdict` version 2", "human-only context"}},
+		{name: "finalization", all: []string{"call `finalize_review_dispatch` exactly once", "command `speckit-testreview`", "persists the additive `review-dispatch` artifact", "the scalar canonical decision `review_verdict`", "human-only context"}},
 	}
 
 	assertCommandCopies(t, "speckit.testreview.md", false, clauses)

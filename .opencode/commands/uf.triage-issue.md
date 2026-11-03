@@ -292,10 +292,16 @@ counts, and the top-level `proposals` array. Use this single payload
 for Section 2.4 proposal storage, Phase 3 verdict resolution, and
 Phase 4 finalization context; do not re-fetch it.
 
-Before consolidating the returned `runs` array, inspect the retrieval
-output for the RD-FR-052 truncation notice shape. If a notice is
-detected, fail closed and report the retrieval failure: do not
-consolidate a partial `runs` array or resolve a verdict from it.
+**Truncation check.** Before consolidating the returned `runs` array or
+storing any proposal, parse the entire retrieval output as one JSON
+object. If the parse succeeds, the output is complete: use it and ignore
+any notice-shaped text inside it, such as a finding that mentions
+truncation. If the parse fails, the host truncated the output —
+typically a truncation notice line matching the case-insensitive shape
+`^\[?[^\n]*\btruncat\w*\b[^\n]*\bsaved\b[^\n]*[:=]\s*("[^"]+"|\/[^\s\]]+)\]?$`
+— and the payload is unusable: fail closed and report the retrieval
+failure. Do not consolidate a partial `runs` array, resolve a verdict
+from it, store any proposal from it, or read the saved file.
 
 **Retrieval failure behavior.** The retrieval call is side-effect-free,
 so its failure handling is strict and bounded:
@@ -1117,11 +1123,17 @@ The compact finalization result is authoritative for the outcome. On
 `artifact_path`, the scalar review verdict (`review_verdict`), run
 counts, `calculated_assessment.authoritative`, `errors`, and the bounded
 `proposals` and `warnings` arrays directly from the result. Read the
-authoritative full data — findings, advisories, plan, runs, and the full
-verdict projection — once from the persisted artifact at `artifact_path`
-(its `payload.findings` and `payload.advisories`). Do not recompute,
-re-derive, or re-map any of them, and do not alter the tool-computed
-verdict, `verdict_reason`, run counts, findings, or advisories.
+authoritative full data — findings, advisories, plan, and runs (each
+run's `workflow_verdict` is that persona's native verdict) — once from
+the persisted artifact at `artifact_path` (its `payload.findings` and
+`payload.advisories`). The artifact persists `payload.findings` and
+`payload.advisories` before `plan` and `runs`. When the file-read tool
+returns only part of the file, keep reading from the next offset until
+the closing brace; if the whole file cannot be read and parsed as one
+JSON object, fail closed rather than report partial findings. Do not
+recompute, re-derive, or re-map any of them, and do not alter the
+tool-computed verdict, `verdict_reason`, run counts, findings, or
+advisories.
 
 Action completion is not part of finalization. The finalizer's closed
 payload has no action field; do not add one, and do not summarize action
