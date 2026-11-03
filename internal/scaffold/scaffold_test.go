@@ -704,7 +704,7 @@ func TestConsolidateDispatchFinalizationContractGates(t *testing.T) {
 			"Presentation-only grouping",
 			"These transformations are presentation-only: they govern presenting the GitHub review comment and the terminal report ONLY",
 			"never merge, filter, re-order, or otherwise alter the findings, contributing run ids, verdicts, run counts, or advisories in finalization data",
-			"The finalized payload's findings remain exactly as `consolidate_dispatch` returned them",
+			"the authoritative full data (findings, advisories, plan, runs, and the full verdict projection) lives in the persisted artifact at `artifact_path`",
 		})
 	})
 
@@ -13047,6 +13047,28 @@ func TestNoObsoleteToolNames(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatalf("walk %s: %v", dirLabel, err)
+		}
+	}
+}
+
+// TestReviewDispatchCommands_TruncationNoticeHandling verifies that every
+// review-dispatch consumer command documents the RD-FR-052 truncation-notice
+// trust boundary (issue #922).
+func TestReviewDispatchCommands_TruncationNoticeHandling(t *testing.T) {
+	commands := []string{
+		"opencode/commands/uf.address-feedback.md",
+		"opencode/commands/uf.review-council.md",
+		"opencode/commands/uf.review-pr.md",
+		"opencode/commands/uf.triage-issue.md",
+		"opencode/commands/uf.unleash.md",
+	}
+	for _, command := range commands {
+		content, err := assetContent(command)
+		if err != nil {
+			t.Fatalf("read embedded asset %s: %v", command, err)
+		}
+		if !strings.Contains(string(content), "truncation notice") {
+			t.Errorf("%s MUST document truncation-notice handling (RD-FR-052, issue #922)", command)
 		}
 	}
 }

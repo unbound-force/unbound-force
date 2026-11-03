@@ -543,15 +543,22 @@ With provenance the tool runs the finalizer internally and returns
 the finalization result directly. Never call `finalize_review_dispatch`
 yourself, and never hand-build or transform a finalization payload.
 
-The tool's response is authoritative. On `status: "success"`, read the
-review-dispatch artifact path (`artifact_path`), the canonical
-review-verdict v2 projection (`review_verdict`), and whether calculated
-data is authoritative (`calculated_assessment.authoritative`) directly
-from the response. Do not recompute, re-derive, or re-map any of them,
-and do not alter the tool-computed verdict, `verdict_reason`, run
-counts, findings, or advisories. The response's top-level `proposals`
-and `warnings` arrays are the single source for lesson proposals and
-consolidation warnings.
+The compact finalization result is authoritative for the outcome. On
+`status: "success"`, read `operation_verdict`, `correlation_id`,
+`artifact_path`, the scalar review verdict (`review_verdict`), run counts,
+`calculated_assessment.authoritative`, `errors`, and the bounded
+`proposals` and `warnings` arrays directly from the result. Read the
+authoritative full data — findings, advisories, plan, runs, and the full
+verdict projection — once from the persisted artifact at `artifact_path`
+(its `payload.findings` and `payload.advisories`). Do not recompute,
+re-derive, or re-map any of them, and do not alter the tool-computed
+verdict, `verdict_reason`, run counts, findings, or advisories. The compact
+result's `proposals` and `warnings` arrays are the single source for lesson
+proposals and consolidation warnings.
+
+If a consolidation response carries a truncation notice instead of
+complete JSON, fail closed: do not recover through a separate
+no-provenance retrieval call.
 
 Each proposal in the finalization result's top-level `proposals` array
 carries the validated shape `{agent, information, tag, category}` as
@@ -669,10 +676,10 @@ separate. These transformations are presentation-only: they govern
 presenting the GitHub review comment and the terminal report ONLY,
 and never merge, filter, re-order, or otherwise alter the findings,
 contributing run ids, verdicts, run counts, or advisories in
-finalization data. The finalized payload's findings remain exactly
-as `consolidate_dispatch` returned them, because the finalizer
-enforces exact correspondence between run findings and consolidated
-findings.
+finalization data. After finalization, the authoritative full data
+(findings, advisories, plan, runs, and the full verdict projection)
+lives in the persisted artifact at `artifact_path`; the compact
+finalization result carries the outcome and the scalar review verdict.
 
 Severity levels from `.opencode/uf/packs/severity.md` when loaded, otherwise:
 - **CRITICAL**: Must be fixed before merge (security vulnerabilities, data loss risks)

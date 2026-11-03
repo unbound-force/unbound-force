@@ -505,6 +505,11 @@ category. If Dewey is unavailable, record an informational skip and do
 not change the recommendation. Never store raw `> learn:` text or
 child-supplied tags, categories, or hashes.
 
+Before consolidating the returned `runs` array, inspect the retrieval
+output for the RD-FR-052 truncation notice shape. If a notice is
+detected, fail closed and report the retrieval failure: do not
+consolidate a partial `runs` array or resolve a verdict from it.
+
 **Retrieval failure behavior.** The retrieval call is side-effect-free,
 so its failure handling is strict and bounded:
 
@@ -581,13 +586,16 @@ With provenance the tool runs the finalizer internally and returns the
 finalization result directly. Never call `finalize_review_dispatch`
 yourself, and never hand-build or transform a finalization payload.
 
-The tool's response is authoritative. On `status: "success"`, read the
-review-dispatch artifact path (`artifact_path`), the canonical
-review-verdict v2 projection (`review_verdict`), and whether calculated
-data is authoritative (`calculated_assessment.authoritative`) directly
-from the response. Do not recompute, re-derive, or re-map any of them,
-and do not alter the tool-computed verdict, `verdict_reason`, run
-counts, findings, or advisories.
+The compact finalization result is authoritative for the outcome. On
+`status: "success"`, read `operation_verdict`, `correlation_id`,
+`artifact_path`, the scalar review verdict (`review_verdict`), run
+counts, `calculated_assessment.authoritative`, `errors`, and the bounded
+`proposals` and `warnings` arrays directly from the result. Read the
+authoritative full data — findings, advisories, plan, runs, and the full
+verdict projection — once from the persisted artifact at `artifact_path`
+(its `payload.findings` and `payload.advisories`). Do not recompute,
+re-derive, or re-map any of them, and do not alter the tool-computed
+verdict, `verdict_reason`, run counts, findings, or advisories.
 
 **Bounded mechanical retry.** If the call fails, classify the failure
 from the structured response alone — default-deny. The failure is

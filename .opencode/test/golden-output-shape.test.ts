@@ -1239,17 +1239,8 @@ describe("golden output shapes -- review-dispatch registry (15 documented sites)
         status: string
         operation_verdict: string
         artifact_path: string | null
-        review_verdict: { schema_version: string; council_decision: string } | null
-        calculated_assessment: {
-          authoritative: boolean
-          payload: {
-            verdict: string
-            verdict_reason: string
-            run_counts: Record<string, number>
-            findings: unknown[]
-            advisories: unknown[]
-          }
-        } | null
+        review_verdict: string | null
+        calculated_assessment: { authoritative: boolean } | null
         correlation_id: string
       }>(
         registry,
@@ -1269,16 +1260,24 @@ describe("golden output shapes -- review-dispatch registry (15 documented sites)
       expect(result.operation_verdict).toBe("APPROVE")
       expect(result.artifact_path).toBe(join(directory, ".uf/artifacts/dispatch", `${correlationId}.json`))
       await expect(stat(result.artifact_path!)).resolves.toBeTruthy()
-      expect(result.review_verdict?.schema_version).toBe("2.0.0")
-      expect(result.review_verdict?.council_decision).toBe("APPROVED")
+      expect(result.review_verdict).toBe("APPROVED")
       expect(result.calculated_assessment?.authoritative).toBe(true)
-      // With provenance, the tool spreads FinalizeReviewDispatchResult; the
-      // consolidated verdict fields ride inside calculated_assessment.payload.
-      expect(result.calculated_assessment?.payload.verdict).toBe("APPROVE")
-      expect(result.calculated_assessment?.payload.verdict_reason).toBe("No findings requiring changes")
-      expect(result.calculated_assessment?.payload.run_counts).toMatchObject({ total: 1, success: 1 })
-      expect(result.calculated_assessment?.payload.findings).toEqual([])
-      expect(result.calculated_assessment?.payload.advisories).toEqual([])
+      // The compact result carries the scalar decision; the full projection
+      // (verdict, counts, findings, advisories) lives in the persisted artifact.
+      const artifact = JSON.parse(await readFile(result.artifact_path!, "utf8")) as {
+        payload: {
+          verdict: string
+          verdict_reason: string
+          run_counts: Record<string, number>
+          findings: unknown[]
+          advisories: unknown[]
+        }
+      }
+      expect(artifact.payload.verdict).toBe("APPROVE")
+      expect(artifact.payload.verdict_reason).toBe("No findings requiring changes")
+      expect(artifact.payload.run_counts).toMatchObject({ total: 1, success: 1 })
+      expect(artifact.payload.findings).toEqual([])
+      expect(artifact.payload.advisories).toEqual([])
       expect(result.correlation_id).toBe(correlationId)
     },
   )
@@ -1322,21 +1321,13 @@ describe("golden output shapes -- review-dispatch registry (15 documented sites)
         status: string
         operation_verdict: string
         artifact_path: string | null
-        review_verdict: {
-          schema_version: string
-          council_decision: string
-          persona_verdicts: unknown[]
-          unresolved_findings: unknown[]
-        } | null
+        review_verdict: string | null
         calculated_assessment: { authoritative: boolean } | null
         errors: string[]
       }
       expect(result.status).toBe("success")
       expect(result.operation_verdict).toBe("APPROVE")
-      expect(result.review_verdict?.schema_version).toBe("2.0.0")
-      expect(result.review_verdict?.council_decision).toBe("APPROVED")
-      expect(Array.isArray(result.review_verdict?.persona_verdicts)).toBe(true)
-      expect(Array.isArray(result.review_verdict?.unresolved_findings)).toBe(true)
+      expect(result.review_verdict).toBe("APPROVED")
       expect(result.calculated_assessment?.authoritative).toBe(true)
       expect(typeof result.artifact_path).toBe("string")
       await expect(stat(result.artifact_path!)).resolves.toBeTruthy()

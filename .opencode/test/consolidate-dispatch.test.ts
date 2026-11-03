@@ -1,6 +1,6 @@
 import type { PluginInput, ToolContext } from "@opencode-ai/plugin"
 import { randomUUID } from "node:crypto"
-import { mkdir, writeFile, rm } from "node:fs/promises"
+import { mkdir, readFile, writeFile, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { describe, expect, it, afterEach } from "vitest"
@@ -255,6 +255,13 @@ function aggregateParentContext(): ToolContext {
 
 /** Run one aggregate dispatch from the shared parent session; returns its minted correlation. */
 const aggregateDispatch = makeAggregateDispatchRunner(aggregateParentContext, cleanupDirs)
+
+async function readPersistedArtifact(result: {
+  artifact_path: string | null
+}): Promise<any> {
+  if (!result.artifact_path) throw new Error("expected artifact_path")
+  return JSON.parse(await readFile(result.artifact_path, "utf8"))
+}
 
 describe("consolidate_dispatch", () => {
   it("consolidates successful runs with no findings into APPROVE", async () => {
@@ -608,12 +615,8 @@ describe("consolidate_dispatch", () => {
     // disappearing.
     expect(finalizationResult.warnings).toEqual([
       {
-        type: "invalid_submissions_excluded",
-        agent: "divisor-guard",
-        run_id: guardRunId,
-        invalid_findings: 1,
-        invalid_proposals: 0,
-        errors: ['findings[1].severity: Invalid option: expected one of "CRITICAL"|"HIGH"|"MEDIUM"|"LOW"'],
+        kind: "invalid_submissions_excluded",
+        detail: `agent=divisor-guard run=${guardRunId} invalid=1`,
       },
     ])
   })
@@ -673,7 +676,12 @@ describe("consolidate_dispatch", () => {
     expect(finalizationResult.status).toBe("success")
     expect(finalizationResult.errors).toEqual([])
     expect(finalizationResult.operation_verdict).toBe("APPROVE WITH ADVISORIES")
-    expect(finalizationResult.warnings).toEqual(payload.warnings)
+    expect(finalizationResult.warnings).toEqual([
+      {
+        kind: "run_findings_overflow",
+        detail: "agent=divisor-guard kept=512 dropped=1",
+      },
+    ])
   })
 
   it("emits no overflow warning when a run carries exactly the per-run bound of valid findings", async () => {
@@ -834,11 +842,8 @@ describe("consolidate_dispatch", () => {
     // submission stays visible (RD-FR-025 zero-success scenario).
     expect(finalizationResult.warnings).toEqual([
       {
-        type: "orphaned_submissions_excluded",
-        agent: "divisor-guard",
-        run_id: guardRunId,
-        discarded_findings: 1,
-        discarded_proposals: 1,
+        kind: "orphaned_submissions_excluded",
+        detail: `agent=divisor-guard run=${guardRunId} findings=1 proposals=1`,
       },
     ])
     // No successful runs means no collected proposals at all.
@@ -1009,7 +1014,7 @@ describe("consolidate_dispatch", () => {
 
     // The persisted payload validates with the orphaned submissions
     // excluded: only the successful adversary contributes.
-    const persistedPayload = finalizationResult.review_dispatch.payload
+    const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
     expect(persistedPayload.findings).toHaveLength(1)
     expect(persistedPayload.findings[0].run_ids).toEqual([adversaryRunId])
     const persistedGuard = persistedPayload.runs.find((run) => run.run_id === guardRunId)
@@ -1022,11 +1027,8 @@ describe("consolidate_dispatch", () => {
     // The warning names the failed run with its discarded counts.
     expect(finalizationResult.warnings).toEqual([
       {
-        type: "orphaned_submissions_excluded",
-        agent: "divisor-guard",
-        run_id: guardRunId,
-        discarded_findings: 2,
-        discarded_proposals: 1,
+        kind: "orphaned_submissions_excluded",
+        detail: `agent=divisor-guard run=${guardRunId} findings=2 proposals=1`,
       },
     ])
 
@@ -1335,7 +1337,7 @@ describe("consolidate_dispatch", () => {
       expect(finalizationResult.correlation_id).toBe(correlationId)
       expect(finalizationResult.artifact_path).toContain(".uf/artifacts/dispatch/")
       expect(finalizationResult.errors).toHaveLength(0)
-      const persistedPayload = finalizationResult.review_dispatch.payload
+      const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
       expect(persistedPayload.runs).toHaveLength(2)
       const hostRun = persistedPayload.runs.find((run: { source: string }) => run.source === "host")
       expect(hostRun).toBeDefined()
@@ -1374,7 +1376,7 @@ describe("consolidate_dispatch", () => {
       expect(finalizationResult.operation_verdict).toBe("APPROVE")
       expect(finalizationResult.correlation_id).toBe(correlationId)
       expect(finalizationResult.errors).toHaveLength(0)
-      const persistedPayload = finalizationResult.review_dispatch.payload
+      const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
       expect(persistedPayload.runs).toHaveLength(1)
       expect(persistedPayload.runs[0].resolved_parent_variant).toBeNull()
     })
@@ -1479,12 +1481,12 @@ describe("consolidate_dispatch", () => {
     expect(finalizationResult.errors).toHaveLength(0)
     // Top-level verdict stays generic; runs and workflow_result are triage-native.
     expect(finalizationResult.operation_verdict).toBe("APPROVE WITH ADVISORIES")
-    const persistedPayload = finalizationResult.review_dispatch.payload
+    const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
     expect(persistedPayload.runs).toHaveLength(1)
     expect(persistedPayload.runs[0].workflow_verdict).toBe("NEEDS-CLARIFICATION")
     expect(persistedPayload.workflow_result).toEqual({ kind: "triage", value: "NEEDS-CLARIFICATION" })
     // The native verdict flows through the persona projection unchanged.
-    expect(finalizationResult.review_verdict.persona_verdicts[0].summary).toBe("Native verdict: NEEDS-CLARIFICATION")
+    expect(`Native verdict: ${persistedPayload.runs[0].workflow_verdict}`).toBe("Native verdict: NEEDS-CLARIFICATION")
   })
 
   it("internally finalizes a triage-issue dispatch with HIGH findings as INVALID", async () => {
@@ -1527,7 +1529,7 @@ describe("consolidate_dispatch", () => {
     expect(finalizationResult.errors).toHaveLength(0)
     // INVALID back-projects to the generic REQUEST CHANGES verdict.
     expect(finalizationResult.operation_verdict).toBe("REQUEST CHANGES")
-    const persistedPayload = finalizationResult.review_dispatch.payload
+    const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
     expect(persistedPayload.runs).toHaveLength(1)
     expect(persistedPayload.runs[0].workflow_verdict).toBe("INVALID")
     expect(persistedPayload.workflow_result).toEqual({ kind: "triage", value: "INVALID" })
@@ -1573,7 +1575,7 @@ describe("consolidate_dispatch", () => {
     expect(finalizationResult.correlation_id).toBe(correlationId)
     expect(finalizationResult.errors).toHaveLength(0)
     expect(finalizationResult.operation_verdict).toBe("APPROVE WITH ADVISORIES")
-    const persistedPayload = finalizationResult.review_dispatch.payload
+    const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
     expect(persistedPayload.runs).toHaveLength(1)
     expect(persistedPayload.runs[0].workflow_verdict).toBe("AUTHOR-DECIDES")
     expect(persistedPayload.workflow_result).toEqual({ kind: "feedback", value: "AUTHOR-DECIDES" })
@@ -1621,7 +1623,7 @@ describe("consolidate_dispatch", () => {
     // native AUTHOR-DECIDES value (RD-FR-008); the HIGH finding remains
     // recorded in the payload findings for the human gate.
     expect(finalizationResult.operation_verdict).toBe("APPROVE WITH ADVISORIES")
-    const persistedPayload = finalizationResult.review_dispatch.payload
+    const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
     expect(persistedPayload.runs).toHaveLength(1)
     expect(persistedPayload.runs[0].workflow_verdict).toBe("AUTHOR-DECIDES")
     expect(persistedPayload.workflow_result).toEqual({ kind: "feedback", value: "AUTHOR-DECIDES" })
@@ -1694,7 +1696,7 @@ describe("consolidate_dispatch", () => {
     // Any successful ACCEPT vote decides a feedback panel; the value is
     // ACCEPT and its lossless back-projection is APPROVE (RD-FR-008).
     expect(finalizationResult.operation_verdict).toBe("APPROVE")
-    const persistedPayload = finalizationResult.review_dispatch.payload
+    const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
     expect(persistedPayload.workflow_result).toEqual({ kind: "feedback", value: "ACCEPT" })
     expect(persistedPayload.verdict).toBe("APPROVE")
     // The MEDIUM finding is retained as the author's decision input and
@@ -1714,10 +1716,8 @@ describe("consolidate_dispatch", () => {
     expect(runVerdicts.get("divisor-guard")).toBe("ACCEPT")
     expect(runVerdicts.get("divisor-adversary")).toBe("AUTHOR-DECIDES")
     // The canonical decision records APPROVED with both native votes.
-    expect(finalizationResult.review_verdict.council_decision).toBe("APPROVED")
-    const personaSummaries = finalizationResult.review_verdict.persona_verdicts.map(
-      (persona: { summary: string }) => persona.summary,
-    )
+    expect(finalizationResult.review_verdict).toBe("APPROVED")
+    const personaSummaries = persistedPayload.runs.filter((run: { workflow_verdict: string | null }) => run.workflow_verdict != null).map((run: { workflow_verdict: string | null }) => `Native verdict: ${run.workflow_verdict}`)
     expect(personaSummaries).toContain("Native verdict: ACCEPT")
     expect(personaSummaries).toContain("Native verdict: AUTHOR-DECIDES")
 
@@ -1838,7 +1838,7 @@ describe("consolidate_dispatch", () => {
     // beat one INVALID, so the value is VALID and its lossless
     // back-projection is APPROVE (RD-FR-008).
     expect(finalizationResult.operation_verdict).toBe("APPROVE")
-    const persistedPayload = finalizationResult.review_dispatch.payload
+    const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
     expect(persistedPayload.workflow_result).toEqual({ kind: "triage", value: "VALID" })
     expect(persistedPayload.verdict).toBe("APPROVE")
     // The HIGH finding is retained as the triage decision input and in
@@ -1859,10 +1859,8 @@ describe("consolidate_dispatch", () => {
     expect(runVerdicts.get("divisor-adversary")).toBe("INVALID")
     expect(runVerdicts.get("divisor-architect")).toBe("VALID")
     // The canonical decision records the triage majority.
-    expect(finalizationResult.review_verdict.council_decision).toBe("APPROVED")
-    const personaSummaries = finalizationResult.review_verdict.persona_verdicts.map(
-      (persona: { summary: string }) => persona.summary,
-    )
+    expect(finalizationResult.review_verdict).toBe("APPROVED")
+    const personaSummaries = persistedPayload.runs.filter((run: { workflow_verdict: string | null }) => run.workflow_verdict != null).map((run: { workflow_verdict: string | null }) => `Native verdict: ${run.workflow_verdict}`)
     expect(personaSummaries).toContain("Native verdict: VALID")
     expect(personaSummaries).toContain("Native verdict: INVALID")
 
@@ -1978,7 +1976,7 @@ describe("consolidate_dispatch", () => {
     // vote-based derivation: the strictest persona vote (the
     // HIGH-findings run) equals the severity ladder over the union.
     expect(finalizationResult.operation_verdict).toBe("REQUEST CHANGES")
-    const persistedPayload = finalizationResult.review_dispatch.payload
+    const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
     expect(persistedPayload.workflow_result).toEqual({ kind: "council", value: "REQUEST CHANGES" })
     expect(persistedPayload.verdict).toBe("REQUEST CHANGES")
     // The HIGH finding is consolidated with its contributing run, the
@@ -1999,10 +1997,8 @@ describe("consolidate_dispatch", () => {
     expect(runVerdicts.get("divisor-guard")).toBe("REQUEST CHANGES")
     expect(runVerdicts.get("divisor-adversary")).toBe("APPROVE")
     // The canonical decision records the blocking outcome with both votes.
-    expect(finalizationResult.review_verdict.council_decision).toBe("CHANGES_REQUESTED")
-    const personaSummaries = finalizationResult.review_verdict.persona_verdicts.map(
-      (persona: { summary: string }) => persona.summary,
-    )
+    expect(finalizationResult.review_verdict).toBe("CHANGES_REQUESTED")
+    const personaSummaries = persistedPayload.runs.filter((run: { workflow_verdict: string | null }) => run.workflow_verdict != null).map((run: { workflow_verdict: string | null }) => `Native verdict: ${run.workflow_verdict}`)
     expect(personaSummaries).toContain("Native verdict: REQUEST CHANGES")
     expect(personaSummaries).toContain("Native verdict: APPROVE")
   })
@@ -2066,7 +2062,7 @@ describe("consolidate_dispatch", () => {
     // Zero successful votes: noSuccessResult decides INCONCLUSIVE and
     // the pass-through back-projection keeps the verdict INCONCLUSIVE.
     expect(finalizationResult.operation_verdict).toBe("INCONCLUSIVE")
-    const persistedPayload = finalizationResult.review_dispatch.payload
+    const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
     expect(persistedPayload.workflow_result).toEqual({ kind: "council", value: "INCONCLUSIVE" })
     expect(persistedPayload.verdict).toBe("INCONCLUSIVE")
     // No findings, no advisories, and the failed runs never voted.
@@ -2089,8 +2085,8 @@ describe("consolidate_dispatch", () => {
     // The canonical decision records the INCONCLUSIVE outcome (the
     // canonical-decision mapping passes availability outcomes through),
     // and no persona verdicts exist because no run succeeded.
-    expect(finalizationResult.review_verdict.council_decision).toBe("INCONCLUSIVE")
-    expect(finalizationResult.review_verdict.persona_verdicts).toHaveLength(0)
+    expect(finalizationResult.review_verdict).toBe("INCONCLUSIVE")
+    expect(persistedPayload.runs.filter((run: { workflow_verdict: string | null }) => run.workflow_verdict != null)).toHaveLength(0)
   })
 
   it("returns finalization payload JSON when provenance is omitted", async () => {

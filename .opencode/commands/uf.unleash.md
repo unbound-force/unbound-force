@@ -707,12 +707,17 @@ sections instead of embedding their text.
 
 **Processing results**:
 
-- If the verdict is APPROVE or APPROVE WITH ADVISORIES:
-  record any advisories for the final report and
-  proceed to Step 5 (Implement) — approving verdicts
-  never trigger the decision gate below.
+- Read the authoritative full data once from the persisted
+  artifact at `artifact_path` returned by the finalization
+  call (`payload.findings` and `payload.advisories`); the
+  compact result carries the outcome, the scalar
+  `review_verdict`, and run counts, never the projection. A detected truncation notice on a consolidation response fails closed.
+- If `operation_verdict` is APPROVE or APPROVE WITH
+  ADVISORIES: record the artifact's advisories for the final
+  report and proceed to Step 5 (Implement) — approving
+  verdicts never trigger the decision gate below.
 
-- If the verdict is REQUEST CHANGES: present the
+- If `operation_verdict` is REQUEST CHANGES: present the
   per-finding spec review decision gate. The council's
   "Spec Review Mode" MANDATORY GATE in
   `.opencode/commands/uf.review-council.md` governs the
@@ -1616,15 +1621,20 @@ text.
    `**Files Reviewed**:` attestation) strictly above —
    below-threshold prompt assembly is unchanged.
 
+Read the authoritative full data once from the persisted artifact at
+`artifact_path` returned by the finalization call (`payload.findings` and
+`payload.advisories`); the compact result carries the outcome, the scalar
+`review_verdict`, and run counts, never the projection. A detected truncation notice on a consolidation response fails closed.
+
 **Processing results**:
 
-- If the verdict is APPROVE or APPROVE WITH ADVISORIES
+- If `operation_verdict` is APPROVE or APPROVE WITH ADVISORIES
   (at least one successful reviewer assessment is
   required for a valid verdict): record any advisories
   for the final report and proceed to Step 7
   (Retrospective).
 
-- If the verdict is REQUEST CHANGES: enter the fix loop.
+- If `operation_verdict` is REQUEST CHANGES: enter the fix loop.
   For each iteration (up to 3 total):
   a. Address the findings by making code fixes --
      delegate the code-fix application to the
