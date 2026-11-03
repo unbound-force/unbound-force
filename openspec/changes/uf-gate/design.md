@@ -156,9 +156,11 @@ provenance metadata per Constitution III:
 ```json
 {
   "version": "1.0.0",
+  "tool_version": "dev",
   "producer": "uf-gate",
   "timestamp": "2026-09-08T12:00:00Z",
   "branch": "opsx/uf-gate",
+  "commit": "1c79bf2452490bd73b8fcb4ce000991fefcbb7b0",
   "phase": "implement",
   "passed": false,
   "checks": [
@@ -182,10 +184,11 @@ provenance metadata per Constitution III:
 ```
 
 The `version` field tracks the schema version for backward
-compatibility. The `producer`, `timestamp`, and `branch`
-fields satisfy Constitution III's provenance requirement.
-The `branch` field is best-effort — empty string when git
-is unavailable or the directory is not a git repository.
+compatibility. The `producer`, `timestamp`, `branch`,
+`commit`, and `tool_version` fields satisfy Constitution
+III's provenance requirement. The `branch` and `commit`
+fields are best-effort — empty string when git is
+unavailable or the directory is not a git repository.
 
 **Rationale**: Constitution III (Observable Quality) — JSON
 format with provenance metadata is required. The schema is
@@ -198,18 +201,23 @@ The `checkNotOnMain` function shells out to `git` rather
 than importing a Go git library:
 
 ```go
-func checkNotOnMain(dir string) CheckResult {
-    // exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-    // with dir set as the working directory
-    // MUST use explicit argument separation (no sh -c)
+func checkNotOnMain(ctx runContext) CheckResult {
+    // Consumes the once-per-run branch resolution. detectBranch
+    // shells out via execGit — explicit argument separation
+    // (no sh -c), bounded timeout — and resolveChange carries
+    // the result, including the CI-ref recovery for detached
+    // HEADs, on the run context (design D2).
 }
 ```
 
 **Error handling**: When git exec fails (git not installed,
-not a git repository, unexpected output), the check returns
-`CheckResult{Passed: false}` with a descriptive message.
-Detached HEAD (`git rev-parse` returns "HEAD") is treated
-as passing — it is not `main`.
+not a git repository, unexpected output), the branch
+detection error is carried on the run context and the check
+returns `CheckResult{Passed: false}` with a descriptive
+message. Detached HEAD (`git rev-parse` returns "HEAD") is
+treated as passing — it is not `main` — unless the CI-ref
+recovery (risk R1) resolves it to `main`, in which case the
+check fails.
 
 **Rationale**: Constitution V (Security by Default) —
 minimal dependencies. `exec.Command` with explicit argument
@@ -297,3 +305,19 @@ test", or "e2e test", or a line matching `coverage.*%`.
 False negatives are possible for non-standard phrasing.
 Mitigated by documenting the expected keywords in the
 command help text and testing with representative examples.
+
+### R5: Review markers are presence-of-text evidence
+
+The `review` and `pr` phases verify review completion by
+searching the active change's `tasks.md` for the literal
+markers `<!-- spec-review: passed -->` and
+`<!-- code-review: passed -->` (GATE-FR-008). This evidence
+is only as strong as write access to `tasks.md`: a
+committer can type the marker without running a review,
+and the gate cannot distinguish the two. The mechanism is
+what the spec mandates and matches the org's marker
+convention, but consumers of `uf gate --phase pr` in CI
+should not assume a stronger guarantee than "the marker is
+present". Binding review checks to provenance-bearing
+dispatch records (`.uf/artifacts/dispatch/`) is the
+documented follow-up direction.

@@ -121,3 +121,15 @@ network access, no secrets handling. Minimal process
 execution limited to `git` for branch detection (see
 design D5), using `exec.Command` with explicit argument
 separation — no shell invocation.
+
+### VI. Deterministic Execution
+
+**Assessment**: PASS
+
+The gate command is this principle's mechanism of record:
+constitution enforcement extracted into an executable,
+tested CLI tool with machine-readable output and three-tier
+exit codes, usable as a `validation_loop.script` or a local
+pre-commit/pre-PR hook. Every check is a deterministic
+function of filesystem and git state — no model judgment
+sits in the enforcement path.

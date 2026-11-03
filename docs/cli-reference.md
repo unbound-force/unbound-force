@@ -157,6 +157,26 @@ uf gate --phase pr
 uf gate --phase implement --format json
 ```
 
+**Artifact resolution**
+
+When the current branch names a change (`opsx/<name>` or
+`NNN-<name>`), checks resolve artifacts from that change only
+(`openspec/changes/<name>/` or `specs/<name>/`) — an unrelated
+change cannot mask a missing artifact. `quick/<name>` branches
+carry no spec artifacts, so their checks always fail by design.
+On a detached HEAD (the default CI checkout state), the branch
+is recovered from `GITHUB_HEAD_REF` or `GITHUB_REF_NAME` before
+the fallback applies. On branches without a change mapping,
+checks fall back to the first alphabetical match across both
+layouts.
+
+**Coverage strategy detection** (`--phase implement`)
+
+Plan/tasks artifacts are scanned (case-insensitive) for: a
+heading containing "coverage"; body text containing "coverage
+target", "unit test", "integration test", or "e2e test"; or a
+line matching `coverage.*%`.
+
 ### uf setup
 
 Install and configure the Unbound Force development tool chain.
