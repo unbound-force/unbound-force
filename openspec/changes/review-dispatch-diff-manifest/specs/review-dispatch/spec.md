@@ -246,6 +246,20 @@ continuations
   error
 - **AND** no file is read
 
+#### Scenario: Missing diff path inside the allowed scope
+
+- **GIVEN** a diff path that does not exist but whose location
+  lies inside the project root or the system temp directory
+  (for example a mistyped temp file name)
+- **WHEN** `read_diff_chunk` is called
+- **THEN** the tool returns a structured `diff_not_found` error
+  whose message quotes the supplied path and says to copy the
+  path exactly from the prompt or manifest rather than retype
+  it
+- **AND** no file is read
+- **AND** a missing diff path whose location lies outside those
+  directories still returns `path_validation_failed`
+
 #### Scenario: No arbitrary filesystem access
 
 - **GIVEN** a caller requesting a file path that is not
