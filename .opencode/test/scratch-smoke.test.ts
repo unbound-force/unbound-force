@@ -196,6 +196,7 @@ describe("provider-free scratch-repository smoke test", () => {
         "command_path",
         "expected_artifact",
         "feature_dir",
+        "idle_timeout",
         "model",
         "pack",
         "phase",
