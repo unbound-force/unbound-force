@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import {
   existsSync,
   mkdirSync,
@@ -17,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { PreflightDeclaredDependencies } from "../lib/preflight-declared.js"
 import {
+  defaultGitExec,
   failure,
   success,
   type ToolFailure,
@@ -44,6 +46,7 @@ import {
   processResultFromExecFile,
   createResolveBaseRefTool,
   type GitExec,
+  type GitPushData,
   type ProgressState,
   type ResolveBaseRefData,
   resolveKey,
@@ -1481,43 +1484,146 @@ describe("git_fetch", () => {
   })
 })
 
-describe("git_push", () => {
-  it("executes plain git push when no options", async () => {
-    const commands: string[] = []
-    const mockExec: GitExec = (args: string[]) => {
-      commands.push(args.join(" "))
-      return ""
+const OLD_SHA = "1".repeat(40)
+const NEW_SHA = "2".repeat(40)
+
+/**
+ * Scripted git executor for the push tools: answers the branch probe,
+ * rev-parse calls, and push with canned output, recording every call.
+ */
+function pushExec(options: {
+  current?: string
+  pushOutput?: string
+  trackingSha?: string | null
+  pushError?: string
+}): { exec: GitExec; commands: string[] } {
+  const commands: string[] = []
+  const exec: GitExec = (args: string[]) => {
+    commands.push(args.join(" "))
+    if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") {
+      return options.current ?? "feat/x"
     }
-    const result = await invokeTool<{ success: boolean }>(
-      createGitPushTool(mockExec, "/fake"),
-      {},
+    if (args[0] === "rev-parse" && args[1] === "HEAD") {
+      return NEW_SHA
+    }
+    if (args[0] === "rev-parse" && args[1] === "--verify") {
+      if (args[2].startsWith("refs/remotes/")) {
+        if (options.trackingSha === null) {
+          throw new Error("fatal: Needed a single revision")
+        }
+        return options.trackingSha ?? OLD_SHA
+      }
+      if (args[2].startsWith("bad")) {
+        throw new Error("fatal: Needed a single revision")
+      }
+      return OLD_SHA
+    }
+    if (args[0] === "push") {
+      if (options.pushError !== undefined) {
+        throw new Error(options.pushError)
+      }
+      return options.pushOutput ?? ""
+    }
+    return ""
+  }
+  return { exec, commands }
+}
+
+const porcelain = (flag: string, ref: string, summary: string) =>
+  `To example.com:org/repo.git\n${flag}\tHEAD:${ref}\t${summary}\nDone`
+
+describe("git_push", () => {
+  it("pushes HEAD to the named branch with an explicit refspec", async () => {
+    const { exec, commands } = pushExec({
+      pushOutput: porcelain(" ", "refs/heads/feat/x", "1111111..2222222"),
+    })
+    const result = await invokeTool<Record<string, unknown>>(
+      createGitPushTool(exec, "/fake"),
+      { branch: "feat/x" },
     )
     expect(result.status).toBe("ok")
-    expect(commands[0]).toBe("push")
+    expect(commands).toContain("push --porcelain origin HEAD:refs/heads/feat/x")
+    expect(commands).toContain("rev-parse --verify 1111111^{commit}")
+    if (result.status === "ok") {
+      expect(result.data).toEqual({
+        remote: "origin",
+        ref: "refs/heads/feat/x",
+        old_sha: OLD_SHA,
+        new_sha: NEW_SHA,
+        updated: true,
+      })
+    }
   })
 
-  it("sets upstream when setUpstream and branch provided", async () => {
-    const commands: string[] = []
-    const mockExec: GitExec = (args: string[]) => {
-      commands.push(args.join(" "))
-      return ""
-    }
-    const result = await invokeTool<{ success: boolean }>(
-      createGitPushTool(mockExec, "/fake"),
-      { setUpstream: true, branch: "feat/my-branch" },
+  it("sets upstream on the named remote when requested", async () => {
+    const { exec, commands } = pushExec({
+      pushOutput: porcelain("*", "refs/heads/feat/x", "[new branch]"),
+    })
+    const result = await invokeTool<Record<string, unknown>>(
+      createGitPushTool(exec, "/fake"),
+      { setUpstream: true, branch: "feat/x", remote: "upstream" },
     )
-    expect(result.status).toBe("ok")
-    expect(commands[0]).toBe("push --set-upstream origin feat/my-branch")
+    expect(commands).toContain(
+      "push --porcelain --set-upstream upstream HEAD:refs/heads/feat/x",
+    )
+    if (result.status === "ok") {
+      expect(result.data).toMatchObject({ remote: "upstream", old_sha: null, updated: true })
+    }
+  })
+
+  it("reports an up-to-date push as not updated", async () => {
+    const { exec } = pushExec({
+      pushOutput: porcelain("=", "refs/heads/feat/x", "[up to date]"),
+    })
+    const result = await invokeTool<Record<string, unknown>>(
+      createGitPushTool(exec, "/fake"),
+      { branch: "feat/x" },
+    )
+    if (result.status === "ok") {
+      expect(result.data).toMatchObject({ old_sha: NEW_SHA, new_sha: NEW_SHA, updated: false })
+    }
+  })
+
+  it("reports a null old_sha when the summary does not resolve", async () => {
+    const { exec } = pushExec({
+      pushOutput: porcelain(" ", "refs/heads/feat/x", "bad0000..2222222"),
+    })
+    const unparsed = await invokeTool<Record<string, unknown>>(
+      createGitPushTool(exec, "/fake"),
+      { branch: "feat/x" },
+    )
+    expect(unparsed.status === "ok" && unparsed.data?.old_sha).toBeNull()
+    const { exec: noLine } = pushExec({ pushOutput: "Done" })
+    const missing = await invokeTool<Record<string, unknown>>(
+      createGitPushTool(noLine, "/fake"),
+      { branch: "feat/x" },
+    )
+    expect(missing.status === "ok" && missing.data?.old_sha).toBeNull()
+  })
+
+  it("refuses when the checkout is on a different branch", async () => {
+    const { exec, commands } = pushExec({ current: "main" })
+    const result = await invokeTool(createGitPushTool(exec, "/fake"), { branch: "feat/x" })
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("BRANCH_MISMATCH")
+      expect(result.message).toContain('branch "main"')
+    }
+    expect(commands.some((c) => c.startsWith("push"))).toBe(false)
+  })
+
+  it("rejects a missing or option-like branch as INVALID_INPUT", async () => {
+    const { exec, commands } = pushExec({})
+    for (const args of [{}, { branch: "--all" }, { branch: "a:b" }, { branch: "x", remote: "-r" }]) {
+      const result = await invokeTool(createGitPushTool(exec, "/fake"), args)
+      expect(result.status === "error" && result.code).toBe("INVALID_INPUT")
+    }
+    expect(commands).toEqual([])
   })
 
   it("returns failure on push error", async () => {
-    const mockExec: GitExec = () => {
-      throw new Error("rejected")
-    }
-    const result = await invokeTool(
-      createGitPushTool(mockExec, "/fake"),
-      {},
-    )
+    const { exec } = pushExec({ pushError: "rejected" })
+    const result = await invokeTool(createGitPushTool(exec, "/fake"), { branch: "feat/x" })
     expect(result.status).toBe("error")
     if (result.status === "error") {
       expect(result.code).toBe("GIT_PUSH_ERROR")
@@ -1526,32 +1632,163 @@ describe("git_push", () => {
 })
 
 describe("git_push_force_with_lease", () => {
-  it("executes git push --force-with-lease", async () => {
-    const commands: string[] = []
-    const mockExec: GitExec = (args: string[]) => {
-      commands.push(args.join(" "))
-      return ""
-    }
-    const result = await invokeTool<{ success: boolean }>(
-      createGitPushForceWithLeaseTool(mockExec, "/fake"),
-      {},
+  it("leases on the remote-tracking ref by default", async () => {
+    const { exec, commands } = pushExec({
+      pushOutput: porcelain("+", "refs/heads/feat/x", "1111111...2222222 (forced update)"),
+    })
+    const result = await invokeTool<Record<string, unknown>>(
+      createGitPushForceWithLeaseTool(exec, "/fake"),
+      { branch: "feat/x" },
     )
-    expect(result.status).toBe("ok")
-    expect(commands[0]).toBe("push --force-with-lease")
+    expect(commands).toContain("rev-parse --verify refs/remotes/origin/feat/x")
+    expect(commands).toContain(
+      `push --porcelain --force-with-lease=refs/heads/feat/x:${OLD_SHA} origin HEAD:refs/heads/feat/x`,
+    )
+    if (result.status === "ok") {
+      expect(result.data).toEqual({
+        remote: "origin",
+        ref: "refs/heads/feat/x",
+        old_sha: OLD_SHA,
+        new_sha: NEW_SHA,
+        updated: true,
+      })
+    }
+  })
+
+  it("leases on an explicit expected_sha and remote", async () => {
+    const { exec, commands } = pushExec({
+      pushOutput: porcelain("+", "refs/heads/feat/x", "1111111...2222222 (forced update)"),
+    })
+    await invokeTool(createGitPushForceWithLeaseTool(exec, "/fake"), {
+      branch: "feat/x",
+      remote: "fork",
+      expected_sha: "1111111",
+    })
+    expect(commands).toContain("rev-parse --verify 1111111^{commit}")
+    expect(commands).toContain(
+      `push --porcelain --force-with-lease=refs/heads/feat/x:${OLD_SHA} fork HEAD:refs/heads/feat/x`,
+    )
+  })
+
+  it("leases on absence when there is no remote-tracking ref", async () => {
+    const { exec, commands } = pushExec({
+      trackingSha: null,
+      pushOutput: porcelain("*", "refs/heads/feat/x", "[new branch]"),
+    })
+    const result = await invokeTool<Record<string, unknown>>(
+      createGitPushForceWithLeaseTool(exec, "/fake"),
+      { branch: "feat/x" },
+    )
+    expect(commands).toContain(
+      "push --porcelain --force-with-lease=refs/heads/feat/x: origin HEAD:refs/heads/feat/x",
+    )
+    if (result.status === "ok") {
+      expect(result.data).toMatchObject({ old_sha: null, updated: true })
+    }
+  })
+
+  it("reports an up-to-date push as not updated", async () => {
+    const { exec } = pushExec({
+      pushOutput: porcelain("=", "refs/heads/feat/x", "[up to date]"),
+    })
+    const result = await invokeTool<Record<string, unknown>>(
+      createGitPushForceWithLeaseTool(exec, "/fake"),
+      { branch: "feat/x" },
+    )
+    if (result.status === "ok") {
+      expect(result.data).toMatchObject({ old_sha: NEW_SHA, updated: false })
+    }
+  })
+
+  it("refuses a detached HEAD without pushing", async () => {
+    const { exec, commands } = pushExec({ current: "HEAD" })
+    const result = await invokeTool(createGitPushForceWithLeaseTool(exec, "/fake"), {
+      branch: "feat/x",
+    })
+    if (result.status === "error") {
+      expect(result.code).toBe("BRANCH_MISMATCH")
+      expect(result.message).toContain("detached HEAD")
+    } else {
+      expect.fail("expected BRANCH_MISMATCH")
+    }
+    expect(commands.some((c) => c.startsWith("push"))).toBe(false)
+  })
+
+  it("rejects a malformed expected_sha as INVALID_INPUT", async () => {
+    const { exec } = pushExec({})
+    const result = await invokeTool(createGitPushForceWithLeaseTool(exec, "/fake"), {
+      branch: "feat/x",
+      expected_sha: "not-a-sha",
+    })
+    expect(result.status === "error" && result.code).toBe("INVALID_INPUT")
   })
 
   it("returns failure on force-push error", async () => {
-    const mockExec: GitExec = () => {
-      throw new Error("stale info")
-    }
-    const result = await invokeTool(
-      createGitPushForceWithLeaseTool(mockExec, "/fake"),
-      {},
-    )
+    const { exec } = pushExec({ pushError: "stale info" })
+    const result = await invokeTool(createGitPushForceWithLeaseTool(exec, "/fake"), {
+      branch: "feat/x",
+    })
     expect(result.status).toBe("error")
     if (result.status === "error") {
       expect(result.code).toBe("GIT_PUSH_FORCE_ERROR")
     }
+  })
+})
+
+describe("push tools against a real repository", () => {
+  let root: string
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "uf-push-real-"))
+  })
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it("refuses a switched checkout, then force-pushes and reports SHAs (#947)", async () => {
+    const remoteDir = join(root, "remote.git")
+    const work = join(root, "work")
+    execFileSync("git", ["init", "-q", "--bare", "-b", "main", remoteDir])
+    execFileSync("git", ["init", "-q", "-b", "main", work])
+    const git = (...args: string[]) => defaultGitExec(args, work)
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "test")
+    git("remote", "add", "origin", remoteDir)
+    git("commit", "-q", "--allow-empty", "-m", "base")
+    git("push", "-q", "origin", "main")
+    git("checkout", "-q", "-b", "feat")
+    git("commit", "-q", "--allow-empty", "-m", "one")
+
+    const push = await invokeTool<GitPushData>(createGitPushTool(defaultGitExec, work), {
+      branch: "feat",
+      setUpstream: true,
+    })
+    const first = git("rev-parse", "HEAD")
+    expect(push).toEqual(success({ remote: "origin", ref: "refs/heads/feat", old_sha: null, new_sha: first, updated: true }))
+
+    // Rewrite history, then switch the checkout away as in the incident.
+    git("commit", "-q", "--amend", "--allow-empty", "-m", "one (rebased)")
+    const rewritten = git("rev-parse", "HEAD")
+    git("checkout", "-q", "main")
+    const forceTool = createGitPushForceWithLeaseTool(defaultGitExec, work)
+    const refused = await invokeTool(forceTool, { branch: "feat" })
+    expect(refused.status === "error" && refused.code).toBe("BRANCH_MISMATCH")
+
+    git("checkout", "-q", "feat")
+    const forced = await invokeTool<GitPushData>(forceTool, { branch: "feat", expected_sha: first })
+    expect(forced).toEqual(success({ remote: "origin", ref: "refs/heads/feat", old_sha: first, new_sha: rewritten, updated: true }))
+    expect(defaultGitExec(["rev-parse", "refs/heads/feat"], remoteDir)).toBe(rewritten)
+
+    const noop = await invokeTool<GitPushData>(forceTool, { branch: "feat" })
+    expect(noop.status === "ok" && noop.data?.updated).toBe(false)
+
+    git("commit", "-q", "--allow-empty", "-m", "two")
+    const ff = await invokeTool<GitPushData>(createGitPushTool(defaultGitExec, work), { branch: "feat" })
+    expect(ff.status === "ok" && ff.data?.old_sha).toBe(rewritten)
+
+    // A stale lease is rejected rather than overwriting the remote.
+    git("commit", "-q", "--amend", "--allow-empty", "-m", "two (rebased)")
+    const stale = await invokeTool(forceTool, { branch: "feat", expected_sha: first })
+    expect(stale.status === "error" && stale.code).toBe("GIT_PUSH_FORCE_ERROR")
   })
 })
 
@@ -1891,18 +2128,18 @@ describe("terminal-write regression (Requirement 1)", () => {
   it("git_push writes nothing to the terminal", async () => {
     const successExec: GitExec = () => ""
     await expectNoTerminalWrites(async () => {
-      await invokeTool(createGitPushTool(successExec, "/fake"), {})
-      await invokeTool(createGitPushTool(throwingExec, "/fake"), {})
+      await invokeTool(createGitPushTool(successExec, "/fake"), { branch: "x" })
+      await invokeTool(createGitPushTool(throwingExec, "/fake"), { branch: "x" })
     })
   })
 
   it("git_push_force_with_lease writes nothing to the terminal", async () => {
     const successExec: GitExec = () => ""
     await expectNoTerminalWrites(async () => {
-      await invokeTool(createGitPushForceWithLeaseTool(successExec, "/fake"), {})
+      await invokeTool(createGitPushForceWithLeaseTool(successExec, "/fake"), { branch: "x" })
       await invokeTool(
         createGitPushForceWithLeaseTool(throwingExec, "/fake"),
-        {},
+        { branch: "x" },
       )
     })
   })
@@ -2019,7 +2256,13 @@ describe("tool args schema exposure", () => {
   it("exposes git_push as a zod-args tool definition", () => {
     const definition = createGitPushTool(branchExec, "/fake")
 
-    expect(Object.keys(definition.args).sort()).toEqual(["branch", "setUpstream"])
+    expect(Object.keys(definition.args).sort()).toEqual(["branch", "remote", "setUpstream"])
+  })
+
+  it("exposes git_push_force_with_lease as a zod-args tool definition", () => {
+    const definition = createGitPushForceWithLeaseTool(branchExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual(["branch", "expected_sha", "remote"])
   })
 
   it("exposes git_merge as a zod-args tool definition", () => {
