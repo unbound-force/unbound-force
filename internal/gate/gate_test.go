@@ -109,6 +109,13 @@ func pinGitCeiling(t *testing.T, dir string) {
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 }
 
+// testCtx builds a run context for dir, resolving the change the
+// way Run does: git-scaffolded fixtures exercise branch-mapped
+// resolution, plain fixtures exercise the unmapped fallback.
+func testCtx(dir string) runContext {
+	return runContext{dir: dir, res: resolveChange(dir)}
+}
+
 // --- checkSpecExists tests ---
 
 func TestCheckSpecExists_OpenSpec(t *testing.T) {
@@ -117,7 +124,7 @@ func TestCheckSpecExists_OpenSpec(t *testing.T) {
 		"proposal.md": "# Proposal\nSome content",
 	})
 
-	r := checkSpecExists(dir)
+	r := checkSpecExists(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass, got fail: %s", r.Message)
 	}
@@ -132,7 +139,7 @@ func TestCheckSpecExists_Speckit(t *testing.T) {
 		"spec.md": "# Spec\nSome content",
 	})
 
-	r := checkSpecExists(dir)
+	r := checkSpecExists(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass, got fail: %s", r.Message)
 	}
@@ -141,7 +148,7 @@ func TestCheckSpecExists_Speckit(t *testing.T) {
 func TestCheckSpecExists_Missing(t *testing.T) {
 	dir := t.TempDir()
 
-	r := checkSpecExists(dir)
+	r := checkSpecExists(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail, got pass")
 	}
@@ -155,7 +162,7 @@ func TestCheckPlanExists_OpenSpec(t *testing.T) {
 		"design.md": "# Design\nSome content",
 	})
 
-	r := checkPlanExists(dir)
+	r := checkPlanExists(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass, got fail: %s", r.Message)
 	}
@@ -167,7 +174,7 @@ func TestCheckPlanExists_Speckit(t *testing.T) {
 		"plan.md": "# Plan\nSome content",
 	})
 
-	r := checkPlanExists(dir)
+	r := checkPlanExists(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass, got fail: %s", r.Message)
 	}
@@ -176,7 +183,7 @@ func TestCheckPlanExists_Speckit(t *testing.T) {
 func TestCheckPlanExists_Missing(t *testing.T) {
 	dir := t.TempDir()
 
-	r := checkPlanExists(dir)
+	r := checkPlanExists(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail, got pass")
 	}
@@ -190,7 +197,7 @@ func TestCheckTasksExist_OpenSpec(t *testing.T) {
 		"tasks.md": "# Tasks\n- [ ] Task 1",
 	})
 
-	r := checkTasksExist(dir)
+	r := checkTasksExist(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass, got fail: %s", r.Message)
 	}
@@ -202,7 +209,7 @@ func TestCheckTasksExist_Speckit(t *testing.T) {
 		"tasks.md": "# Tasks\n- [ ] Task 1",
 	})
 
-	r := checkTasksExist(dir)
+	r := checkTasksExist(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass, got fail: %s", r.Message)
 	}
@@ -211,7 +218,7 @@ func TestCheckTasksExist_Speckit(t *testing.T) {
 func TestCheckTasksExist_Missing(t *testing.T) {
 	dir := t.TempDir()
 
-	r := checkTasksExist(dir)
+	r := checkTasksExist(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail, got pass")
 	}
@@ -227,7 +234,7 @@ func TestCheckCoverageStrategy_Heading(t *testing.T) {
 		"tasks.md": "# Tasks\n\n## Test coverage plan\n\nTests are organized by package.",
 	})
 
-	r := checkCoverageStrategy(dir)
+	r := checkCoverageStrategy(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass for coverage heading, got fail: %s", r.Message)
 	}
@@ -241,7 +248,7 @@ func TestCheckCoverageStrategy_Keyword(t *testing.T) {
 		"tasks.md": "# Tasks\n\ncoverage target: high\n",
 	})
 
-	r := checkCoverageStrategy(dir)
+	r := checkCoverageStrategy(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass for coverage keyword, got fail: %s", r.Message)
 	}
@@ -253,7 +260,7 @@ func TestCheckCoverageStrategy_UnitTestKeyword(t *testing.T) {
 		"tasks.md": "# Tasks\n\nWe need a unit test for each function.\n",
 	})
 
-	r := checkCoverageStrategy(dir)
+	r := checkCoverageStrategy(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass for 'unit test' keyword, got fail: %s", r.Message)
 	}
@@ -265,7 +272,7 @@ func TestCheckCoverageStrategy_Missing(t *testing.T) {
 		"tasks.md": "# Tasks\n\n- [ ] Implement feature\n- [ ] Write docs\n",
 	})
 
-	r := checkCoverageStrategy(dir)
+	r := checkCoverageStrategy(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail for missing coverage strategy, got pass")
 	}
@@ -275,7 +282,7 @@ func TestCheckCoverageStrategy_NoFiles(t *testing.T) {
 	dir := t.TempDir()
 	pinGitCeiling(t, dir)
 
-	r := checkCoverageStrategy(dir)
+	r := checkCoverageStrategy(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail when no task/plan files exist, got pass")
 	}
@@ -289,7 +296,7 @@ func TestCheckTasksComplete_AllDone(t *testing.T) {
 		"tasks.md": "# Tasks\n- [x] Task 1\n- [x] Task 2\n",
 	})
 
-	r := checkTasksComplete(dir)
+	r := checkTasksComplete(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass, got fail: %s", r.Message)
 	}
@@ -301,7 +308,7 @@ func TestCheckTasksComplete_Incomplete(t *testing.T) {
 		"tasks.md": "# Tasks\n- [x] Task 1\n- [ ] Task 2\n",
 	})
 
-	r := checkTasksComplete(dir)
+	r := checkTasksComplete(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail for incomplete tasks, got pass")
 	}
@@ -313,7 +320,7 @@ func TestCheckTasksComplete_ProseLiteral(t *testing.T) {
 		"tasks.md": "# Tasks\n- [x] Complete task\n\nUse `- [ ]` for incomplete tasks.\n",
 	})
 
-	r := checkTasksComplete(dir)
+	r := checkTasksComplete(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected prose literal to be ignored, got fail: %s", r.Message)
 	}
@@ -325,7 +332,7 @@ func TestCheckTasksComplete_IndentedSubtask(t *testing.T) {
 		"tasks.md": "# Tasks\n- [x] 1.1 Done\n  - [ ] 1.1.1 Nested incomplete\n",
 	})
 
-	r := checkTasksComplete(dir)
+	r := checkTasksComplete(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected indented unchecked subtask to fail, got pass")
 	}
@@ -335,7 +342,7 @@ func TestCheckTasksComplete_NoFile(t *testing.T) {
 	dir := t.TempDir()
 	pinGitCeiling(t, dir)
 
-	r := checkTasksComplete(dir)
+	r := checkTasksComplete(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail when no tasks.md, got pass")
 	}
@@ -349,7 +356,7 @@ func TestCheckReviewRun_SpecReview(t *testing.T) {
 		"tasks.md": "# Tasks\n- [x] Task 1\n<!-- spec-review: passed -->",
 	})
 
-	r := checkReviewRun(dir)
+	r := checkReviewRun(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass for spec-review marker, got fail: %s", r.Message)
 	}
@@ -361,7 +368,7 @@ func TestCheckReviewRun_CodeReview(t *testing.T) {
 		"tasks.md": "# Tasks\n- [x] Task 1\n<!-- code-review: passed -->",
 	})
 
-	r := checkReviewRun(dir)
+	r := checkReviewRun(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass for code-review marker, got fail: %s", r.Message)
 	}
@@ -373,7 +380,7 @@ func TestCheckReviewRun_NoMarker(t *testing.T) {
 		"tasks.md": "# Tasks\n- [x] Task 1\n",
 	})
 
-	r := checkReviewRun(dir)
+	r := checkReviewRun(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail when no review marker, got pass")
 	}
@@ -387,7 +394,7 @@ func TestCheckReviewPass_Present(t *testing.T) {
 		"tasks.md": "# Tasks\n- [x] Task 1\n<!-- code-review: passed -->",
 	})
 
-	r := checkReviewPass(dir)
+	r := checkReviewPass(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass for code-review marker, got fail: %s", r.Message)
 	}
@@ -399,7 +406,7 @@ func TestCheckReviewPass_OnlySpecReview(t *testing.T) {
 		"tasks.md": "# Tasks\n- [x] Task 1\n<!-- spec-review: passed -->",
 	})
 
-	r := checkReviewPass(dir)
+	r := checkReviewPass(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail when only spec-review marker present, got pass")
 	}
@@ -411,7 +418,7 @@ func TestCheckReviewPass_NoMarker(t *testing.T) {
 		"tasks.md": "# Tasks\n- [x] Task 1\n",
 	})
 
-	r := checkReviewPass(dir)
+	r := checkReviewPass(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail when no marker, got pass")
 	}
@@ -420,7 +427,7 @@ func TestCheckReviewPass_NoMarker(t *testing.T) {
 func TestCheckReviewPass_NoFile(t *testing.T) {
 	dir := t.TempDir()
 
-	r := checkReviewPass(dir)
+	r := checkReviewPass(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail when no tasks.md, got pass")
 	}
@@ -437,7 +444,7 @@ func TestCheckReviewRun_SpeckitLayout(t *testing.T) {
 		"tasks.md": "# Tasks\n- [x] Task 1\n<!-- spec-review: passed -->",
 	})
 
-	r := checkReviewRun(dir)
+	r := checkReviewRun(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass for speckit layout, got fail: %s", r.Message)
 	}
@@ -446,7 +453,7 @@ func TestCheckReviewRun_SpeckitLayout(t *testing.T) {
 func TestCheckReviewRun_NoFile(t *testing.T) {
 	dir := t.TempDir()
 
-	r := checkReviewRun(dir)
+	r := checkReviewRun(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail when no tasks.md, got pass")
 	}
@@ -460,7 +467,7 @@ func TestCheckTasksComplete_SpeckitLayout(t *testing.T) {
 		"tasks.md": "# Tasks\n- [x] Task 1\n- [x] Task 2\n",
 	})
 
-	r := checkTasksComplete(dir)
+	r := checkTasksComplete(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass for speckit layout, got fail: %s", r.Message)
 	}
@@ -474,7 +481,7 @@ func TestCheckCoverageStrategy_SpeckitPlan(t *testing.T) {
 		"plan.md": "# Plan\n\n## Coverage Strategy\n\nUnit tests for all.\n",
 	})
 
-	r := checkCoverageStrategy(dir)
+	r := checkCoverageStrategy(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass for speckit plan, got fail: %s", r.Message)
 	}
@@ -486,7 +493,7 @@ func TestCheckCoverageStrategy_PercentagePattern(t *testing.T) {
 		"tasks.md": "# Tasks\n\nTarget: coverage >= 90%\n",
 	})
 
-	r := checkCoverageStrategy(dir)
+	r := checkCoverageStrategy(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass for percentage pattern, got fail: %s", r.Message)
 	}
@@ -505,9 +512,50 @@ func TestCheckCoverageStrategy_ActiveChangeMissingCoverage_Fails(t *testing.T) {
 	})
 	initGitRepo(t, dir, "opsx/zzz-active")
 
-	r := checkCoverageStrategy(dir)
+	r := checkCoverageStrategy(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected active change without coverage strategy to fail, got: %s", r.Message)
+	}
+}
+
+func TestCheckCoverageStrategy_SpeckitBranchChange_MissingCoverage_Fails(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	// Another Speckit feature carries the coverage strategy; the
+	// branch-mapped one does not. Strict resolution must not let
+	// 001-other satisfy 002-active's check.
+	scaffoldSpeckitChange(t, dir, "001-other", map[string]string{
+		"plan.md": "# Plan\n\n## Coverage Strategy\n\nUnit tests.\n",
+	})
+	scaffoldSpeckitChange(t, dir, "002-active", map[string]string{
+		"plan.md": "# Plan\n",
+	})
+	initGitRepo(t, dir, "002-active")
+
+	r := checkCoverageStrategy(testCtx(dir))
+	if r.Passed {
+		t.Errorf("expected active Speckit change without coverage strategy to fail, got: %s", r.Message)
+	}
+}
+
+func TestCheckCoverageStrategy_SpeckitBranchChange_Passes(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	scaffoldSpeckitChange(t, dir, "001-other", map[string]string{
+		"plan.md": "# Plan\n",
+	})
+	scaffoldSpeckitChange(t, dir, "002-active", map[string]string{
+		"plan.md": "# Plan\n\n## Coverage Strategy\n\nIntegration tests.\n",
+	})
+	initGitRepo(t, dir, "002-active")
+
+	r := checkCoverageStrategy(testCtx(dir))
+	if !r.Passed {
+		t.Errorf("expected coverage strategy from branch-mapped Speckit change, got: %s", r.Message)
 	}
 }
 
@@ -523,7 +571,7 @@ func TestCheckSpecExists_QuickBranch_Fails(t *testing.T) {
 	})
 	initGitRepo(t, dir, "quick/some-change")
 
-	r := checkSpecExists(dir)
+	r := checkSpecExists(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected quick branch to fail spec-exists, got: %s", r.Message)
 	}
@@ -542,7 +590,7 @@ func TestCheckCoverageStrategy_QuickBranch_Fails(t *testing.T) {
 	})
 	initGitRepo(t, dir, "quick/some-change")
 
-	r := checkCoverageStrategy(dir)
+	r := checkCoverageStrategy(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected quick branch to fail coverage-strategy, got: %s", r.Message)
 	}
@@ -558,7 +606,7 @@ func TestFindTasksFile_QuickBranch(t *testing.T) {
 	})
 	initGitRepo(t, dir, "quick/some-change")
 
-	path, err := findTasksFile(dir)
+	path, err := findTasksFile(testCtx(dir))
 	if err != nil {
 		t.Fatalf("find tasks file: %v", err)
 	}
@@ -577,7 +625,7 @@ func TestCheckNotOnMain_FeatureBranch(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir, "opsx/test-feature")
 
-	r := checkNotOnMain(dir)
+	r := checkNotOnMain(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass on feature branch, got fail: %s", r.Message)
 	}
@@ -591,7 +639,7 @@ func TestCheckNotOnMain_OnMain(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir, "main")
 
-	r := checkNotOnMain(dir)
+	r := checkNotOnMain(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail on main branch, got pass")
 	}
@@ -605,7 +653,7 @@ func TestCheckNotOnMain_NonGitDir(t *testing.T) {
 	dir := t.TempDir()
 	pinGitCeiling(t, dir)
 
-	r := checkNotOnMain(dir)
+	r := checkNotOnMain(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail in non-git directory, got pass")
 	}
@@ -624,7 +672,7 @@ func TestCheckNotOnMain_DetachedHead(t *testing.T) {
 	// Detach HEAD.
 	runGit(t, dir, "checkout", "--detach")
 
-	r := checkNotOnMain(dir)
+	r := checkNotOnMain(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected pass on detached HEAD, got fail: %s", r.Message)
 	}
@@ -636,7 +684,7 @@ func TestCheckNotOnMain_GitUnavailable(t *testing.T) {
 	// "Git not available" scenario).
 	t.Setenv("PATH", t.TempDir())
 
-	r := checkNotOnMain(dir)
+	r := checkNotOnMain(testCtx(dir))
 	if r.Passed {
 		t.Error("expected fail when git is unavailable")
 	}
@@ -785,6 +833,53 @@ func TestRun_ImplementPhase_Pass(t *testing.T) {
 	}
 	if report.Summary.Passed != 4 {
 		t.Errorf("expected 4 passed, got %d", report.Summary.Passed)
+	}
+}
+
+func TestRun_ImplementPhase_MultiChange_ResolvesBranchChange(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	// aaa-other is complete; the branch-mapped zzz-active is not.
+	// Strict resolution must fail the run on zzz-active's gaps
+	// without letting aaa-other's artifacts satisfy any check.
+	scaffoldOpenSpecChange(t, dir, "aaa-other", map[string]string{
+		"proposal.md": "# Proposal",
+		"design.md":   "# Design",
+		"tasks.md":    "# Tasks\n\n## Coverage Strategy\n\nUnit tests.\n",
+	})
+	scaffoldOpenSpecChange(t, dir, "zzz-active", map[string]string{
+		"proposal.md": "# Proposal",
+	})
+	initGitRepo(t, dir, "opsx/zzz-active")
+
+	var stdout, stderr bytes.Buffer
+	report, err := Run(Options{
+		TargetDir: dir,
+		Phase:     "implement",
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+	})
+	if err == nil {
+		t.Fatal("expected error for incomplete active change")
+	}
+	if report == nil {
+		t.Fatal("expected report on check failure")
+	}
+	if report.Passed {
+		t.Error("expected report.Passed=false")
+	}
+	if report.Branch != "opsx/zzz-active" {
+		t.Errorf("expected provenance branch opsx/zzz-active, got %q", report.Branch)
+	}
+	if report.Summary != (Summary{Total: 4, Passed: 1, Failed: 3}) {
+		t.Errorf("unexpected summary: %+v", report.Summary)
+	}
+	for _, c := range report.Checks {
+		if strings.Contains(c.Message, "aaa-other") {
+			t.Errorf("check %s resolved another change's artifacts: %s", c.Name, c.Message)
+		}
 	}
 }
 
@@ -1010,6 +1105,35 @@ func TestFormatText_NoBranch(t *testing.T) {
 	// Should NOT contain branch info when Branch is empty.
 	if strings.Contains(output, "branch:") {
 		t.Errorf("expected no branch line when Branch is empty, got: %s", output)
+	}
+}
+
+func TestFormatText_ProvenanceLine(t *testing.T) {
+	report := &GateReport{
+		Version:     SchemaVersion,
+		ToolVersion: "v1.2.3",
+		Producer:    ProducerName,
+		Timestamp:   "2026-09-08T12:00:00Z",
+		Branch:      "opsx/test",
+		Commit:      "0123456789abcdef",
+		Phase:       "specify",
+		Passed:      true,
+		Checks: []CheckResult{
+			{Name: "spec-exists", Passed: true, Message: "Spec found"},
+		},
+		Summary: Summary{Total: 1, Passed: 1, Failed: 0},
+	}
+
+	var buf bytes.Buffer
+	if err := FormatText(report, &buf); err != nil {
+		t.Fatalf("FormatText error: %v", err)
+	}
+
+	output := buf.String()
+	for _, want := range []string{"branch: opsx/test", "commit: 0123456789abcdef", ProducerName, "v1.2.3"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in provenance output, got: %s", want, output)
+		}
 	}
 }
 
@@ -1313,7 +1437,7 @@ func TestFindTasksFile_OpenSpec(t *testing.T) {
 		"tasks.md": "# Tasks",
 	})
 
-	path, err := findTasksFile(dir)
+	path, err := findTasksFile(testCtx(dir))
 	if err != nil {
 		t.Fatalf("find tasks file: %v", err)
 	}
@@ -1328,7 +1452,7 @@ func TestFindTasksFile_Speckit(t *testing.T) {
 		"tasks.md": "# Tasks",
 	})
 
-	path, err := findTasksFile(dir)
+	path, err := findTasksFile(testCtx(dir))
 	if err != nil {
 		t.Fatalf("find tasks file: %v", err)
 	}
@@ -1341,7 +1465,7 @@ func TestFindTasksFile_NotFound(t *testing.T) {
 	dir := t.TempDir()
 	pinGitCeiling(t, dir)
 
-	path, err := findTasksFile(dir)
+	path, err := findTasksFile(testCtx(dir))
 	if err != nil {
 		t.Fatalf("find tasks file: %v", err)
 	}
@@ -1421,7 +1545,7 @@ func TestFindTasksFile_MultipleChanges_SelectsBranchChange(t *testing.T) {
 	})
 	initGitRepo(t, dir, "opsx/zzz-active")
 
-	path, err := findTasksFile(dir)
+	path, err := findTasksFile(testCtx(dir))
 	if err != nil {
 		t.Fatalf("find tasks file: %v", err)
 	}
@@ -1447,7 +1571,7 @@ func TestCheckSpecExists_ActiveChangeMissing_Fails(t *testing.T) {
 	})
 	initGitRepo(t, dir, "opsx/zzz-active")
 
-	r := checkSpecExists(dir)
+	r := checkSpecExists(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail: active change has no proposal.md; got pass: %s", r.Message)
 	}
@@ -1464,7 +1588,7 @@ func TestFindTasksFile_SpeckitBranchChange(t *testing.T) {
 	})
 	initGitRepo(t, dir, "001-test-feature")
 
-	path, err := findTasksFile(dir)
+	path, err := findTasksFile(testCtx(dir))
 	if err != nil {
 		t.Fatalf("find tasks file: %v", err)
 	}
@@ -1491,14 +1615,14 @@ func TestTaskChecks_UnreadableTasksFile(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		fn   func(string) CheckResult
+		fn   func(runContext) CheckResult
 	}{
 		{"tasks-complete", checkTasksComplete},
 		{"review-run", checkReviewRun},
 		{"review-pass", checkReviewPass},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := tc.fn(dir)
+			r := tc.fn(testCtx(dir))
 			if r.Passed {
 				t.Errorf("expected fail for unreadable tasks.md")
 			}
@@ -1522,7 +1646,7 @@ func TestCheckCoverageStrategy_UnreadableArtifact(t *testing.T) {
 		t.Fatalf("chmod: %v", err)
 	}
 
-	r := checkCoverageStrategy(dir)
+	r := checkCoverageStrategy(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail for unreadable artifact")
 	}
@@ -1533,7 +1657,7 @@ func TestCheckCoverageStrategy_UnreadableArtifact(t *testing.T) {
 
 // --- InternalError contract ---
 
-func TestInternalError(t *testing.T) {
+func TestInternalError_ErrorUnwrapExitCode(t *testing.T) {
 	inner := errors.New("boom")
 	e := &InternalError{Err: inner}
 	if e.Error() != "boom" {
@@ -1561,7 +1685,7 @@ func TestFindTasksFile_ActiveChangeMissing(t *testing.T) {
 	})
 	initGitRepo(t, dir, "opsx/zzz-missing")
 
-	if path, err := findTasksFile(dir); err != nil {
+	if path, err := findTasksFile(testCtx(dir)); err != nil {
 		t.Fatalf("find tasks file: %v", err)
 	} else if path != "" {
 		t.Errorf("expected no tasks file for missing active change, got %s", path)
@@ -1580,8 +1704,88 @@ func TestCheckSpecExists_SpeckitBranch_Missing(t *testing.T) {
 	})
 	initGitRepo(t, dir, "002-active")
 
-	r := checkSpecExists(dir)
+	r := checkSpecExists(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected fail for active Speckit branch without spec.md; got pass: %s", r.Message)
+	}
+}
+
+// --- detached-HEAD CI branch recovery ---
+
+func TestResolveChange_DetachedHead_RecoversCIRef(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	scaffoldOpenSpecChange(t, dir, "aaa-other", map[string]string{
+		"tasks.md": "# Tasks\n",
+	})
+	scaffoldOpenSpecChange(t, dir, "zzz-active", map[string]string{
+		"tasks.md": "# Tasks\n\n## Coverage Strategy\n\nUnit tests.\n",
+	})
+	initGitRepo(t, dir, "main")
+	runGit(t, dir, "checkout", "--detach")
+	t.Setenv("GITHUB_HEAD_REF", "opsx/zzz-active")
+	t.Setenv("GITHUB_REF_NAME", "")
+
+	res := resolveChange(dir)
+	if !res.Strict || res.Name != "zzz-active" {
+		t.Errorf("expected strict resolution to zzz-active via CI ref, got %+v", res)
+	}
+	if res.Branch != "opsx/zzz-active" {
+		t.Errorf("expected effective branch opsx/zzz-active, got %q", res.Branch)
+	}
+
+	// The coverage check must read the CI-named change, not the
+	// alphabetical first.
+	r := checkCoverageStrategy(runContext{dir: dir, res: res})
+	if !r.Passed {
+		t.Errorf("expected coverage strategy from CI-resolved change, got: %s", r.Message)
+	}
+}
+
+func TestResolveChange_DetachedHead_RefNameFallback(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	scaffoldOpenSpecChange(t, dir, "zzz-active", map[string]string{
+		"tasks.md": "# Tasks\n",
+	})
+	initGitRepo(t, dir, "main")
+	runGit(t, dir, "checkout", "--detach")
+	t.Setenv("GITHUB_HEAD_REF", "")
+	t.Setenv("GITHUB_REF_NAME", "opsx/zzz-active")
+
+	res := resolveChange(dir)
+	if !res.Strict || res.Name != "zzz-active" {
+		t.Errorf("expected strict resolution to zzz-active via GITHUB_REF_NAME, got %+v", res)
+	}
+}
+
+func TestResolveChange_DetachedHead_NoCIRef_FallsBack(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	scaffoldOpenSpecChange(t, dir, "aaa-first", map[string]string{
+		"tasks.md": "# Tasks\n",
+	})
+	initGitRepo(t, dir, "main")
+	runGit(t, dir, "checkout", "--detach")
+	t.Setenv("GITHUB_HEAD_REF", "")
+	t.Setenv("GITHUB_REF_NAME", "")
+
+	res := resolveChange(dir)
+	if res.Strict || res.Quick || res.Name != "" {
+		t.Errorf("expected unmapped fallback without CI refs, got %+v", res)
+	}
+	if res.Branch != "HEAD" {
+		t.Errorf("expected literal HEAD branch without CI refs, got %q", res.Branch)
+	}
+	if path, err := findTasksFile(runContext{dir: dir, res: res}); err != nil {
+		t.Fatalf("find tasks file: %v", err)
+	} else if !strings.HasSuffix(path, filepath.Join("aaa-first", "tasks.md")) {
+		t.Errorf("expected alphabetical fallback to aaa-first, got %s", path)
 	}
 }

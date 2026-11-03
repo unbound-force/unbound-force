@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -269,7 +270,7 @@ func TestNewGateCmd_MissingPhase(t *testing.T) {
 	}
 }
 
-func TestExitCode(t *testing.T) {
+func TestExitCode_MapsErrorsToProcessCodes(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
@@ -284,6 +285,18 @@ func TestExitCode(t *testing.T) {
 			"wrap: %w",
 			&gate.InternalError{Err: fmt.Errorf("boom")},
 		), 2},
+		// *exec.ExitError satisfies exitCoder structurally, but a
+		// subprocess failure must not leak its child status into the
+		// CLI's exit code: raw and wrapped exec errors exit 1.
+		{"exec exit error", &exec.ExitError{}, 1},
+		{"wrapped exec exit error", fmt.Errorf(
+			"check container: %w",
+			&exec.ExitError{},
+		), 1},
+		// An explicit opt-in wins even when it wraps an exec error.
+		{"internal error wrapping exec exit error", &gate.InternalError{
+			Err: &exec.ExitError{},
+		}, 2},
 	}
 
 	for _, tt := range tests {
@@ -475,5 +488,40 @@ func TestNewGateCmd_CheckFailure_StreamSeparation(t *testing.T) {
 	// The error line goes to stderr.
 	if !strings.Contains(errBuf.String(), "Error:") {
 		t.Errorf("expected error line on stderr, got: %q", errBuf.String())
+	}
+}
+
+func TestNewGateCmd_InternalError_StreamSeparation(t *testing.T) {
+	// A file where the openspec/changes directory belongs makes the
+	// artifact scan fail with an internal error (exit code 2).
+	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	openspecDir := filepath.Join(dir, "openspec")
+	if err := os.MkdirAll(openspecDir, 0o755); err != nil {
+		t.Fatalf("mkdir openspec: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(openspecDir, "changes"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write malformed artifact root: %v", err)
+	}
+
+	cmd := newGateCmd()
+	var out, errBuf bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	cmd.SetArgs([]string{"--phase", "specify", "--dir", dir})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for internal failure")
+	}
+	if exitCode(err) != 2 {
+		t.Errorf("expected exit code 2 for internal error, got %d", exitCode(err))
+	}
+	// GATE-FR-009: the internal-error message reaches stderr.
+	if !strings.Contains(errBuf.String(), "Error:") {
+		t.Errorf("expected error line on stderr, got: %q", errBuf.String())
+	}
+	if strings.Contains(out.String(), "Error:") {
+		t.Errorf("error leaked to stdout: %q", out.String())
 	}
 }

@@ -93,7 +93,7 @@ var validPhases = []string{
 Each phase maps to a slice of check functions:
 
 ```go
-type CheckFunc func(dir string) CheckResult
+type CheckFunc func(ctx runContext) CheckResult
 
 var phaseChecks = map[string][]CheckFunc{
     "specify":   {checkSpecExists},
@@ -107,7 +107,10 @@ var phaseChecks = map[string][]CheckFunc{
 
 Checks are cumulative — later phases include earlier checks
 where appropriate. Each check function is independently
-testable.
+testable. The run context carries the project directory plus
+the change resolution computed once per run, so every check
+in a run evaluates a single branch snapshot and report
+provenance matches the resolution the checks used.
 
 **Phase simplification note**: The gate's five phases
 (`specify`, `plan`, `implement`, `review`, `pr`) are
@@ -256,7 +259,12 @@ artifact for the active change. `quick/<name>` branches
 the quick tier carries no spec artifacts, so unrelated
 changes must not satisfy its checks either. On branches
 without a change mapping, resolution falls back to the first
-alphabetical match across both layouts. Both paths can
+alphabetical match across both layouts. A detached HEAD —
+the default checkout state on CI runners — reports the
+literal branch `HEAD` and would land in that fallback; the
+resolver first recovers the branch from CI-provided refs
+(`GITHUB_HEAD_REF`, then `GITHUB_REF_NAME`) so headless CI
+runs keep strict branch-keyed resolution. Both paths can
 miss artifacts in non-standard locations or custom
 schemas. Mitigated by testing both detection paths and
 documenting expected artifact locations in the command

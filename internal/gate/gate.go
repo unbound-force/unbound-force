@@ -28,10 +28,14 @@ type Options struct {
 	// BuildVersion identifies the uf binary that produced the report.
 	BuildVersion string
 
-	// Format is the output format: "text" or "json".
+	// Format is the output format: "text" or "json". Reserved:
+	// Run does not consume it; the CLI boundary owns formatting
+	// (design D7).
 	Format string
 
-	// Stdout is the writer for check results.
+	// Stdout is reserved for future output; Run does not write
+	// to it. The CLI boundary formats the report and writes it
+	// through its own writer (design D7).
 	Stdout io.Writer
 
 	// Stderr is reserved for future diagnostics; Run does not
@@ -109,11 +113,17 @@ func Run(opts Options) (*GateReport, error) {
 		return nil, fmt.Errorf("path is not a directory: %s", opts.TargetDir)
 	}
 
+	// Resolve the active change once so every check sees a single
+	// branch snapshot and provenance matches the resolution the
+	// checks used.
+	res := resolveChange(resolved)
+	ctx := runContext{dir: resolved, res: res}
+
 	// Execute checks for the phase.
 	checks := phaseChecks[opts.Phase]
 	results := make([]CheckResult, 0, len(checks))
 	for _, check := range checks {
-		result := check(resolved)
+		result := check(ctx)
 		if result.internalErr != nil {
 			return nil, &InternalError{Err: result.internalErr}
 		}
@@ -123,15 +133,12 @@ func Run(opts Options) (*GateReport, error) {
 	// Compute summary.
 	summary := computeSummary(results)
 
-	// Populate provenance (Constitution III).
-	branch := detectBranch(resolved)
-
 	report := &GateReport{
 		Version:     SchemaVersion,
 		ToolVersion: opts.BuildVersion,
 		Producer:    ProducerName,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
-		Branch:      branch,
+		Branch:      res.Branch,
 		Commit:      detectCommit(resolved),
 		Phase:       opts.Phase,
 		Passed:      summary.Failed == 0,

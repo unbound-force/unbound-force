@@ -100,9 +100,13 @@ Coverage strategy detection (implement phase):
 Artifact resolution:
   When the current branch names a change (opsx/<name> or
   NNN-<name>), checks resolve artifacts from that change only
-  (openspec/changes/<name>/ or specs/<name>/). On branches
-  without a change mapping, checks fall back to the first
-  alphabetical match across openspec/changes/* or specs/*.
+  (openspec/changes/<name>/ or specs/<name>/). quick/<name>
+  branches carry no spec artifacts, so their checks always fail.
+  On a detached HEAD (the default CI checkout state), the branch
+  is recovered from GITHUB_HEAD_REF or GITHUB_REF_NAME before
+  falling back. On branches without a change mapping, checks
+  fall back to the first alphabetical match across
+  openspec/changes/* or specs/*.
 
 Use --format json for machine-readable output with provenance
 metadata (schema version, producer, tool version, timestamp, branch, commit).`,

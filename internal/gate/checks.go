@@ -13,10 +13,11 @@ import (
 )
 
 // CheckFunc is the signature for all gate check functions.
-// Each function accepts a project root directory and returns
+// Each function accepts a run context — the project directory
+// plus the change resolution resolved once per run — and returns
 // a structured result. Check functions are pure — they read
 // the filesystem but produce no side effects (Constitution IV).
-type CheckFunc func(dir string) CheckResult
+type CheckFunc func(ctx runContext) CheckResult
 
 // validPhases lists the accepted values for --phase per D2.
 var validPhases = []string{
@@ -54,7 +55,6 @@ func init() {
 // artifactQuery describes the artifact to probe across both
 // OpenSpec and Speckit locations.
 type artifactQuery struct {
-	dir          string // project root directory
 	checkName    string // check identifier for the result
 	label        string // human-readable artifact label
 	openspecFile string // filename under openspec/changes/*/
@@ -112,6 +112,18 @@ type changeResolution struct {
 	Quick bool
 }
 
+// runContext carries the project directory and the change
+// resolution for one gate run. Run resolves the context once so
+// every check sees a single branch snapshot and report provenance
+// matches the resolution the checks used.
+type runContext struct {
+	// dir is the canonicalized project root directory.
+	dir string
+
+	// res is the change resolution for the run.
+	res changeResolution
+}
+
 // resolveChange maps the current git branch to the change it names.
 // Branches that map to a change (opsx/<name> under openspec/changes,
 // NNN-<name> under specs) resolve strictly to that change: another
@@ -121,8 +133,20 @@ type changeResolution struct {
 // spec artifacts, so unrelated changes must not satisfy its checks
 // either. Unmapped branches keep the documented alphabetical
 // fallback.
+//
+// A detached HEAD makes git report the literal branch "HEAD", which
+// names no change. Because CI runners check out commits in a
+// detached state, the resolver first recovers the branch from
+// CI-provided refs (GITHUB_HEAD_REF on pull request events, then
+// GITHUB_REF_NAME on push events) before applying the fallback, so
+// headless CI runs keep strict branch-keyed resolution (design R1).
 func resolveChange(dir string) changeResolution {
 	branch := detectBranch(dir)
+	if branch == "HEAD" {
+		if ref := ciBranchRef(); ref != "" {
+			branch = ref
+		}
+	}
 	if active := activeChangeName(branch, openspecChangesBase); active != "" {
 		return changeResolution{Branch: branch, Name: active, Base: openspecChangesBase, Strict: true}
 	}
@@ -133,6 +157,19 @@ func resolveChange(dir string) changeResolution {
 		return changeResolution{Branch: branch, Strict: true, Quick: true}
 	}
 	return changeResolution{Branch: branch}
+}
+
+// ciBranchRef returns the branch name a CI runner reports for this
+// run, or "". GitHub Actions checks out a detached HEAD; pull
+// request events expose the head branch through GITHUB_HEAD_REF and
+// push events expose the pushed branch through GITHUB_REF_NAME.
+// Refs that name no change (for example PR merge refs like
+// "123/merge") simply map to the unmapped fallback.
+func ciBranchRef() string {
+	if ref := strings.TrimSpace(os.Getenv("GITHUB_HEAD_REF")); ref != "" {
+		return ref
+	}
+	return strings.TrimSpace(os.Getenv("GITHUB_REF_NAME"))
 }
 
 // regularFile reports whether path exists and is a regular file.
@@ -186,10 +223,10 @@ func internalCheck(name string, err error) CheckResult {
 
 // checkArtifactExists probes both OpenSpec and Speckit locations
 // for an artifact. Returns a CheckResult with the given check
-// name and label. Resolution follows resolveChange: branch-mapped
+// name and label. Resolution follows the run context: branch-mapped
 // and quick branches never fall back to another change's artifacts.
-func checkArtifactExists(q artifactQuery) CheckResult {
-	res := resolveChange(q.dir)
+func checkArtifactExists(ctx runContext, q artifactQuery) CheckResult {
+	res := ctx.res
 
 	if res.Quick {
 		return CheckResult{
@@ -204,13 +241,13 @@ func checkArtifactExists(q artifactQuery) CheckResult {
 		if res.Base == speckitBase {
 			file = q.speckitFile
 		}
-		p := filepath.Join(q.dir, res.Base, res.Name, file)
+		p := filepath.Join(ctx.dir, res.Base, res.Name, file)
 		exists, err := regularFile(p)
 		if err != nil {
 			return internalCheck(q.checkName, err)
 		}
 		if exists {
-			return q.passAt(p)
+			return q.passAt(ctx.dir, p)
 		}
 		return CheckResult{
 			Name:    q.checkName,
@@ -221,15 +258,15 @@ func checkArtifactExists(q artifactQuery) CheckResult {
 
 	// No branch mapping: legacy first-match behavior across all
 	// changes.
-	if p, err := firstArtifactFile(q.dir, openspecChangesBase, q.openspecFile); err != nil {
+	if p, err := firstArtifactFile(ctx.dir, openspecChangesBase, q.openspecFile); err != nil {
 		return internalCheck(q.checkName, err)
 	} else if p != "" {
-		return q.passAt(p)
+		return q.passAt(ctx.dir, p)
 	}
-	if p, err := firstArtifactFile(q.dir, speckitBase, q.speckitFile); err != nil {
+	if p, err := firstArtifactFile(ctx.dir, speckitBase, q.speckitFile); err != nil {
 		return internalCheck(q.checkName, err)
 	} else if p != "" {
-		return q.passAt(p)
+		return q.passAt(ctx.dir, p)
 	}
 
 	return CheckResult{
@@ -240,8 +277,8 @@ func checkArtifactExists(q artifactQuery) CheckResult {
 }
 
 // passAt builds the passing CheckResult for a resolved artifact path.
-func (q artifactQuery) passAt(path string) CheckResult {
-	rel, _ := filepath.Rel(q.dir, path)
+func (q artifactQuery) passAt(dir, path string) CheckResult {
+	rel, _ := filepath.Rel(dir, path)
 	return CheckResult{
 		Name:    q.checkName,
 		Passed:  true,
@@ -251,9 +288,8 @@ func (q artifactQuery) passAt(path string) CheckResult {
 
 // checkSpecExists probes both OpenSpec and Speckit locations for
 // a spec artifact (GATE-FR-004). Passes if found in either location.
-func checkSpecExists(dir string) CheckResult {
-	return checkArtifactExists(artifactQuery{
-		dir:          dir,
+func checkSpecExists(ctx runContext) CheckResult {
+	return checkArtifactExists(ctx, artifactQuery{
 		checkName:    "spec-exists",
 		label:        "Spec",
 		openspecFile: "proposal.md",
@@ -263,9 +299,8 @@ func checkSpecExists(dir string) CheckResult {
 
 // checkPlanExists probes both OpenSpec and Speckit locations for
 // a plan/design artifact (GATE-FR-005).
-func checkPlanExists(dir string) CheckResult {
-	return checkArtifactExists(artifactQuery{
-		dir:          dir,
+func checkPlanExists(ctx runContext) CheckResult {
+	return checkArtifactExists(ctx, artifactQuery{
 		checkName:    "plan-exists",
 		label:        "Plan",
 		openspecFile: "design.md",
@@ -275,10 +310,9 @@ func checkPlanExists(dir string) CheckResult {
 
 // checkTasksExist probes both OpenSpec and Speckit locations for
 // a tasks artifact (GATE-FR-006).
-func checkTasksExist(dir string) CheckResult {
-	return checkArtifactExists(artifactQuery{
-		dir:          dir,
-		checkName:    "tasks-exist",
+func checkTasksExist(ctx runContext) CheckResult {
+	return checkArtifactExists(ctx, artifactQuery{
+		checkName:    "tasks-exists",
 		label:        "Tasks",
 		openspecFile: "tasks.md",
 		speckitFile:  "tasks.md",
@@ -303,8 +337,8 @@ var coverageKeywords = []string{
 // uses three patterns: a heading containing "coverage"
 // (case-insensitive), body text containing specific keywords,
 // or a line matching the coverage percentage regex.
-func checkCoverageStrategy(dir string) CheckResult {
-	candidates, err := coverageArtifacts(dir)
+func checkCoverageStrategy(ctx runContext) CheckResult {
+	candidates, err := coverageArtifacts(ctx)
 	if err != nil {
 		return internalCheck("coverage-strategy", err)
 	}
@@ -314,7 +348,7 @@ func checkCoverageStrategy(dir string) CheckResult {
 			return internalCheck("coverage-strategy", err)
 		}
 		if found {
-			rel, _ := filepath.Rel(dir, path)
+			rel, _ := filepath.Rel(ctx.dir, path)
 			return CheckResult{
 				Name:    "coverage-strategy",
 				Passed:  true,
@@ -330,13 +364,13 @@ func checkCoverageStrategy(dir string) CheckResult {
 	}
 }
 
-// coverageArtifacts returns the plan and tasks artifacts selected for
-// the current branch (resolveChange): the branch-mapped change's
+// coverageArtifacts returns the plan and tasks artifacts selected
+// by the run's resolved change: the branch-mapped change's
 // artifacts only, or the documented alphabetical fallback used by the
 // other artifact checks on unmapped branches. quick branches resolve
 // to no candidates.
-func coverageArtifacts(dir string) ([]string, error) {
-	res := resolveChange(dir)
+func coverageArtifacts(ctx runContext) ([]string, error) {
+	res := ctx.res
 
 	if res.Quick {
 		return nil, nil
@@ -347,12 +381,12 @@ func coverageArtifacts(dir string) ([]string, error) {
 		if res.Base == speckitBase {
 			names = []string{"tasks.md", "plan.md"}
 		}
-		return changeArtifacts(dir, res.Base, res.Name, names)
+		return changeArtifacts(ctx.dir, res.Base, res.Name, names)
 	}
 
 	var candidates []string
 	for _, name := range []string{"tasks.md", "design.md"} {
-		path, err := firstArtifactFile(dir, openspecChangesBase, name)
+		path, err := firstArtifactFile(ctx.dir, openspecChangesBase, name)
 		if err != nil {
 			return nil, err
 		}
@@ -361,7 +395,7 @@ func coverageArtifacts(dir string) ([]string, error) {
 		}
 	}
 	for _, name := range []string{"tasks.md", "plan.md"} {
-		path, err := firstArtifactFile(dir, speckitBase, name)
+		path, err := firstArtifactFile(ctx.dir, speckitBase, name)
 		if err != nil {
 			return nil, err
 		}
@@ -430,8 +464,8 @@ func hasCoverageStrategy(path string) (bool, error) {
 // per GATE-FR-007. If any `- [ ]` checkbox lines remain — including
 // indented subtasks — the check fails. Prose mentioning the
 // literal mid-line does not count.
-func checkTasksComplete(dir string) CheckResult {
-	rel, content, message, err := loadTasksFile(dir)
+func checkTasksComplete(ctx runContext) CheckResult {
+	rel, content, message, err := loadTasksFile(ctx)
 	if err != nil {
 		return internalCheck("tasks-complete", err)
 	}
@@ -460,15 +494,15 @@ func checkTasksComplete(dir string) CheckResult {
 // On success it returns a relative path (for messages) and the file
 // content. A missing file is an expected check outcome; a read failure is
 // returned so Run can classify it as an internal error.
-func loadTasksFile(dir string) (rel string, content []byte, message string, readErr error) {
-	path, err := findTasksFile(dir)
+func loadTasksFile(ctx runContext) (rel string, content []byte, message string, readErr error) {
+	path, err := findTasksFile(ctx)
 	if err != nil {
 		return "", nil, "", err
 	}
 	if path == "" {
 		return "", nil, "No tasks.md found", nil
 	}
-	rel, _ = filepath.Rel(dir, path)
+	rel, _ = filepath.Rel(ctx.dir, path)
 	content, err = os.ReadFile(path)
 	if err != nil {
 		return rel, nil, "", fmt.Errorf("read %s: %w", rel, err)
@@ -485,8 +519,8 @@ var reviewMarkers = []string{
 
 // checkReviewRun looks for any review marker in tasks.md per
 // GATE-FR-007. Accepts either spec-review or code-review marker.
-func checkReviewRun(dir string) CheckResult {
-	rel, content, message, err := loadTasksFile(dir)
+func checkReviewRun(ctx runContext) CheckResult {
+	rel, content, message, err := loadTasksFile(ctx)
 	if err != nil {
 		return internalCheck("review-run", err)
 	}
@@ -519,8 +553,8 @@ const codeReviewMarker = "<!-- code-review: passed -->"
 // checkReviewPass looks for the code-review passed marker in
 // tasks.md per GATE-FR-008. Unlike checkReviewRun, this requires
 // specifically the code-review marker.
-func checkReviewPass(dir string) CheckResult {
-	rel, content, message, err := loadTasksFile(dir)
+func checkReviewPass(ctx runContext) CheckResult {
+	rel, content, message, err := loadTasksFile(ctx)
 	if err != nil {
 		return internalCheck("review-pass", err)
 	}
@@ -547,11 +581,11 @@ func checkReviewPass(dir string) CheckResult {
 // per GATE-FR-008. Uses exec.CommandContext with a bounded timeout and
 // explicit argument separation (no shell invocation) per
 // Constitution V.
-func checkNotOnMain(dir string) CheckResult {
-	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+func checkNotOnMain(ctx runContext) CheckResult {
+	gitCtx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = dir
+	cmd := exec.CommandContext(gitCtx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = ctx.dir
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -564,7 +598,7 @@ func checkNotOnMain(dir string) CheckResult {
 			}
 		}
 		detail := err.Error()
-		if ctx.Err() != nil {
+		if gitCtx.Err() != nil {
 			detail = fmt.Sprintf("git did not respond within %s", gitCommandTimeout)
 		} else {
 			var exitErr *exec.ExitError
@@ -598,20 +632,20 @@ func checkNotOnMain(dir string) CheckResult {
 	}
 }
 
-// findTasksFile locates the tasks.md file for the change that the
-// current branch maps to (resolveChange): the branch-mapped change's
-// tasks.md only, or the first alphabetical match across both layouts
-// on unmapped branches. quick branches resolve to no tasks file.
+// findTasksFile locates the tasks.md file for the run's resolved
+// change: the branch-mapped change's tasks.md only, or the first
+// alphabetical match across both layouts on unmapped branches.
+// quick branches resolve to no tasks file.
 // Returns an empty path if not found.
-func findTasksFile(dir string) (string, error) {
-	res := resolveChange(dir)
+func findTasksFile(ctx runContext) (string, error) {
+	res := ctx.res
 
 	if res.Quick {
 		return "", nil
 	}
 
 	if res.Strict {
-		p := filepath.Join(dir, res.Base, res.Name, "tasks.md")
+		p := filepath.Join(ctx.dir, res.Base, res.Name, "tasks.md")
 		exists, err := regularFile(p)
 		if err != nil {
 			return "", err
@@ -622,10 +656,10 @@ func findTasksFile(dir string) (string, error) {
 		return "", nil
 	}
 
-	if p, err := firstArtifactFile(dir, openspecChangesBase, "tasks.md"); err != nil {
+	if p, err := firstArtifactFile(ctx.dir, openspecChangesBase, "tasks.md"); err != nil {
 		return "", err
 	} else if p != "" {
 		return p, nil
 	}
-	return firstArtifactFile(dir, speckitBase, "tasks.md")
+	return firstArtifactFile(ctx.dir, speckitBase, "tasks.md")
 }

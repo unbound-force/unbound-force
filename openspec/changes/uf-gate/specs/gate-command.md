@@ -363,8 +363,9 @@ The gate command MUST follow the testable CLI pattern:
 a `gateParams` struct with `io.Writer` injection for
 both stdout and stderr, and a `runGate(params)` function
 separate from cobra wiring. All check functions MUST
-accept a directory path and return a structured result
-without side effects. Git-dependent checks (`checkNotOnMain`)
+accept the project directory and the run's resolved
+change context, and return a structured result without
+side effects. Git-dependent checks (`checkNotOnMain`)
 MUST be tested using `git init` inside `t.TempDir()` to
 create isolated git repositories.
 
@@ -384,6 +385,64 @@ create isolated git repositories.
   targeting that directory
 - **THEN** the function returns an error and output
   contains failing check results
+
+### Requirement: Branch-aware artifact resolution
+
+**ID:** GATE-FR-012
+
+Artifact checks MUST resolve the active change from the
+current git branch before probing artifacts:
+
+- When the branch maps to a change (`opsx/<name>` under
+  `openspec/changes/`, `NNN-<name>` under `specs/`), checks
+  MUST validate that change only; artifacts of another
+  change MUST NOT satisfy the active change's checks.
+- `quick/<name>` branches MUST resolve to no change: no
+  spec artifact can satisfy their checks, because the quick
+  tier carries no spec artifacts.
+- On branches without a change mapping, checks MUST fall
+  back to the first alphabetical match across both layouts.
+- The resolution MUST be computed once per run and shared
+  by every check in that run, and the report's `branch`
+  provenance field MUST reflect the branch the checks
+  resolved against.
+- When git reports a detached HEAD (the default checkout
+  state on CI runners), the resolver MUST recover the
+  branch from CI-provided refs (`GITHUB_HEAD_REF`, then
+  `GITHUB_REF_NAME`) before applying the fallback.
+
+#### Scenario: Branch-mapped change is strict
+
+- **GIVEN** `openspec/changes/aaa-other/` holds complete
+  implement artifacts and the branch is `opsx/zzz-active`,
+  whose change has only `proposal.md`
+- **WHEN** the user runs `uf gate --phase implement`
+- **THEN** the plan-exists, tasks-exists, and
+  coverage-strategy checks fail and no check message
+  references `aaa-other`
+
+#### Scenario: Quick branch never passes artifact checks
+
+- **GIVEN** `openspec/changes/some-change/proposal.md`
+  exists and the branch is `quick/some-change`
+- **WHEN** the user runs `uf gate --phase specify`
+- **THEN** the spec-exists check fails with an explanation
+  that quick branches carry no spec artifacts
+
+#### Scenario: Detached HEAD recovers the CI branch
+
+- **GIVEN** the repository is in a detached HEAD state and
+  `GITHUB_HEAD_REF` is set to `opsx/zzz-active`
+- **WHEN** the user runs `uf gate --phase implement`
+- **THEN** checks resolve artifacts from
+  `openspec/changes/zzz-active/` only
+
+#### Scenario: Unmapped branch falls back alphabetically
+
+- **GIVEN** the branch maps to no change and
+  `openspec/changes/aaa-first/proposal.md` exists
+- **WHEN** the user runs `uf gate --phase specify`
+- **THEN** the spec-exists check passes against `aaa-first`
 
 ## MODIFIED Requirements
 
