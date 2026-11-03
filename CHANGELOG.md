@@ -4,6 +4,7 @@ All notable changes to this project are documented in this file.
 Each entry follows the format: `- <change-name>: <summary>`.
 
 ## Unreleased
+
 ### Added
 - preflight-project-checks: projects can declare their own
   deterministic pre-flight checks in a new project-owned
@@ -41,14 +42,23 @@ Each entry follows the format: `- <change-name>: <summary>`.
   artifact path, scalar review verdict, run counts, bounded
   proposals/warnings, calculated-assessment authority, errors) instead
   of echoing the artifact body; findings and advisories are read once
-  from the persisted artifact. The five consumer commands document the
-  compact contract and a deterministic truncation-notice recovery
+  from the persisted artifact, which now lists `findings` and
+  `advisories` ahead of `plan` and `runs`. On a persistence failure the
+  scalar `review_verdict` falls back to the calculated decision. As in
+  PR #776, `proposals`, `warnings`, and the truncation flags are omitted
+  when empty. `detail: "summary"` combined with `provenance` is
+  rejected. The five consumer commands document the compact contract;
+  review-council keeps the deterministic truncation-notice recovery
   (parse-first, strict notice shape, realpath confinement, schema
-  validation). BREAKING: finalization responses no longer carry
+  validation), and the other four fail closed on an unparseable
+  response. BREAKING: finalization responses no longer carry
   `review_dispatch` or an object `review_verdict` /
   `calculated_assessment.payload`; read the artifact at `artifact_path`
   for the full projection and treat `review_verdict` as the scalar
-  council decision. (Spec:
+  council decision. `speckit.testreview` is updated to the compact
+  result. Repos with scaffolded command copies must re-run `uf init`
+  after upgrading, or their older command prose reads fields the tool
+  no longer returns. (Spec:
   openspec/changes/bound-consolidate-dispatch-output/, Fixes: #922)
 - init-override-stubs-gitignore-sync: `uf init` now seeds both
   per-developer override stubs (`.uf/model-matrix.override.yaml`

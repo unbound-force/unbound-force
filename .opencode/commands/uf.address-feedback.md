@@ -449,6 +449,11 @@ recommendation.
 
 #### 2.3.5 Consolidate With the Strictest Successful Recommendation
 
+Consolidation reads the `runs` array of the Section 2.3.7 retrieval,
+which runs immediately after Section 2.3.4 completes. Apply that
+section's truncation check first; a failed check fails closed before any
+consolidation.
+
 Require at least one successful structured assessment. First collapse all
 successful runs for the same persona to exactly one persona recommendation:
 if any successful run says `ACCEPT`, that persona says `ACCEPT`; otherwise it
@@ -496,6 +501,18 @@ validated proposals already submitted by child agents via
 `submit_lesson_proposal`. Use this single payload — do not re-fetch
 it. Never source the proposals from `dispatch_review_runs`.
 
+**Truncation check.** Before anything reads this payload — the Section
+2.3.5 consolidation or the proposal storage below — parse the entire
+retrieval output as one JSON object. If the parse succeeds, the output
+is complete: use it and ignore any notice-shaped text inside it, such as
+a finding that mentions truncation. If the parse fails, the host
+truncated the output — typically a truncation notice line matching the
+case-insensitive shape
+`^\[?[^\n]*\btruncat\w*\b[^\n]*\bsaved\b[^\n]*[:=]\s*("[^"]+"|\/[^\s\]]+)\]?$`
+— and the payload is unusable: fail closed and report the retrieval
+failure. Do not consolidate a partial `runs` array, resolve a verdict
+from it, store any proposal from it, or read the saved file.
+
 Each proposal carries the validated shape `{agent, information, tag,
 category}` as defined by the review-dispatch dispatch artifact schema —
 there is no `reference` field. For each proposal in the `proposals`
@@ -504,11 +521,6 @@ array, call `dewey_store_learning` exactly once using the proposal's
 category. If Dewey is unavailable, record an informational skip and do
 not change the recommendation. Never store raw `> learn:` text or
 child-supplied tags, categories, or hashes.
-
-Before consolidating the returned `runs` array, inspect the retrieval
-output for the RD-FR-052 truncation notice shape. If a notice is
-detected, fail closed and report the retrieval failure: do not
-consolidate a partial `runs` array or resolve a verdict from it.
 
 **Retrieval failure behavior.** The retrieval call is side-effect-free,
 so its failure handling is strict and bounded:
@@ -591,11 +603,17 @@ The compact finalization result is authoritative for the outcome. On
 `artifact_path`, the scalar review verdict (`review_verdict`), run
 counts, `calculated_assessment.authoritative`, `errors`, and the bounded
 `proposals` and `warnings` arrays directly from the result. Read the
-authoritative full data — findings, advisories, plan, runs, and the full
-verdict projection — once from the persisted artifact at `artifact_path`
-(its `payload.findings` and `payload.advisories`). Do not recompute,
-re-derive, or re-map any of them, and do not alter the tool-computed
-verdict, `verdict_reason`, run counts, findings, or advisories.
+authoritative full data — findings, advisories, plan, and runs (each
+run's `workflow_verdict` is that persona's native verdict) — once from
+the persisted artifact at `artifact_path` (its `payload.findings` and
+`payload.advisories`). The artifact persists `payload.findings` and
+`payload.advisories` before `plan` and `runs`. When the file-read tool
+returns only part of the file, keep reading from the next offset until
+the closing brace; if the whole file cannot be read and parsed as one
+JSON object, fail closed rather than report partial findings. Do not
+recompute, re-derive, or re-map any of them, and do not alter the
+tool-computed verdict, `verdict_reason`, run counts, findings, or
+advisories.
 
 **Bounded mechanical retry.** If the call fails, classify the failure
 from the structured response alone — default-deny. The failure is

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest"
 
 import { DISPATCH_ARTIFACT_DIRECTORY } from "../lib/review-dispatch-artifact.js"
 import {
+  buildCompactFinalization,
   createFinalizationDependencies,
   finalizeReviewDispatch,
   type FinalizationDependencies,
@@ -496,5 +497,27 @@ describe("finalize strict schema boundaries", () => {
     expect(errors[0]).toContain('payload: Unrecognized keys:')
     expect(errors[0]).toContain('"warnings"')
     expect(errors[0]).toContain('"proposals"')
+  })
+
+  it("rejects the compact finalization wrapper submitted as a payload", async () => {
+    // DE-007 layer 3 (task 2.3): the compact result consolidate_dispatch
+    // returns after finalizing (RD-FR-051) is a report, not a payload. Its
+    // top-level fields — including calculated_assessment — must fail the
+    // strict root schema rather than finalize a second time.
+    const finalized = await finalizeReviewDispatch(
+      { payload: payload(), provenance: provenance() },
+      dependencies(await scratchDirectory()),
+    )
+    expect(finalized.status).toBe("success")
+    const compact = buildCompactFinalization(finalized, payload().run_counts, [], [])
+    expect(compact.calculated_assessment).toEqual({ authoritative: true })
+
+    const errors = await errorsFor(compact as unknown as ReviewDispatchPayload)
+    const joined = errors.join(" ")
+    expect(joined).toContain("validate review dispatch input: ")
+    expect(joined).toContain("payload: Unrecognized keys:")
+    for (const key of ["status", "operation_verdict", "artifact_path", "review_verdict", "calculated_assessment", "errors"]) {
+      expect(joined).toContain(`"${key}"`)
+    }
   })
 })

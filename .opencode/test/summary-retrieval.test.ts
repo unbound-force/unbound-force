@@ -113,6 +113,10 @@ function summaryInput(overrides: Record<string, unknown> = {}) {
   }
 }
 
+// Spec literals (RD-FR-049), asserted directly so raising SUMMARY_LIMITS
+// cannot silently loosen the guard.
+const BYTE_BUDGET = 40_960
+
 function byteSize(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).length
 }
@@ -198,11 +202,11 @@ describe("summary retrieval", () => {
         proposals: Array.from({ length: 7 }, (_, index) => makeProposal(index)),
       }) as Parameters<typeof buildSummaryRetrieval>[0],
     )
-    expect(summary.findings).toHaveLength(SUMMARY_LIMITS.findings)
+    expect(summary.findings).toHaveLength(15)
     expect(summary.proposals).toHaveLength(7)
     expect(summary.findings_truncated).toBe(true)
     expect(summary.proposals_truncated).toBeUndefined()
-    expect(byteSize(summary)).toBeLessThan(SUMMARY_LIMITS.maxBytes)
+    expect(byteSize(summary)).toBeLessThan(BYTE_BUDGET)
   })
 
   it("caps pathological dispatches at 15/15/10/5 and stays under budget", () => {
@@ -216,15 +220,15 @@ describe("summary retrieval", () => {
         ),
       }) as Parameters<typeof buildSummaryRetrieval>[0],
     )
-    expect(summary.findings).toHaveLength(SUMMARY_LIMITS.findings)
-    expect(summary.advisories).toHaveLength(SUMMARY_LIMITS.advisories)
-    expect(summary.proposals).toHaveLength(SUMMARY_LIMITS.proposals)
-    expect(summary.warnings).toHaveLength(SUMMARY_LIMITS.warnings)
+    expect(summary.findings).toHaveLength(15)
+    expect(summary.advisories).toHaveLength(15)
+    expect(summary.proposals).toHaveLength(10)
+    expect(summary.warnings).toHaveLength(5)
     expect(summary.findings_truncated).toBe(true)
     expect(summary.advisories_truncated).toBe(true)
     expect(summary.proposals_truncated).toBe(true)
     expect(summary.warnings_truncated).toBe(true)
-    expect(byteSize(summary)).toBeLessThan(SUMMARY_LIMITS.maxBytes)
+    expect(byteSize(summary)).toBeLessThan(BYTE_BUDGET)
   })
 
   it("drops findings before advisories when multibyte text blows the budget", () => {
@@ -243,10 +247,136 @@ describe("summary retrieval", () => {
         ),
       }) as Parameters<typeof buildSummaryRetrieval>[0],
     )
-    expect(byteSize(summary)).toBeLessThan(SUMMARY_LIMITS.maxBytes)
-    expect(summary.findings.length).toBeLessThan(15)
+    expect(byteSize(summary)).toBeLessThan(BYTE_BUDGET)
+    const kept = summary.findings as Array<Record<string, unknown>>
+    expect(kept.length).toBeLessThan(15)
+    expect(kept.length).toBeGreaterThan(0)
+    // Trailing entries are dropped: the survivors are the leading findings.
+    expect(kept.map((finding) => finding.line)).toEqual(
+      Array.from({ length: kept.length }, (_, index) => index + 1),
+    )
     expect(summary.findings_truncated).toBe(true)
-    expect(summary.advisories_truncated).toBeFalsy()
+    expect(summary.advisories).toHaveLength(15)
+    expect(summary.advisories_truncated).toBeUndefined()
+  })
+
+  it("pins the limits to the RD-FR-049 literals", () => {
+    expect(SUMMARY_LIMITS).toEqual({
+      findings: 15,
+      advisories: 15,
+      proposals: 10,
+      warnings: 5,
+      severityChars: 16,
+      categoryChars: 128,
+      descriptionChars: 512,
+      fileChars: 256,
+      informationChars: 512,
+      tagChars: 128,
+      agentChars: 128,
+      verdictReasonChars: 512,
+      warningKindChars: 64,
+      warningDetailChars: 256,
+      maxBytes: BYTE_BUDGET,
+    })
+  })
+
+  /**
+   * Every array at its cap and every bounded field at (or cut to) its
+   * maximum. Warning kinds are always one of the five documented names, so
+   * the 64-character kind cap is unreachable; the composed detail is pinned
+   * at 256 through an oversized agent name.
+   */
+  function worstCaseInput(text: (length: number) => string) {
+    return summaryInput({
+      verdict_reason: text(600),
+      findings: Array.from({ length: 15 }, (_, index) =>
+        makeFinding(index, {
+          severity: text(20),
+          category: text(200),
+          description: text(600),
+          file: text(300),
+          line: index + 1,
+        }),
+      ),
+      advisories: Array.from({ length: 15 }, (_, index) =>
+        makeAdvisory(index, { severity: text(20), description: text(600) }),
+      ),
+      proposals: Array.from({ length: 10 }, (_, index) =>
+        makeProposal(index, { agent: text(200), information: text(600), tag: text(200) }),
+      ),
+      warnings: Array.from({ length: 5 }, () => ({
+        ...makeWarning("orphaned_submissions_excluded"),
+        agent: text(300),
+      })),
+    }) as Parameters<typeof buildSummaryRetrieval>[0]
+  }
+
+  it("keeps every-field-at-maximum entries under budget without dropping", () => {
+    const summary = buildSummaryRetrieval(worstCaseInput((length) => "x".repeat(length)))
+    expect(byteSize(summary)).toBeLessThan(BYTE_BUDGET)
+    expect(summary.findings).toHaveLength(15)
+    expect(summary.advisories).toHaveLength(15)
+    expect(summary.proposals).toHaveLength(10)
+    expect(summary.warnings).toHaveLength(5)
+    for (const flag of ["findings_truncated", "advisories_truncated", "proposals_truncated", "warnings_truncated"]) {
+      expect(summary[flag]).toBeUndefined()
+    }
+    expect((summary.verdict_reason as string).length).toBe(512)
+    for (const finding of summary.findings as Array<Record<string, string>>) {
+      expect(finding.severity.length).toBe(16)
+      expect(finding.category.length).toBe(128)
+      expect(finding.description.length).toBe(512)
+      expect(finding.file.length).toBe(256)
+      expect(finding.truncated).toBe(true)
+    }
+    for (const advisory of summary.advisories as Array<Record<string, string>>) {
+      expect(advisory.description.length).toBe(512)
+    }
+    for (const proposal of summary.proposals as Array<Record<string, string>>) {
+      expect(proposal.agent.length).toBe(128)
+      expect(proposal.information.length).toBe(512)
+      expect(proposal.tag.length).toBe(128)
+    }
+    for (const warning of summary.warnings as Array<Record<string, string>>) {
+      expect(warning.detail.length).toBe(256)
+      expect(warning.truncated).toBe(true)
+    }
+  })
+
+  it("holds the budget by construction for escape-heavy multibyte content", () => {
+    // Quotes and backslashes serialize to two bytes, control characters to
+    // six (\u0001), CJK to three, and astral emoji to four.
+    const unit = '"\\\u0001\n中文\u{1F600}'
+    const text = (length: number) => unit.repeat(Math.ceil(length / unit.length) + 1)
+    const summary = buildSummaryRetrieval(worstCaseInput(text))
+
+    expect(byteSize(summary)).toBeLessThan(BYTE_BUDGET)
+    // The drop loop engaged, consuming findings first.
+    expect(summary.findings_truncated).toBe(true)
+    const findings = summary.findings as Array<Record<string, unknown>>
+    const advisories = summary.advisories as Array<Record<string, unknown>>
+    if (summary.advisories_truncated === true) expect(findings).toHaveLength(0)
+    if (summary.proposals_truncated === true) expect(advisories).toHaveLength(0)
+    expect(findings.map((finding) => finding.line)).toEqual(
+      Array.from({ length: findings.length }, (_, index) => index + 1),
+    )
+    // Truncation never splits a surrogate pair.
+    expect(JSON.stringify(summary)).not.toMatch(/\\ud83d(?!\\ude00)/i)
+    for (const finding of findings) {
+      expect(finding.description as string).not.toMatch(/[\ud800-\udbff]$/)
+    }
+  })
+
+  it("never splits a surrogate pair at a truncation boundary", () => {
+    // "a" plus emoji puts a high surrogate at index 511, the last kept unit.
+    const summary = buildSummaryRetrieval(
+      summaryInput({
+        findings: [makeFinding(0, { description: "a" + "\u{1F600}".repeat(600) })],
+      }) as Parameters<typeof buildSummaryRetrieval>[0],
+    )
+    const finding = (summary.findings as Array<Record<string, unknown>>)[0]
+    expect(finding.description).toBe("a" + "\u{1F600}".repeat(255))
+    expect(finding.truncated).toBe(true)
   })
 
   it("composes warning detail per kind and discards unknown kinds", () => {
@@ -309,7 +439,7 @@ describe("summary retrieval", () => {
     )
     const finding = (summary.findings as Array<Record<string, unknown>>)[0]
     expect(finding).toMatchObject({ file: null, line: null, truncated: true })
-    expect((finding.description as string).length).toBe(SUMMARY_LIMITS.descriptionChars)
+    expect((finding.description as string).length).toBe(512)
     expect(finding).not.toHaveProperty("root_cause")
     expect(finding).not.toHaveProperty("run_ids")
     const advisory = (summary.advisories as Array<Record<string, unknown>>)[0]
@@ -392,8 +522,8 @@ describe("compact finalization", () => {
       Array.from({ length: 12 }, (_, index) => makeProposal(index)),
       Array.from({ length: 7 }, () => makeWarning("orphaned_submissions_excluded")),
     )
-    expect(compact.proposals).toHaveLength(SUMMARY_LIMITS.proposals)
-    expect(compact.warnings).toHaveLength(SUMMARY_LIMITS.warnings)
+    expect(compact.proposals).toHaveLength(10)
+    expect(compact.warnings).toHaveLength(5)
     expect(compact.proposals_truncated).toBe(true)
     expect(compact.warnings_truncated).toBe(true)
     const keys = Object.keys(compact)
