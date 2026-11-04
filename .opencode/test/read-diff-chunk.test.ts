@@ -276,6 +276,9 @@ describe("read_diff_chunk (RD-FR-034)", () => {
         const data = JSON.parse(result.output)
         expect(data.code).toBe("diff_not_found")
         expect(data.error).toContain(JSON.stringify(diffPath))
+        // The remediation guidance must survive: agents are told to
+        // copy the path, not retype it (issue #932 follow-up).
+        expect(data.error).toContain("do not retype")
         expect(data.content).toBeUndefined()
       }
     })

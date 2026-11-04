@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { describe, expect, it, afterEach } from "vitest"
 
-import { ReviewDispatchPlugin, createConsolidateDispatchTool, createFinalizationDependencies, _getSessionCorrelationMap, finalizeReviewDispatch, deduplicateProposals } from "../plugins/review-dispatch/index.js"
+import { ReviewDispatchPlugin, createConsolidateDispatchTool, createFinalizationDependencies, _getSessionCorrelationMap, finalizeReviewDispatch, deduplicateProposals, readDispatchArtifact } from "../plugins/review-dispatch/index.js"
 import { withBun } from "./helpers/bun-runtime.js"
 import {
   dispatchParentContext,
@@ -2632,7 +2632,7 @@ describe("consolidate_dispatch durable and deduplicated proposals (RD-FR-054, RD
     expect(result.warnings).toEqual([])
   })
 
-  it("matches proposals with fewer than four tokens only on an equal token sequence", () => {
+  it("matches proposals with fewer than six tokens only on an equal token sequence", () => {
     const result = deduplicateProposals([
       { agent: "divisor-guard", information: "Prefer tabs", tag: "a" },
       { agent: "divisor-sre", information: "Prefer spaces", tag: "b" },
@@ -2698,13 +2698,42 @@ describe("consolidate_dispatch durable and deduplicated proposals (RD-FR-054, RD
 
     const full = JSON.parse((await tool.execute({}, noopContext())).output)
     expect(full.proposals).toHaveLength(512)
+    // RD-FR-054 keeps the FIRST 512 in collection order; pin the
+    // retention policy, not only the cardinality, so a slice(-512)
+    // or slice(3) regression fails (RD-FR-054 overflow scenario).
+    expect(full.proposals[0].information).toContain("lesson 0")
+    expect(full.proposals[511].information).toContain("lesson 511")
     expect(full.warnings).toEqual([{ type: "proposals_overflow", kept_proposals: 512, dropped_proposals: 3 }])
     const summary = JSON.parse((await tool.execute({ detail: "summary" }, noopContext())).output)
     expect(summary.warnings).toEqual([{ kind: "proposals_overflow", detail: "kept=512 dropped=3" }])
 
     const compact = JSON.parse((await tool.execute({ provenance: provenance() }, noopContext())).output)
     expect(compact.status).toBe("success")
-    expect((await readPersistedArtifact(compact)).payload.proposals).toHaveLength(512)
+    const persisted = (await readPersistedArtifact(compact)).payload.proposals as Array<{ information: string }>
+    expect(persisted).toHaveLength(512)
+    expect(persisted[0].information).toContain("lesson 0")
+    expect(persisted[511].information).toContain("lesson 511")
+  })
+
+  it("round-trips the production writer's artifact through read_dispatch_artifact (RD-FR-056/057)", async () => {
+    const projectRoot = await scratchRoot()
+    const information = "Round-trip the writer's envelope through the bounded reader. ".repeat(80)
+    await setupDispatchSession(
+      [runFixture({ agent: "divisor-guard", proposals: [{ information, tag: "review-dispatch", category: "pattern" }] })],
+      { plan: explicitRunPlan("divisor-guard") },
+    )
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+    const compact = JSON.parse((await tool.execute({ provenance: provenance() }, noopContext())).output)
+    expect(compact.status).toBe("success")
+
+    // The writer's own output must satisfy the production reader. The
+    // hand-built envelopes of read-dispatch-artifact.test.ts cannot
+    // catch a drift between the two (DE-007 writer/reader seam).
+    const summary = await readDispatchArtifact({ correlation_id: compact.correlation_id, section: "summary" }, projectRoot)
+    expect(summary).toMatchObject({ status: "ok", counts: { findings: 0, advisories: 0, proposals: 1, runs: 1 } })
+    const page = await readDispatchArtifact({ correlation_id: compact.correlation_id, section: "proposals" }, projectRoot)
+    expect(page).toMatchObject({ status: "ok", total: 1, offset: 0, next_offset: null })
+    expect((page.entries as Array<{ information: string }>)[0].information).toBe(information)
   })
 
 })
