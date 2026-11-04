@@ -7,7 +7,7 @@
 - [x] 1.1 Remove the embedded `internal/scaffold/assets/opencode/package-lock.json` asset, and drop `opencode/package-lock.json` from both tool-owned path lists in `internal/scaffold/scaffold.go`
 - [x] 1.2 Add `package-lock.json` to the canonical `opencodeGitignore` lines and to this repository's `.opencode/.gitignore`
 - [x] 1.3 Switch `installAndActivateReviewPlugins` (`internal/scaffold/plugin_activation.go`) to `npm install --ignore-scripts --omit=dev --no-package-lock --no-audit --no-fund`, and update the remediation text
-- [x] 1.4 Stop tracking `.opencode/package-lock.json` in this repository, and make `make plugin-test` install with `npm install --no-package-lock --no-audit --no-fund`
+- [x] 1.4 Stop tracking `.opencode/package-lock.json` in this repository, and make `make plugin-test` install with `npx -y npm@11.6.2 install --no-package-lock --no-audit --no-fund` (npm 11 because node 22's bundled npm 10.9.9 crashes in Arborist on the lockless vitest 5 peer graph)
 
 ## 2. Doctor
 

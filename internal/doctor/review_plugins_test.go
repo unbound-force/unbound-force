@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -239,6 +240,25 @@ func TestCheckManifestInstallConsistency_UnreadableInstall(t *testing.T) {
 	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: os.ReadFile})
 	if result.Severity != Fail || !strings.Contains(result.Message, "vitest") {
 		t.Errorf("result = %v %q, want Fail naming vitest", result.Severity, result.Message)
+	}
+}
+
+func TestCheckManifestInstallConsistency_ReadErrorFails(t *testing.T) {
+	// A present-but-unreadable install (EACCES, EISDIR) must not pass
+	// silently as if the package were absent.
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
+	writeInstalledPackages(t, dir)
+	readFile := func(path string) ([]byte, error) {
+		if strings.Contains(path, filepath.Join("node_modules", "zod")) {
+			return nil, fs.ErrPermission
+		}
+		return os.ReadFile(path)
+	}
+
+	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: readFile})
+	if result.Severity != Fail || !strings.Contains(result.Message, "zod: installed package.json unreadable") {
+		t.Errorf("result = %v %q, want Fail naming unreadable zod", result.Severity, result.Message)
 	}
 }
 

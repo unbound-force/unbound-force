@@ -3490,10 +3490,10 @@ func TestRun_OpencodeGitignore_MergesMissingLinesKeepsUserLines(t *testing.T) {
 
 // TestRun_OpencodeGitignore_WrittenDespiteActivationFailure pins the
 // SC-FR-015 independence requirement: the .opencode/.gitignore writer is
-// a sub-tool independent of the review-plugin activation result — npm ci
-// may fail or be skipped while node_modules/ can still appear. The run
-// reuses the reviewPluginRunOpts seam with failInstall=true so activation
-// genuinely fails at the npm ci step (same wiring as
+// a sub-tool independent of the review-plugin activation result — npm
+// install may fail or be skipped while node_modules/ can still appear.
+// The run reuses the reviewPluginRunOpts seam with failInstall=true so
+// activation genuinely fails at the npm install step (same wiring as
 // TestRun_IndependentSubtoolsContinueOnPluginFailure), and the failed
 // activation is asserted first so the test cannot silently stop testing
 // the failure path.

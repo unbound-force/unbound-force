@@ -2,7 +2,9 @@ package doctor
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -2311,7 +2313,12 @@ func checkManifestInstallConsistency(opts *Options) CheckResult {
 		}
 		installedPath := filepath.Join(opts.TargetDir, ".opencode", "node_modules", filepath.FromSlash(name), "package.json")
 		installedData, err := readFile(installedPath)
+		if errors.Is(err, fs.ErrNotExist) {
+			// Absence is the dependencies check's concern.
+			continue
+		}
 		if err != nil {
+			mismatches = append(mismatches, fmt.Sprintf("%s: installed package.json unreadable", name))
 			continue
 		}
 		var installed installedPackage

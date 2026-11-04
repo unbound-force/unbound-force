@@ -178,6 +178,9 @@ imported externally.
   mirror; CI `node-version: 22` resolves to v22.23.3 (in range,
   verified 2026-10-19); older Node sees npm EBADENGINE warnings,
   not hard failures
+- **npm for plugin-test**: `make plugin-test` installs through
+  `npx -y npm@11.6.2` (`PLUGIN_TEST_NPM`); node 22's bundled
+  npm 10.9.9 crashes building the lockless vitest 5 peer graph
 
 ## Behavioral Rules
 

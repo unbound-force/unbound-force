@@ -904,7 +904,11 @@ Each entry follows the format: `- <change-name>: <summary>`.
   direct pins and the `toml`/`uuid` overrides; other transitive
   versions now resolve at install time. This repository also stops
   tracking the lock, and `make plugin-test` installs with
-  `--no-package-lock`. Rollout: existing hero repositories can drop
+  `--no-package-lock` through an exact-pinned npm 11
+  (`npx -y npm@11.6.2`), because node 22's bundled npm 10.9.9
+  crashes in Arborist building the lockless vitest 5 peer graph.
+  `manifest-install` fails, rather than passes, when an installed
+  `package.json` exists but cannot be read. Rollout: existing hero repositories can drop
   their committed lock with
   `git rm --cached .opencode/package-lock.json`. (Spec:
   openspec/changes/stop-shipping-plugin-lock/)
