@@ -248,7 +248,13 @@ const BUN = (() => {
 
 describe("uf_preflight_declared_checks real YAML", () => {
   it("parses the shipped .uf/preflight.yaml template to an empty v1 config", async () => {
-    const text = await readFile(fileURLToPath(new URL("../../.uf/preflight.yaml", import.meta.url)), "utf8")
+    // The shipped template is the embedded scaffold asset. This repository's
+    // own .uf/preflight.yaml is a project extension point that declares
+    // checks (see instruction-lint-preflight.test.ts).
+    const text = await readFile(
+      fileURLToPath(new URL("../../internal/scaffold/assets/uf/preflight.yaml", import.meta.url)),
+      "utf8",
+    )
     expect(parsePreflightConfig(parseYamlSubset(text))).toEqual({ version: 1, checks: [] })
   })
 

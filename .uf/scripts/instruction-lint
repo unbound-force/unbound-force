@@ -1,0 +1,10 @@
+#!/bin/sh
+# Pre-flight wrapper for the instruction linter (.uf/preflight.yaml).
+#
+# Lints the tree in the working directory (the checkout, or a merge-base
+# worktree during soft-gate baselines) with the primary checkout's
+# linter, so rules and node_modules resolution are identical for both
+# runs. Exit 1 means the linter reported errors; warnings never fail.
+set -eu
+root="${UF_PREFLIGHT_PROJECT_ROOT:-$PWD}"
+exec node "$root/.opencode/lib/instruction-lint.ts" --root "$PWD" "$@"
