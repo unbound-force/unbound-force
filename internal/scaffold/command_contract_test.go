@@ -204,6 +204,8 @@ func TestCommandContracts_AddressFeedback(t *testing.T) {
 		{name: "planned no-success", all: []string{"availability-only causes produce native, generic, and canonical `unavailable`", "policy, plan, budget, limit, persistence, calculation, or mixed cause", "native, generic, and canonical `inconclusive`", "retain the item for explicit human handling", "must not be converted to `author-decides`"}},
 		{name: "tier two finalization", all: []string{"finalize every tier 2 item, including plan or no-success failures, with a single `consolidate_dispatch` call", "\"workflow_id\": \"uf.address-feedback\"", "never call `finalize_review_dispatch` yourself", "the scalar review verdict (`review_verdict`)"}},
 		{name: "feedback triage artifact", all: []string{".uf/artifacts/feedback-triage/pr-<pr_number>-round-<m>.json", "existing feedback-triage artifact", "emitted in addition to each tier 2 `review-dispatch` artifact"}},
+		{name: "pr head checkout", all: []string{"### 1.2.1 Check Out the PR Head", "MUST be on the PR head before the first `get_progress` or `checkpoint` call", "gh pr checkout <PR_NUMBER>", "Never fetch the head branch by guessing a remote name", "never reset or discard local commits", "Never call `get_progress` or `checkpoint` from another branch."}},
+		{name: "push to configured head remote", all: []string{"git fetch <HEAD_REMOTE> <HEAD_MERGE_REF>", "git push <HEAD_REMOTE> HEAD:<HEAD_MERGE_REF>"}},
 	}
 
 	assertCommandCopies(t, "uf.address-feedback.md", true, clauses)
