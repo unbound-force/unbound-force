@@ -170,6 +170,10 @@ func TestRunGate_NonExistentDir(t *testing.T) {
 	if exitCode(err) != 1 {
 		t.Errorf("expected exit code 1 for non-existent dir, got %d", exitCode(err))
 	}
+	// GATE-FR-010: the error names the missing directory.
+	if !strings.Contains(err.Error(), "directory does not exist") {
+		t.Errorf("expected 'directory does not exist' message, got: %v", err)
+	}
 }
 
 func TestRunGate_CheckFailure_ExitCode1(t *testing.T) {
@@ -243,6 +247,10 @@ func TestNewGateCmd_InvalidFormat(t *testing.T) {
 	if !strings.Contains(err.Error(), "invalid format") {
 		t.Errorf("expected 'invalid format' in error, got: %v", err)
 	}
+	// GATE-FR-003: the message lists the valid formats.
+	if !strings.Contains(err.Error(), "text") || !strings.Contains(err.Error(), "json") {
+		t.Errorf("expected valid formats listed in error, got: %v", err)
+	}
 	// GATE-FR-003: the error message goes to stderr, keeping stdout clean.
 	if !strings.Contains(errBuf.String(), "invalid format") {
 		t.Errorf("expected 'invalid format' on stderr, got: %q", errBuf.String())
@@ -262,7 +270,13 @@ func TestNewGateCmd_Help(t *testing.T) {
 		t.Fatalf("help execution: %v", err)
 	}
 	text := out.String()
-	for _, want := range []string{"specify", "plan", "implement", "review", "pr", "--format", "Exit codes"} {
+	// The want-list pins design R4's mitigation: the coverage
+	// detection keywords are documented in the help text.
+	for _, want := range []string{
+		"specify", "plan", "implement", "review", "pr",
+		"--format", "Exit codes",
+		"coverage target", "unit test", "integration test", "e2e test",
+	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("help output missing %q", want)
 		}

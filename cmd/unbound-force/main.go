@@ -21,6 +21,16 @@ var (
 )
 
 func main() {
+	root := newRootCmd()
+	if err := root.Execute(); err != nil {
+		os.Exit(exitCode(err))
+	}
+}
+
+// newRootCmd builds the root command with every subcommand
+// registered. Extracted from main so tests can verify the real
+// registration surface (for example the gate command, GATE-FR-001).
+func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:     "unbound-force",
 		Short:   "Unbound Force specification framework toolkit (alias: uf)",
@@ -38,9 +48,7 @@ func main() {
 	root.AddCommand(newHomebrewCaskCmd())
 	root.AddCommand(newGateCmd())
 
-	if err := root.Execute(); err != nil {
-		os.Exit(exitCode(err))
-	}
+	return root
 }
 
 // exitCoder is implemented by errors that carry their own process

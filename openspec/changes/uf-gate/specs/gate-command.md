@@ -161,6 +161,9 @@ When `--phase implement`, the gate MUST check:
   artifact (Constitution IV). The check MUST detect a
   coverage strategy by matching at least one of:
   - A heading containing "coverage" (case-insensitive)
+    that does not negate it — headings such as "No
+    coverage strategy" or "without coverage" MUST NOT
+    satisfy the check
   - Body text containing any of: "coverage target",
     "unit test", "integration test", "e2e test"
   - A line matching `coverage.*%` (percentage target)
@@ -187,6 +190,14 @@ When `--phase implement`, the gate MUST check:
 - **WHEN** the user runs `uf gate --phase implement`
 - **THEN** the `coverage-strategy` check passes
 
+#### Scenario: Negated coverage heading does not satisfy detection
+
+- **GIVEN** proposal.md, design.md, and tasks.md exist,
+  and design.md contains the heading "## No coverage
+  strategy is planned" with no other coverage signal
+- **WHEN** the user runs `uf gate --phase implement`
+- **THEN** the `coverage-strategy` check fails
+
 ### Requirement: Review phase checks
 
 **ID:** GATE-FR-007
@@ -195,8 +206,8 @@ When `--phase review`, the gate MUST check:
 
 - All task checkboxes in the tasks artifact are marked
   complete (`[x]`). The check scans tasks.md for lines
-  matching `- [ ]` — if any unchecked boxes remain, the
-  check fails.
+  matching `- [ ]` outside fenced code blocks — if any
+  unchecked boxes remain, the check fails.
 - A review has been executed. The check looks for the
   `<!-- spec-review: passed -->` or
   `<!-- code-review: passed -->` marker in tasks.md.
@@ -224,6 +235,13 @@ When `--phase review`, the gate MUST check:
 - **WHEN** the user runs `uf gate --phase review`
 - **THEN** the `review-run` check fails with a message
   indicating no review has been recorded
+
+#### Scenario: Fenced example does not count as an incomplete task
+
+- **GIVEN** tasks.md contains all checkboxes `[x]` and a
+  fenced code block documenting the `- [ ]` syntax
+- **WHEN** the user runs `uf gate --phase review`
+- **THEN** the `tasks-complete` check passes
 
 ### Requirement: PR phase checks
 
@@ -402,7 +420,10 @@ current git branch before probing artifacts:
   spec artifact can satisfy their checks, because the quick
   tier carries no spec artifacts.
 - On branches without a change mapping, checks MUST fall
-  back to the first alphabetical match across both layouts.
+  back to the first alphabetical change directory across
+  both layouts, resolved once for the whole run: artifacts
+  of different changes MUST NOT be combined to satisfy a
+  phase.
 - The resolution MUST be computed once per run and shared
   by every check in that run, and the report's `branch`
   provenance field MUST reflect the branch the checks
@@ -444,6 +465,17 @@ current git branch before probing artifacts:
   `openspec/changes/aaa-first/proposal.md` exists
 - **WHEN** the user runs `uf gate --phase specify`
 - **THEN** the spec-exists check passes against `aaa-first`
+
+#### Scenario: Unmapped branch does not combine artifacts across changes
+
+- **GIVEN** the branch maps to no change,
+  `openspec/changes/aaa-first/` holds `proposal.md` and
+  `tasks.md` but no `design.md`, and
+  `openspec/changes/bbb-second/design.md` exists
+- **WHEN** the user runs `uf gate --phase implement`
+- **THEN** the `plan-exists` and `coverage-strategy`
+  checks fail against `aaa-first` and no check message
+  references `bbb-second`
 
 ## MODIFIED Requirements
 

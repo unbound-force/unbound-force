@@ -35,12 +35,13 @@
     and speckit `tasks.md` (GATE-FR-006)
   - `checkCoverageStrategy`: scan plan/tasks content
     for coverage strategy keywords — heading containing
-    "coverage" (case-insensitive), body containing
+    "coverage" (case-insensitive, negated headings such
+    as "No coverage strategy" excluded), body containing
     "coverage target", "unit test", "integration test",
     "e2e test", or line matching `coverage.*%` (GATE-FR-006)
   - `checkTasksComplete`: scan tasks.md for `- [ ]`
-    lines — if any unchecked boxes remain, check fails
-    (GATE-FR-007)
+    lines outside fenced code blocks — if any unchecked
+    boxes remain, check fails (GATE-FR-007)
   - `checkReviewRun`: look for `<!-- spec-review: passed -->`
     or `<!-- code-review: passed -->` marker in
     tasks.md (GATE-FR-007)
@@ -133,8 +134,11 @@ or e2e tests needed — the command is read-only
 filesystem inspection. Git-dependent checks use
 `git init` inside `t.TempDir()` for isolation.
 
-Coverage achieved: 93.7% statement coverage for
-`internal/gate/` (measured with `go test -cover`);
+Coverage achieved: 92.7% statement coverage for
+`internal/gate/` (measured with `go test -cover`
+at the review-fix head, including the unmapped
+fallback, negated-heading, fenced-example, and
+CI-ref validation regression tests);
 the lowest per-function figure outside the
 deliberately-untriggered `init` panic guard is
 80.0% (FormatJSON, whose marshal-error branch is

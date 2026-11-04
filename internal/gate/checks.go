@@ -113,6 +113,11 @@ type changeResolution struct {
 	// Quick reports a quick/<name> branch. The quick tier carries no
 	// spec artifacts, so no artifact can satisfy its checks.
 	Quick bool
+
+	// ResolveErr records why fallback change discovery failed (""
+	// means discovery succeeded or was not needed). Run escalates
+	// it to an internal error (exit 2) before any check executes.
+	ResolveErr error
 }
 
 // runContext carries the project directory and the change
@@ -134,8 +139,9 @@ type runContext struct {
 // a false pass in multi-change repos (design R1). quick/<name>
 // branches resolve strictly to no change: the quick tier has no
 // spec artifacts, so unrelated changes must not satisfy its checks
-// either. Unmapped branches keep the documented alphabetical
-// fallback.
+// either. Unmapped branches resolve to one first-alphabetical change
+// directory for the whole run, so artifacts of different changes are
+// never combined to satisfy a phase (design R1).
 //
 // A detached HEAD makes git report the literal branch "HEAD", which
 // names no change. Because CI runners check out commits in a
@@ -159,7 +165,13 @@ func resolveChange(dir string) changeResolution {
 	if name, ok := strings.CutPrefix(branch, "quick/"); ok && name != "" {
 		return changeResolution{Branch: branch, BranchErr: branchErr, Strict: true, Quick: true}
 	}
-	return changeResolution{Branch: branch, BranchErr: branchErr}
+	res := changeResolution{Branch: branch, BranchErr: branchErr}
+	if name, base, err := firstChangeDir(dir); err != nil {
+		res.ResolveErr = err
+	} else {
+		res.Name, res.Base = name, base
+	}
+	return res
 }
 
 // ciBranchRef returns the branch name a CI runner reports for this
@@ -183,13 +195,17 @@ func ciBranchRef() string {
 }
 
 // validCIRef reports whether ref is safe to use for change
-// resolution: no absolute paths, backslashes, traversal, or empty
-// path components that could escape the artifact base directories.
+// resolution: no absolute paths, backslashes, traversal, empty
+// path components, or control characters that could escape the
+// artifact base directories or inject content into messages.
 func validCIRef(ref string) bool {
 	if ref == "" {
 		return false
 	}
 	if filepath.IsAbs(ref) || strings.Contains(ref, "\\") {
+		return false
+	}
+	if strings.ContainsFunc(ref, isControlRune) {
 		return false
 	}
 	for _, part := range strings.Split(ref, "/") {
@@ -198,6 +214,13 @@ func validCIRef(ref string) bool {
 		}
 	}
 	return true
+}
+
+// isControlRune reports whether r is a control character. Git
+// refnames cannot contain control characters, so their presence
+// in a CI-provided ref is injected content, never a branch name.
+func isControlRune(r rune) bool {
+	return r < 0x20 || (r >= 0x7f && r <= 0x9f)
 }
 
 // regularFile reports whether path exists and is a regular file.
@@ -212,31 +235,34 @@ func regularFile(path string) (bool, error) {
 	return st.Mode().IsRegular(), nil
 }
 
-// firstArtifactFile returns the first alphabetical artifact below base.
-// It reads literal directory names so --dir values cannot alter discovery
-// through filepath.Glob metacharacters.
-func firstArtifactFile(dir, base, file string) (string, error) {
-	entries, err := os.ReadDir(filepath.Join(dir, base))
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
+// firstChangeDir returns the first alphabetical change directory
+// below the supported layouts — openspec/changes first, then
+// specs. Symlinked change directories are followed so fallback
+// resolution matches strict resolution. It returns empty names
+// when no change directory exists in either layout.
+func firstChangeDir(dir string) (name, base string, err error) {
+	for _, b := range []string{openspecChangesBase, speckitBase} {
+		entries, readErr := os.ReadDir(filepath.Join(dir, b))
+		if errors.Is(readErr, os.ErrNotExist) {
 			continue
 		}
-		path := filepath.Join(dir, base, entry.Name(), file)
-		exists, statErr := regularFile(path)
-		if statErr != nil {
-			return "", statErr
+		if readErr != nil {
+			return "", "", readErr
 		}
-		if exists {
-			return path, nil
+		for _, entry := range entries {
+			info, statErr := os.Stat(filepath.Join(dir, b, entry.Name()))
+			if errors.Is(statErr, os.ErrNotExist) {
+				continue
+			}
+			if statErr != nil {
+				return "", "", statErr
+			}
+			if info.IsDir() {
+				return entry.Name(), b, nil
+			}
 		}
 	}
-	return "", nil
+	return "", "", nil
 }
 
 // internalCheck builds a failed CheckResult carrying an internal
@@ -249,10 +275,12 @@ func internalCheck(name string, err error) CheckResult {
 	}
 }
 
-// checkArtifactExists probes both OpenSpec and Speckit locations
-// for an artifact. Returns a CheckResult with the given check
-// name and label. Resolution follows the run context: branch-mapped
-// and quick branches never fall back to another change's artifacts.
+// checkArtifactExists probes the resolved change for an artifact
+// across both OpenSpec and Speckit locations. Returns a CheckResult
+// with the given check name and label. Resolution follows the run
+// context: branch-mapped and quick branches never fall back to
+// another change's artifacts; unmapped branches resolve one
+// first-alphabetical change for the whole run.
 func checkArtifactExists(ctx runContext, q artifactQuery) CheckResult {
 	res := ctx.res
 
@@ -264,43 +292,30 @@ func checkArtifactExists(ctx runContext, q artifactQuery) CheckResult {
 		}
 	}
 
-	if res.Strict {
-		file := q.openspecFile
-		if res.Base == speckitBase {
-			file = q.speckitFile
-		}
-		p := filepath.Join(ctx.dir, res.Base, res.Name, file)
-		exists, err := regularFile(p)
-		if err != nil {
-			return internalCheck(q.checkName, err)
-		}
-		if exists {
-			return q.passAt(ctx.dir, p)
-		}
+	if res.Name == "" {
 		return CheckResult{
 			Name:    q.checkName,
 			Passed:  false,
-			Message: fmt.Sprintf("No %s artifact found for change %s (expected %s/%s/%s)", q.label, res.Name, res.Base, res.Name, file),
+			Message: fmt.Sprintf("No change directory found under %s or %s", openspecChangesBase, speckitBase),
 		}
 	}
 
-	// No branch mapping: legacy first-match behavior across all
-	// changes.
-	if p, err := firstArtifactFile(ctx.dir, openspecChangesBase, q.openspecFile); err != nil {
+	file := q.openspecFile
+	if res.Base == speckitBase {
+		file = q.speckitFile
+	}
+	p := filepath.Join(ctx.dir, res.Base, res.Name, file)
+	exists, err := regularFile(p)
+	if err != nil {
 		return internalCheck(q.checkName, err)
-	} else if p != "" {
+	}
+	if exists {
 		return q.passAt(ctx.dir, p)
 	}
-	if p, err := firstArtifactFile(ctx.dir, speckitBase, q.speckitFile); err != nil {
-		return internalCheck(q.checkName, err)
-	} else if p != "" {
-		return q.passAt(ctx.dir, p)
-	}
-
 	return CheckResult{
 		Name:    q.checkName,
 		Passed:  false,
-		Message: fmt.Sprintf("No %s artifact found (expected %s/*/%s or %s/*/%s)", q.label, openspecChangesBase, q.openspecFile, speckitBase, q.speckitFile),
+		Message: fmt.Sprintf("No %s artifact found for change %s (expected %s/%s/%s)", q.label, res.Name, res.Base, res.Name, file),
 	}
 }
 
@@ -392,46 +407,24 @@ func checkCoverageStrategy(ctx runContext) CheckResult {
 	}
 }
 
-// coverageArtifacts returns the plan and tasks artifacts selected
-// by the run's resolved change: the branch-mapped change's
-// artifacts only, or the documented alphabetical fallback used by the
-// other artifact checks on unmapped branches. quick branches resolve
-// to no candidates.
+// coverageArtifacts returns the plan and tasks artifacts of the
+// run's resolved change: the branch-mapped change's artifacts
+// only, or the one first-alphabetical change resolved for the
+// whole run on unmapped branches — coverage text in another
+// change cannot satisfy the active resolution. quick branches
+// and runs with no change directory resolve to no candidates.
 func coverageArtifacts(ctx runContext) ([]string, error) {
 	res := ctx.res
 
-	if res.Quick {
+	if res.Quick || res.Name == "" {
 		return nil, nil
 	}
 
-	if res.Strict {
-		names := []string{"tasks.md", "design.md"}
-		if res.Base == speckitBase {
-			names = []string{"tasks.md", "plan.md"}
-		}
-		return changeArtifacts(ctx.dir, res.Base, res.Name, names)
+	names := []string{"tasks.md", "design.md"}
+	if res.Base == speckitBase {
+		names = []string{"tasks.md", "plan.md"}
 	}
-
-	var candidates []string
-	for _, name := range []string{"tasks.md", "design.md"} {
-		path, err := firstArtifactFile(ctx.dir, openspecChangesBase, name)
-		if err != nil {
-			return nil, err
-		}
-		if path != "" {
-			candidates = append(candidates, path)
-		}
-	}
-	for _, name := range []string{"tasks.md", "plan.md"} {
-		path, err := firstArtifactFile(ctx.dir, speckitBase, name)
-		if err != nil {
-			return nil, err
-		}
-		if path != "" {
-			candidates = append(candidates, path)
-		}
-	}
-	return candidates, nil
+	return changeArtifacts(ctx.dir, res.Base, res.Name, names)
 }
 
 func changeArtifacts(dir, base, change string, names []string) ([]string, error) {
@@ -449,10 +442,18 @@ func changeArtifacts(dir, base, change string, names []string) ([]string, error)
 	return candidates, nil
 }
 
+// negatedCoverageRe matches headings that mention coverage in a
+// negated form: "No coverage strategy is planned" contains the
+// word "coverage" but denies a strategy, so the heading signal
+// must not count it (GATE-FR-006).
+var negatedCoverageRe = regexp.MustCompile(`(?i)\b(?:no|without|missing|lacking)\s+coverage\b|\bcoverage\s+strategy\s+is\s+(?:not|absent|none)\b`)
+
 // hasCoverageStrategy scans a file for coverage strategy
-// indicators per GATE-FR-006. The file is read whole, matching the
-// sibling checks that consume the same artifacts: artifact content
-// is check input, never an internal error.
+// indicators per GATE-FR-006: a heading containing "coverage"
+// that does not negate it, body keywords, or a coverage
+// percentage line. The file is read whole, matching the sibling
+// checks that consume the same artifacts: artifact content is
+// check input, never an internal error.
 func hasCoverageStrategy(path string) (bool, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -461,8 +462,9 @@ func hasCoverageStrategy(path string) (bool, error) {
 	for _, line := range strings.Split(string(content), "\n") {
 		lower := strings.ToLower(line)
 
-		// Heading containing "coverage" (case-insensitive).
-		if strings.HasPrefix(strings.TrimSpace(line), "#") && strings.Contains(lower, "coverage") {
+		// Heading containing "coverage" (case-insensitive), unless
+		// the heading negates it (GATE-FR-006).
+		if strings.HasPrefix(strings.TrimSpace(line), "#") && strings.Contains(lower, "coverage") && !negatedCoverageRe.MatchString(line) {
 			return true, nil
 		}
 
@@ -484,7 +486,8 @@ func hasCoverageStrategy(path string) (bool, error) {
 // checkTasksComplete scans tasks.md for unchecked task boxes
 // per GATE-FR-007. If any `- [ ]` checkbox lines remain — including
 // indented subtasks — the check fails. Prose mentioning the
-// literal mid-line does not count.
+// literal mid-line and examples inside fenced code blocks do
+// not count.
 func checkTasksComplete(ctx runContext) CheckResult {
 	rel, content, message, err := loadTasksFile(ctx)
 	if err != nil {
@@ -494,8 +497,20 @@ func checkTasksComplete(ctx runContext) CheckResult {
 		return CheckResult{Name: "tasks-complete", Passed: false, Message: message}
 	}
 
+	inFence := false
 	for _, line := range strings.Split(string(content), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "- [ ]") {
+		trimmed := strings.TrimSpace(line)
+		// Fenced code blocks can document task syntax without
+		// declaring tasks; their contents are not task lines
+		// (GATE-FR-007).
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- [ ]") {
 			return CheckResult{
 				Name:    "tasks-complete",
 				Passed:  false,
@@ -631,34 +646,26 @@ func checkNotOnMain(ctx runContext) CheckResult {
 	}
 }
 
-// findTasksFile locates the tasks.md file for the run's resolved
-// change: the branch-mapped change's tasks.md only, or the first
-// alphabetical match across both layouts on unmapped branches.
-// quick branches resolve to no tasks file.
-// Returns an empty path if not found.
+// findTasksFile locates the tasks.md file of the run's resolved
+// change: the branch-mapped change's tasks.md only, or the one
+// first-alphabetical change resolved for the whole run on
+// unmapped branches. quick branches and runs with no change
+// directory resolve to no tasks file. Returns an empty path if
+// not found.
 func findTasksFile(ctx runContext) (string, error) {
 	res := ctx.res
 
-	if res.Quick {
+	if res.Quick || res.Name == "" {
 		return "", nil
 	}
 
-	if res.Strict {
-		p := filepath.Join(ctx.dir, res.Base, res.Name, "tasks.md")
-		exists, err := regularFile(p)
-		if err != nil {
-			return "", err
-		}
-		if exists {
-			return p, nil
-		}
-		return "", nil
-	}
-
-	if p, err := firstArtifactFile(ctx.dir, openspecChangesBase, "tasks.md"); err != nil {
+	p := filepath.Join(ctx.dir, res.Base, res.Name, "tasks.md")
+	exists, err := regularFile(p)
+	if err != nil {
 		return "", err
-	} else if p != "" {
+	}
+	if exists {
 		return p, nil
 	}
-	return firstArtifactFile(ctx.dir, speckitBase, "tasks.md")
+	return "", nil
 }

@@ -167,15 +167,17 @@ carry no spec artifacts, so their checks always fail by design.
 On a detached HEAD (the default CI checkout state), the branch
 is recovered from `GITHUB_HEAD_REF` or `GITHUB_REF_NAME` before
 the fallback applies. On branches without a change mapping,
-checks fall back to the first alphabetical match across both
-layouts.
+checks resolve the first alphabetical change directory across
+both layouts — one change for the whole run; artifacts of
+different changes are never combined.
 
 **Coverage strategy detection** (`--phase implement`)
 
 Plan/tasks artifacts are scanned (case-insensitive) for: a
-heading containing "coverage"; body text containing "coverage
-target", "unit test", "integration test", or "e2e test"; or a
-line matching `coverage.*%`.
+heading containing "coverage" (negated headings such as "No
+coverage strategy" do not count); body text containing
+"coverage target", "unit test", "integration test", or
+"e2e test"; or a line matching `coverage.*%`.
 
 ### uf setup
 

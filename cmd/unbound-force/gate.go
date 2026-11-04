@@ -92,9 +92,15 @@ Exit codes:
 
 Coverage strategy detection (implement phase):
   plan/tasks artifacts are scanned (case-insensitive) for a
-  heading containing 'coverage', body text containing 'coverage
-  target', 'unit test', 'integration test', or 'e2e test', or a
-  line matching coverage.*%.
+  heading containing 'coverage' — negated headings such as 'No
+  coverage strategy' do not count — body text containing
+  'coverage target', 'unit test', 'integration test', or
+  'e2e test', or a line matching coverage.*%.
+
+Task completion (review phase):
+  tasks.md lines matching '- [ ]' fail the check, including
+  indented subtasks; prose mid-line and examples inside fenced
+  code blocks do not count.
 
 Artifact resolution:
   When the current branch names a change (opsx/<name> or
@@ -104,8 +110,9 @@ Artifact resolution:
   On a detached HEAD (the default CI checkout state), the branch
   is recovered from GITHUB_HEAD_REF or GITHUB_REF_NAME before
   falling back. On branches without a change mapping, checks
-  fall back to the first alphabetical match across
-  openspec/changes/* or specs/*.
+  resolve the first alphabetical change directory across
+  openspec/changes/* or specs/* — one change for the whole run;
+  artifacts of different changes are never combined.
 
 Use --format json for machine-readable output with provenance
 metadata (schema version, producer, tool version, timestamp, branch, commit).`,

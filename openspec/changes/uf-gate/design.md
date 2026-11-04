@@ -266,8 +266,11 @@ artifact for the active change. `quick/<name>` branches
 (the /uf.unleash quick tier) resolve strictly to no change —
 the quick tier carries no spec artifacts, so unrelated
 changes must not satisfy its checks either. On branches
-without a change mapping, resolution falls back to the first
-alphabetical match across both layouts. A detached HEAD —
+without a change mapping, resolution falls back to one
+first-alphabetical change directory for the whole run —
+artifacts of different changes are never combined to
+satisfy a phase, and symlinked change directories are
+followed so fallback matches strict resolution. A detached HEAD —
 the default checkout state on CI runners — reports the
 literal branch `HEAD` and would land in that fallback; the
 resolver first recovers the branch from CI-provided refs
@@ -299,12 +302,15 @@ architecture.
 
 Detecting "coverage strategy present" requires scanning
 plan/tasks content for specific patterns: a heading
-containing "coverage" (case-insensitive), body text
-containing "coverage target", "unit test", "integration
-test", or "e2e test", or a line matching `coverage.*%`.
-False negatives are possible for non-standard phrasing.
-Mitigated by documenting the expected keywords in the
-command help text and testing with representative examples.
+containing "coverage" (case-insensitive) that does not
+negate it, body text containing "coverage target",
+"unit test", "integration test", or "e2e test", or a
+line matching `coverage.*%`. False negatives are possible
+for non-standard phrasing; negated headings ("No coverage
+strategy") are excluded so the heading signal cannot be
+satisfied by its own denial. Mitigated by documenting the
+expected keywords in the command help text and testing
+with representative examples.
 
 ### R5: Review markers are presence-of-text evidence
 

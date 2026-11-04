@@ -94,7 +94,7 @@ func Run(opts Options) (*GateReport, error) {
 
 	resolved, err := filepath.EvalSymlinks(absDir)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			// User-supplied path does not exist — exit 1.
 			return nil, fmt.Errorf("directory does not exist: %s", opts.TargetDir)
 		}
@@ -118,6 +118,11 @@ func Run(opts Options) (*GateReport, error) {
 	// branch snapshot and provenance matches the resolution the
 	// checks used.
 	res := resolveChange(resolved)
+	if res.ResolveErr != nil {
+		return nil, &InternalError{
+			Err: fmt.Errorf("resolve change: %w", res.ResolveErr),
+		}
+	}
 	ctx := runContext{dir: resolved, res: res}
 
 	// Execute checks for the phase.

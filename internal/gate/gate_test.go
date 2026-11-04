@@ -943,6 +943,10 @@ func TestRun_NonExistentDir(t *testing.T) {
 	if report != nil {
 		t.Errorf("expected nil report for non-existent dir")
 	}
+	// GATE-FR-010: the error names the missing directory.
+	if !strings.Contains(err.Error(), "directory does not exist") {
+		t.Errorf("expected 'directory does not exist' message, got: %v", err)
+	}
 }
 
 func TestRun_Provenance(t *testing.T) {
@@ -1993,8 +1997,8 @@ func TestResolveChange_DetachedHead_NoCIRef_FallsBack(t *testing.T) {
 	t.Setenv("GITHUB_REF_NAME", "")
 
 	res := resolveChange(dir)
-	if res.Strict || res.Quick || res.Name != "" {
-		t.Errorf("expected unmapped fallback without CI refs, got %+v", res)
+	if res.Strict || res.Quick || res.Name != "aaa-first" {
+		t.Errorf("expected unmapped fallback to resolve aaa-first without CI refs, got %+v", res)
 	}
 	if res.Branch != "HEAD" {
 		t.Errorf("expected literal HEAD branch without CI refs, got %q", res.Branch)
@@ -2049,8 +2053,8 @@ func TestResolveChange_DetachedHead_MergeRefFallsBack(t *testing.T) {
 	t.Setenv("GITHUB_REF_NAME", "123/merge")
 
 	res := resolveChange(dir)
-	if res.Strict || res.Quick || res.Name != "" {
-		t.Errorf("expected unmapped fallback for merge ref, got %+v", res)
+	if res.Strict || res.Quick || res.Name != "aaa-first" {
+		t.Errorf("expected unmapped fallback to resolve aaa-first for merge ref, got %+v", res)
 	}
 	if res.Branch != "123/merge" {
 		t.Errorf("expected effective branch 123/merge, got %q", res.Branch)
@@ -2058,9 +2062,9 @@ func TestResolveChange_DetachedHead_MergeRefFallsBack(t *testing.T) {
 }
 
 // TestResolveChange_DetachedHead_UnsafeCIRefRejected verifies the
-// Constitution V input validation on CI-provided refs: traversal and
-// absolute-path values are ignored rather than flowing into artifact
-// path construction.
+// Constitution V input validation on CI-provided refs: traversal,
+// absolute-path, and control-character values are ignored rather
+// than flowing into artifact path construction or messages.
 func TestResolveChange_DetachedHead_UnsafeCIRefRejected(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -2072,12 +2076,141 @@ func TestResolveChange_DetachedHead_UnsafeCIRefRejected(t *testing.T) {
 	initGitRepo(t, dir, "main")
 	runGit(t, dir, "checkout", "--detach")
 
-	for _, ref := range []string{"../../evil", "/abs/path", `opsx\evil`, "opsx//evil", "opsx/./evil"} {
+	for _, ref := range []string{
+		"../../evil", "/abs/path", `opsx\evil`, "opsx//evil", "opsx/./evil",
+		"opsx/x\nPASS: 2 of 2 checks passed", "opsx/x\ttab", "opsx/x\x07bel",
+		"opsx/x\x7fdel", "opsx/x\u0085nb",
+	} {
 		t.Setenv("GITHUB_HEAD_REF", ref)
 		t.Setenv("GITHUB_REF_NAME", "")
 		res := resolveChange(dir)
-		if res.Branch != "HEAD" || res.Strict || res.Name != "" {
-			t.Errorf("expected unsafe CI ref %q to be ignored (unmapped fallback), got %+v", ref, res)
+		if res.Branch != "HEAD" || res.Strict || res.Name != "aaa-first" {
+			t.Errorf("expected unsafe CI ref %q to be ignored (safe alphabetical fallback), got %+v", ref, res)
 		}
+	}
+}
+
+// --- unmapped fallback resolution tests (GATE-FR-012) ---
+
+// TestCheckSpecExists_UnmappedFallback_SelectsFirstChange pins
+// that the unmapped fallback resolves one first-alphabetical
+// change for the whole run: a later change's artifact cannot
+// satisfy the phase.
+func TestCheckSpecExists_UnmappedFallback_SelectsFirstChange(t *testing.T) {
+	dir := t.TempDir()
+	pinGitCeiling(t, dir)
+	scaffoldOpenSpecChange(t, dir, "aaa-first", map[string]string{
+		"tasks.md": "# Tasks",
+	})
+	scaffoldOpenSpecChange(t, dir, "bbb-second", map[string]string{
+		"proposal.md": "# Proposal",
+	})
+
+	r := checkSpecExists(testCtx(dir))
+	if r.Passed {
+		t.Fatalf("expected fail: fallback must resolve only aaa-first, got pass")
+	}
+	if !strings.Contains(r.Message, "aaa-first") {
+		t.Errorf("expected message to name aaa-first, got: %s", r.Message)
+	}
+	if strings.Contains(r.Message, "bbb-second") {
+		t.Errorf("expected no reference to bbb-second, got: %s", r.Message)
+	}
+}
+
+// TestRun_ImplementPhase_UnmappedFallback_DoesNotCombineChanges
+// pins GATE-FR-012's no-union scenario: the implement phase must
+// not pass by combining spec/tasks from one change with
+// plan/coverage from another.
+func TestRun_ImplementPhase_UnmappedFallback_DoesNotCombineChanges(t *testing.T) {
+	dir := t.TempDir()
+	pinGitCeiling(t, dir)
+	scaffoldOpenSpecChange(t, dir, "aaa-nostrat", map[string]string{
+		"proposal.md": "# Proposal",
+		"tasks.md":    "# Tasks\n- [x] done\n",
+	})
+	scaffoldOpenSpecChange(t, dir, "bbb-cov", map[string]string{
+		"design.md": "# Design\n\ncoverage target: >= 80%\n",
+	})
+
+	var stdout, stderr bytes.Buffer
+	report, err := Run(Options{
+		TargetDir: dir,
+		Phase:     "implement",
+		Format:    "json",
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+	})
+	if err == nil {
+		t.Fatal("expected implement failure: artifacts of two changes must not combine")
+	}
+	if report == nil || report.Passed {
+		t.Fatalf("expected failed report, got %+v", report)
+	}
+	for _, r := range report.Checks {
+		if (r.Name == "plan-exists" || r.Name == "coverage-strategy") && r.Passed {
+			t.Errorf("%s must fail: bbb-cov artifacts must not satisfy aaa-nostrat", r.Name)
+		}
+		if strings.Contains(r.Message, "bbb-cov") {
+			t.Errorf("no check message may reference bbb-cov, got: %s", r.Message)
+		}
+	}
+}
+
+// TestCheckSpecExists_UnmappedFallback_FollowsSymlinkedChangeDir
+// pins that symlinked change directories resolve in the fallback,
+// matching strict resolution (which stats through symlinks).
+func TestCheckSpecExists_UnmappedFallback_FollowsSymlinkedChangeDir(t *testing.T) {
+	dir := t.TempDir()
+	pinGitCeiling(t, dir)
+	target := filepath.Join(dir, "elsewhere", "real-change")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "proposal.md"), []byte("# Proposal"), 0o644); err != nil {
+		t.Fatalf("write proposal: %v", err)
+	}
+	changes := filepath.Join(dir, "openspec", "changes")
+	if err := os.MkdirAll(changes, 0o755); err != nil {
+		t.Fatalf("mkdir changes: %v", err)
+	}
+	if err := os.Symlink(filepath.Join("..", "..", "elsewhere", "real-change"), filepath.Join(changes, "aaa-link")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	r := checkSpecExists(testCtx(dir))
+	if !r.Passed {
+		t.Errorf("expected symlinked change dir to resolve in fallback, got fail: %s", r.Message)
+	}
+}
+
+// TestCheckCoverageStrategy_NegatedHeading pins GATE-FR-006's
+// negation exclusion: a heading that denies a coverage strategy
+// must not satisfy the Constitution IV check.
+func TestCheckCoverageStrategy_NegatedHeading(t *testing.T) {
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"design.md": "# Design\n\n## No coverage strategy is planned\n\nnone\n",
+		"tasks.md":  "# Tasks\n- [x] done\n",
+	})
+
+	r := checkCoverageStrategy(testCtx(dir))
+	if r.Passed {
+		t.Errorf("expected negated coverage heading to fail, got pass")
+	}
+}
+
+// TestCheckTasksComplete_FencedExample pins GATE-FR-007's fenced
+// code block exclusion: an example checkbox inside a fence is
+// documentation, not an incomplete task.
+func TestCheckTasksComplete_FencedExample(t *testing.T) {
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"tasks.md": "# Tasks\n- [x] done\n\nExample syntax:\n\n```\n- [ ] like this\n```\n",
+	})
+
+	r := checkTasksComplete(testCtx(dir))
+	if !r.Passed {
+		t.Errorf("expected fenced example to be ignored, got fail: %s", r.Message)
 	}
 }
