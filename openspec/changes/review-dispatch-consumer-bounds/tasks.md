@@ -18,6 +18,9 @@
 - [x] 1.2 Add `deduplicateProposals` (NFKC, lowercase, letter/digit
       tokens, fixed stop words, overlap coefficient >= 0.5 for token sets of 4 or more, exact token sequence otherwise, longer text wins, earlier slot kept) and the
       `duplicate_proposal_merged` warning with its `agent=<agent> kept=<kept_agent>` summary detail (RD-FR-055).
+      (First-revision thresholds; superseded by task 4.2 — Jaccard
+      >= 0.3 with a 6-token floor and a negation guard, adopted in
+      the review loop.)
 - [x] 1.3 Feed the deduplicated proposals into the finalizer payload
       (omitted when empty), the full and summary retrievals, and the compact result; update the tool description to call the tool-result arrays a preview and the
       artifact the lesson source (RD-FR-054, D3).
@@ -48,26 +51,34 @@
 - [x] 3.2 [P] `openspec/changes/review-dispatch-diff-manifest/specs/review-dispatch/spec.md`:
       `read_diff_chunk` `diff_not_found` scenario (#943).
 
-## 5. Review follow-ups (design D2, D7)
+## 4. Review follow-ups (design D2, D7)
 
-- [x] 5.1 Copy the updated `schemas/review-dispatch/v1.0.0.schema.json`
+- [x] 4.1 Copy the updated `schemas/review-dispatch/v1.0.0.schema.json`
       to `.uf/schemas/` and `internal/scaffold/assets/uf/schemas/`; add `TestSchemaRegistryMatchesUFCopies`.
-- [x] 5.2 Switch deduplication to Jaccard >= 0.3 with a 6-token floor
+- [x] 4.2 Switch deduplication to Jaccard >= 0.3 with a 6-token floor
       and a negation guard; test the negated and subset pairs.
-- [x] 5.3 Cap persisted proposals at 512 with a `proposals_overflow`
+- [x] 4.3 Cap persisted proposals at 512 with a `proposals_overflow`
       warning; test 515 proposals.
-- [x] 5.4 Add `read_dispatch_artifact` (RD-FR-057) with tests, and move
+- [x] 4.4 Add `read_dispatch_artifact` (RD-FR-057) with tests, and move
       every consumer's artifact read onto it, including the older-plugin stranded rule.
-- [x] 5.5 Nits: Section 3.2 reference, 512-character bound including
+- [x] 4.5 Nits: Section 3.2 reference, 512-character bound including
       the ellipsis, pre-dedupe proposal count note.
+- [x] 4.6 Record the bundled #946 fix (dispatch error summary
+      suffix) in proposal.md What Changes; add its CHANGELOG
+      `Spec:` tail.
+- [x] 4.7 Record the bundled #942 fix (uf.review-pr self-authored
+      verdict mapping) in proposal.md What Changes; add its
+      CHANGELOG `Spec:` tail.
 
-## 4. Mirror, documentation, CI parity
+## 5. Mirror, documentation, CI parity
 
-- [x] 4.1 Copy every edited `.opencode/` file byte-identical into
+- [x] 5.1 Copy every edited `.opencode/` file byte-identical into
       `internal/scaffold/assets/opencode/`.
-- [x] 4.2 CHANGELOG.md entries under Unreleased with
+- [x] 5.2 CHANGELOG.md entries under Unreleased with
       `(Spec: openspec/changes/review-dispatch-consumer-bounds, Fixes: #N)` tails.
-- [ ] 4.3 Documentation-gate assessment; file the docs issue for the
-      user-facing artifact and consumer change before merge.
-- [x] 4.4 CI parity: `make plugin-test` and
+- [x] 5.3 Documentation-gate assessment; file the docs issues for
+      the user-facing artifact and consumer change — one in-repo
+      and one in unbound-force/website (the 7.2/7.3 precedent from
+      review-dispatch-diff-manifest) — before merge.
+- [x] 5.4 CI parity: `make plugin-test` and
       `go test -race -count=1 ./...` both pass.

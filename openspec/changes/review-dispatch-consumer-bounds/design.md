@@ -157,6 +157,12 @@ which is the rule `uf.review-pr` already had.
 - `uf.unleash`: Steps 4 and 6 add lesson storage from the artifact
   they already read.
 
+D4's per-entry `dewey_store_learning` loop remains the accepted
+DE-001 residual: extraction is infeasible while the store tool
+lives on a separate MCP server the plugin cannot invoke. The
+retirement path is a Dewey-side batch-store tool; when it lands,
+the loop and this note retire together.
+
 ### D5 (revisits #929 D5). Triage and feedback finalize first
 
 #929 kept `uf.triage-issue` and `uf.address-feedback` on
@@ -198,6 +204,16 @@ With this change no in-repo command calls `consolidate_dispatch`
 with `detail: "full"`. The mode stays the default for external
 callers and for compatibility.
 
+### D6. Spec deltas for `diff_not_found` (#943)
+
+The `build-review-prompts` and `review-dispatch-diff-manifest`
+deltas are unarchived, so their scenarios are edited in place:
+FR-011 gains the in-scope missing-path rule with two scenarios,
+FR-009's not-found scenario becomes a not-readable scenario (a
+missing path never reaches the read), and RD-FR-034 gains a
+`diff_not_found` scenario beside the existing
+`path_validation_failed` one.
+
 ### D7. A bounded reader replaces file reads of the artifact
 
 The artifact is written with `JSON.stringify(envelope, null, 2)`, so
@@ -237,16 +253,6 @@ added: finalization is not idempotent (a second call after a
 persisted first attempt collides on the artifact path and mints a
 new correlation ID), so a tool error stays non-mechanical and fails
 closed, as before.
-
-### D6. Spec deltas for `diff_not_found` (#943)
-
-The `build-review-prompts` and `review-dispatch-diff-manifest`
-deltas are unarchived, so their scenarios are edited in place:
-FR-011 gains the in-scope missing-path rule with two scenarios,
-FR-009's not-found scenario becomes a not-readable scenario (a
-missing path never reaches the read), and RD-FR-034 gains a
-`diff_not_found` scenario beside the existing
-`path_validation_failed` one.
 
 ## Risks / Trade-offs
 

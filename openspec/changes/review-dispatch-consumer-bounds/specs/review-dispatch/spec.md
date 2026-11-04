@@ -9,7 +9,18 @@
 Requirement numbering: RD-FR-054 through RD-FR-057 are allocated
 for this change, from the RD-FR-054..058 range that
 `bound-consolidate-dispatch-output` reserved; RD-FR-058 stays
-reserved for future review-dispatch changes.
+reserved for future review-dispatch changes. Elsewhere in the
+review-dispatch capability, RD-FR-001..008 is
+review-council-multi-model-fanout, RD-FR-025..027
+fix-review-dispatch-recovery, RD-FR-028..031
+derive-per-run-timeout, RD-FR-032..036
+review-dispatch-diff-manifest, RD-FR-037
+host-fallback-provenance, RD-FR-038
+split-host-resolution-failure-classes, RD-FR-039..048 reserved
+there, and RD-FR-049..053 bound-consolidate-dispatch-output; the
+review-matrix capability carries RD-FR-009..010 and RD-FR-019..024,
+with RD-FR-011..018 reserved there. Requirement ids MUST stay
+inside the allocated range.
 
 Amendment and archive order: each requirement below amends one or
 more requirements of the unarchived
@@ -164,8 +175,8 @@ recovery accepts `duplicate_proposal_merged` and the RD-FR-054
 
 #### Scenario: Distinct lessons are kept
 
-- **GIVEN** a dispatch whose proposals share fewer than half of the
-  smaller proposal's tokens
+- **GIVEN** a dispatch whose proposal pairs each have a Jaccard
+  similarity below 0.3
 - **WHEN** `consolidate_dispatch` runs
 - **THEN** every proposal is kept in collection order
 - **AND** no `duplicate_proposal_merged` warning is emitted
@@ -349,3 +360,7 @@ parse.
 - **WHEN** `read_dispatch_artifact` is called
 - **THEN** it returns `status: "error"` with `not_found` or
   `invalid_artifact` and no entries
+
+## REMOVED Requirements
+
+None.
