@@ -2217,7 +2217,11 @@ func TestSCFR001_CanonicalAssetSurfaceMatchesMirrors(t *testing.T) {
 // file in schemas/<type>/ that also ships under .uf/schemas/<type>/ is
 // byte-identical there. TestSCFR001_CanonicalAssetSurfaceMatchesMirrors only
 // compares the embedded asset with the .uf copy, so a registry edit that
-// skipped .uf (issue #941 review) went unnoticed.
+// skipped .uf (issue #941 review) went unnoticed. The guard is
+// absence-proof: every schema the canonical asset set ships under
+// .uf/schemas must keep its registry file, and a registry file in a
+// family that ships .uf copies fails when its own .uf copy is missing
+// instead of being silently skipped (PR #949 review).
 func TestSchemaRegistryMatchesUFCopies(t *testing.T) {
 	root := findProjectRoot(t)
 	if root == "" {
@@ -2227,6 +2231,24 @@ func TestSchemaRegistryMatchesUFCopies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("glob schema registry: %v", err)
 	}
+
+	// Absence-proof half: the canonical assets shipped under uf/schemas
+	// must keep their registry files. The glob below cannot see a file
+	// that disappeared from schemas/, so without this check a mirrored
+	// schema deleted from the registry would fail nothing.
+	shipped := make(map[string]bool)
+	for _, asset := range task42CanonicalAssets {
+		if !strings.HasPrefix(asset.asset, "uf/schemas/") {
+			continue
+		}
+		rel := strings.TrimPrefix(asset.asset, "uf/schemas/")
+		shipped[rel] = true
+		registryPath := filepath.Join(root, "schemas", rel)
+		if _, err := os.Stat(registryPath); err != nil {
+			t.Errorf("canonical asset %s is missing its registry file at %s", asset.asset, registryPath)
+		}
+	}
+
 	compared := 0
 	for _, source := range registry {
 		rel, err := filepath.Rel(filepath.Join(root, "schemas"), source)
@@ -2236,6 +2258,15 @@ func TestSchemaRegistryMatchesUFCopies(t *testing.T) {
 		copyPath := filepath.Join(root, ".uf", "schemas", rel)
 		copyData, err := os.ReadFile(copyPath)
 		if os.IsNotExist(err) {
+			// A schema that ships under .uf/schemas, or that sits in a
+			// family shipping .uf copies, must not silently skip
+			// comparison when its .uf copy goes missing. Families that
+			// have never shipped a .uf copy remain exempt.
+			if shipped[rel] {
+				t.Errorf("schemas/%s ships under .uf/schemas but its copy is missing at %s", rel, copyPath)
+			} else if _, statErr := os.Stat(filepath.Join(root, ".uf", "schemas", filepath.Dir(rel))); statErr == nil {
+				t.Errorf("schemas/%s has no .uf copy at %s even though .uf/schemas/%s ships copies", rel, copyPath, filepath.Dir(rel))
+			}
 			continue
 		}
 		if err != nil {
