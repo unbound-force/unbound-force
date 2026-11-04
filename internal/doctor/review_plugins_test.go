@@ -23,26 +23,24 @@ const reviewPluginManifestFixture = `{
   }
 }`
 
-// reviewPluginLockFixture mirrors the package-lock.json root entry with
-// matching versions and lockfileVersion 3.
-const reviewPluginLockFixture = `{
-  "name": "unbound-force-opencode-plugins",
-  "lockfileVersion": 3,
-  "requires": true,
-  "packages": {
-    "": {
-      "name": "unbound-force-opencode-plugins",
-      "dependencies": {
-        "@opencode-ai/plugin": "1.4.10",
-        "zod": "4.1.8"
-      },
-      "devDependencies": {
-        "@vitest/coverage-v8": "5.0.3",
-        "vitest": "5.0.3"
-      }
-    }
-  }
-}`
+// reviewPluginInstalledVersions are the versions the fixture installs under
+// node_modules; they match reviewPluginManifestFixture's pins.
+var reviewPluginInstalledVersions = map[string]string{
+	"@opencode-ai/plugin": "1.4.10",
+	"zod":                 "4.1.8",
+	"@vitest/coverage-v8": "5.0.3",
+	"vitest":              "5.0.3",
+}
+
+// writeInstalledPackages installs every review plugin package under
+// .opencode/node_modules at its pinned version.
+func writeInstalledPackages(t *testing.T, dir string) {
+	t.Helper()
+	for _, pkg := range reviewPluginPackages {
+		createFile(t, dir, filepath.Join(".opencode", "node_modules", pkg, "package.json"),
+			`{"version": "`+reviewPluginInstalledVersions[pkg]+`"}`)
+	}
+}
 
 // reviewPluginOpencodeJSONFixture mirrors the scaffolded opencode.json
 // plugin-array entries for the two review plugins.
@@ -66,16 +64,13 @@ const reviewDispatchSourceFixture = `export default async () => ({
 })`
 
 // writeReviewPluginScaffold creates a minimal, consistent review plugin
-// scaffold under dir: package.json, package-lock.json, node_modules for the
+// scaffold under dir: package.json, node_modules for the
 // four declared packages, both plugin sources, and the opencode.json
 // registration entries.
 func writeReviewPluginScaffold(t *testing.T, dir string) {
 	t.Helper()
 	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
-	createFile(t, dir, ".opencode/package-lock.json", reviewPluginLockFixture)
-	for _, pkg := range reviewPluginPackages {
-		createFile(t, dir, filepath.Join(".opencode", "node_modules", pkg, "package.json"), "{}")
-	}
+	writeInstalledPackages(t, dir)
 	createFile(t, dir, ".opencode/plugins/invoke-agent/index.ts", invokeAgentSourceFixture)
 	createFile(t, dir, ".opencode/plugins/review-dispatch/index.ts", reviewDispatchSourceFixture)
 	createFile(t, dir, "opencode.json", reviewPluginOpencodeJSONFixture)
@@ -175,7 +170,7 @@ func TestCheckReviewPlugins_AllPass(t *testing.T) {
 	for _, r := range group.Results {
 		byName[r.Name] = r
 	}
-	for _, name := range []string{"manifest-lock", "dependencies", "node version", "npm version", "registration", "plugin tools"} {
+	for _, name := range []string{"manifest-install", "dependencies", "node version", "npm version", "registration", "plugin tools"} {
 		r, ok := byName[name]
 		if !ok {
 			t.Errorf("missing result %q in group", name)
@@ -193,14 +188,14 @@ func TestCheckReviewPlugins_AllPass(t *testing.T) {
 	}
 }
 
-func TestCheckManifestLockConsistency_Mismatch(t *testing.T) {
+func TestCheckManifestInstallConsistency_Mismatch(t *testing.T) {
 	dir := t.TempDir()
 	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
-	mismatchedLock := strings.Replace(reviewPluginLockFixture, `"zod": "4.1.8"`, `"zod": "4.2.0"`, 1)
-	createFile(t, dir, ".opencode/package-lock.json", mismatchedLock)
+	writeInstalledPackages(t, dir)
+	createFile(t, dir, ".opencode/node_modules/zod/package.json", `{"version": "4.2.0"}`)
 
 	opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
-	result := checkManifestLockConsistency(opts)
+	result := checkManifestInstallConsistency(opts)
 	if result.Severity != Fail {
 		t.Errorf("severity = %v, want Fail (hard version mismatch)", result.Severity)
 	}
@@ -209,17 +204,51 @@ func TestCheckManifestLockConsistency_Mismatch(t *testing.T) {
 	}
 }
 
-func TestCheckManifestLockConsistency_MissingLock(t *testing.T) {
+func TestCheckManifestInstallConsistency_NotInstalledPasses(t *testing.T) {
+	// Packages that are not installed are the dependencies check's
+	// concern; with no lock shipped there is nothing else to compare.
 	dir := t.TempDir()
 	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
 	opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
 
-	result := checkManifestLockConsistency(opts)
+	result := checkManifestInstallConsistency(opts)
+	if result.Severity != Pass {
+		t.Errorf("severity = %v, want Pass (message=%q)", result.Severity, result.Message)
+	}
+}
+
+func TestCheckManifestInstallConsistency_MissingManifest(t *testing.T) {
+	dir := t.TempDir()
+	opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+
+	result := checkManifestInstallConsistency(opts)
 	if result.Severity != Warn {
-		t.Errorf("severity = %v, want Warn (repairable missing lock)", result.Severity)
+		t.Errorf("severity = %v, want Warn (repairable missing manifest)", result.Severity)
 	}
 	if result.InstallHint == "" {
-		t.Error("missing-lock result should carry a remediation hint")
+		t.Error("missing-manifest result should carry a remediation hint")
+	}
+}
+
+func TestCheckManifestInstallConsistency_UnreadableInstall(t *testing.T) {
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
+	writeInstalledPackages(t, dir)
+	createFile(t, dir, ".opencode/node_modules/vitest/package.json", "{}")
+
+	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: os.ReadFile})
+	if result.Severity != Fail || !strings.Contains(result.Message, "vitest") {
+		t.Errorf("result = %v %q, want Fail naming vitest", result.Severity, result.Message)
+	}
+}
+
+func TestCheckManifestInstallConsistency_Undeclared(t *testing.T) {
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/package.json", strings.Replace(reviewPluginManifestFixture, `"zod": "4.1.8"`, `"other": "1.0.0"`, 1))
+
+	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: os.ReadFile})
+	if result.Severity != Fail || !strings.Contains(result.Message, "zod not declared") {
+		t.Errorf("result = %v %q, want Fail naming undeclared zod", result.Severity, result.Message)
 	}
 }
 
@@ -376,14 +405,11 @@ func TestCheckPluginToolRegistration(t *testing.T) {
 
 func TestCheckReviewPlugins_RepairableVsBroken(t *testing.T) {
 	t.Run("repairable inactive", func(t *testing.T) {
-		// Manifest, lock, and node_modules are consistent, but the plugin
+		// Manifest and node_modules are consistent, but the plugin
 		// sources were never activated: recoverable partial.
 		dir := t.TempDir()
 		createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
-		createFile(t, dir, ".opencode/package-lock.json", reviewPluginLockFixture)
-		for _, pkg := range reviewPluginPackages {
-			createFile(t, dir, filepath.Join(".opencode", "node_modules", pkg, "package.json"), "{}")
-		}
+		writeInstalledPackages(t, dir)
 		opts := reviewPluginDoctorOpts(dir,
 			map[string]string{"node": "/usr/local/bin/node", "npm": "/usr/local/bin/npm"},
 			map[string]string{"node --version": "v22.0.0", "npm --version": "10.0.0"},
@@ -397,21 +423,21 @@ func TestCheckReviewPlugins_RepairableVsBroken(t *testing.T) {
 			t.Errorf("plugin tools severity = %v, want Warn (repairable)", r.Severity)
 		}
 		// Everything else that is repairable stays non-Fail.
-		if r := byName["manifest-lock"]; r.Severity == Fail {
-			t.Errorf("manifest-lock severity = Fail, want non-Fail in repairable state")
+		if r := byName["manifest-install"]; r.Severity == Fail {
+			t.Errorf("manifest-install severity = Fail, want non-Fail in repairable state")
 		}
 	})
 
-	t.Run("broken mismatched lock", func(t *testing.T) {
+	t.Run("broken mismatched install", func(t *testing.T) {
 		dir := t.TempDir()
 		createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
-		brokenLock := strings.Replace(reviewPluginLockFixture, `"@opencode-ai/plugin": "1.4.10"`, `"@opencode-ai/plugin": "9.9.9"`, 1)
-		createFile(t, dir, ".opencode/package-lock.json", brokenLock)
+		writeInstalledPackages(t, dir)
+		createFile(t, dir, ".opencode/node_modules/@opencode-ai/plugin/package.json", `{"version": "9.9.9"}`)
 		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
 		group := checkReviewPlugins(opts)
 		byName := resultMap(group)
-		if r := byName["manifest-lock"]; r.Severity != Fail {
-			t.Errorf("manifest-lock severity = %v, want Fail (broken)", r.Severity)
+		if r := byName["manifest-install"]; r.Severity != Fail {
+			t.Errorf("manifest-install severity = %v, want Fail (broken)", r.Severity)
 		}
 	})
 }

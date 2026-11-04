@@ -127,7 +127,7 @@ func TestRun_InstallsProbesAndAtomicallyActivatesReviewPlugins(t *testing.T) {
 			case "npm --version":
 				events = append(events, command)
 				return []byte("10.9.2\n"), nil
-			case "npm ci --ignore-scripts --omit=dev":
+			case "npm install --ignore-scripts --omit=dev --no-package-lock --no-audit --no-fund":
 				events = append(events, command)
 				return nil, nil
 			case "opencode debug config":
@@ -206,7 +206,7 @@ func TestRun_InstallsProbesAndAtomicallyActivatesReviewPlugins(t *testing.T) {
 		"node --version",
 		"lookpath npm",
 		"npm --version",
-		"npm ci --ignore-scripts --omit=dev",
+		"npm install --ignore-scripts --omit=dev --no-package-lock --no-audit --no-fund",
 		"lookpath opencode",
 		"import probe",
 		"tool-definition probe",
@@ -261,7 +261,7 @@ func TestRun_InstallsProbesAndAtomicallyActivatesReviewPlugins(t *testing.T) {
 }
 
 // reviewPluginRunOpts builds an Options whose injected command fakes drive
-// the review plugin activation flow. When failInstall is true, `npm ci`
+// the review plugin activation flow. When failInstall is true, `npm install`
 // returns an error (soft failure); otherwise the full install → probe →
 // atomic activate path succeeds.
 func reviewPluginRunOpts(t *testing.T, targetDir string, stdout io.Writer, failInstall bool) Options {
@@ -293,9 +293,9 @@ func reviewPluginRunOpts(t *testing.T, targetDir string, stdout io.Writer, failI
 				return []byte("v22.15.0\r\n"), nil
 			case "npm --version":
 				return []byte("10.9.2\n"), nil
-			case "npm ci --ignore-scripts --omit=dev":
+			case "npm install --ignore-scripts --omit=dev --no-package-lock --no-audit --no-fund":
 				if failInstall {
-					return []byte("npm ERR! code ENOTCACHED\n"), fmt.Errorf("npm ci failed: offline")
+					return []byte("npm ERR! code ENOTCACHED\n"), fmt.Errorf("npm install failed: offline")
 				}
 				return nil, nil
 			case "opencode debug config":
@@ -345,7 +345,7 @@ func TestRun_PartialResultOnPluginActivationFailure(t *testing.T) {
 
 	// The failed and inactive sub-tool plus remediation must be surfaced.
 	out := stdout.String()
-	for _, want := range []string{"review-plugins", "failed", "activation: inactive", "npm ci --ignore-scripts --omit=dev"} {
+	for _, want := range []string{"review-plugins", "failed", "activation: inactive", "npm install --ignore-scripts --omit=dev --no-package-lock"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("Run() output does not surface %q:\n%s", want, out)
 		}
@@ -380,7 +380,7 @@ func TestRun_IndependentSubtoolsContinueOnPluginFailure(t *testing.T) {
 func TestRun_IdempotentRetryAfterPluginFailure(t *testing.T) {
 	targetDir := t.TempDir()
 
-	// First run: npm ci fails → soft partial result, no plugin source.
+	// First run: npm install fails → soft partial result, no plugin source.
 	firstOut := &bytes.Buffer{}
 	first, err := Run(reviewPluginRunOpts(t, targetDir, firstOut, true))
 	if err != nil {
@@ -390,7 +390,7 @@ func TestRun_IdempotentRetryAfterPluginFailure(t *testing.T) {
 		t.Fatalf("first Run() = Status %q / FailedSubTools %d, want partial/1", first.Status, first.FailedSubTools)
 	}
 
-	// Second run: npm ci succeeds → plugins activate, result fully populated.
+	// Second run: npm install succeeds → plugins activate, result fully populated.
 	secondOut := &bytes.Buffer{}
 	second, err := Run(reviewPluginRunOpts(t, targetDir, secondOut, false))
 	if err != nil {

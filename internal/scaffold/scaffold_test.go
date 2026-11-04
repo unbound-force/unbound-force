@@ -81,16 +81,6 @@ func assertStringMap(t *testing.T, label string, got, want map[string]string) {
 	}
 }
 
-type packageLockEntry struct {
-	Version         string            `json:"version"`
-	Resolved        string            `json:"resolved"`
-	Integrity       string            `json:"integrity"`
-	License         string            `json:"license"`
-	Dev             bool              `json:"dev"`
-	Dependencies    map[string]string `json:"dependencies"`
-	DevDependencies map[string]string `json:"devDependencies"`
-}
-
 // TestEmbeddedAssetsMatchSource verifies that every file under
 // internal/scaffold/assets/ is byte-identical to the canonical
 // source file at the repo root. This prevents drift between the
@@ -1534,7 +1524,7 @@ func TestUnleashCommand_ToolRoutingContracts(t *testing.T) {
 	})
 }
 
-func TestPluginPackageInputs_ExactVersionsAndLockIntegrity(t *testing.T) {
+func TestPluginPackageInputs_ExactVersions(t *testing.T) {
 	root := findProjectRoot(t)
 	if root == "" {
 		t.Fatal("project root not found")
@@ -1583,101 +1573,6 @@ func TestPluginPackageInputs_ExactVersionsAndLockIntegrity(t *testing.T) {
 	assertStringMap(t, "development dependencies", manifest.DevDependencies, expectedDevelopment)
 	assertStringMap(t, "security overrides", manifest.Overrides, expectedOverrides)
 	assertStringMap(t, "node engines", manifest.Engines, expectedEngines)
-
-	var lock struct {
-		Name            string                      `json:"name"`
-		LockfileVersion int                         `json:"lockfileVersion"`
-		Requires        bool                        `json:"requires"`
-		Packages        map[string]packageLockEntry `json:"packages"`
-	}
-	readJSONFile(t, filepath.Join(root, ".opencode", "package-lock.json"), &lock)
-	if lock.Name != manifest.Name {
-		t.Errorf("lock name = %q, want manifest name %q", lock.Name, manifest.Name)
-	}
-	if lock.LockfileVersion != 3 {
-		t.Errorf("lockfileVersion = %d, want 3", lock.LockfileVersion)
-	}
-	if !lock.Requires {
-		t.Error("lock requires must be true")
-	}
-	lockRoot, ok := lock.Packages[""]
-	if !ok {
-		t.Fatal("lock is missing the root package entry")
-	}
-	assertStringMap(t, "locked runtime dependencies", lockRoot.Dependencies, expectedRuntime)
-	assertStringMap(t, "locked development dependencies", lockRoot.DevDependencies, expectedDevelopment)
-
-	for name, version := range expectedRuntime {
-		assertLockedDirectPackage(t, lock.Packages, name, version, false)
-	}
-	for name, version := range expectedDevelopment {
-		assertLockedDirectPackage(t, lock.Packages, name, version, true)
-	}
-	for path, entry := range lock.Packages {
-		if path == "" || entry.Resolved == "" {
-			continue
-		}
-		if !strings.HasPrefix(entry.Integrity, "sha512-") {
-			t.Errorf("locked package %s integrity = %q, want sha512 integrity", path, entry.Integrity)
-		}
-	}
-	assertLockedSecurityOverride(t, lock.Packages, "toml", "4.2.0",
-		"sha512-TvAJjbHZlYmI323+srtqHQFyJsoWy6mI09ppkuj9+iRsqsVKG9fvTcOP7FHF2UCb0QSYtjEavffrKzdd0XgClg==")
-	assertLockedSecurityOverride(t, lock.Packages, "uuid", "13.0.1",
-		"sha512-9ezox2roIft6ExBVTVqibSd5dc5/47Sw/uY6b4SjQUT2TzQ0tltNquWA46y4xPQmdZYqvnio22SgWd41M86+jw==")
-}
-
-func assertLockedDirectPackage(
-	t *testing.T,
-	packages map[string]packageLockEntry,
-	name, version string,
-	wantDevelopment bool,
-) {
-	t.Helper()
-
-	locked, ok := packages["node_modules/"+name]
-	if !ok {
-		t.Errorf("lock is missing direct package %s", name)
-		return
-	}
-	if locked.Version != version {
-		t.Errorf("locked %s version = %q, want %q", name, locked.Version, version)
-	}
-	if locked.License != "MIT" {
-		t.Errorf("locked %s license = %q, want MIT", name, locked.License)
-	}
-	if locked.Dev != wantDevelopment {
-		t.Errorf("locked %s dev = %t, want %t", name, locked.Dev, wantDevelopment)
-	}
-	if !strings.HasPrefix(locked.Resolved, "https://registry.npmjs.org/") {
-		t.Errorf("locked %s resolved URL = %q, want npm registry URL", name, locked.Resolved)
-	}
-	if !strings.HasPrefix(locked.Integrity, "sha512-") {
-		t.Errorf("locked %s integrity = %q, want sha512 integrity", name, locked.Integrity)
-	}
-}
-
-func assertLockedSecurityOverride(
-	t *testing.T,
-	packages map[string]packageLockEntry,
-	name, version, integrity string,
-) {
-	t.Helper()
-
-	locked, ok := packages["node_modules/"+name]
-	if !ok {
-		t.Errorf("lock is missing security override %s", name)
-		return
-	}
-	if locked.Version != version {
-		t.Errorf("locked override %s version = %q, want %q", name, locked.Version, version)
-	}
-	if locked.Integrity != integrity {
-		t.Errorf("locked override %s integrity = %q, want %q", name, locked.Integrity, integrity)
-	}
-	if locked.License != "MIT" {
-		t.Errorf("locked override %s license = %q, want MIT", name, locked.License)
-	}
 }
 
 func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
@@ -1799,10 +1694,11 @@ func TestPluginPackageInputs_GitignoreTracksCanonicalInputs(t *testing.T) {
 	if string(content) != want {
 		t.Errorf(".opencode/.gitignore = %q, want %q", string(content), want)
 	}
-	for _, trackedInput := range []string{"package.json", "package-lock.json"} {
-		if strings.Contains(string(content), trackedInput) {
-			t.Errorf(".opencode/.gitignore must not ignore %s", trackedInput)
-		}
+	if strings.Contains(string(content), "package.json\n") {
+		t.Error(".opencode/.gitignore must not ignore package.json")
+	}
+	if !strings.Contains(string(content), "\npackage-lock.json\n") {
+		t.Error(".opencode/.gitignore must ignore package-lock.json (no lock is shipped or tracked)")
 	}
 }
 
@@ -1812,7 +1708,7 @@ func TestPluginPackageInputs_MirrorsMatchCanonical(t *testing.T) {
 		t.Fatal("project root not found")
 	}
 
-	for _, name := range []string{"package.json", "package-lock.json"} {
+	for _, name := range []string{"package.json"} {
 		canonical, err := os.ReadFile(filepath.Join(root, ".opencode", name))
 		if err != nil {
 			t.Fatalf("read canonical %s: %v", name, err)
@@ -1849,7 +1745,13 @@ func TestSCFR003_FreshTargetInputsDoNotActivatePlugins(t *testing.T) {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	for _, name := range []string{"package.json", "package-lock.json"} {
+	if _, err := assetContent("opencode/package-lock.json"); err == nil {
+		t.Error("scaffold must not embed opencode/package-lock.json")
+	}
+	if _, err := os.Stat(filepath.Join(target, ".opencode", "package-lock.json")); !os.IsNotExist(err) {
+		t.Errorf("fresh target must not receive .opencode/package-lock.json: %v", err)
+	}
+	for _, name := range []string{"package.json"} {
 		canonical, err := os.ReadFile(filepath.Join(root, ".opencode", name))
 		if err != nil {
 			t.Fatalf("read canonical %s: %v", name, err)
@@ -2107,8 +2009,7 @@ var expectedAssetPaths = []string{
 	"opencode/lib/reviewer-manifest.ts",
 	"opencode/lib/run-timeout.ts",
 	"opencode/lib/unleash-templates.ts",
-	// Reproducible plugin package inputs (2)
-	"opencode/package-lock.json",
+	// Plugin package manifest (1); no lock is shipped
 	"opencode/package.json",
 	// Review policy, model-matrix template, project-owned sibling
 	// template, and project-declared pre-flight checks (5)
@@ -2159,7 +2060,6 @@ var task42CanonicalAssets = []struct {
 	{asset: "opencode/lib/reviewer-manifest.ts", source: ".opencode/lib/reviewer-manifest.ts"},
 	{asset: "opencode/lib/run-timeout.ts", source: ".opencode/lib/run-timeout.ts"},
 	{asset: "opencode/lib/unleash-templates.ts", source: ".opencode/lib/unleash-templates.ts"},
-	{asset: "opencode/package-lock.json", source: ".opencode/package-lock.json"},
 	{asset: "opencode/package.json", source: ".opencode/package.json"},
 	{asset: "uf/model-matrix.yaml", source: ".uf/model-matrix.yaml"},
 	{asset: "uf/preflight.yaml", source: ".uf/preflight.yaml"},
@@ -3569,12 +3469,12 @@ func TestRun_OpencodeGitignore_MergesMissingLinesKeepsUserLines(t *testing.T) {
 	}
 
 	// The user comment and foo.log line survive in place; only the
-	// missing canonical lines (bun.lock, .vitest/, coverage/) append.
+	// missing canonical lines (bun.lock, package-lock.json, .vitest/, coverage/) append.
 	got, err := os.ReadFile(filepath.Join(dir, ".opencode", ".gitignore"))
 	if err != nil {
 		t.Fatalf("read .opencode/.gitignore: %v", err)
 	}
-	want := preExisting + "bun.lock\n.vitest/\ncoverage/\n"
+	want := preExisting + "bun.lock\npackage-lock.json\n.vitest/\ncoverage/\n"
 	if string(got) != want {
 		t.Errorf(".opencode/.gitignore merge mismatch:\n got %q\nwant %q", got, want)
 	}
@@ -3583,7 +3483,7 @@ func TestRun_OpencodeGitignore_MergesMissingLinesKeepsUserLines(t *testing.T) {
 		t.Errorf("expected summary to report .opencode/.gitignore as upgraded, got:\n%s",
 			output)
 	}
-	if !strings.Contains(output, "appended missing lines: bun.lock, .vitest/, coverage/") {
+	if !strings.Contains(output, "appended missing lines: bun.lock, package-lock.json, .vitest/, coverage/") {
 		t.Errorf("expected the upgraded detail to name the appended lines, got:\n%s", output)
 	}
 }
@@ -3717,7 +3617,7 @@ func TestRun_OpencodeGitignore_StealthSkipsIt(t *testing.T) {
 				return []byte("v22.15.0\n"), nil
 			case "npm --version":
 				return []byte("10.9.2\n"), nil
-			case "npm ci --ignore-scripts --omit=dev":
+			case "npm install --ignore-scripts --omit=dev --no-package-lock --no-audit --no-fund":
 				return nil, nil
 			default:
 				t.Fatalf("unexpected in-dir command %q", command)
@@ -4173,9 +4073,9 @@ func TestIsToolOwned(t *testing.T) {
 		// Tool-owned: OpenSpec schema
 		{"openspec/schemas/unbound-force/schema.yaml", true},
 		{"openspec/schemas/unbound-force/templates/proposal.md", true},
-		// Tool-owned: reproducible plugin package inputs
+		// Tool-owned: plugin package manifest; the lock is not shipped
 		{"opencode/package.json", true},
-		{"opencode/package-lock.json", true},
+		{"opencode/package-lock.json", false},
 		// Tool-owned: activation-gated plugin sources
 		{invokeAgentPluginAsset, true},
 		{reviewDispatchPluginAsset, true},
@@ -4863,7 +4763,7 @@ func TestIsDivisorAsset(t *testing.T) {
 		{reviewDispatchPluginAsset, true},
 		{ufWorkflowPluginAsset, true},
 		{"opencode/package.json", true},
-		{"opencode/package-lock.json", true},
+		{"opencode/package-lock.json", false},
 		// Shared agent executor library
 		{"opencode/lib/agent-executor.ts", true},
 		{"opencode/lib/branch-classification.ts", true},
@@ -10026,19 +9926,19 @@ func TestEnsureOpencodeGitignore_MergeSemantics(t *testing.T) {
 			name:        "empty file receives exactly the canonical lines",
 			existing:    "",
 			wantContent: opencodeGitignore,
-			wantDetail:  "appended missing lines: node_modules, bun.lock, .vitest/, coverage/",
+			wantDetail:  "appended missing lines: node_modules, bun.lock, package-lock.json, .vitest/, coverage/",
 		},
 		{
 			name:        "missing trailing newline is synthesized before appending",
 			existing:    "user.log\nnode_modules",
-			wantContent: "user.log\nnode_modules\nbun.lock\n.vitest/\ncoverage/\n",
-			wantDetail:  "appended missing lines: bun.lock, .vitest/, coverage/",
+			wantContent: "user.log\nnode_modules\nbun.lock\npackage-lock.json\n.vitest/\ncoverage/\n",
+			wantDetail:  "appended missing lines: bun.lock, package-lock.json, .vitest/, coverage/",
 		},
 		{
 			name:        "only missing canonical lines append, user lines retained in place",
 			existing:    "foo.log\nnode_modules\n",
-			wantContent: "foo.log\nnode_modules\nbun.lock\n.vitest/\ncoverage/\n",
-			wantDetail:  "appended missing lines: bun.lock, .vitest/, coverage/",
+			wantContent: "foo.log\nnode_modules\nbun.lock\npackage-lock.json\n.vitest/\ncoverage/\n",
+			wantDetail:  "appended missing lines: bun.lock, package-lock.json, .vitest/, coverage/",
 		},
 	}
 	for _, tt := range tests {

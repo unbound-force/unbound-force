@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginRuntimeRemediation = "install Node.js 22 and npm 10, then rerun uf init"
-	pluginInstallRemediation = "run npm ci --ignore-scripts --omit=dev in .opencode, then rerun uf init"
+	pluginInstallRemediation = "run npm install --ignore-scripts --omit=dev --no-package-lock in .opencode, then rerun uf init"
 	pluginProbeDirectoryName = "uf-review-plugin-probe"
 )
 
@@ -66,9 +66,13 @@ func installAndActivateReviewPlugins(opts *Options) ([]string, []byte, error) {
 		return nil, output, err
 	}
 
-	output, err = opts.ExecCmdInDir(opencodeDir, npmPath, "ci", "--ignore-scripts", "--omit=dev")
+	// No lock is shipped or written: .opencode/package.json pins the
+	// direct dependencies exactly, and --no-package-lock keeps npm from
+	// reading a stale lock or writing a new one that users and opencode
+	// would then fight over.
+	output, err = opts.ExecCmdInDir(opencodeDir, npmPath, "install", "--ignore-scripts", "--omit=dev", "--no-package-lock", "--no-audit", "--no-fund")
 	if err != nil {
-		return nil, output, fmt.Errorf("install locked plugin dependencies: %w; %s", err, pluginInstallRemediation)
+		return nil, output, fmt.Errorf("install plugin dependencies: %w; %s", err, pluginInstallRemediation)
 	}
 
 	stageRoot, err := opts.MkdirTemp(opencodeDir, ".uf-review-plugins-")

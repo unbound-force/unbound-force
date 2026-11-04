@@ -28,7 +28,7 @@ coverage-gate: coverage ## enforce scope-based coverage thresholds on changed pa
 ##@ Plugin Tests (TypeScript)
 
 plugin-test: ## run TypeScript plugin unit, integration, smoke, and coverage checks
-	cd .opencode && npm ci && npx vitest run --coverage
+	cd .opencode && npm install --no-package-lock --no-audit --no-fund && npx vitest run --coverage
 
 ##@ CRAP Load Monitoring
 

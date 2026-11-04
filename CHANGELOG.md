@@ -891,6 +891,23 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/remove-mutimind-mxf-orchestration/, Fixes: #565, Fixes: #566)
 
 ### Changed
+- stop-shipping-plugin-lock: `uf init` no longer ships or tracks
+  `.opencode/package-lock.json`. opencode and users also install into
+  `.opencode/`, so a tool-owned lock was overwritten on every
+  `uf init` or broke `npm ci`. Plugin activation now runs
+  `npm install --ignore-scripts --omit=dev --no-package-lock
+  --no-audit --no-fund`, which neither reads nor writes a lock.
+  `.opencode/.gitignore` gains `package-lock.json` through the
+  existing merge-only writer. `uf doctor` replaces its manifest-lock
+  check with `manifest-install`, which compares each `package.json`
+  pin with the installed version. `package.json` keeps its exact
+  direct pins and the `toml`/`uuid` overrides; other transitive
+  versions now resolve at install time. This repository also stops
+  tracking the lock, and `make plugin-test` installs with
+  `--no-package-lock`. Rollout: existing hero repositories can drop
+  their committed lock with
+  `git rm --cached .opencode/package-lock.json`. (Spec:
+  openspec/changes/stop-shipping-plugin-lock/)
 - split-host-resolution-failure-classes: Host-resolution
   failures in the review-dispatch plugin's `executeDispatchRun`
   now split by cause instead of collapsing into one retryable
