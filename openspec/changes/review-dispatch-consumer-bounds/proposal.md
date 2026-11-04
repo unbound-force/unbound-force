@@ -39,7 +39,7 @@ that array.
 `build_review_prompts`; the capability deltas still list only
 `path_validation_failed`.
 
-Fixes #941, #945, #943.
+Fixes #941, #945, #943, #946, #942.
 
 ## What Changes
 
@@ -74,6 +74,15 @@ Fixes #941, #945, #943.
 - Record `diff_not_found` in the `build-review-prompts` FR-009 and
   FR-011 scenarios and the `review-dispatch-diff-manifest`
   `read_diff_chunk` scenarios.
+- **Bundled fix (#946)**: a non-ok `dispatch_review_runs` summary
+  ends with ' — error: <message> (retryable: <bool>)' — the
+  message collapsed to one line and cut to at most 512 characters
+  including the ellipsis, the retryable marker omitted when
+  unknown.
+- **Bundled fix (#942)**: `uf.review-pr` fetches the PR author and
+  maps its own APPROVE/REQUEST_CHANGES verdict to a COMMENT review
+  when the viewer is the author (GitHub rejects REQUEST_CHANGES on
+  one's own pull request).
 - No quality or governance gate changes. The plugin suite keeps
   its 94 percent statements floor.
 
@@ -126,7 +135,8 @@ Fixes #941, #945, #943.
   `go test -race -count=1 ./...`.
 - **Documentation impact**: CHANGELOG.md entries. The artifact
   shape and consumer behavior are user-facing to calling agents,
-  so the documentation-gate issue is filed before merge.
+  so the documentation-gate issues — one in-repo and one in
+  unbound-force/website — are filed before merge.
 
 ## Constitution Alignment
 
@@ -180,4 +190,8 @@ returned, inside `.uf/artifacts/dispatch/`.
 
 Deduplication runs in the tool, not in command prose. Removing the
 full retrieval from two commands removes a model-executed
-truncation-handling branch.
+truncation-handling branch. The page-then-store loop over
+`payload.proposals` remains the accepted DE-001 residual:
+extraction is infeasible while `dewey_store_learning` lives on a
+separate MCP server the plugin cannot invoke. A Dewey-side
+batch-store tool is its retirement path.
