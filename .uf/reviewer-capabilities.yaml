@@ -35,6 +35,10 @@ reviewers:
     capability: review
     scopes:
       - test-quality
+  - agent: divisor-linguist
+    capability: review
+    scopes:
+      - documentation
   - agent: divisor-envoy
     capability: content
     scopes: []
