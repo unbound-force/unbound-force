@@ -1,9 +1,12 @@
+import { execFileSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   buildArtifact,
+  classifyInstructionPath,
+  countLines,
   discoverArtifacts,
   estimateTokens,
   findRoot,
@@ -11,6 +14,7 @@ import {
   main,
   parsePackRules,
   RULES,
+  type Delta,
   type Finding,
 } from "../lib/instruction-lint.js"
 
@@ -387,5 +391,135 @@ describe("cli", () => {
     const bad = cli(["--config", "alt.json"], root)
     expect(bad.code).toBe(2)
     expect(bad.err).toMatch(/cannot read config/)
+  })
+})
+
+describe("delegation contract check (IL-042, DE-008)", () => {
+  const block = (lines: string) => "```\n" + lines + "\n```"
+  const il042 = (body: string, kind: "agent" | "command" | "skill" = "command") => {
+    const files: Record<string, string> =
+      kind === "agent" ? { ".opencode/agents/a.md": AGENT(body) }
+      : kind === "skill" ? { ".opencode/skills/s/SKILL.md": SKILL("s", body) }
+      : { ".opencode/commands/c.md": COMMAND(body) }
+    return run(files).filter((f) => f.rule === "IL-042")
+  }
+
+  it("accepts complete call blocks and command-path delegations", () => {
+    expect(il042(block("uf_delegate_command\n  command_path: \"x.md\"\n  checkpoint_step: \"plan\""))).toEqual([])
+    expect(il042(block("uf_delegate_command\n  prompt: [p]\n  task_classification: \"judgment\""))).toEqual([])
+    expect(il042(block(
+      "uf_delegate_command\n  prompt: [p]\n  task_classification: [deterministic or judgment]\n  skill: [ref]\n  skill_absent_reason: [why]",
+    ))).toEqual([])
+    expect(il042(block("replicator_forge_spawn_subtask({ subtask_description: d, task_classification: \"deterministic\", skill: \"s\" })"), "skill")).toEqual([])
+  })
+
+  it("flags a missing classification, honoring the command_path exemption only where the tool has one", () => {
+    const missing = il042(block("uf_delegate_command\n  prompt: [p]\n  feature_dir: F"))
+    expect(missing).toHaveLength(1)
+    expect(missing[0]).toMatchObject({ line: 6, severity: "warning", reviewSeverity: "MEDIUM" })
+    expect(missing[0].message).toMatch(/no task_classification \(or `command_path`\)/)
+    const spawn = il042(block("replicator_forge_spawn_subtask\n  command_path: x\n  files: [f]"), "agent")
+    expect(spawn).toHaveLength(1)
+    expect(spawn[0].message).not.toMatch(/command_path/)
+  })
+
+  it("flags a possibly-deterministic classification without skill fields", () => {
+    const f = il042(block("uf_delegate_command\n  prompt: [p]\n  task_classification: \"deterministic\"\n  feature_dir: F"))
+    expect(f).toHaveLength(1)
+    expect(f[0].message).toMatch(/neither skill nor skill_absent_reason/)
+  })
+
+  it("treats each call in a block separately and ignores prose, other tools, and packs", () => {
+    const two = il042(block("uf_delegate_command\n  command_path: a\nuf_delegate_command\n  prompt: p"))
+    expect(two.map((f) => f.line)).toEqual([8])
+    expect(il042("Call `uf_delegate_command` with the prompt.\n\nuf_delegate_command\n")).toEqual([])
+    expect(il042(block("uf_delegate_command_v2\n  prompt: p\nuf_delegate_command: true"))).toEqual([])
+    // A fence delimiter ends the call even when blocks are adjacent.
+    expect(il042(block("uf_delegate_command\n  prompt: p") + "\n" + block("  task_classification: judgment"))).toHaveLength(1)
+    expect(run({ ".opencode/uf/packs/p.md": PACK("p", block("uf_delegate_command\n  prompt: p")) }).filter((f) => f.rule === "IL-042")).toEqual([])
+  })
+})
+
+describe("base deltas (--base)", () => {
+  const sh = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe" }).toString("utf8")
+  function gitRepo(files: Record<string, string>): string {
+    const root = repo(files)
+    sh(root, "init", "-q", "-b", "main")
+    sh(root, "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A")
+    sh(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base")
+    return root
+  }
+  function cli(args: string[], cwd: string) {
+    const out: string[] = []
+    const err: string[] = []
+    const code = main(args, { cwd, out: (s) => out.push(s), err: (s) => err.push(s) })
+    return { code, out: out.join("\n"), err: err.join("\n") }
+  }
+
+  it("counts lines like wc -l", () => {
+    expect([countLines(""), countLines("a"), countLines("a\n"), countLines("a\nb")]).toEqual([0, 1, 1, 2])
+  })
+
+  it("classifies instruction paths the same way discovery does", () => {
+    expect(classifyInstructionPath("AGENTS.md")).toEqual({ kind: "context", name: "AGENTS" })
+    expect(classifyInstructionPath(".opencode/agents/a.md")).toEqual({ kind: "agent", name: "a" })
+    expect(classifyInstructionPath(".opencode/commands/c.md")).toEqual({ kind: "command", name: "c" })
+    expect(classifyInstructionPath(".opencode/uf/packs/p.md")).toEqual({ kind: "pack", name: "p" })
+    expect(classifyInstructionPath(".opencode/skill/s/SKILL.md")).toEqual({ kind: "skill", name: "s" })
+    expect(classifyInstructionPath(".opencode/agents/sub/a.md")).toBeNull()
+    expect(classifyInstructionPath("docs/AGENTS.md")).toBeNull()
+  })
+
+  it("reports added, deleted, modified, and load-only files against the merge base", { timeout: 30000 }, () => {
+    const root = gitRepo({
+      ".opencode/agents/a.md": AGENT("Load `.opencode/skills/s/SKILL.md` first."),
+      ".opencode/agents/gone.md": AGENT("old"),
+      ".opencode/commands/c.md": COMMAND("same"),
+      ".opencode/skills/s/SKILL.md": SKILL("s", "short"),
+      ".opencode/uf/packs/p.md": PACK("p", "unchanged"),
+    })
+    rmSync(join(root, ".opencode/agents/gone.md"))
+    writeFileSync(join(root, ".opencode/skills/s/SKILL.md"), SKILL("s", "a much longer body\nwith two lines"))
+    writeFileSync(join(root, ".opencode/commands/new.md"), COMMAND("fresh"))
+
+    const parsed = JSON.parse(cli(["--json", "--base", "main"], root).out)
+    expect(parsed.delta.base).toBe("main")
+    expect(parsed.delta.mergeBase).toMatch(/^[0-9a-f]{40}$/)
+    const byFile = Object.fromEntries(parsed.delta.files.map((d: Delta) => [d.file, d]))
+    expect(Object.keys(byFile)).toEqual([
+      ".opencode/agents/a.md", ".opencode/agents/gone.md", ".opencode/commands/new.md", ".opencode/skills/s/SKILL.md",
+    ])
+    expect(byFile[".opencode/agents/a.md"].status).toBe("load-only")
+    expect(byFile[".opencode/agents/a.md"].loadTokens.delta).toBeGreaterThan(0)
+    expect(byFile[".opencode/agents/gone.md"]).toMatchObject({ status: "deleted", lines: { head: 0 } })
+    expect(byFile[".opencode/commands/new.md"].status).toBe("added")
+    expect(byFile[".opencode/skills/s/SKILL.md"]).toMatchObject({ status: "modified", lines: { delta: 1 }, loadTokens: null })
+    expect(parsed.delta.totals.lines).toBe(parsed.delta.files.reduce((n: number, d: Delta) => n + d.lines.delta, 0))
+
+    const only = JSON.parse(cli(["--json", "--base", "main", "--only", ".opencode/commands/new.md"], root).out)
+    expect(only.delta.files.map((d: Delta) => d.file)).toEqual([".opencode/commands/new.md"])
+
+    const text = cli(["--base", "main"], root).out
+    expect(text).toMatch(/deltas since main \(merge-base [0-9a-f]{12}\)/)
+    expect(text).toMatch(/added\s+\.opencode\/commands\/new\.md/)
+    expect(text).toMatch(/total: [+-]?\d+ lines, [+-]?\d+ tokens across 4 files/)
+    expect(JSON.parse(cli(["--json"], root).out).delta).toBeUndefined()
+  })
+
+  it("fails with exit 2 on an unknown base ref or a missing value", { timeout: 30000 }, () => {
+    const root = gitRepo({ ".opencode/agents/a.md": AGENT("x") })
+    const r = cli(["--base", "no-such-ref"], root)
+    expect(r.code).toBe(2)
+    expect(r.err).toMatch(/cannot read base no-such-ref/)
+    expect(cli(["--base"], root).code).toBe(2)
+  })
+
+  it("handles a base with no instruction files", { timeout: 30000 }, () => {
+    const root = gitRepo({ "README.md": "x" })
+    writeFileSync(join(root, ".opencode/agents.md"), "")
+    mkdirSync(join(root, ".opencode/agents"))
+    writeFileSync(join(root, ".opencode/agents/a.md"), AGENT("x"))
+    const parsed = JSON.parse(cli(["--json", "--base", "main"], root).out)
+    expect(parsed.delta.files.map((d: Delta) => d.status)).toEqual(["added"])
   })
 })

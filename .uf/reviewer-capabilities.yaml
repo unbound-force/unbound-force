@@ -39,6 +39,11 @@ reviewers:
     capability: review
     scopes:
       - documentation
+  - agent: divisor-determinism
+    capability: review
+    scopes:
+      - documentation
+      - standard
   - agent: divisor-envoy
     capability: content
     scopes: []

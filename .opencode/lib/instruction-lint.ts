@@ -8,12 +8,13 @@
 // belong in a review pack, not in this tool.
 //
 // Run from the repository root:
-//   node .opencode/lib/instruction-lint.ts [--json] [--strict] [--all] [--report]
+//   node .opencode/lib/instruction-lint.ts [--json] [--strict] [--all] [--report] [--base REF]
 //
 // Suppress a finding with an HTML comment in the instruction file:
 //   <!-- instruction-lint-disable-next-line IL-023 -->
 //   <!-- instruction-lint-disable IL-041 -->   (whole file)
 
+import { execFileSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, resolve, sep } from "node:path"
 // `yaml` is not a declared dependency: the scaffold tests pin the plugin
@@ -48,6 +49,7 @@ export const RULES: Record<string, RuleInfo> = {
   "IL-031": { severity: "warning", summary: "Context loaded by a command or agent exceeds the load budget" },
   "IL-040": { severity: "info", summary: "Prescribed-output phrasing; render it from a tool instead (DE-003)" },
   "IL-041": { severity: "info", summary: "Multi-command shell procedure in prose; candidate for a tested tool (DE-001)" },
+  "IL-042": { severity: "warning", summary: "Delegation call block omits task_classification or the skill contract (DE-008)" },
   "IL-050": { severity: "info", summary: "Near-duplicate paragraphs across files (instruction drift risk)" },
 }
 
@@ -198,6 +200,20 @@ function isDir(p: string): boolean {
 
 function toPosix(p: string): string {
   return p.split(sep).join("/")
+}
+
+// Classify a repo-relative posix path as an instruction artifact using
+// the same layout discoverArtifacts walks, so base-revision trees read
+// from git are discovered identically to the working tree.
+export function classifyInstructionPath(rel: string): { kind: ArtifactKind; name: string } | null {
+  if (rel === "AGENTS.md") return { kind: "context", name: "AGENTS" }
+  const flat = /^\.opencode\/(agents|commands|uf\/packs)\/([^/]+)\.md$/.exec(rel)
+  if (flat) {
+    const kind: ArtifactKind = flat[1] === "agents" ? "agent" : flat[1] === "commands" ? "command" : "pack"
+    return { kind, name: flat[2] }
+  }
+  const skill = /^\.opencode\/skills?\/([^/]+)\/SKILL\.md$/.exec(rel)
+  return skill ? { kind: "skill", name: skill[1] } : null
 }
 
 export function discoverArtifacts(root: string): Artifact[] {
@@ -536,6 +552,63 @@ function checkProse(a: Artifact, emit: Emit): void {
   }
 }
 
+// DE-008: delegation tools whose parameter contract binds deterministic
+// work to repo tooling. `optionalWith` names the parameter that, when
+// present, makes task_classification optional (uf_delegate_command
+// accepts unclassified command-path delegations).
+const DELEGATION_TOOLS: Record<string, { optionalWith: string | null }> = {
+  uf_delegate_command: { optionalWith: "command_path" },
+  replicator_forge_spawn_subtask: { optionalWith: null },
+}
+const DELEGATION_CALL = new RegExp(`^\\s*(${Object.keys(DELEGATION_TOOLS).join("|")})\\b\\s*(?:\\(|\\{|$)`)
+const PARAM_KEY = /(?:^|[\s{,(])["']?([a-z_][a-z0-9_]*)["']?\s*:/g
+
+function checkDelegationCall(a: Artifact, tool: string, line: number, text: string, emit: Emit): void {
+  const keys = new Map<string, number>()
+  for (const m of text.matchAll(PARAM_KEY)) if (!keys.has(m[1])) keys.set(m[1], m.index ?? 0)
+  const { optionalWith } = DELEGATION_TOOLS[tool]
+  const at = keys.get("task_classification")
+  if (at === undefined) {
+    if (optionalWith && keys.has(optionalWith)) return
+    const unless = optionalWith ? ` (or \`${optionalWith}\`)` : ""
+    emit("IL-042", a, line, `${tool} call passes no task_classification${unless}; the tool fails closed without it (DE-008)`)
+    return
+  }
+  // The classification value runs to the next parameter key.
+  const after = [...keys.values()].filter((o) => o > at).sort((x, y) => x - y)[0] ?? text.length
+  const value = text.slice(at, after)
+  if (/deterministic/i.test(value) && !keys.has("skill") && !keys.has("skill_absent_reason")) {
+    emit("IL-042", a, line, `${tool} call can classify work deterministic but passes neither skill nor skill_absent_reason (DE-008)`)
+  }
+}
+
+// Scan fenced blocks for delegation call sites: a line that starts with
+// a delegation tool name begins a call, which runs to the next call or
+// the end of the block. Prose mentions of the tools are not call sites.
+function checkDelegations(a: Artifact, emit: Emit): void {
+  if (a.kind !== "agent" && a.kind !== "command" && a.kind !== "skill") return
+  let call: { tool: string; line: number; text: string[] } | null = null
+  const flush = (): void => {
+    if (call) checkDelegationCall(a, call.tool, call.line, call.text.join("\n"), emit)
+    call = null
+  }
+  for (let i = a.bodyStart; i < a.lines.length; i++) {
+    if (!a.fenced[i] || /^\s{0,3}(`{3,}|~{3,})/.test(a.lines[i])) {
+      flush()
+      continue
+    }
+    const m = DELEGATION_CALL.exec(a.lines[i])
+    if (m) {
+      flush()
+      const line = a.lines[i]
+      call = { tool: m[1], line: i + 1, text: [line.slice(line.indexOf(m[1]) + m[1].length)] }
+    } else if (call) {
+      call.text.push(a.lines[i])
+    }
+  }
+  flush()
+}
+
 function shingles(text: string): Set<string> {
   const words = text.toLowerCase().match(/[a-z0-9']+/g) ?? []
   const out = new Set<string>()
@@ -603,7 +676,12 @@ export interface LintResult {
   loadTokens: Map<string, number>
 }
 
-export function lint(root: string, artifacts: Artifact[], options: Partial<LintOptions> = {}): LintResult {
+export function lint(
+  root: string,
+  artifacts: Artifact[],
+  options: Partial<LintOptions> = {},
+  exists: (rel: string) => boolean = (rel) => existsSync(join(root, rel)),
+): LintResult {
   const opts: LintOptions = { ...DEFAULT_OPTIONS, ...options }
   const findings: Finding[] = []
   const emit: Emit = (rule, a, line, message) => {
@@ -629,6 +707,7 @@ export function lint(root: string, artifacts: Artifact[], options: Partial<LintO
   for (const a of artifacts) {
     checkFrontmatter(a, emit)
     checkProse(a, emit)
+    checkDelegations(a, emit)
     if (a.tokens > opts.maxFileTokens) {
       emit("IL-030", a, 1, `~${a.tokens} tokens exceeds the ${opts.maxFileTokens}-token file budget`)
     }
@@ -644,7 +723,7 @@ export function lint(root: string, artifacts: Artifact[], options: Partial<LintO
         if (s) loaded.set(s.file, s)
         else emit("IL-012", a, r.line, `skill "${r.name}" is not defined in .opencode/skills/`)
       } else if (r.kind === "path") {
-        if (!existsSync(join(root, r.name))) emit("IL-013", a, r.line, `${r.name} does not exist`)
+        if (!exists(r.name)) emit("IL-013", a, r.line, `${r.name} does not exist`)
         else {
           const target = byFile.get(r.name)
           if (target && (target.kind === "pack" || target.kind === "skill")) loaded.set(target.file, target)
@@ -674,6 +753,90 @@ export function lint(root: string, artifacts: Artifact[], options: Partial<LintO
 }
 
 // ---------------------------------------------------------------------
+// Base-revision deltas (DE-004 evidence)
+// ---------------------------------------------------------------------
+
+export function countLines(text: string): number {
+  if (text === "") return 0
+  const n = text.split("\n").length
+  return text.endsWith("\n") ? n - 1 : n
+}
+
+export interface BaseTree {
+  ref: string
+  mergeBase: string
+  artifacts: Artifact[]
+  // every path under .opencode/ (and AGENTS.md) at the merge base
+  paths: Set<string>
+}
+
+const git = (root: string, args: string[], input?: string): Buffer =>
+  execFileSync("git", args, { cwd: root, input, maxBuffer: 256 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"] })
+
+// Read the instruction artifacts at merge-base(ref, HEAD), so a base
+// that moved ahead of the branch does not count its own changes.
+export function readBaseTree(root: string, ref: string): BaseTree {
+  const mergeBase = git(root, ["merge-base", ref, "HEAD"]).toString("utf8").trim()
+  const paths = git(root, ["ls-tree", "-r", "-z", "--name-only", mergeBase, "--", ".opencode", "AGENTS.md"])
+    .toString("utf8").split("\0").filter(Boolean)
+  const wanted = paths.map((p) => ({ p, c: classifyInstructionPath(p) })).filter((x) => x.c !== null)
+  const artifacts: Artifact[] = []
+  if (wanted.length > 0) {
+    const out = git(root, ["cat-file", "--batch"], wanted.map((w) => `${mergeBase}:${w.p}\n`).join(""))
+    let off = 0
+    for (const w of wanted) {
+      const nl = out.indexOf(10, off)
+      const size = Number(out.subarray(off, nl).toString("utf8").split(" ")[2])
+      const text = out.subarray(nl + 1, nl + 1 + size).toString("utf8")
+      off = nl + 1 + size + 1
+      artifacts.push(buildArtifact(w.p, text, w.c!.kind, w.c!.name))
+    }
+  }
+  return { ref, mergeBase, artifacts, paths: new Set(paths) }
+}
+
+export interface Delta {
+  file: string
+  status: "added" | "deleted" | "modified" | "load-only"
+  lines: { base: number; head: number; delta: number }
+  tokens: { base: number; head: number; delta: number }
+  // null for artifacts with no load set (skills, packs, AGENTS.md)
+  loadTokens: { base: number; head: number; delta: number } | null
+}
+
+const pair = (base: number, head: number) => ({ base, head, delta: head - base })
+
+export function computeDeltas(base: LintResult, head: LintResult): Delta[] {
+  const b = new Map(base.artifacts.map((a) => [a.file, a]))
+  const h = new Map(head.artifacts.map((a) => [a.file, a]))
+  const out: Delta[] = []
+  for (const file of [...new Set([...b.keys(), ...h.keys()])].sort()) {
+    const ba = b.get(file)
+    const ha = h.get(file)
+    const text = (a: Artifact | undefined): string => (a ? a.lines.join("\n") : "")
+    const bl = base.loadTokens.get(file)
+    const hl = head.loadTokens.get(file)
+    const loadTokens = bl === undefined && hl === undefined ? null : pair(bl ?? 0, hl ?? 0)
+    let status: Delta["status"]
+    if (!ba) status = "added"
+    else if (!ha) status = "deleted"
+    else if (text(ba) !== text(ha)) status = "modified"
+    else if (loadTokens && loadTokens.delta !== 0) status = "load-only"
+    else continue
+    out.push({
+      file,
+      status,
+      lines: pair(ba ? countLines(text(ba)) : 0, ha ? countLines(text(ha)) : 0),
+      tokens: pair(ba?.tokens ?? 0, ha?.tokens ?? 0),
+      loadTokens,
+    })
+  }
+  return out
+}
+
+const signed = (n: number): string => (n > 0 ? `+${n}` : String(n))
+
+// ---------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------
 
@@ -683,7 +846,7 @@ export interface CliIO {
   err: (s: string) => void
 }
 
-const USAGE = `usage: instruction-lint [--root DIR] [--config FILE] [--only PATH]... [--json] [--strict] [--all] [--report] [--rules]
+const USAGE = `usage: instruction-lint [--root DIR] [--config FILE] [--only PATH]... [--json] [--strict] [--all] [--report] [--base REF] [--rules]
 
   --root DIR     repository root (default: nearest ancestor containing .opencode/)
   --config FILE  JSON options (default: <root>/.opencode/instruction-lint.json if present)
@@ -694,6 +857,8 @@ const USAGE = `usage: instruction-lint [--root DIR] [--config FILE] [--only PATH
   --strict       exit 1 on warnings as well as errors
   --all          show info findings (hidden by default, always counted)
   --report       print per-file token and load-set sizes
+  --base REF     also report line, token, and load-set deltas for instruction files
+                 changed since merge-base(REF, HEAD) (DE-004 evidence)
   --rules        list rule IDs and exit`
 
 export function findRoot(start: string): string | null {
@@ -710,10 +875,11 @@ export function main(argv: string[], io: CliIO): number {
   const flags = new Set<string>()
   let root: string | null = null
   let config: string | null = null
+  let baseRef: string | null = null
   const only = new Set<string>()
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
-    if (a === "--root" || a === "--config" || a === "--only") {
+    if (a === "--root" || a === "--config" || a === "--only" || a === "--base") {
       const v = argv[++i]
       if (!v) {
         io.err(`${a} needs a value\n${USAGE}`)
@@ -721,6 +887,7 @@ export function main(argv: string[], io: CliIO): number {
       }
       if (a === "--root") root = resolve(io.cwd, v)
       else if (a === "--config") config = resolve(io.cwd, v)
+      else if (a === "--base") baseRef = v
       else for (const p of v.split(",")) if (p.trim()) only.add(p.trim().replace(/^\.\//, ""))
     } else if (["--json", "--strict", "--all", "--report", "--rules", "--help"].includes(a)) {
       flags.add(a)
@@ -754,6 +921,22 @@ export function main(argv: string[], io: CliIO): number {
   }
 
   const result = lint(root, discoverArtifacts(root), options)
+  let delta: { base: string; mergeBase: string; files: Delta[]; totals: { lines: number; tokens: number } } | null = null
+  if (baseRef !== null) {
+    let tree: BaseTree
+    try {
+      tree = readBaseTree(root, baseRef)
+    } catch (e) {
+      const detail = (e as { stderr?: Buffer }).stderr?.toString("utf8").trim() || (e as Error).message
+      io.err(`cannot read base ${baseRef}: ${detail}`)
+      return 2
+    }
+    const baseResult = lint(root, tree.artifacts, options, (rel) => tree.paths.has(rel))
+    let files = computeDeltas(baseResult, result)
+    if (only.size > 0) files = files.filter((d) => only.has(d.file))
+    const sum = (k: "lines" | "tokens"): number => files.reduce((n, d) => n + d[k].delta, 0)
+    delta = { base: baseRef, mergeBase: tree.mergeBase, files, totals: { lines: sum("lines"), tokens: sum("tokens") } }
+  }
   if (only.size > 0) result.findings = result.findings.filter((f) => only.has(f.file))
   const count = (s: Severity): number => result.findings.filter((f) => f.severity === s).length
   const summary = { files: result.artifacts.length, errors: count("error"), warnings: count("warning"), info: count("info") }
@@ -761,7 +944,7 @@ export function main(argv: string[], io: CliIO): number {
   if (flags.has("--json")) {
     const loadTokens = Object.fromEntries(result.loadTokens)
     const tokens = Object.fromEntries(result.artifacts.map((a) => [a.file, a.tokens]))
-    io.out(JSON.stringify({ summary, findings: result.findings, tokens, loadTokens }, null, 2))
+    io.out(JSON.stringify({ summary, findings: result.findings, tokens, loadTokens, ...(delta ? { delta } : {}) }, null, 2))
   } else {
     for (const f of result.findings) {
       if (f.severity === "info" && !flags.has("--all")) continue
@@ -774,6 +957,14 @@ export function main(argv: string[], io: CliIO): number {
         const load = result.loadTokens.get(a.file)
         io.out(`${String(a.tokens).padStart(6)}  ${(load === undefined ? "-" : String(load)).padStart(6)}  ${a.file}`)
       }
+    }
+    if (delta) {
+      io.out(`\ndeltas since ${delta.base} (merge-base ${delta.mergeBase.slice(0, 12)})`)
+      io.out(`${"lines".padEnd(14)} ${"tokens".padEnd(14)} ${"load".padEnd(14)} ${"status".padEnd(10)} file`)
+      const cell = (p: { base: number; head: number; delta: number } | null): string =>
+        (p ? `${p.head} (${signed(p.delta)})` : "-").padEnd(14)
+      for (const d of delta.files) io.out(`${cell(d.lines)} ${cell(d.tokens)} ${cell(d.loadTokens)} ${d.status.padEnd(10)} ${d.file}`)
+      io.out(`total: ${signed(delta.totals.lines)} lines, ${signed(delta.totals.tokens)} tokens across ${delta.files.length} files`)
     }
     const hidden = flags.has("--all") ? "" : " (use --all to show info)"
     io.out(`\n${summary.files} files: ${summary.errors} errors, ${summary.warnings} warnings, ${summary.info} info${summary.info ? hidden : ""}`)

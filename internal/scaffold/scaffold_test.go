@@ -4761,6 +4761,9 @@ var knownNonEmbeddedFiles = map[string]bool{
 	// Meta-prompt reviewer — repo-local persona that depends on the
 	// repo-local instruction linter and determinism pack
 	".opencode/agents/divisor-linguist.md": true,
+	// Determinism reviewer — repo-local persona that depends on the
+	// repo-local determinism pack, instruction linter, and tool inventory
+	".opencode/agents/divisor-determinism.md": true,
 }
 
 func TestCanonicalSources_AreEmbedded(t *testing.T) {
