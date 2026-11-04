@@ -1,7 +1,9 @@
 import { Buffer } from "node:buffer"
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { execFile } from "node:child_process"
+import { mkdir, mkdtemp, rm, symlink, truncate, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { promisify } from "node:util"
 
 import { afterEach, describe, expect, it } from "vitest"
 
@@ -13,6 +15,7 @@ import samplePayload from "../../schemas/review-dispatch/samples/sample-review-d
 // read_dispatch_artifact instead of the file-read tool, whose 2000-character
 // line limit cuts long JSON strings such as full-length lesson proposals.
 
+const execFileAsync = promisify(execFile)
 const CORRELATION = samplePayload.correlation_id
 const roots: string[] = []
 
@@ -99,6 +102,37 @@ describe("read_dispatch_artifact (RD-FR-057)", () => {
     expect(past).toMatchObject({ total: 1, offset: 5, entries: [], next_offset: null })
   })
 
+  it("serves complete advisories entries and the full finding at an in-bounds offset", async () => {
+    // The sample payload carries zero advisories, so a request against
+    // it would only assert another empty page. Inject a valid entry
+    // first, then require the served entry to be complete.
+    const advisory = {
+      severity: "LOW",
+      description: "Advisories are served complete through the reader.",
+      run_ids: [samplePayload.runs[0].run_id],
+    }
+    const root = await projectWith({ ...samplePayload, advisories: [advisory] })
+    const advisories = await readDispatchArtifact({ correlation_id: CORRELATION, section: "advisories" }, root)
+    expect(advisories).toMatchObject({ status: "ok", total: 1, offset: 0, next_offset: null })
+    expect(advisories.entries).toEqual([advisory])
+
+    // RD-FR-057: an in-bounds page serves the complete, untruncated
+    // finding — every field, at its full length.
+    const findings = await readDispatchArtifact({ correlation_id: CORRELATION, section: "findings", offset: 0 }, root)
+    expect(findings).toMatchObject({ status: "ok", total: 1, offset: 0, next_offset: null })
+    expect(findings.entries).toEqual([
+      {
+        severity: "HIGH",
+        category: "correctness",
+        description: "A required validation branch is missing.",
+        root_cause: "Unvalidated external input",
+        file: "internal/review/dispatch.go",
+        line: 42,
+        run_ids: ["11111111-1111-4111-8111-111111111111"],
+      },
+    ])
+  })
+
   it("fails closed on invalid input, a missing artifact, and an invalid artifact", async () => {
     const root = await projectWith({ ...samplePayload })
     expect(await readDispatchArtifact({ correlation_id: "../etc", section: "summary" }, root)).toMatchObject({
@@ -137,6 +171,31 @@ describe("read_dispatch_artifact (RD-FR-057)", () => {
     await rm(linkedPath)
     await symlink(target, linkedPath)
     expect(await readDispatchArtifact({ correlation_id: CORRELATION, section: "summary" }, linked)).toMatchObject({
+      code: "invalid_artifact",
+    })
+  })
+
+  it("rejects an artifact larger than the 64 MiB bound", async () => {
+    const root = await projectWith({ ...samplePayload })
+    const path = join(root, DISPATCH_ARTIFACT_DIRECTORY, `${CORRELATION}.json`)
+    // A sparse truncate past the bound keeps the test cheap: the stat
+    // size exceeds 64 MiB without 64 MiB ever being written.
+    await truncate(path, 64 * 1024 * 1024 + 1)
+    expect(await readDispatchArtifact({ correlation_id: CORRELATION, section: "summary" }, root)).toMatchObject({
+      status: "error",
+      code: "invalid_artifact",
+    })
+  })
+
+  it("rejects a FIFO artifact without blocking the open (RD-FR-057)", async () => {
+    const root = await projectWith({ ...samplePayload })
+    const path = join(root, DISPATCH_ARTIFACT_DIRECTORY, `${CORRELATION}.json`)
+    // A writer-less FIFO would block a plain O_RDONLY open forever;
+    // O_NONBLOCK plus the regular-file stat check must reject it.
+    await rm(path)
+    await execFileAsync("mkfifo", [path])
+    expect(await readDispatchArtifact({ correlation_id: CORRELATION, section: "summary" }, root)).toMatchObject({
+      status: "error",
       code: "invalid_artifact",
     })
   })

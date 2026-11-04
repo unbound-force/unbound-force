@@ -406,6 +406,8 @@ describe("build_review_prompts", () => {
       expect(data.error).toBeDefined()
       // A missing file inside an allowed directory is reported precisely (issue #932)
       expect(data.code).toBe("diff_not_found")
+      // ...with the copy-don't-retype remediation attached.
+      expect(data.error).toContain("do not retype")
     })
   })
 
