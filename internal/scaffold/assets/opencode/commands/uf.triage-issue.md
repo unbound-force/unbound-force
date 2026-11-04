@@ -269,6 +269,11 @@ The tool's caller-visible output is a one-line counts summary only:
 dispatch_review_runs: <status> (correlation_id <id>) — <completed> completed, <failed> failed, <skipped> skipped, <findings> findings, <proposals> proposals
 ```
 
+A non-ok summary also ends with ` — error: <message> (retryable:
+<bool>)`, the failure message collapsed to one line and cut to at most
+512 characters including the ellipsis, the retryable marker omitted
+when unknown.
+
 Its `<proposals>` count is taken before `consolidate_dispatch` merges
 near-identical proposals, so the artifact may hold fewer. Capture the
 `correlation_id` reported in that one-line summary and pass it as

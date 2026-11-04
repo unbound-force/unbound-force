@@ -684,7 +684,11 @@ sections instead of embedding their text.
    counts summary — `dispatch_review_runs: <status>
    (correlation_id <id>) — <completed> completed, <failed>
    failed, <skipped> skipped, <findings> findings, <proposals>
-   proposals`. Capture the `correlation_id` reported in that
+   proposals`. A non-ok summary also ends with ` — error:
+   <message> (retryable: <bool>)`, the failure message collapsed
+   to one line and cut to at most 512 characters including the
+   ellipsis, the retryable marker omitted when unknown. Capture
+   the `correlation_id` reported in that
    one-line summary and pass it as `correlation_id` on every
    subsequent consolidation call for this dispatch. Step 4
    and Step 6 are separate dispatches with separate
@@ -1622,7 +1626,11 @@ text.
       `dispatch_review_runs: <status> (correlation_id <id>)
       — <completed> completed, <failed> failed, <skipped>
       skipped, <findings> findings, <proposals> proposals`.
-      Capture the `correlation_id` reported in that
+      A non-ok summary also ends with ` — error: <message>
+      (retryable: <bool>)`, the failure message collapsed to one
+      line and cut to at most 512 characters including the ellipsis,
+      the retryable marker omitted when unknown. Capture the
+      `correlation_id` reported in that
       one-line summary and pass it as `correlation_id` on
       every subsequent consolidation call for this
       dispatch. Step 4 and Step 6 are separate dispatches
