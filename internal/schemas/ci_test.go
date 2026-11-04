@@ -315,12 +315,40 @@ func TestHandAuthoredSchemas_DirectoryStructure(t *testing.T) {
 	}
 }
 
+// TestReviewMatrixSchema_RepositoryPolicyValidates verifies the repository's
+// own .uf/review-matrix.yaml — a project extension point that MAY diverge
+// from the embedded canonical policy — still satisfies the v3 schema.
+func TestReviewMatrixSchema_RepositoryPolicyValidates(t *testing.T) {
+	schemasDir := repoSchemasDir()
+	schemaData, err := os.ReadFile(filepath.Join(schemasDir, "review-matrix", "v3.schema.json"))
+	if err != nil {
+		t.Fatalf("read review matrix schema: %v", err)
+	}
+	matrixData, err := os.ReadFile(filepath.Join(schemasDir, "..", ".uf", "review-matrix.yaml"))
+	if err != nil {
+		t.Fatalf("read repository review matrix: %v", err)
+	}
+	var matrix map[string]interface{}
+	if err := yaml.Unmarshal(matrixData, &matrix); err != nil {
+		t.Fatalf("parse repository review matrix YAML: %v", err)
+	}
+	matrixJSON, err := json.Marshal(matrix)
+	if err != nil {
+		t.Fatalf("convert repository review matrix to JSON: %v", err)
+	}
+	if err := schemas.ValidateBytes(schemaData, matrixJSON); err != nil {
+		t.Fatalf("repository review matrix validation failed: %v", err)
+	}
+}
+
 // TestReviewMatrixSchema_CanonicalPolicyValidates verifies the checked-in YAML
 // policy with the same schema used for JSON fixtures.
 func TestReviewMatrixSchema_CanonicalPolicyValidates(t *testing.T) {
 	schemasDir := repoSchemasDir()
 	schemaPath := filepath.Join(schemasDir, "review-matrix", "v3.schema.json")
-	matrixPath := filepath.Join(schemasDir, "..", ".uf", "review-matrix.yaml")
+	// The canonical policy is the embedded scaffold asset; the repository's
+	// .uf/ copy is a project extension point validated separately below.
+	matrixPath := filepath.Join(schemasDir, "..", "internal", "scaffold", "assets", "uf", "review-matrix.yaml")
 
 	schemaData, err := os.ReadFile(schemaPath)
 	if err != nil {
