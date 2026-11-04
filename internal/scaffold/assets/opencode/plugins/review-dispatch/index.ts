@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer"
 import { createHash, randomUUID } from "node:crypto"
-import { chmod, link, lstat, mkdir, open, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
+import { constants } from "node:fs"
+import { chmod, link, mkdir, open, readFile, readdir, realpath, rename, stat, unlink, writeFile, type FileHandle } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 
@@ -6258,9 +6259,12 @@ function artifactReadError(code: "invalid_input" | "not_found" | "invalid_artifa
 /**
  * Read one bounded section of a persisted review-dispatch artifact
  * (RD-FR-057). The path is derived from the correlation ID inside the
- * project's dispatch store, so no caller-supplied path is read; the file must
- * be a regular non-symlink file, parse as a review-dispatch envelope, and
- * pass the strict payload schema. Array sections page by entry under
+ * project's dispatch store, so no caller-supplied path is read; the file is
+ * opened with O_NOFOLLOW and O_NONBLOCK, inspected and read through the same
+ * handle, and bounded at ARTIFACT_MAX_FILE_BYTES against the live stream, so
+ * a symlink, FIFO, or same-path swap cannot redirect, stall, or oversize the
+ * read. The envelope must parse as review-dispatch and pass the strict
+ * payload schema. Array sections page by entry under
  * ARTIFACT_PAGE_MAX_BYTES of compact JSON; runs omit their findings (each
  * finding lives once in the findings section with its run_ids) and carry a
  * finding_count instead.
@@ -6277,19 +6281,48 @@ export async function readDispatchArtifact(rawInput: unknown, projectRoot: strin
   const offset = parsed.data.offset ?? 0
   const path = join(resolve(projectRoot, DISPATCH_ARTIFACT_DIRECTORY), `${correlationId}.json`)
   let text: string
+  let handle: FileHandle | undefined
   try {
-    const info = await lstat(path)
+    // Inspect and read through the same handle so a same-path swap
+    // cannot redirect content between stat and read (TOCTOU).
+    // O_NOFOLLOW rejects a symlinked final component (ELOOP) and
+    // O_NONBLOCK keeps the open from blocking on a FIFO or device;
+    // both flags are feature-detected because not every platform
+    // defines them. The stat must then prove a regular file.
+    const openFlags = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0)
+    handle = await open(path, openFlags)
+    const info = await handle.stat()
     if (!info.isFile()) {
       return artifactReadError("invalid_artifact", "artifact is not a regular file")
     }
     if (info.size > ARTIFACT_MAX_FILE_BYTES) {
       return artifactReadError("invalid_artifact", `artifact exceeds ${ARTIFACT_MAX_FILE_BYTES} bytes`)
     }
-    text = await readFile(path, "utf8")
+    // Read bounded against the live stream so growth after the stat
+    // still cannot exceed the byte budget.
+    const chunks: Buffer[] = []
+    const chunk = Buffer.alloc(64 * 1024)
+    let total = 0
+    for (;;) {
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null)
+      if (bytesRead === 0) {
+        break
+      }
+      total += bytesRead
+      if (total > ARTIFACT_MAX_FILE_BYTES) {
+        return artifactReadError("invalid_artifact", `artifact exceeds ${ARTIFACT_MAX_FILE_BYTES} bytes`)
+      }
+      chunks.push(Buffer.from(chunk.subarray(0, bytesRead)))
+    }
+    text = Buffer.concat(chunks).toString("utf8")
   } catch (error: unknown) {
     return isErrno(error, "ENOENT")
       ? artifactReadError("not_found", `no finalized artifact for correlation_id ${correlationId}`)
       : artifactReadError("invalid_artifact", `read artifact: ${errorMessage(error)}`)
+  } finally {
+    if (handle) {
+      await handle.close().catch(() => undefined)
+    }
   }
   let envelope: Record<string, unknown>
   try {
