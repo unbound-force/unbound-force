@@ -95,6 +95,18 @@ type packageLockEntry struct {
 // internal/scaffold/assets/ is byte-identical to the canonical
 // source file at the repo root. This prevents drift between the
 // embedded copies and the files developers actually use.
+// projectOwnedPolicyMirrors are uf/ policy assets whose embedded copy is
+// the canonical default shipped to generated projects. They are project
+// extension points (uf init never overwrites them), and this repository
+// extends its own .uf/ copies — for example to register the repo-local
+// divisor-linguist reviewer — so its copies MAY diverge from the embedded
+// asset. Canonical content is asserted against the embedded asset in
+// internal/schemas, and the repository copies are checked to preserve it.
+var projectOwnedPolicyMirrors = map[string]bool{
+	"uf/reviewer-capabilities.yaml": true,
+	"uf/review-matrix.yaml":         true,
+}
+
 func TestEmbeddedAssets_MatchSource(t *testing.T) {
 	root := findProjectRoot(t)
 	if root == "" {
@@ -134,6 +146,9 @@ func TestEmbeddedAssets_MatchSource(t *testing.T) {
 		// templates — the canonical repo copies MAY legitimately diverge.
 		if strings.HasPrefix(relPath, "opencode/uf/packs/") &&
 			strings.HasSuffix(relPath, "-custom.md") {
+			continue
+		}
+		if projectOwnedPolicyMirrors[relPath] {
 			continue
 		}
 
@@ -2197,6 +2212,9 @@ func TestSCFR001_CanonicalAssetSurfaceMatchesMirrors(t *testing.T) {
 			}
 			if got := mapAssetToSource(asset.asset); got != asset.source {
 				t.Fatalf("mapAssetToSource(%q) = %q, want %q", asset.asset, got, asset.source)
+			}
+			if projectOwnedPolicyMirrors[asset.asset] {
+				return // repository copy may extend the canonical default
 			}
 			mirror, err := assetContent(asset.asset)
 			if err != nil {
@@ -4737,6 +4755,9 @@ var knownNonEmbeddedFiles = map[string]bool{
 	// and are registered in expectedAssetPaths)
 	".opencode/uf/packs/determinism.md":           true,
 	".opencode/skills/determinism-first/SKILL.md": true,
+	// Meta-prompt reviewer — repo-local persona that depends on the
+	// repo-local instruction linter and determinism pack
+	".opencode/agents/divisor-linguist.md": true,
 }
 
 func TestCanonicalSources_AreEmbedded(t *testing.T) {
