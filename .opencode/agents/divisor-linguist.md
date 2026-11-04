@@ -88,6 +88,8 @@ Run the instruction linter once, restricted to the changed instruction files:
 node .opencode/lib/instruction-lint.ts --json --only <changed instruction files, comma-separated>
 ```
 
+The caller's pre-flight evidence may already include an `instruction-lint` row and its text output (the advisory check declared in `.uf/preflight.yaml`). That output covers the whole repository; still run the command above for structured findings scoped to the change, and report each finding once — never once from pre-flight output and again from this run.
+
 Exit code 1 means the linter found errors — that is evidence, not a tool failure. A tool failure is output that does not parse as JSON. The JSON shape:
 
 ```json
