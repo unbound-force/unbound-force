@@ -1355,6 +1355,15 @@ Each entry follows the format: `- <change-name>: <summary>`.
   `/uf.rebase-pr` drops its upstream check and bash fallback.
   (Fixes: #947)
   (Docs: #963, unbound-force/website#379)
+- address-feedback-pr-checkout (#954): `/uf.address-feedback` now
+  checks out the PR head (`gh pr checkout`) in new Section 1.2.1
+  before its first `get_progress` or `checkpoint` call, and stops if
+  the tree is dirty or `HEAD` doesn't match the frozen `head_sha`
+  afterwards. Progress is therefore keyed to the PR branch, not
+  whatever branch the run started on. Section 4.4 fetches and
+  pushes through the head remote and merge ref that `gh pr
+  checkout` configured, instead of a hard-coded `origin`, which
+  in a fork-and-upstream clone is the fork. (Fixes: #954)
 - review-dispatch-consumer-bounds (#941): lesson proposals are now
   stored with their full text. `consolidate_dispatch` persists the
   proposals in the dispatch artifact as an optional
