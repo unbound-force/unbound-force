@@ -146,22 +146,68 @@ func eligibleReviewersForTest(
 	return eligible, nil
 }
 
-func loadCanonicalReviewerManifestForTest(t *testing.T) reviewerManifestFixture {
+// The canonical reviewer policy is the embedded scaffold asset shipped to
+// generated projects. The repository's own .uf/ copy is a project
+// extension point that MAY register additional repo-local reviewers.
+func canonicalReviewerManifestPath() string {
+	return filepath.Join(repoSchemasDir(), "..", "internal", "scaffold", "assets", "uf", "reviewer-capabilities.yaml")
+}
+
+func repositoryReviewerManifestPath() string {
+	return filepath.Join(repoSchemasDir(), "..", ".uf", "reviewer-capabilities.yaml")
+}
+
+func loadReviewerManifestForTest(t *testing.T, path string) reviewerManifestFixture {
 	t.Helper()
-	schemasDir := repoSchemasDir()
-	schemaData, err := os.ReadFile(filepath.Join(schemasDir, "reviewer-capabilities", "v1.0.0.schema.json"))
+	schemaData, err := os.ReadFile(filepath.Join(repoSchemasDir(), "reviewer-capabilities", "v1.0.0.schema.json"))
 	if err != nil {
 		t.Fatalf("read reviewer-capabilities schema: %v", err)
 	}
-	manifestData, err := os.ReadFile(filepath.Join(schemasDir, "..", ".uf", "reviewer-capabilities.yaml"))
+	manifestData, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read canonical reviewer manifest: %v", err)
+		t.Fatalf("read reviewer manifest %s: %v", path, err)
 	}
 	manifest, err := parseReviewerManifestForTest(schemaData, manifestData)
 	if err != nil {
-		t.Fatalf("parse canonical reviewer manifest: %v", err)
+		t.Fatalf("parse reviewer manifest %s: %v", path, err)
 	}
 	return manifest
+}
+
+func loadCanonicalReviewerManifestForTest(t *testing.T) reviewerManifestFixture {
+	t.Helper()
+	return loadReviewerManifestForTest(t, canonicalReviewerManifestPath())
+}
+
+// TestReviewerCapabilities_RepositoryManifestExtendsCanonical keeps the
+// mirror exemption honest: the repository copy must contain every
+// canonical entry unchanged and in canonical order, and every extra
+// reviewer it registers must have an agent definition.
+func TestReviewerCapabilities_RepositoryManifestExtendsCanonical(t *testing.T) {
+	canonical := loadCanonicalReviewerManifestForTest(t)
+	repository := loadReviewerManifestForTest(t, repositoryReviewerManifestPath())
+	if err := validateReviewerManifestSemanticsForTest(repository); err != nil {
+		t.Fatalf("repository reviewer manifest: %v", err)
+	}
+
+	known := make(map[string]bool, len(canonical.Reviewers))
+	for _, entry := range canonical.Reviewers {
+		known[entry.Agent] = true
+	}
+	var knownInOrder []reviewerEntryFixture
+	for _, entry := range repository.Reviewers {
+		if known[entry.Agent] {
+			knownInOrder = append(knownInOrder, entry)
+			continue
+		}
+		agentPath := filepath.Join(repoSchemasDir(), "..", ".opencode", "agents", entry.Agent+".md")
+		if _, err := os.Stat(agentPath); err != nil {
+			t.Errorf("repository reviewer %s has no agent definition at %s: %v", entry.Agent, agentPath, err)
+		}
+	}
+	if !reflect.DeepEqual(knownInOrder, canonical.Reviewers) {
+		t.Errorf("repository manifest canonical entries = %#v, want %#v", knownInOrder, canonical.Reviewers)
+	}
 }
 
 func TestReviewerCapabilities_CanonicalManifestHasExactOrderAndScopes(t *testing.T) {

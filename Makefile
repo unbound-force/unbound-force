@@ -39,6 +39,12 @@ plugin-test: ## run TypeScript plugin unit, integration, smoke, and coverage che
 	cd .opencode && $(PLUGIN_TEST_NPM) install --ignore-scripts --no-package-lock --no-audit --no-fund && npx vitest run --coverage
 	@test ! -e .opencode/package-lock.json || { echo 'package-lock.json must not exist after plugin-test'; exit 1; }
 
+##@ Instruction Lint (agents, commands, skills, packs)
+
+.PHONY: lint-instructions
+lint-instructions: ## static checks on agent/command/skill/pack prose (add --strict to fail on warnings)
+	node .opencode/lib/instruction-lint.ts $(ARGS)
+
 ##@ CRAP Load Monitoring
 
 GAZE_VERSION ?= latest
