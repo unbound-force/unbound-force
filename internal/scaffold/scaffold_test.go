@@ -98,11 +98,14 @@ type packageLockEntry struct {
 // projectOwnedPolicyMirrors are uf/ policy assets whose embedded copy is
 // the canonical default shipped to generated projects. They are project
 // extension points (uf init never overwrites them), and this repository
-// extends its own .uf/ copies — for example to register the repo-local
-// divisor-linguist reviewer — so its copies MAY diverge from the embedded
-// asset. Canonical content is asserted against the embedded asset in
-// internal/schemas, and the repository copies are checked to preserve it.
+// extends its own .uf/ copies — registering the repo-local
+// divisor-linguist reviewer and declaring the instruction-lint pre-flight
+// check — so its copies MAY diverge from the embedded asset. Canonical
+// content is asserted against the embedded asset (internal/schemas and
+// TestRun_PreflightChecksPreservedOnRerun), and the repository copies are
+// checked to preserve or validate against it.
 var projectOwnedPolicyMirrors = map[string]bool{
+	"uf/preflight.yaml":             true,
 	"uf/reviewer-capabilities.yaml": true,
 	"uf/review-matrix.yaml":         true,
 }
