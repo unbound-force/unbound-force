@@ -1297,7 +1297,9 @@ Each entry follows the format: `- <change-name>: <summary>`.
   opencode stops warning about duplicate skills such as
   `speckit-workflow`. When only the legacy directory exists it is
   renamed; when both exist, legacy-only files move, byte-identical
-  copies and stale copies of scaffolded skills are removed, and a
+  copies and stale copies of scaffolded skills are removed (a
+  failed removal warns and keeps the file on disk instead of
+  counting it as removed), and a
   differing copy of any other skill is kept in place with a
   conflict warning, never overwritten. `uf_delegate_command` no
   longer searches `.opencode/skill`, so a stale legacy copy can't
@@ -1305,6 +1307,7 @@ Each entry follows the format: `- <change-name>: <summary>`.
   `unbound-force-heroes` skill moves to `.opencode/skills/`.
   Stealth mode skips this migration and the `command/` one,
   since both run after the stealth restore. (Fixes: #933)
+  (Docs: #963, unbound-force/website#379)
 - skill-root-file (#934): `uf_delegate_command` now resolves a
   bare `skill` value as a repo skill name first and, when no skill
   root holds it, as a repo-root file, so `Makefile` or
@@ -1315,13 +1318,24 @@ Each entry follows the format: `- <change-name>: <summary>`.
   that commands and make targets are not skill references and
   points to `skill_absent_reason`. `/uf.unleash` states the rule.
   (Fixes: #934)
+  (Docs: #963, unbound-force/website#379)
 - push-tool-target (#947): `git_push` and
   `git_push_force_with_lease` now require `branch` (optional
   `remote`, default `origin`; `HEAD` is rejected) and refuse with
   `BRANCH_MISMATCH` unless `symbolic-ref HEAD` is
   `refs/heads/<branch>` (a detached HEAD or another branch),
-  instead of pushing whatever happened to be checked out. Both
-  push the verified HEAD commit to `refs/heads/<branch>` with an
+  instead of pushing whatever happened to be checked out.
+  BREAKING: callers omitting `branch` fail `INVALID_INPUT`;
+  repos with scaffolded command copies must re-run `uf init`
+  after upgrading to refresh the migrated call sites, and hero
+  repos' hand-written commands using the old no-argument shape
+  must pass `branch` too. A git execution failure while
+  detecting the branch reports that it could not be determined
+  rather than misdiagnosing a detached HEAD. `remote` must be a
+  git config nickname: it also rejects `/`, which git would
+  resolve as a local repository path, while `branch` keeps
+  allowing `/` for names such as `feat/x`. Both push the
+  verified HEAD commit to `refs/heads/<branch>` with an
   explicit refspec. The force tool leases on
   `refs/heads/<branch>:<expected_sha>`; without `expected_sha`
   it leases on the remote-tracking ref with
@@ -1330,11 +1344,15 @@ Each entry follows the format: `- <change-name>: <summary>`.
   exist" when there is no tracking ref. An `expected_sha` that
   isn't a local commit fails `EXPECTED_SHA_UNKNOWN` without
   pushing. Both return `{remote, ref, old_sha, new_sha,
-  updated}`, with `updated: false` for an up-to-date no-op.
-  `/uf.finale`, `/uf.fix-ci` and `/uf.rebase-pr` pass `branch`;
-  `/uf.fix-ci` and `/uf.rebase-pr` lease on the PR's pre-fetch
-  head SHA, and `/uf.rebase-pr` drops its upstream check and
-  bash fallback. (Fixes: #947)
+  updated}`, with `updated: false` for an up-to-date no-op and
+  an optional `warning` when the push landed but the
+  `setUpstream` tracking configuration failed (the message
+  carries the remediation command). `/uf.finale`, `/uf.fix-ci`
+  and `/uf.rebase-pr` pass `branch`; `/uf.fix-ci` and
+  `/uf.rebase-pr` lease on the PR's pre-fetch head SHA, and
+  `/uf.rebase-pr` drops its upstream check and bash fallback.
+  (Fixes: #947)
+  (Docs: #963, unbound-force/website#379)
 - review-dispatch-consumer-bounds (#941): lesson proposals are now
   stored with their full text. `consolidate_dispatch` persists the
   proposals in the dispatch artifact as an optional

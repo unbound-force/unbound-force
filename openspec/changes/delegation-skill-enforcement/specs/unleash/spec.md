@@ -39,6 +39,14 @@ envelope that is non-retryable and names the searched
 locations. A resolved reference MUST be injected into the
 composed prompt as a tool-rendered directive instructing the
 child to load the skill or run the script for the task.
+(Superseded by `retroactive-push-skill-contracts`,
+openspec/changes/retroactive-push-skill-contracts/: the skill
+root set is `.opencode/skills/<name>/SKILL.md` only — the
+legacy `.opencode/skill/` root is retired and migrated by
+`uf init` — and a `/`-free value that names an existing
+repo-root file resolves as a root-file reference; an existing
+directory is not a file reference. That change MUST archive
+after this change.)
 
 The tool MUST record `task_classification`, the resolved skill
 reference, and any `skill_absent_reason` in the checkpoint data
