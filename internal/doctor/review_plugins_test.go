@@ -255,6 +255,20 @@ func TestCheckManifestInstallConsistency_UnreadableInstall(t *testing.T) {
 	}
 }
 
+func TestCheckManifestInstallConsistency_MalformedInstall(t *testing.T) {
+	// A present-but-unparseable installed package.json must fail
+	// like any other unreadable install rather than pass silently.
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
+	writeInstalledPackages(t, dir)
+	createFile(t, dir, ".opencode/node_modules/vitest/package.json", "not-json")
+
+	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: os.ReadFile})
+	if result.Severity != Fail || !strings.Contains(result.Message, "vitest") {
+		t.Errorf("result = %v %q, want Fail naming vitest", result.Severity, result.Message)
+	}
+}
+
 func TestCheckManifestInstallConsistency_ReadErrorFails(t *testing.T) {
 	// A present-but-unreadable install (EACCES, EISDIR) must not pass
 	// silently as if the package were absent.
