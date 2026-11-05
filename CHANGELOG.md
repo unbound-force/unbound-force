@@ -1371,7 +1371,13 @@ Each entry follows the format: `- <change-name>: <summary>`.
   failing the push at 4.4; the recorded push target must match
   `refs/heads/<head_ref>`, so a branch that merely contains the
   merged PR (such as upstream `main`) stops instead of pushing the
-  PR's commits elsewhere. Progress is therefore keyed to the PR
+  PR's commits elsewhere. PR-derived values (`HEAD_BRANCH`,
+  `HEAD_MERGE_REF`, `HEAD_REMOTE`) are charset-validated before
+  any shell-template interpolation — quoting alone is
+  insufficient (`$`, backtick, and `"` are legal git refname
+  characters that stay active inside double quotes) — and
+  `PR_NUMBER` must be a positive integer. Progress is therefore
+  keyed to the PR
   branch, not whatever branch the run started on — including on
   compressed-context resume (the session-resume guard confirms the
   branch before reading progress). Section 4.4 fetches and pushes
