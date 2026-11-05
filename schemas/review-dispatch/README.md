@@ -22,8 +22,9 @@ NOT infer approval from `review-dispatch` alone.
 
 The payload schema is draft 2020-12 and closed at every object level.
 It defines command and mode identity, immutable input context, the
-version 1 plan, run provenance, findings, advisories, coverage, native
-workflow result, generic verdict, and seven terminal run counts.
+version 1 plan, run provenance, findings, advisories, lesson proposals,
+coverage, native workflow result, generic verdict, and seven terminal
+run counts.
 
 JSON Schema owns structure, types, enums, bounds, and nullability.
 `finalize_review_dispatch` owns cross-field semantics, including run
