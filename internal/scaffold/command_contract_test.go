@@ -390,21 +390,26 @@ func TestCommandContracts_ArtifactSourcedLessons(t *testing.T) {
 	}{
 		{name: "uf.review-pr.md", clauses: []commandClause{
 			{name: "lessons from the artifact", all: []string{"lessons come from the artifact's `payload.proposals` array", "never from the compact result's preview"}},
+			{name: "failed finalization stores nothing", all: []string{"the stranded proposals remain retained in the persisted dispatch store", "report them as stranded, never store improvised lessons"}},
 		}},
 		{name: "uf.review-council.md", clauses: []commandClause{
 			{name: "lessons after finalization", all: []string{"after the section 5 finalization of this iteration succeeds, read the artifact's `payload.proposals` array", "never store lessons from it"}},
 			{name: "merge and overflow warning kinds", all: []string{"`duplicate_proposal_merged`, or `proposals_overflow` is discarded without failing"}},
+			{name: "failed finalization stores nothing", all: []string{"When the finalization fails closed, store no lesson: the proposals stay in the dispatch store, so report them as stranded"}},
 		}},
 		{name: "uf.unleash.md", clauses: []commandClause{
 			{name: "lessons from the artifact", all: []string{"store the dispatch's lessons from the `proposals` section", "never store from the preview"}},
+			{name: "failed finalization stores nothing", all: []string{"store no lesson and report the proposals as stranded in the dispatch store"}},
 		}},
 		{name: "uf.triage-issue.md", clauses: []commandClause{
 			{name: "finalize first", all: []string{"immediately after `dispatch_review_runs` completes, run the section 4.6 finalization", "this command makes no no-provenance retrieval call"}},
 			{name: "runs from the artifact", all: []string{"from the `payload.runs` array of the artifact read in section 2.3", "for each proposal in `payload.proposals`"}},
+			{name: "failed finalization stores nothing", all: []string{"no lesson is stored (the proposals stay in the dispatch store; report them as stranded)"}},
 		}},
 		{name: "uf.address-feedback.md", clauses: []commandClause{
 			{name: "finalize first", all: []string{"run it immediately after the item's section 2.3.4 dispatch completes", "this command makes no no-provenance retrieval call"}},
 			{name: "runs from the artifact", all: []string{"consolidation reads the `payload.runs` array of the artifact persisted by the item's section 2.3.8 finalization", "for each proposal in `payload.proposals`"}},
+			{name: "failed finalization stores nothing", all: []string{"store no lesson (the proposals stay in the dispatch store; report them as stranded) and consolidate nothing"}},
 		}},
 	}
 	for _, command := range commands {
