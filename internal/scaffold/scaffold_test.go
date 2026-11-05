@@ -1635,6 +1635,12 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 	}
 	readJSONFile(t, filepath.Join(root, "internal", "scaffold", "testdata", "plugin-package-provenance.json"), &provenance)
 
+	var manifest struct {
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	readJSONFile(t, filepath.Join(root, "internal", "scaffold", "assets", "opencode", "package.json"), &manifest)
+
 	expectedPackages := map[string]struct {
 		version string
 		project string
@@ -1671,6 +1677,15 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 		}
 		if len(entry.RegistryMaintainers) == 0 {
 			t.Errorf("%s registry maintainers are empty", name)
+		}
+		declared, ok := manifest.Dependencies[name]
+		if !ok {
+			declared, ok = manifest.DevDependencies[name]
+		}
+		if !ok {
+			t.Errorf("scaffold manifest does not declare %s", name)
+		} else if entry.Version != declared {
+			t.Errorf("%s provenance version %q does not match scaffold manifest pin %q", name, entry.Version, declared)
 		}
 	}
 
