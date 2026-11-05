@@ -730,7 +730,8 @@ sections instead of embedding their text.
   plugin predates durable proposals, so store nothing and
   report the previewed lessons as stranded. Never store from
   the preview. Skip storage when the finalization failed or
-  Dewey is unavailable, and say so in the report.
+  Dewey is unavailable: store no lesson and report the
+  proposals as stranded in the dispatch store.
 - Parse the entire finalization response as one JSON
   object first. If it parses, it is complete — ignore any
   truncation-shaped text inside it. If it does not parse,
@@ -1668,8 +1669,8 @@ text, already merged across personas by `consolidate_dispatch`), call
 compact result's `proposals` preview is non-empty: then the loaded
 plugin predates durable proposals, so store nothing and report the
 previewed lessons as stranded. Never store from the preview. Skip
-storage when the finalization failed or Dewey is unavailable, and say so
-in the report.
+storage when the finalization failed or Dewey is unavailable: store no
+lesson and report the proposals as stranded in the dispatch store.
 
 Parse the entire finalization response as one JSON object first. If it
 parses, it is complete — ignore any truncation-shaped text inside it. If
