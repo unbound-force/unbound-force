@@ -1,6 +1,29 @@
+<!-- capability: run-plan-command
+     change: delegation-timeout-budgets
+     originating_issue: 930
+     rationale: adds the delegation timeout recovery protocol to
+     the run-plan orchestrator; the capability's founding
+     unnumbered requirements live in the unarchived founding
+     change openspec/changes/run-plan-command/ and are not
+     modified here (the capability is not yet in
+     openspec/specs/, so this delta uses ADDED)
+-->
+
+Requirement numbering: this change allocates RPC-FR-001 for the
+requirement added below. RPC-FR-002 through RPC-FR-010 are
+reserved for future run-plan-command changes. The capability's
+founding requirements are unnumbered and live in the unarchived
+founding change `openspec/changes/run-plan-command/`; the sibling
+capability `delegation-timeouts` (delta in this same change)
+allocates DT-FR-001 through DT-FR-004 and reserves DT-FR-005
+through DT-FR-012. Requirement ids MUST stay inside the
+allocated range.
+
 ## ADDED Requirements
 
 ### Requirement: Delegation Timeout Recovery
+
+**ID: RPC-FR-001** This requirement MUST be satisfied.
 
 The orchestrator MUST delegate `/uf.unleash` with
 `timeout: 14400000` and MUST NOT pass `idle_timeout` (the
@@ -54,3 +77,11 @@ MUST NOT restart the item fresh on `main`.
 - **WHEN** the orchestrator recovers
 - **THEN** it applies gate-timeout recovery and does not
   re-delegate before the gate is cleared
+
+## MODIFIED Requirements
+
+None.
+
+## REMOVED Requirements
+
+None.
