@@ -210,7 +210,9 @@ recovery accepts `duplicate_proposal_merged` and the RD-FR-054
 
 This requirement amends RD-FR-053 and the full-mode consumer
 paragraph of RD-FR-052, and revisits design D5 of
-`bound-consolidate-dispatch-output`.
+`bound-consolidate-dispatch-output`. Where a clause of this
+requirement conflicts with RD-FR-049 through RD-FR-053 of that
+change, this requirement governs.
 
 Every in-repo command that stores dispatch lessons MUST store them
 from the persisted artifact, reading `payload.proposals` through the
