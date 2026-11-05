@@ -267,6 +267,14 @@ When the checked-out branch's configured upstream is verifiably
 not match (or is unset, as after the checkout fallback), the
 command MUST fall back to the explicit raw refspec command to
 guarantee the push target.
+(Superseded by `retroactive-push-skill-contracts`,
+openspec/changes/retroactive-push-skill-contracts/: the force
+push MUST always go through the `git_push_force_with_lease`
+plugin tool with `{branch: <HEAD_BRANCH>, remote:
+<HEAD_REMOTE>, expected_sha: <HEAD_SHA>}` — including after
+the checkout fallback — via an explicit refspec independent of
+any configured upstream; raw shell force-push forms are
+forbidden. That change MUST archive after this change.)
 
 #### Scenario: Plugin tool push with verified upstream
 

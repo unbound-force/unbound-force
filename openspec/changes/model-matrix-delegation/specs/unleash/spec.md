@@ -60,6 +60,14 @@ envelope that is non-retryable and names the searched
 locations. A resolved reference MUST be injected into the
 composed prompt as a tool-rendered directive instructing the
 child to load the skill or run the script for the task.
+(Superseded by `retroactive-push-skill-contracts`,
+openspec/changes/retroactive-push-skill-contracts/: the skill
+root set is `.opencode/skills/<name>/SKILL.md` only — the
+legacy `.opencode/skill/` root is retired and migrated by
+`uf init` — and a `/`-free value that names an existing
+repo-root file resolves as a root-file reference; an existing
+directory is not a file reference. That change MUST archive
+after this change.)
 
 `uf_delegate_command` MUST additionally accept a `model`
 parameter (with optional `variant`), a `profile` parameter
@@ -186,6 +194,13 @@ provenance.
 - **WHEN** `uf_delegate_command` resolves the reference
 - **THEN** the `.opencode/skills/` entry is used and is the
   resolved reference recorded in the audit trail
+  (Superseded by `retroactive-push-skill-contracts`,
+  openspec/changes/retroactive-push-skill-contracts/: the
+  legacy `.opencode/skill/` root is retired, so no two-root
+  collision exists; a `/`-free name that misses the skill
+  directory falls back to a repo-root file reference, and an
+  existing directory is not a file reference. That change
+  MUST archive after this change.)
 
 #### Scenario: No applicable skill, reason recorded
 

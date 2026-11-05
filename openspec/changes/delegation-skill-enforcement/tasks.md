@@ -48,6 +48,13 @@
   collision across the roots (first root wins), script-path
   resolution, traversal-rejected path, not-found envelope,
   no child session spawned on failure.
+  (Superseded by `retroactive-push-skill-contracts`,
+  openspec/changes/retroactive-push-skill-contracts/: the
+  legacy `.opencode/skill/` root is retired and migrated by
+  `uf init`; a `/`-free name that misses the skill directory
+  falls back to a repo-root file reference, and an existing
+  directory is not a file reference. That change MUST archive
+  after this change.)
 - [x] 1.4 Inject the tool-rendered skill directive into the
   composed prompt at a fixed position (after command text
   and feature-dir context, before the extra prompt), wording
