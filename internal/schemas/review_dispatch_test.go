@@ -460,8 +460,8 @@ func TestReviewVerdictCompatibility_MajorBoundary(t *testing.T) {
 
 // TestReviewDispatchSchema_LessonProposals verifies the optional
 // payload.proposals array (RD-FR-054, issue #941): a payload without it
-// and one with a well-formed full-length proposal validate, and malformed
-// proposals are rejected.
+// and one with a well-formed full-length proposal validate, malformed
+// proposals are rejected, and 513 entries exceed the array bound.
 func TestReviewDispatchSchema_LessonProposals(t *testing.T) {
 	schemaData, err := os.ReadFile(filepath.Join(
 		repoSchemasDir(), "review-dispatch", "v1.0.0.schema.json",
@@ -476,13 +476,17 @@ func TestReviewDispatchSchema_LessonProposals(t *testing.T) {
 		t.Fatalf("read review-dispatch sample: %v", err)
 	}
 
-	withProposal := func(proposal map[string]any) []byte {
+	withProposals := func(proposals ...map[string]any) []byte {
 		t.Helper()
 		var payload map[string]any
 		if err := json.Unmarshal(sampleData, &payload); err != nil {
 			t.Fatalf("decode review-dispatch sample: %v", err)
 		}
-		payload["proposals"] = []any{proposal}
+		entries := make([]any, 0, len(proposals))
+		for _, proposal := range proposals {
+			entries = append(entries, proposal)
+		}
+		payload["proposals"] = entries
 		encoded, err := json.Marshal(payload)
 		if err != nil {
 			t.Fatalf("encode payload: %v", err)
@@ -501,8 +505,15 @@ func TestReviewDispatchSchema_LessonProposals(t *testing.T) {
 	if err := schemas.ValidateBytes(schemaData, sampleData); err != nil {
 		t.Fatalf("payload without proposals must validate: %v", err)
 	}
-	if err := schemas.ValidateBytes(schemaData, withProposal(valid())); err != nil {
+	if err := schemas.ValidateBytes(schemaData, withProposals(valid())); err != nil {
 		t.Fatalf("full-length proposal must validate: %v", err)
+	}
+	overLimit := make([]map[string]any, 513)
+	for i := range overLimit {
+		overLimit[i] = valid()
+	}
+	if err := schemas.ValidateBytes(schemaData, withProposals(overLimit...)); err == nil {
+		t.Fatal("513 proposals must exceed the array bound (max 512)")
 	}
 
 	tests := []struct {
@@ -520,7 +531,7 @@ func TestReviewDispatchSchema_LessonProposals(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			proposal := valid()
 			test.mutate(proposal)
-			if err := schemas.ValidateBytes(schemaData, withProposal(proposal)); err == nil {
+			if err := schemas.ValidateBytes(schemaData, withProposals(proposal)); err == nil {
 				t.Fatal("expected schema rejection")
 			}
 		})

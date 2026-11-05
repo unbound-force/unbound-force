@@ -524,6 +524,19 @@ describe("finalize strict schema boundaries", () => {
       expect(errors).toHaveLength(1)
       expect(errors[0]).toContain("payload.proposals.0")
     }
+
+    const oversized = payload() as unknown as Record<string, unknown>
+    oversized.proposals = Array.from({ length: 513 }, () => ({
+      agent: "divisor-guard",
+      information: "lesson",
+      tag: "review-dispatch",
+    }))
+    const oversizedErrors = await errorsFor(
+      oversized as unknown as ReturnType<typeof payload>,
+    )
+    expect(oversizedErrors).toHaveLength(1)
+    expect(oversizedErrors[0]).toContain("payload.proposals")
+    expect(oversizedErrors[0]).not.toContain("payload.proposals.0")
   })
 
   it("rejects the compact finalization wrapper submitted as a payload", async () => {
