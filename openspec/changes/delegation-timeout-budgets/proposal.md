@@ -99,9 +99,15 @@ timeout result carries no resume state.
 - Byte-identical mirrors under `internal/scaffold/assets/opencode/`.
 - Tests: `.opencode/test/delegation-budget.test.ts` (new),
   executor and delegate tests.
+- Documentation: user-facing reference for `idle_timeout`, the
+  timeout ceilings, the timeout envelope fields, and the
+  recovery protocol tracked as unbound-force/website#381
+  (AGENTS.md documentation gate; constitution Cross-Repo
+  Documentation rule).
 - No change to `invoke_agent`'s or `dispatch_review_runs`' input
-  bounds, to `run-timeout.ts` derivation, or to any quality gate
-  (coverage floor, CRAP, review limits).
+  bounds, to `run-timeout.ts` derivation (its record type gains
+  optional executor-outcome audit fields), or to any quality
+  gate (coverage floor, CRAP, review limits).
 
 ## Constitution Alignment
 

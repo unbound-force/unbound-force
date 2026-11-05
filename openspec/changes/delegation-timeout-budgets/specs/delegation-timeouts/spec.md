@@ -1,6 +1,25 @@
+<!-- capability: delegation-timeouts
+     change: delegation-timeout-budgets
+     originating_issue: 930
+     rationale: new capability covering hierarchical delegation
+     budgets, idle timeout, the command-path timeout ceiling,
+     and resume-carrying timeout results; design decisions
+     D1-D5 live in this change's design.md
+-->
+
+Requirement numbering: this change allocates DT-FR-001 through
+DT-FR-004 for the requirements added below. DT-FR-005 through
+DT-FR-012 are reserved for future delegation-timeouts changes.
+The sibling capability `run-plan-command` (delta in this same
+change) allocates RPC-FR-001 and reserves RPC-FR-002 through
+RPC-FR-010 for future run-plan-command changes. Requirement ids
+MUST stay inside the allocated range.
+
 ## ADDED Requirements
 
 ### Requirement: Hierarchical Delegation Budgets
+
+**ID: DT-FR-001** This requirement MUST be satisfied.
 
 The shared agent executor MUST record each child session's
 absolute deadline in a process-wide budget registry for the
@@ -39,6 +58,8 @@ session, with error code `budget_exhausted`, non-retryable.
 - **THEN** the effective timeout is 10 minutes
 
 ### Requirement: Idle Timeout
+
+**ID: DT-FR-002** This requirement MUST be satisfied.
 
 When an idle timeout is configured, the executor MUST poll the
 child's session subtree for activity and MUST abort the child with
@@ -87,6 +108,8 @@ run's result.
 
 ### Requirement: Command-Path Timeout Ceiling
 
+**ID: DT-FR-003** This requirement MUST be satisfied.
+
 `uf_delegate_command` MUST accept `timeout` up to 14,400,000 ms
 when `command_path` is supplied and MUST reject a `timeout` above
 1,800,000 ms when it is not.
@@ -98,6 +121,8 @@ when `command_path` is supplied and MUST reject a `timeout` above
 - **THEN** validation fails before any child session is created
 
 ### Requirement: Resume-Carrying Timeout Results
+
+**ID: DT-FR-004** This requirement MUST be satisfied.
 
 When a run ends by a limit, the executor result MUST carry a
 `timeout` object with `kind` (`wall_clock`, `idle`, `budget`),
@@ -127,3 +152,11 @@ MUST yield `resume: null`.
   `question` tool call
 - **WHEN** the idle timeout fires
 - **THEN** the envelope carries `timeout.pending_question: true`
+
+## MODIFIED Requirements
+
+None.
+
+## REMOVED Requirements
+
+None.
