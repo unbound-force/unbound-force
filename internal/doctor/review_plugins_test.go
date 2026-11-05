@@ -9,7 +9,7 @@ import (
 )
 
 // reviewPluginManifestFixture mirrors the scaffolded .opencode/package.json
-// declared dependencies (design D13): two runtime deps and two dev deps.
+// declared dependencies (design D13): two runtime deps, no dev deps.
 const reviewPluginManifestFixture = `{
   "name": "unbound-force-opencode-plugins",
   "private": true,
@@ -17,10 +17,6 @@ const reviewPluginManifestFixture = `{
   "dependencies": {
     "@opencode-ai/plugin": "1.4.10",
     "zod": "4.1.8"
-  },
-  "devDependencies": {
-    "@vitest/coverage-v8": "5.0.3",
-    "vitest": "5.0.3"
   }
 }`
 
@@ -29,8 +25,6 @@ const reviewPluginManifestFixture = `{
 var reviewPluginInstalledVersions = map[string]string{
 	"@opencode-ai/plugin": "1.4.10",
 	"zod":                 "4.1.8",
-	"@vitest/coverage-v8": "5.0.3",
-	"vitest":              "5.0.3",
 }
 
 // writeInstalledPackages installs every review plugin package under
@@ -66,7 +60,7 @@ const reviewDispatchSourceFixture = `export default async () => ({
 
 // writeReviewPluginScaffold creates a minimal, consistent review plugin
 // scaffold under dir: package.json, node_modules for the
-// four declared packages, both plugin sources, and the opencode.json
+// declared runtime packages, both plugin sources, and the opencode.json
 // registration entries.
 func writeReviewPluginScaffold(t *testing.T, dir string) {
 	t.Helper()
@@ -235,11 +229,11 @@ func TestCheckManifestInstallConsistency_UnreadableInstall(t *testing.T) {
 	dir := t.TempDir()
 	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
 	writeInstalledPackages(t, dir)
-	createFile(t, dir, ".opencode/node_modules/vitest/package.json", "{}")
+	createFile(t, dir, ".opencode/node_modules/zod/package.json", "{}")
 
 	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: os.ReadFile})
-	if result.Severity != Fail || !strings.Contains(result.Message, "vitest") {
-		t.Errorf("result = %v %q, want Fail naming vitest", result.Severity, result.Message)
+	if result.Severity != Fail || !strings.Contains(result.Message, "zod") {
+		t.Errorf("result = %v %q, want Fail naming zod", result.Severity, result.Message)
 	}
 }
 
@@ -275,7 +269,7 @@ func TestCheckManifestInstallConsistency_Undeclared(t *testing.T) {
 func TestCheckReviewPluginDependencies_Missing(t *testing.T) {
 	dir := t.TempDir()
 	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
-	// Only one of the four packages is installed.
+	// Only one of the two runtime packages is installed.
 	createFile(t, dir, ".opencode/node_modules/zod/package.json", "{}")
 
 	opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
@@ -283,7 +277,10 @@ func TestCheckReviewPluginDependencies_Missing(t *testing.T) {
 	if result.Severity != Warn {
 		t.Errorf("severity = %v, want Warn", result.Severity)
 	}
-	for _, missing := range []string{"@opencode-ai/plugin", "vitest", "@vitest/coverage-v8"} {
+	if strings.Contains(result.Message, "vitest") {
+		t.Errorf("message %q must not require devDependencies the scaffold never installs", result.Message)
+	}
+	for _, missing := range []string{"@opencode-ai/plugin"} {
 		if !strings.Contains(result.Message, missing) {
 			t.Errorf("message %q should report missing %q", result.Message, missing)
 		}

@@ -937,3 +937,52 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		}
 	})
 }
+
+func TestPreservePluginDevDependencies_RestoresRepositoryManifest(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+	repo, err := os.ReadFile(filepath.Join(root, ".opencode", "package.json"))
+	if err != nil {
+		t.Fatalf("read repository manifest: %v", err)
+	}
+	shipped, err := assetContent(pluginManifestAsset)
+	if err != nil {
+		t.Fatalf("read shipped manifest: %v", err)
+	}
+	// uf init over this repository must leave its dev manifest untouched.
+	if got := preservePluginDevDependencies(shipped, repo); !bytes.Equal(got, repo) {
+		t.Errorf("merged manifest differs from the repository manifest:\n%s", got)
+	}
+}
+
+func TestPreservePluginDevDependencies_Cases(t *testing.T) {
+	shipped, err := assetContent(pluginManifestAsset)
+	if err != nil {
+		t.Fatalf("read shipped manifest: %v", err)
+	}
+	for _, existing := range []string{`{"dependencies": {"zod": "4.1.8"}}`, `not json`, `{"devDependencies": {}}`} {
+		if got := preservePluginDevDependencies(shipped, []byte(existing)); !bytes.Equal(got, shipped) {
+			t.Errorf("existing %q: got %s, want the shipped manifest unchanged", existing, got)
+		}
+	}
+	got := preservePluginDevDependencies(shipped, []byte(`{"devDependencies": {"z-tool": ">=1.0.0", "a-tool": "2.0.0"}}`))
+	var merged struct {
+		DevDependencies map[string]string `json:"devDependencies"`
+		Overrides       map[string]string `json:"overrides"`
+	}
+	if err := json.Unmarshal(got, &merged); err != nil {
+		t.Fatalf("merged manifest is not valid JSON: %v\n%s", err, got)
+	}
+	if merged.DevDependencies["z-tool"] != ">=1.0.0" || merged.DevDependencies["a-tool"] != "2.0.0" || len(merged.Overrides) == 0 {
+		t.Errorf("merged = %+v", merged)
+	}
+	if !bytes.Contains(got, []byte(`"z-tool": ">=1.0.0"`)) || bytes.Index(got, []byte("a-tool")) > bytes.Index(got, []byte("z-tool")) {
+		t.Errorf("devDependencies must be sorted and unescaped:\n%s", got)
+	}
+	if got := preservePluginDevDependencies([]byte("{}\n"), []byte(`{"devDependencies": {"a": "1"}}`)); string(got) != "{}\n" {
+		t.Errorf("manifest without an overrides anchor must be returned unchanged, got %s", got)
+	}
+}
+

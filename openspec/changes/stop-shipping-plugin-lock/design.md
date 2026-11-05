@@ -35,6 +35,24 @@ Activation runs `npm install --ignore-scripts --omit=dev
 The remediation text in both `uf init` and `uf doctor` names the
 same command.
 
+### D2a. Ship no devDependencies
+
+A lockless `npm install --omit=dev` still builds the full ideal tree,
+including `devDependencies`, and only skips them when writing
+`node_modules`. On node 22's bundled npm 10.9.9 the vitest 5 peer
+graph crashes that build ("Cannot read properties of null (reading
+'edgesOut')"), so activation would fail on the supported runtime.
+
+- The scaffolded `.opencode/package.json` is this repository's
+  manifest without its `devDependencies` block. Tests derive and
+  compare it byte for byte.
+- `uf init` re-inserts a target's existing `devDependencies` (sorted,
+  before `overrides`) when it refreshes the tool-owned manifest, so
+  this repository's dev manifest stays byte-identical and skipped.
+- `uf doctor` expects only the runtime packages under `node_modules`.
+- `make plugin-test` installs the full graph through `npx -y
+  npm@11.6.2` (`PLUGIN_TEST_NPM`), which builds it without crashing.
+
 ### D3. Ignore the lock in `.opencode/.gitignore`
 
 `package-lock.json` joins the canonical `opencodeGitignore` lines.

@@ -8,6 +8,7 @@
 - [x] 1.2 Add `package-lock.json` to the canonical `opencodeGitignore` lines and to this repository's `.opencode/.gitignore`
 - [x] 1.3 Switch `installAndActivateReviewPlugins` (`internal/scaffold/plugin_activation.go`) to `npm install --ignore-scripts --omit=dev --no-package-lock --no-audit --no-fund`, and update the remediation text
 - [x] 1.4 Stop tracking `.opencode/package-lock.json` in this repository, and make `make plugin-test` install with `npx -y npm@11.6.2 install --no-package-lock --no-audit --no-fund` (npm 11 because node 22's bundled npm 10.9.9 crashes in Arborist on the lockless vitest 5 peer graph)
+- [x] 1.5 Ship the scaffold `.opencode/package.json` without `devDependencies`, keep a target's existing `devDependencies` when `uf init` refreshes the manifest, and limit the doctor package checks to the runtime packages, so activation installs cleanly on npm 10.9.9 (design D2a)
 
 ## 2. Doctor
 

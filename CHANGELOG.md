@@ -907,8 +907,13 @@ Each entry follows the format: `- <change-name>: <summary>`.
   `--no-package-lock` through an exact-pinned npm 11
   (`npx -y npm@11.6.2`), because node 22's bundled npm 10.9.9
   crashes in Arborist building the lockless vitest 5 peer graph.
-  `manifest-install` fails, rather than passes, when an installed
-  `package.json` exists but cannot be read. Rollout: existing hero repositories can drop
+  The scaffolded `package.json` ships no `devDependencies`, since a
+  lockless install resolves them even under `--omit=dev` and the
+  same crash would break activation on npm 10; `uf init` keeps any
+  `devDependencies` a target already declares, and `uf doctor`
+  checks only the runtime packages. `manifest-install` fails, rather
+  than passes, when an installed `package.json` exists but cannot be
+  read. Rollout: existing hero repositories can drop
   their committed lock with
   `git rm --cached .opencode/package-lock.json`. (Spec:
   openspec/changes/stop-shipping-plugin-lock/)

@@ -30,7 +30,7 @@ coverage-gate: coverage ## enforce scope-based coverage thresholds on changed pa
 # plugin-test installs through an exact-pinned npm 11: node 22's bundled
 # npm 10.9.9 crashes in Arborist ("Cannot read properties of null
 # (reading 'edgesOut')") building the lockless tree for the vitest 5
-# peer graph. The uf init activation graph is unaffected.
+# peer graph. uf init avoids the crash by shipping no devDependencies.
 PLUGIN_TEST_NPM ?= npx -y npm@11.6.2
 
 plugin-test: ## run TypeScript plugin unit, integration, smoke, and coverage checks

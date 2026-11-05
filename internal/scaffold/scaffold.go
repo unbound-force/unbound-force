@@ -296,6 +296,9 @@ func Run(opts Options) (*Result, error) {
 		// Check if file already exists
 		existing, readErr := os.ReadFile(outPath)
 		fileExists := readErr == nil
+		if fileExists && relPath == pluginManifestAsset {
+			out = preservePluginDevDependencies(out, existing)
+		}
 
 		if !fileExists {
 			// New file -- create it

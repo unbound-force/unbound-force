@@ -2181,15 +2181,16 @@ const reviewPluginRuntimeRemediation = "install Node.js 22 and npm 10, then reru
 // inconsistent plugin dependency install.
 const reviewPluginInstallRemediation = "run npm install --ignore-scripts --omit=dev --no-package-lock in .opencode, then rerun uf init"
 
-// reviewPluginPackages lists the four direct npm packages declared by the
-// scaffolded review plugin manifest (design D13). Order is significant: it
+// reviewPluginPackages lists the direct runtime npm packages declared by the
+// scaffolded review plugin manifest (design D13). The scaffold ships no
+// devDependencies (activation installs with --omit=dev, and generated
+// projects never run the plugin suite), so only runtime packages are
+// expected under node_modules. Order is significant: it
 // is the deterministic iteration order for the manifest-install and
 // dependency presence checks.
 var reviewPluginPackages = []string{
 	"@opencode-ai/plugin",
 	"zod",
-	"vitest",
-	"@vitest/coverage-v8",
 }
 
 // reviewPluginTools maps each review plugin directory to the tool names its
@@ -2345,7 +2346,7 @@ func checkManifestInstallConsistency(opts *Options) CheckResult {
 	}
 }
 
-// checkReviewPluginDependencies verifies the four declared packages are
+// checkReviewPluginDependencies verifies the declared runtime packages are
 // present under .opencode/node_modules/. Returns Pass when all are present,
 // Warn (repairable) when one or more are missing.
 func checkReviewPluginDependencies(opts *Options) CheckResult {

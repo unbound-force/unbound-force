@@ -85,6 +85,38 @@ func assertStringMap(t *testing.T, label string, got, want map[string]string) {
 // internal/scaffold/assets/ is byte-identical to the canonical
 // source file at the repo root. This prevents drift between the
 // embedded copies and the files developers actually use.
+// shippedPluginManifest derives the scaffolded .opencode/package.json from
+// this repository's manifest: the same bytes without the devDependencies
+// block. Generated projects never run the plugin suite, and a lockless
+// install still resolves devDependencies even under --omit=dev, which
+// crashes npm 10.9.9's Arborist on the vitest 5 peer graph.
+func shippedPluginManifest(source []byte) []byte {
+	lines := strings.SplitAfter(string(source), "\n")
+	var out strings.Builder
+	skipping := false
+	for _, line := range lines {
+		switch {
+		case !skipping && line == "  \"devDependencies\": {\n":
+			skipping = true
+		case skipping:
+			if line == "  },\n" || line == "  }\n" {
+				skipping = false
+			}
+		default:
+			out.WriteString(line)
+		}
+	}
+	return []byte(out.String())
+}
+
+// expectedEmbedded returns the embedded bytes a canonical source maps to.
+func expectedEmbedded(relPath string, source []byte) []byte {
+	if relPath == "opencode/package.json" {
+		return shippedPluginManifest(source)
+	}
+	return source
+}
+
 func TestEmbeddedAssets_MatchSource(t *testing.T) {
 	root := findProjectRoot(t)
 	if root == "" {
@@ -143,7 +175,7 @@ func TestEmbeddedAssets_MatchSource(t *testing.T) {
 			continue
 		}
 
-		if !bytes.Equal(embedded, source) {
+		if !bytes.Equal(embedded, expectedEmbedded(relPath, source)) {
 			t.Errorf("drift detected: internal/scaffold/assets/%s differs from %s\n"+
 				"Run: cp %s internal/scaffold/assets/%s",
 				relPath, srcRel, srcRel, relPath)
@@ -1717,8 +1749,11 @@ func TestPluginPackageInputs_MirrorsMatchCanonical(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read scaffold mirror %s: %v", name, err)
 		}
-		if !bytes.Equal(canonical, mirror) {
-			t.Errorf("scaffold mirror %s differs from canonical input", name)
+		if !bytes.Equal(shippedPluginManifest(canonical), mirror) {
+			t.Errorf("scaffold mirror %s differs from canonical input minus devDependencies", name)
+		}
+		if bytes.Contains(mirror, []byte("devDependencies")) {
+			t.Errorf("scaffold mirror %s must not ship devDependencies", name)
 		}
 	}
 }
@@ -1761,7 +1796,7 @@ func TestSCFR003_FreshTargetInputsDoNotActivatePlugins(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read fresh-target %s: %v", name, err)
 		}
-		if !bytes.Equal(generated, canonical) {
+		if !bytes.Equal(generated, shippedPluginManifest(canonical)) {
 			t.Errorf("fresh-target %s differs from canonical reproducible input", name)
 		}
 		if !containsPath(result.Created, filepath.ToSlash(filepath.Join(".opencode", name))) {
@@ -2106,7 +2141,7 @@ func TestSCFR001_CanonicalAssetSurfaceMatchesMirrors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read canonical source: %v", err)
 			}
-			if !bytes.Equal(mirror, canonical) {
+			if !bytes.Equal(mirror, expectedEmbedded(asset.asset, canonical)) {
 				t.Errorf("embedded asset %q drifted from %q", asset.asset, asset.source)
 			}
 		})

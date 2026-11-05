@@ -180,7 +180,9 @@ imported externally.
   not hard failures
 - **npm for plugin-test**: `make plugin-test` installs through
   `npx -y npm@11.6.2` (`PLUGIN_TEST_NPM`); node 22's bundled
-  npm 10.9.9 crashes building the lockless vitest 5 peer graph
+  npm 10.9.9 crashes building the lockless vitest 5 peer graph.
+  The scaffolded manifest ships no `devDependencies` for the same
+  reason; `uf init` keeps a target's existing ones
 
 ## Behavioral Rules
 

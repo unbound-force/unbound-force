@@ -36,9 +36,13 @@ to embedded mirrors where drift applies.
 The repository and scaffold MUST track `.opencode/package.json`.
 They MUST NOT track or ship `.opencode/package-lock.json`. Direct
 dependencies MUST pin `@opencode-ai/plugin` 1.19.0 and Zod 4.1.8
-exactly. Test dependencies MUST pin Vitest 5.0.3 and
-`@vitest/coverage-v8` 5.0.3. The `toml` and `uuid` security
-overrides MUST remain.
+exactly. This repository's manifest MUST also pin the test
+dependencies Vitest 5.0.3 and `@vitest/coverage-v8` 5.0.3. The
+scaffolded manifest MUST NOT declare `devDependencies`, because a
+lockless install resolves them even under `--omit=dev`. When
+`uf init` refreshes an existing `.opencode/package.json`, it MUST
+keep the `devDependencies` that file already declares. The `toml`
+and `uuid` security overrides MUST remain.
 
 `.opencode/.gitignore` MUST ignore `node_modules`, `bun.lock`, and
 `package-lock.json`. It MUST NOT ignore `package.json`. Tests MUST
