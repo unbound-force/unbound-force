@@ -1,5 +1,7 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { existsSync, lstatSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
 
 import type { PluginInput } from "@opencode-ai/plugin"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -331,14 +333,20 @@ function enoent(what: string): NodeJS.ErrnoException {
   return Object.assign(new Error(`ENOENT: no such file or directory, ${what}`), { code: "ENOENT" })
 }
 
-/** Invoke the delegate tool with a full parent-session context and parse its JSON output. */
+/**
+ * Invoke the delegate tool with a full parent-session context and parse its
+ * JSON output. cwd defaults to the fake repository root; tests exercising
+ * real-filesystem defaults (the statSync-backed isDirectory) pass a real
+ * scratch directory instead.
+ */
 async function invokeDelegate(
   exec: GitExec,
   deps: DelegateCommandDependencies,
   args: Record<string, unknown>,
   abort: AbortSignal = new AbortController().signal,
+  cwd: string = FAKE_CWD,
 ): Promise<ToolResult<DelegateCommandData>> {
-  const delegate = createDelegateCommandTool(exec, FAKE_CWD, deps)
+  const delegate = createDelegateCommandTool(exec, cwd, deps)
   const result = await (
     delegate as {
       execute: (
@@ -349,7 +357,7 @@ async function invokeDelegate(
   ).execute(args, {
     sessionID: "parent-session",
     messageID: "message-parent",
-    directory: FAKE_CWD,
+    directory: cwd,
     abort,
   })
   return JSON.parse(result.output) as ToolResult<DelegateCommandData>
@@ -1176,6 +1184,60 @@ describe("uf_delegate_command skill resolution", () => {
         skill,
       })
       expect(result.status === "error" && result.code).toBe("SKILL_NOT_FOUND")
+    }
+  })
+
+  it("filters a real directory and accepts a real file through the default isDirectory (#948)", async () => {
+    // The default isDirectory (statSync-backed) has no positive-path coverage
+    // elsewhere: every other test injects a fake, so a regression returning
+    // isFile() -- or always false -- would pass the suite while letting a
+    // real directory resolve as a script reference. statSync, mkdtemp, and
+    // node:fs/promises stay real under the node:fs mock (only existsSync,
+    // lstatSync, readFileSync, mkdirSync, and writeFileSync are replaced),
+    // so this exercise runs against a real scratch tree.
+    const directory = await mkdtemp(join(tmpdir(), "uf-delegate-isdir-"))
+    try {
+      await mkdir(join(directory, "docs"))
+      await writeFile(join(directory, "run.sh"), "#!/bin/sh\n", { mode: 0o755 })
+      const realExists: FileExists = (path) => {
+        try {
+          statSync(path)
+          return true
+        } catch {
+          return false
+        }
+      }
+      const deps: DelegateCommandDependencies = {
+        client: fakeClient().client,
+        modelMatrix: matrixFreeDeps,
+        readText: fakeReadText({}).readText,
+        fileExists: realExists,
+        // isDirectory deliberately omitted: resolution must fall back to the
+        // production default rather than a test fake.
+      }
+
+      // A real directory is not a root-file reference.
+      const dirResult = await invokeDelegate(
+        recordingExec().exec,
+        deps,
+        { prompt: "Run it.", task_classification: "deterministic", skill: "docs" },
+        new AbortController().signal,
+        directory,
+      )
+      expect(dirResult.status === "error" && dirResult.code).toBe("SKILL_NOT_FOUND")
+
+      // A real file resolves through the same default.
+      const fileResult = await invokeDelegate(
+        recordingExec().exec,
+        deps,
+        { prompt: "Run it.", task_classification: "deterministic", skill: "run.sh" },
+        new AbortController().signal,
+        directory,
+      )
+      expect(fileResult.status).toBe("ok")
+      expect(fileResult.status === "ok" && fileResult.data.skill).toBe("run.sh")
+    } finally {
+      await rm(directory, { recursive: true, force: true })
     }
   })
 
