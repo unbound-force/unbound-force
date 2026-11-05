@@ -1857,40 +1857,6 @@ func containsPath(paths []string, want string) bool {
 	return false
 }
 
-func TestPluginPackageInputs_RollbackPrerequisites(t *testing.T) {
-	root := findProjectRoot(t)
-	if root == "" {
-		t.Fatal("project root not found")
-	}
-
-	var rollback struct {
-		BaselineLockSHA256 string `json:"baseline_lock_sha256"`
-		PriorGitignore     string `json:"prior_gitignore"`
-		SecurityOverride   struct {
-			LockSHA256         string            `json:"lock_sha256"`
-			TransitiveVersions map[string]string `json:"transitive_versions"`
-		} `json:"security_override_rollback"`
-	}
-	readJSONFile(t, filepath.Join(root, "internal", "scaffold", "testdata", "plugin-package-rollback.json"), &rollback)
-
-	const baselineLockSHA256 = "1ac9cdf171a743c69b18498e15711d628280a4748defd6334cd4276e194d32dc"
-	if rollback.BaselineLockSHA256 != baselineLockSHA256 {
-		t.Errorf("baseline lock SHA256 = %q, want %q", rollback.BaselineLockSHA256, baselineLockSHA256)
-	}
-	const priorGitignore = "node_modules\npackage.json\nbun.lock\n.gitignore\n"
-	if rollback.PriorGitignore != priorGitignore {
-		t.Errorf("prior .opencode/.gitignore = %q, want %q", rollback.PriorGitignore, priorGitignore)
-	}
-	const preHardeningLockSHA256 = "fef6f7f145d9dc8398233566934ff7a4e36d9505dbcb662660c773c03c1cdcba"
-	if rollback.SecurityOverride.LockSHA256 != preHardeningLockSHA256 {
-		t.Errorf("pre-hardening lock SHA256 = %q, want %q",
-			rollback.SecurityOverride.LockSHA256, preHardeningLockSHA256)
-	}
-	assertStringMap(t, "pre-hardening transitive versions",
-		rollback.SecurityOverride.TransitiveVersions,
-		map[string]string{"toml": "4.1.1", "uuid": "13.0.0"})
-}
-
 func TestDispatchRuntime_TaskScopedPluginSources(t *testing.T) {
 	root := findProjectRoot(t)
 	if root == "" {

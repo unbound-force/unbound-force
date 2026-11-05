@@ -260,6 +260,103 @@ func TestRun_InstallsProbesAndAtomicallyActivatesReviewPlugins(t *testing.T) {
 	}
 }
 
+// TestSCFR003_ForeignLockSurvivesRun composes the observable behavior
+// behind the "Lock written by another tool" scenario: a foreign lock
+// written into the target before Run() survives byte-identical, is
+// never reported as written, and the activation install runs with
+// --no-package-lock so the lock is neither read nor written.
+func TestSCFR003_ForeignLockSurvivesRun(t *testing.T) {
+	targetDir := t.TempDir()
+	opencodeDir := filepath.Join(targetDir, ".opencode")
+	if err := os.MkdirAll(opencodeDir, 0o755); err != nil {
+		t.Fatalf("create .opencode dir: %v", err)
+	}
+
+	// opencode.json with a user-owned plugin so the activation probe
+	// has a config to read, matching the other activation tests.
+	opencodeJSON := "{\n  \"plugin\": [\"user-owned-plugin\"]\n}\n"
+	if err := os.WriteFile(filepath.Join(targetDir, "opencode.json"), []byte(opencodeJSON), 0o644); err != nil {
+		t.Fatalf("write opencode.json: %v", err)
+	}
+
+	// A realistic foreign lock, diverging from anything the scaffold
+	// ships, pre-written before Run().
+	foreignLock := []byte(`{
+  "name": "foreign-project",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "foreign-project",
+      "version": "1.0.0",
+      "dependencies": {
+        "left-pad": "^1.3.0"
+      }
+    },
+    "node_modules/left-pad": {
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz",
+      "integrity": "sha512-XI5MPZVNTjYzN4Gk+lnMdFuZ2swrEHP7t6v/psU7hWSKVstLgvXWraHbjS4bPT/MGY4wdJhWN7EjJSbO9MBzA==",
+      "license": "MIT"
+    }
+  }
+}
+`)
+	lockPath := filepath.Join(opencodeDir, "package-lock.json")
+	if err := os.WriteFile(lockPath, foreignLock, 0o644); err != nil {
+		t.Fatalf("pre-write foreign lock: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	opts := reviewPluginRunOpts(t, targetDir, &stdout, false)
+	baseExec := opts.ExecCmdInDir
+	var installCommands []string
+	opts.ExecCmdInDir = func(dir, name string, args ...string) ([]byte, error) {
+		command := filepath.Base(name) + " " + strings.Join(args, " ")
+		if strings.HasPrefix(command, "npm install") {
+			installCommands = append(installCommands, command)
+		}
+		return baseExec(dir, name, args...)
+	}
+
+	result, err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+
+	// The foreign lock must survive byte-identical.
+	got, readErr := os.ReadFile(lockPath)
+	if readErr != nil {
+		t.Fatalf("foreign lock removed by Run(): %v", readErr)
+	}
+	if !bytes.Equal(got, foreignLock) {
+		t.Error("foreign lock content was modified by Run()")
+	}
+
+	// Run() must not report the foreign lock in any write group.
+	lockRel := filepath.ToSlash(filepath.Join(".opencode", "package-lock.json"))
+	for name, group := range map[string][]string{
+		"Created":     result.Created,
+		"Overwritten": result.Overwritten,
+		"Updated":     result.Updated,
+	} {
+		if containsPath(group, lockRel) {
+			t.Errorf("foreign lock reported as %s by Run()", name)
+		}
+	}
+
+	// The activation install must have run without touching the lock.
+	if len(installCommands) == 0 {
+		t.Fatal("activation install never ran; test cannot verify the lock is not read")
+	}
+	for _, command := range installCommands {
+		if !strings.Contains(command, "--no-package-lock") {
+			t.Errorf("install command %q must pin --no-package-lock so the foreign lock is neither read nor written", command)
+		}
+	}
+}
+
 // reviewPluginRunOpts builds an Options whose injected command fakes drive
 // the review plugin activation flow. When failInstall is true, `npm install`
 // returns an error (soft failure); otherwise the full install → probe →
@@ -517,24 +614,24 @@ func TestStageReviewPluginSources_CoversImportedLibModules(t *testing.T) {
 func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 	// Test the three branches of the idempotency guard by actually calling atomicallyActivateReviewPlugins
 	// rather than testing the logic directly
-	
+
 	tempDir := t.TempDir()
 	pluginsDir := filepath.Join(tempDir, ".opencode", "plugins")
-	
+
 	// Test case 1: Force refresh
 	t.Run("Force refresh", func(t *testing.T) {
 		// Create staged plugin directories and files
 		stagedBase := filepath.Join(tempDir, "stage1")
 		stagedInvokeAgentDir := filepath.Join(stagedBase, "plugins", "invoke-agent")
 		stagedReviewDispatchDir := filepath.Join(stagedBase, "plugins", "review-dispatch")
-		
+
 		if err := os.MkdirAll(stagedInvokeAgentDir, 0o755); err != nil {
 			t.Fatalf("mkdir staged invoke-agent plugin dir: %v", err)
 		}
 		if err := os.MkdirAll(stagedReviewDispatchDir, 0o755); err != nil {
 			t.Fatalf("mkdir staged review-dispatch plugin dir: %v", err)
 		}
-		
+
 		if err := os.WriteFile(filepath.Join(stagedInvokeAgentDir, "index.ts"), []byte("// invoke-agent content"), 0o644); err != nil {
 			t.Fatalf("write staged invoke-agent index.ts: %v", err)
 		}
@@ -555,7 +652,7 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(stagedUfFinaleDir, "index.ts"), []byte("// uf-finale content"), 0o644); err != nil {
 			t.Fatalf("write staged uf-finale index.ts: %v", err)
 		}
-		
+
 		// Debug: Check if the source directories exist
 		if _, err := os.Stat(stagedInvokeAgentDir); err != nil {
 			t.Fatalf("staged invoke-agent directory does not exist: %v", err)
@@ -569,23 +666,23 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(stagedReviewDispatchDir, "index.ts")); err != nil {
 			t.Fatalf("staged review-dispatch index.ts does not exist: %v", err)
 		}
-		
+
 		// Print the actual paths for debugging
 		t.Logf("stageRoot: %s", stagedBase)
 		t.Logf("stagedInvokeAgentDir: %s", stagedInvokeAgentDir)
 		t.Logf("stagedReviewDispatchDir: %s", stagedReviewDispatchDir)
-		
+
 		// Create installed plugin directories and files with different content
 		installedInvokeAgentDir := filepath.Join(pluginsDir, "invoke-agent")
 		installedReviewDispatchDir := filepath.Join(pluginsDir, "review-dispatch")
-		
+
 		if err := os.MkdirAll(installedInvokeAgentDir, 0o755); err != nil {
 			t.Fatalf("mkdir installed invoke-agent plugin dir: %v", err)
 		}
 		if err := os.MkdirAll(installedReviewDispatchDir, 0o755); err != nil {
 			t.Fatalf("mkdir installed review-dispatch plugin dir: %v", err)
 		}
-		
+
 		if err := os.WriteFile(filepath.Join(installedInvokeAgentDir, "index.ts"), []byte("// old invoke-agent content"), 0o644); err != nil {
 			t.Fatalf("write installed invoke-agent index.ts: %v", err)
 		}
@@ -606,7 +703,7 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(installedUfFinaleDir, "index.ts"), []byte("// old uf-finale content"), 0o644); err != nil {
 			t.Fatalf("write installed uf-finale index.ts: %v", err)
 		}
-		
+
 		// Create options with Force=true
 		opts := &Options{
 			TargetDir: tempDir,
@@ -619,23 +716,23 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 			Rename:    os.Rename,
 			MkdirAll:  os.MkdirAll,
 		}
-		
+
 		// Ensure the plugins directory exists before calling the function
 		if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
 			t.Fatalf("mkdir plugins directory: %v", err)
 		}
-		
+
 		// Call the actual function
 		activated, err := atomicallyActivateReviewPlugins(opts, stagedBase)
 		if err != nil {
 			t.Fatalf("atomicallyActivateReviewPlugins failed: %v", err)
 		}
-		
+
 		// Verify that plugins were activated
 		if len(activated) != 4 {
 			t.Errorf("expected 4 activated plugins, got %d", len(activated))
 		}
-		
+
 		// Verify that staged directories were removed
 		if _, err := os.Stat(stagedInvokeAgentDir); !os.IsNotExist(err) {
 			t.Error("staged invoke-agent directory should have been removed")
@@ -643,7 +740,7 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if _, err := os.Stat(stagedReviewDispatchDir); !os.IsNotExist(err) {
 			t.Error("staged review-dispatch directory should have been removed")
 		}
-		
+
 		// Verify that installed files now have the new content
 		invokeContent, err := os.ReadFile(filepath.Join(installedInvokeAgentDir, "index.ts"))
 		if err != nil {
@@ -652,7 +749,7 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if string(invokeContent) != "// invoke-agent content" {
 			t.Error("installed invoke-agent content was not updated")
 		}
-		
+
 		reviewContent, err := os.ReadFile(filepath.Join(installedReviewDispatchDir, "index.ts"))
 		if err != nil {
 			t.Fatalf("read installed review-dispatch content: %v", err)
@@ -675,21 +772,21 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 			t.Error("installed uf-finale content was not updated")
 		}
 	})
-	
+
 	// Test case 2: Content diff refresh
 	t.Run("Content diff refresh", func(t *testing.T) {
 		// Recreate staged plugin directories and files
 		stagedBase := filepath.Join(tempDir, "stage2")
 		stagedInvokeAgentDir := filepath.Join(stagedBase, "plugins", "invoke-agent")
 		stagedReviewDispatchDir := filepath.Join(stagedBase, "plugins", "review-dispatch")
-		
+
 		if err := os.MkdirAll(stagedInvokeAgentDir, 0o755); err != nil {
 			t.Fatalf("mkdir staged invoke-agent plugin dir: %v", err)
 		}
 		if err := os.MkdirAll(stagedReviewDispatchDir, 0o755); err != nil {
 			t.Fatalf("mkdir staged review-dispatch plugin dir: %v", err)
 		}
-		
+
 		if err := os.WriteFile(filepath.Join(stagedInvokeAgentDir, "index.ts"), []byte("// new invoke-agent content"), 0o644); err != nil {
 			t.Fatalf("write staged invoke-agent index.ts: %v", err)
 		}
@@ -710,13 +807,13 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(stagedUfFinaleDir, "index.ts"), []byte("// new uf-finale content"), 0o644); err != nil {
 			t.Fatalf("write staged uf-finale index.ts: %v", err)
 		}
-		
+
 		// Create installed plugin directories and files with different content
 		installedInvokeAgentDir := filepath.Join(pluginsDir, "invoke-agent")
 		installedReviewDispatchDir := filepath.Join(pluginsDir, "review-dispatch")
 		installedUfWorkflowDir := filepath.Join(pluginsDir, "uf-workflow")
 		installedUfFinaleDir := filepath.Join(pluginsDir, "uf-finale")
-		
+
 		if err := os.MkdirAll(installedInvokeAgentDir, 0o755); err != nil {
 			t.Fatalf("mkdir installed invoke-agent plugin dir: %v", err)
 		}
@@ -729,7 +826,7 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if err := os.MkdirAll(installedUfFinaleDir, 0o755); err != nil {
 			t.Fatalf("mkdir installed uf-finale plugin dir: %v", err)
 		}
-		
+
 		if err := os.WriteFile(filepath.Join(installedInvokeAgentDir, "index.ts"), []byte("// old invoke-agent content"), 0o644); err != nil {
 			t.Fatalf("write installed invoke-agent index.ts: %v", err)
 		}
@@ -742,7 +839,7 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(installedUfFinaleDir, "index.ts"), []byte("// old uf-finale content"), 0o644); err != nil {
 			t.Fatalf("write installed uf-finale index.ts: %v", err)
 		}
-		
+
 		// Create options with Force=false
 		opts := &Options{
 			TargetDir: tempDir,
@@ -755,18 +852,18 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 			Rename:    os.Rename,
 			MkdirAll:  os.MkdirAll,
 		}
-		
+
 		// Call the actual function
 		activated, err := atomicallyActivateReviewPlugins(opts, stagedBase)
 		if err != nil {
 			t.Fatalf("atomicallyActivateReviewPlugins failed: %v", err)
 		}
-		
+
 		// Verify that plugins were activated
 		if len(activated) != 4 {
 			t.Errorf("expected 4 activated plugins, got %d", len(activated))
 		}
-		
+
 		// Verify that staged directories were removed
 		if _, err := os.Stat(stagedInvokeAgentDir); !os.IsNotExist(err) {
 			t.Error("staged invoke-agent directory should have been removed")
@@ -774,7 +871,7 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if _, err := os.Stat(stagedReviewDispatchDir); !os.IsNotExist(err) {
 			t.Error("staged review-dispatch directory should have been removed")
 		}
-		
+
 		// Verify that installed files now have the new content
 		invokeContent, err := os.ReadFile(filepath.Join(installedInvokeAgentDir, "index.ts"))
 		if err != nil {
@@ -783,7 +880,7 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if string(invokeContent) != "// new invoke-agent content" {
 			t.Error("installed invoke-agent content was not updated")
 		}
-		
+
 		reviewContent, err := os.ReadFile(filepath.Join(installedReviewDispatchDir, "index.ts"))
 		if err != nil {
 			t.Fatalf("read installed review-dispatch content: %v", err)
@@ -806,21 +903,21 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 			t.Error("installed uf-finale content was not updated")
 		}
 	})
-	
+
 	// Test case 3: Identical skip
 	t.Run("Identical skip", func(t *testing.T) {
 		// Recreate staged plugin directories and files
 		stagedBase := filepath.Join(tempDir, "stage3")
 		stagedInvokeAgentDir := filepath.Join(stagedBase, "plugins", "invoke-agent")
 		stagedReviewDispatchDir := filepath.Join(stagedBase, "plugins", "review-dispatch")
-		
+
 		if err := os.MkdirAll(stagedInvokeAgentDir, 0o755); err != nil {
 			t.Fatalf("mkdir staged invoke-agent plugin dir: %v", err)
 		}
 		if err := os.MkdirAll(stagedReviewDispatchDir, 0o755); err != nil {
 			t.Fatalf("mkdir staged review-dispatch plugin dir: %v", err)
 		}
-		
+
 		if err := os.WriteFile(filepath.Join(stagedInvokeAgentDir, "index.ts"), []byte("// identical content"), 0o644); err != nil {
 			t.Fatalf("write staged invoke-agent index.ts: %v", err)
 		}
@@ -841,13 +938,13 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(stagedUfFinaleDir, "index.ts"), []byte("// identical content"), 0o644); err != nil {
 			t.Fatalf("write staged uf-finale index.ts: %v", err)
 		}
-		
+
 		// Create installed plugin directories and files with identical content
 		installedInvokeAgentDir := filepath.Join(pluginsDir, "invoke-agent")
 		installedReviewDispatchDir := filepath.Join(pluginsDir, "review-dispatch")
 		installedUfWorkflowDir := filepath.Join(pluginsDir, "uf-workflow")
 		installedUfFinaleDir := filepath.Join(pluginsDir, "uf-finale")
-		
+
 		if err := os.MkdirAll(installedInvokeAgentDir, 0o755); err != nil {
 			t.Fatalf("mkdir installed invoke-agent plugin dir: %v", err)
 		}
@@ -860,7 +957,7 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if err := os.MkdirAll(installedUfFinaleDir, 0o755); err != nil {
 			t.Fatalf("mkdir installed uf-finale plugin dir: %v", err)
 		}
-		
+
 		if err := os.WriteFile(filepath.Join(installedInvokeAgentDir, "index.ts"), []byte("// identical content"), 0o644); err != nil {
 			t.Fatalf("write installed invoke-agent index.ts: %v", err)
 		}
@@ -873,7 +970,7 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(installedUfFinaleDir, "index.ts"), []byte("// identical content"), 0o644); err != nil {
 			t.Fatalf("write installed uf-finale index.ts: %v", err)
 		}
-		
+
 		// Create options with Force=false
 		opts := &Options{
 			TargetDir: tempDir,
@@ -885,18 +982,18 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 			Rename:    os.Rename,
 			MkdirAll:  os.MkdirAll,
 		}
-		
+
 		// Call the actual function
 		activated, err := atomicallyActivateReviewPlugins(opts, stagedBase)
 		if err != nil {
 			t.Fatalf("atomicallyActivateReviewPlugins failed: %v", err)
 		}
-		
+
 		// Verify that plugins were activated
 		if len(activated) != 4 {
 			t.Errorf("expected 4 activated plugins, got %d", len(activated))
 		}
-		
+
 		// Verify that staged directories were removed
 		if _, err := os.Stat(stagedInvokeAgentDir); !os.IsNotExist(err) {
 			t.Error("staged invoke-agent directory should have been removed")
@@ -904,7 +1001,7 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if _, err := os.Stat(stagedReviewDispatchDir); !os.IsNotExist(err) {
 			t.Error("staged review-dispatch directory should have been removed")
 		}
-		
+
 		// Verify that installed files now have the new content
 		invokeContent, err := os.ReadFile(filepath.Join(installedInvokeAgentDir, "index.ts"))
 		if err != nil {
@@ -913,7 +1010,7 @@ func TestAtomicallyActivateReviewPlugins_Branches(t *testing.T) {
 		if string(invokeContent) != "// identical content" {
 			t.Error("installed invoke-agent content should not have changed")
 		}
-		
+
 		reviewContent, err := os.ReadFile(filepath.Join(installedReviewDispatchDir, "index.ts"))
 		if err != nil {
 			t.Fatalf("read installed review-dispatch content: %v", err)
@@ -985,4 +1082,3 @@ func TestPreservePluginDevDependencies_Cases(t *testing.T) {
 		t.Errorf("manifest without an overrides anchor must be returned unchanged, got %s", got)
 	}
 }
-

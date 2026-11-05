@@ -225,6 +225,24 @@ func TestCheckManifestInstallConsistency_MissingManifest(t *testing.T) {
 	}
 }
 
+func TestCheckManifestInstallConsistency_MalformedManifest(t *testing.T) {
+	// A present-but-unparseable package.json must warn with a
+	// remediation hint rather than pass as a healthy manifest.
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/package.json", "not-json")
+
+	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: os.ReadFile})
+	if result.Severity != Warn {
+		t.Errorf("severity = %v, want Warn (repairable malformed manifest)", result.Severity)
+	}
+	if result.Message != "package.json malformed" {
+		t.Errorf("message = %q, want %q", result.Message, "package.json malformed")
+	}
+	if result.InstallHint == "" {
+		t.Error("malformed-manifest result should carry a remediation hint")
+	}
+}
+
 func TestCheckManifestInstallConsistency_UnreadableInstall(t *testing.T) {
 	dir := t.TempDir()
 	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
