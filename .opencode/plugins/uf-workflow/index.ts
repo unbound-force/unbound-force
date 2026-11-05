@@ -8,6 +8,7 @@ import { tool, type PluginInput, type PluginModule } from "@opencode-ai/plugin"
 import { z } from "zod"
 import {
   DEFAULT_TIMEOUT_MILLISECONDS,
+  MAX_TIMEOUT_MILLISECONDS,
   PromptSchema,
   directModelIdentity,
   executeAgentSession,
@@ -1844,10 +1845,11 @@ const TASKS_ARTIFACT_STOP_MESSAGE =
   "Task generation failed -- tasks.md was not created. Check the agent output for errors."
 
 /**
- * Wall-clock ceiling for prompt-only delegations, matching the executor
- * TimeoutSchema bound shared with invoke_agent.
+ * Wall-clock ceiling for prompt-only delegations, derived from the
+ * executor TimeoutSchema bound shared with invoke_agent so the two
+ * cannot drift apart.
  */
-export const MAX_PROMPT_DELEGATION_TIMEOUT_MS = 1_800_000
+export const MAX_PROMPT_DELEGATION_TIMEOUT_MS = MAX_TIMEOUT_MILLISECONDS
 
 /**
  * Wall-clock ceiling for command-path delegations (4 hours;
