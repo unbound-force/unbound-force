@@ -205,10 +205,37 @@ func TestCommandContracts_AddressFeedback(t *testing.T) {
 		{name: "tier two finalization", all: []string{"finalize every tier 2 item, including plan or no-success failures, with a single `consolidate_dispatch` call", "\"workflow_id\": \"uf.address-feedback\"", "never call `finalize_review_dispatch` yourself", "the scalar review verdict (`review_verdict`)"}},
 		{name: "feedback triage artifact", all: []string{".uf/artifacts/feedback-triage/pr-<pr_number>-round-<m>.json", "existing feedback-triage artifact", "emitted in addition to each tier 2 `review-dispatch` artifact"}},
 		{name: "pr head checkout", all: []string{"### 1.2.1 Check Out the PR Head", "MUST be on the PR head before the first `get_progress` or `checkpoint` call", "gh pr checkout <PR_NUMBER>", "Never fetch the head branch by guessing a remote name", "never reset or discard local commits", "Never call `get_progress` or `checkpoint` from another branch."}},
-		{name: "push to configured head remote", all: []string{"git fetch <HEAD_REMOTE> <HEAD_MERGE_REF>", "git push <HEAD_REMOTE> HEAD:<HEAD_MERGE_REF>"}},
+		{name: "pr head identity keyed on head sha", all: []string{"Identity is keyed on `HEAD`, not on the local branch name", "`git merge-base --is-ancestor <head_sha> HEAD`", "carries unpushed commits from a prior run", "Record the actual checked-out branch name as `HEAD_BRANCH`", "git config branch.<HEAD_BRANCH>.remote", "git config branch.<HEAD_BRANCH>.merge"}},
+		{name: "read-only merge ref stops early", all: []string{"If `HEAD_MERGE_REF` starts with `refs/pull/`, **STOP**", "read-only merge ref (a fork PR with maintainer edits disabled)", "the Section 4.4 push would always be rejected"}},
+		{name: "checkout failure stop", all: []string{"If the checkout fails, **STOP** and report the specific error", "untracked working tree files would be overwritten", "`git stash -u` includes untracked files; plain `git stash` skips them"}},
+		{name: "push to configured head remote", all: []string{"git fetch <HEAD_REMOTE> <HEAD_MERGE_REF>", "git push <HEAD_REMOTE> HEAD:<HEAD_MERGE_REF>", "git rev-list --left-right --count HEAD...FETCH_HEAD", "no remote-tracking ref is written, so `git status` cannot observe divergence"}},
 	}
 
 	assertCommandCopies(t, "uf.address-feedback.md", true, clauses)
+
+	// Ordering pin: the PR-head checkout gate must precede the
+	// first **CHECKPOINT** marker — progress state is keyed by
+	// the checked-out branch (#954), so a checkpoint instruction
+	// moved above Section 1.2.1 regresses the branch keying while
+	// every pinned phrase stays present. The anchor is the bold
+	// **CHECKPOINT** marker, not a get_progress mention: the
+	// session-resume guard legitimately references get_progress
+	// before Section 1.2.1 while ordering it after the branch
+	// confirmation.
+	for _, copy := range loadCommandCopies(t, "uf.address-feedback.md", true) {
+		normalized := normalizeCommandText(copy.text)
+		sectionIdx := strings.Index(normalized, "### 1.2.1 check out the pr head")
+		checkpointIdx := strings.Index(normalized, "**checkpoint**")
+		if sectionIdx < 0 {
+			t.Fatalf("%s: Section 1.2.1 heading not found; ordering pin cannot run", copy.name)
+		}
+		if checkpointIdx < 0 {
+			t.Fatalf("%s: no **CHECKPOINT** marker found; ordering pin cannot run", copy.name)
+		}
+		if sectionIdx > checkpointIdx {
+			t.Errorf("%s: Section 1.2.1 (index %d) must precede the first **CHECKPOINT** marker (index %d) so progress state is keyed to the PR head branch", copy.name, sectionIdx, checkpointIdx)
+		}
+	}
 }
 
 func TestCommandContracts_SpeckitTestReview(t *testing.T) {

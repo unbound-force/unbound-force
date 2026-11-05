@@ -15,7 +15,9 @@ The command follows four sequential phases (Ingest → Assess → Triage → Exe
 > **SESSION-RESUME GUARD**: If this session has been resumed
 > from compressed context, you MUST:
 > 1. Re-read this full command template
-> 2. Call `get_progress` with `command: "uf.address-feedback"`
+> 2. Confirm the working tree is on the PR head per Section
+>    1.2.1 — the re-check is unconditional on resume — then
+>    call `get_progress` with `command: "uf.address-feedback"`
 >    to recover checkpoint-based progress state
 > 3. Check `.uf/feedback/pr-<PR_NUMBER>/state.json` for
 >    cached assessment state
@@ -72,8 +74,11 @@ After completing each phase/sub-step, mark it `completed`.
 This runs alongside `checkpoint` tool progress tracking —
 both MUST be maintained.
 
-On resume from compressed context, call `get_progress`
-with `command: "uf.address-feedback"` and re-initialize the
+On resume from compressed context, first confirm the working
+tree is on the PR head per Section 1.2.1 (progress state is
+keyed by the checked-out branch — never read it from another
+branch), then call `get_progress` with
+`command: "uf.address-feedback"` and re-initialize the
 TodoWrite list from the returned progress state: completed
 steps become `completed`, the first incomplete step becomes
 `in_progress`, and remaining steps become `pending`.
@@ -156,8 +161,20 @@ git branch --show-current
 git rev-parse HEAD
 ```
 
-- **Current branch is `head_ref` and `HEAD` equals `head_sha`**:
-  continue.
+Identity is keyed on `HEAD`, not on the local branch name:
+`gh pr checkout` does not guarantee the local branch is named
+`head_ref` (a cross-repo PR whose head is the fork's default
+branch checks out as `<owner>/<branch>`, for example
+`contrib/main`). Record the actual checked-out branch name as
+`HEAD_BRANCH` for the push-target lookup below.
+
+- **`HEAD` equals `head_sha`**: the tree is exactly at the PR
+  head — continue.
+- **`HEAD` is a descendant of `head_sha`** (`git merge-base
+  --is-ancestor <head_sha> HEAD` holds): the local branch
+  carries unpushed commits from a prior run (for example a
+  failed-push retry) — continue; never reset or discard local
+  commits.
 - **Otherwise**: if `git status --porcelain --untracked-files=no`
   prints anything, **STOP** with error:
   > "Working tree has uncommitted changes. Commit or stash them,
@@ -169,30 +186,45 @@ git rev-parse HEAD
   gh pr checkout <PR_NUMBER>
   ```
 
+  If the checkout fails, **STOP** and report the specific error.
+  The common cause is untracked files that collide with tracked
+  files on the PR branch — the dirty check above passes them
+  because it excludes untracked files, so git aborts with
+  "untracked working tree files would be overwritten".
+  Remediate by removing, renaming, or stashing them
+  (`git stash -u` includes untracked files; plain `git stash`
+  skips them), then rerun `/uf.address-feedback <PR_NUMBER>`.
+
   `gh pr checkout` resolves the PR's head repository (fork or
-  same-repo) and configures the branch's push remote and tracking
-  ref. Never fetch the head branch by guessing a remote name —
-  in a fork-and-upstream clone, `origin` is usually the fork and
-  does not carry the PR.
+  same-repo) and records the checked-out branch's remote and
+  merge ref (for a fork PR with maintainer edits disabled, the
+  merge ref is the read-only `refs/pull/<N>/head` — detected
+  below). Never fetch the head branch by guessing a remote
+  name — in a fork-and-upstream clone, `origin` is usually the
+  fork and does not carry the PR.
 
 After the checkout, re-run `git branch --show-current` and
-`git rev-parse HEAD`. If the branch is not `head_ref` or `HEAD`
-is not `head_sha` (the local branch carries unpushed commits or
-has diverged from the PR), **STOP** and report both SHAs; never
-reset or discard local commits.
+`git rev-parse HEAD`, and re-apply the identity checks above:
+accept `HEAD` equal to or descending from `head_sha`; otherwise
+(the branch is unrelated to the PR head), **STOP** and report
+both SHAs; never reset or discard local commits.
 
-Record the push target that `gh pr checkout` configured, for
-Section 4.4:
+Record the push target that `gh pr checkout` configured for the
+actual checked-out branch (`HEAD_BRANCH`), for Section 4.4:
 
 ```bash
-git config branch.<head_ref>.remote
-git config branch.<head_ref>.merge
+git config branch.<HEAD_BRANCH>.remote
+git config branch.<HEAD_BRANCH>.merge
 ```
 
 Record the first value as `HEAD_REMOTE` (a remote name or URL)
 and the second as `HEAD_MERGE_REF` (for example
 `refs/heads/<head_ref>`). If either is unset, **STOP** and report
-that the PR head has no configured push target.
+that the PR head has no configured push target. If
+`HEAD_MERGE_REF` starts with `refs/pull/`, **STOP**: it is a
+read-only merge ref (a fork PR with maintainer edits disabled),
+so the Section 4.4 push would always be rejected — report that
+the PR head cannot be pushed to from this clone.
 
 ### 1.3 Fetch Reviews and Comments
 
@@ -1036,12 +1068,19 @@ target recorded in Section 1.2.1:
 
 ```bash
 git fetch <HEAD_REMOTE> <HEAD_MERGE_REF>
-git status
+git rev-list --left-right --count HEAD...FETCH_HEAD
 ```
 
-**If branch has diverged** (another contributor pushed
-commits): warn the author and present the decision as
-follows:
+`HEAD_REMOTE` may be a URL, and fetching from a URL updates
+only `FETCH_HEAD` — no remote-tracking ref is written, so
+`git status` cannot observe divergence. The `git rev-list
+--left-right --count HEAD...FETCH_HEAD` output is two counts:
+commits only on HEAD (left) and commits only on FETCH_HEAD
+(right).
+
+**If branch has diverged** (a nonzero right count — another
+contributor pushed commits): warn the author and present the
+decision as follows:
 
 1. Print the decision content as plain session text **above**
    the question tool (visibility directive — the printed text
