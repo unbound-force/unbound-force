@@ -69,6 +69,11 @@ func scaffoldSpeckitChange(t *testing.T, dir, spec string, files map[string]stri
 // commit behavior.
 func initGitRepo(t *testing.T, dir, branch string) {
 	t.Helper()
+	// Git fixtures spawn several subprocesses per test; skip them
+	// under -short so quick iterations run without them (TC-011).
+	if testing.Short() {
+		t.Skip("skipping git subprocess fixture in short mode")
+	}
 	runGit(t, dir, "init", "--initial-branch=main")
 	runGit(t, dir, "config", "user.email", "test@test.com")
 	runGit(t, dir, "config", "user.name", "Test")
@@ -613,6 +618,31 @@ func TestCheckCoverageStrategy_QuickBranch_Fails(t *testing.T) {
 	r := checkCoverageStrategy(testCtx(dir))
 	if r.Passed {
 		t.Errorf("expected quick branch to fail coverage-strategy, got: %s", r.Message)
+	}
+	if !strings.Contains(r.Message, "quick") {
+		t.Errorf("expected quick-branch explanation in message, got: %s", r.Message)
+	}
+}
+
+// TestCheckTasksComplete_QuickBranch pins the quick-branch
+// explanation for the tasks-consuming checks: the failure names
+// the tier limitation, not a missing artifact.
+func TestCheckTasksComplete_QuickBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"tasks.md": "# Tasks\n- [x] done\n",
+	})
+	initGitRepo(t, dir, "quick/some-change")
+
+	r := checkTasksComplete(testCtx(dir))
+	if r.Passed {
+		t.Fatalf("expected quick branch to fail tasks-complete, got: %s", r.Message)
+	}
+	if !strings.Contains(r.Message, "quick") {
+		t.Errorf("expected quick-branch explanation in message, got: %s", r.Message)
 	}
 }
 
@@ -2212,5 +2242,97 @@ func TestCheckTasksComplete_FencedExample(t *testing.T) {
 	r := checkTasksComplete(testCtx(dir))
 	if !r.Passed {
 		t.Errorf("expected fenced example to be ignored, got fail: %s", r.Message)
+	}
+}
+
+// TestCheckTasksComplete_MixedMarkerFence pins GATE-FR-007's fence
+// matching: a fence closes only on its own marker character, so a
+// tilde line inside a backtick fence is content and cannot mask
+// task lines after the true closer.
+func TestCheckTasksComplete_MixedMarkerFence(t *testing.T) {
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"tasks.md": "# Tasks\n\n```\n~~~\n```\n\n- [ ] still open\n",
+	})
+
+	r := checkTasksComplete(testCtx(dir))
+	if r.Passed {
+		t.Error("expected task after a mixed-marker fence to fail, got pass")
+	}
+}
+
+// TestFenceLine pins the CommonMark delimiter classification the
+// scanners rely on: markers must repeat at least three times, a
+// closing fence carries no info string, and a backtick fence's
+// info string must not contain a backtick.
+func TestFenceLine(t *testing.T) {
+	tests := []struct {
+		name    string
+		line    string
+		marker  byte
+		length  int
+		closing bool
+	}{
+		{name: "opening with info", line: "```go", marker: '`', length: 3, closing: false},
+		{name: "plain backticks", line: "```", marker: '`', length: 3, closing: true},
+		{name: "indented longer tildes", line: "  ~~~~  ", marker: '~', length: 4, closing: true},
+		{name: "tilde info string", line: "~~~ruby", marker: '~', length: 3, closing: false},
+		{name: "two markers only", line: "``", marker: 0, length: 0, closing: false},
+		{name: "task line", line: "- [ ] task", marker: 0, length: 0, closing: false},
+		{name: "backtick info with backticks", line: "```a`b", marker: 0, length: 0, closing: false},
+	}
+	for _, tt := range tests {
+		marker, length, closing := fenceLine(tt.line)
+		if marker != tt.marker || length != tt.length || closing != tt.closing {
+			t.Errorf("%s: fenceLine(%q) = (%d, %d, %v), want (%d, %d, %v)",
+				tt.name, tt.line, marker, length, closing, tt.marker, tt.length, tt.closing)
+		}
+	}
+}
+
+// TestCheckCoverageStrategy_FencedExample pins GATE-FR-006's fenced
+// code block exclusion: coverage syntax documented inside a fence
+// is not a strategy.
+func TestCheckCoverageStrategy_FencedExample(t *testing.T) {
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"design.md": "# Design\n\n```\n## Coverage Strategy\n```\n",
+		"tasks.md":  "# Tasks\n- [x] done\n",
+	})
+
+	r := checkCoverageStrategy(testCtx(dir))
+	if r.Passed {
+		t.Error("expected fenced coverage heading to fail, got pass")
+	}
+}
+
+// TestCheckCoverageStrategy_NegatedBody pins GATE-FR-006's body
+// negation exclusion: body text denying tests is not a strategy.
+func TestCheckCoverageStrategy_NegatedBody(t *testing.T) {
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"design.md": "# Design\n\nNo unit tests are planned for this change.\n",
+		"tasks.md":  "# Tasks\n- [x] done\n",
+	})
+
+	r := checkCoverageStrategy(testCtx(dir))
+	if r.Passed {
+		t.Error("expected negated body text to fail, got pass")
+	}
+}
+
+// TestCheckCoverageStrategy_ZeroPercentage pins GATE-FR-006's
+// zero-percent exclusion: a measured coverage of zero denies a
+// strategy rather than stating one.
+func TestCheckCoverageStrategy_ZeroPercentage(t *testing.T) {
+	dir := t.TempDir()
+	scaffoldOpenSpec(t, dir, map[string]string{
+		"design.md": "# Design\n\nCurrent coverage: 0%.\n",
+		"tasks.md":  "# Tasks\n- [x] done\n",
+	})
+
+	r := checkCoverageStrategy(testCtx(dir))
+	if r.Passed {
+		t.Error("expected zero-percent line to fail, got pass")
 	}
 }

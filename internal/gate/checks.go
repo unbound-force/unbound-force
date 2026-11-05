@@ -381,6 +381,23 @@ var coverageKeywords = []string{
 // (case-insensitive), body text containing specific keywords,
 // or a line matching the coverage percentage regex.
 func checkCoverageStrategy(ctx runContext) CheckResult {
+	// By-design resolution failures carry the same explanation the
+	// artifact-existence checks emit, so a quick-branch or no-change
+	// log reads as a tier limitation rather than a missing artifact.
+	if ctx.res.Quick {
+		return CheckResult{
+			Name:    "coverage-strategy",
+			Passed:  false,
+			Message: fmt.Sprintf("No coverage strategy can satisfy quick branch %s: quick changes carry no spec artifacts", ctx.res.Branch),
+		}
+	}
+	if ctx.res.Name == "" {
+		return CheckResult{
+			Name:    "coverage-strategy",
+			Passed:  false,
+			Message: fmt.Sprintf("No change directory found under %s or %s", openspecChangesBase, speckitBase),
+		}
+	}
 	candidates, err := coverageArtifacts(ctx)
 	if err != nil {
 		return internalCheck("coverage-strategy", err)
@@ -448,18 +465,30 @@ func changeArtifacts(dir, base, change string, names []string) ([]string, error)
 // must not count it (GATE-FR-006).
 var negatedCoverageRe = regexp.MustCompile(`(?i)\b(?:no|without|missing|lacking)\s+coverage\b|\bcoverage\s+strategy\s+is\s+(?:not|absent|none)\b`)
 
+// negatedCoverageBodyRe matches body text and percentage lines that
+// deny a coverage strategy rather than state one: "No unit tests
+// are planned", "without integration tests", or a measured coverage
+// of zero percent (GATE-FR-006).
+var negatedCoverageBodyRe = regexp.MustCompile(`(?i)\b(?:no|without|missing|lacking)\s+(?:unit\s+|integration\s+|e2e\s+)?tests?\b|\bcoverage\b[^%\n]{0,40}?\b0\s*%`)
+
 // hasCoverageStrategy scans a file for coverage strategy
 // indicators per GATE-FR-006: a heading containing "coverage"
-// that does not negate it, body keywords, or a coverage
-// percentage line. The file is read whole, matching the sibling
-// checks that consume the same artifacts: artifact content is
-// check input, never an internal error.
+// that does not negate it, non-negated body keywords, or a
+// coverage percentage line that does not report a measured
+// zero. Signals inside fenced code blocks are documentation,
+// not strategy, and do not count. The file is read whole,
+// matching the sibling checks that consume the same artifacts:
+// artifact content is check input, never an internal error.
 func hasCoverageStrategy(path string) (bool, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
 	}
+	fence := fenceTracker{}
 	for _, line := range strings.Split(string(content), "\n") {
+		if fence.update(line) {
+			continue
+		}
 		lower := strings.ToLower(line)
 
 		// Heading containing "coverage" (case-insensitive), unless
@@ -468,25 +497,94 @@ func hasCoverageStrategy(path string) (bool, error) {
 			return true, nil
 		}
 
-		// Body text keywords.
-		for _, kw := range coverageKeywords {
-			if strings.Contains(lower, kw) {
+		// Body text keywords and percentage lines, unless the
+		// line negates them (GATE-FR-006).
+		if !negatedCoverageBodyRe.MatchString(line) {
+			for _, kw := range coverageKeywords {
+				if strings.Contains(lower, kw) {
+					return true, nil
+				}
+			}
+
+			// Coverage percentage pattern.
+			if coveragePctRe.MatchString(line) {
 				return true, nil
 			}
-		}
-
-		// Coverage percentage pattern.
-		if coveragePctRe.MatchString(line) {
-			return true, nil
 		}
 	}
 	return false, nil
 }
 
+// fenceTracker implements CommonMark code-fence matching for the
+// artifact scanners: a fence opens with three or more backticks or
+// tildes and closes only on a line of the same marker character,
+// at least as long as the opening fence, carrying nothing but the
+// marker. A line using the other marker inside an open fence is
+// content, so mixed-marker markdown cannot flip the state and mask
+// subsequent task lines or coverage signals (GATE-FR-006,
+// GATE-FR-007).
+type fenceTracker struct {
+	marker byte // 0 when no fence is open; '`' or '~' otherwise
+	length int  // marker repetitions of the opening fence
+}
+
+// fenced reports whether the tracker currently sits inside a fence.
+func (f *fenceTracker) fenced() bool { return f.marker != 0 }
+
+// update feeds one line to the tracker and reports whether the line
+// belongs to a fenced code block — a delimiter or content. Callers
+// skip such lines when scanning for task and coverage signals.
+func (f *fenceTracker) update(line string) bool {
+	marker, length, closing := fenceLine(line)
+	if marker == 0 {
+		return f.fenced()
+	}
+	if !f.fenced() {
+		f.marker, f.length = marker, length
+		return true
+	}
+	if closing && marker == f.marker && length >= f.length {
+		f.marker, f.length = 0, 0
+	}
+	return true
+}
+
+// fenceLine classifies a line as a code-fence delimiter. It returns
+// the marker character (0 for non-fence lines), the marker length,
+// and whether the line can close a fence — marker characters only,
+// with no info string. An opening fence may carry an info string,
+// but a backtick fence's info string must not contain a backtick.
+func fenceLine(line string) (marker byte, length int, closing bool) {
+	s := strings.TrimSpace(line)
+	if s == "" {
+		return 0, 0, false
+	}
+	c := s[0]
+	if c != '`' && c != '~' {
+		return 0, 0, false
+	}
+	n := 0
+	for n < len(s) && s[n] == c {
+		n++
+	}
+	if n < 3 {
+		return 0, 0, false
+	}
+	info := strings.TrimSpace(s[n:])
+	if info == "" {
+		return c, n, true
+	}
+	if c == '`' && strings.Contains(info, "`") {
+		return 0, 0, false
+	}
+	return c, n, false
+}
+
 // checkTasksComplete scans tasks.md for unchecked task boxes
 // per GATE-FR-007. If any `- [ ]` checkbox lines remain — including
 // indented subtasks — the check fails. Prose mentioning the
-// literal mid-line and examples inside fenced code blocks do
+// literal mid-line and examples inside fenced code blocks (which
+// close only on their own marker and length, per CommonMark) do
 // not count.
 func checkTasksComplete(ctx runContext) CheckResult {
 	rel, content, message, err := loadTasksFile(ctx)
@@ -497,20 +595,15 @@ func checkTasksComplete(ctx runContext) CheckResult {
 		return CheckResult{Name: "tasks-complete", Passed: false, Message: message}
 	}
 
-	inFence := false
+	fence := fenceTracker{}
 	for _, line := range strings.Split(string(content), "\n") {
-		trimmed := strings.TrimSpace(line)
 		// Fenced code blocks can document task syntax without
-		// declaring tasks; their contents are not task lines
-		// (GATE-FR-007).
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			inFence = !inFence
+		// declaring tasks; their delimiters and contents are not
+		// task lines (GATE-FR-007).
+		if fence.update(line) {
 			continue
 		}
-		if inFence {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "- [ ]") {
+		if strings.HasPrefix(strings.TrimSpace(line), "- [ ]") {
 			return CheckResult{
 				Name:    "tasks-complete",
 				Passed:  false,
@@ -531,6 +624,15 @@ func checkTasksComplete(ctx runContext) CheckResult {
 // content. A missing file is an expected check outcome; a read failure is
 // returned so Run can classify it as an internal error.
 func loadTasksFile(ctx runContext) (rel string, content []byte, message string, readErr error) {
+	// By-design resolution failures carry the same explanation the
+	// artifact-existence checks emit, so a quick-branch or no-change
+	// log reads as a tier limitation rather than a missing artifact.
+	if ctx.res.Quick {
+		return "", nil, fmt.Sprintf("No tasks.md can satisfy quick branch %s: quick changes carry no spec artifacts", ctx.res.Branch), nil
+	}
+	if ctx.res.Name == "" {
+		return "", nil, fmt.Sprintf("No change directory found under %s or %s", openspecChangesBase, speckitBase), nil
+	}
 	path, err := findTasksFile(ctx)
 	if err != nil {
 		return "", nil, "", err

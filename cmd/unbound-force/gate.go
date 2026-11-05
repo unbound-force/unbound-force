@@ -92,10 +92,14 @@ Exit codes:
 
 Coverage strategy detection (implement phase):
   plan/tasks artifacts are scanned (case-insensitive) for a
-  heading containing 'coverage' — negated headings such as 'No
-  coverage strategy' do not count — body text containing
+  heading containing 'coverage'; body text containing
   'coverage target', 'unit test', 'integration test', or
-  'e2e test', or a line matching coverage.*%.
+  'e2e test'; or a line matching coverage.*%. Signals that
+  deny the strategy do not count — negated headings such as
+  'No coverage strategy', negated body text such as 'No unit
+  tests are planned', and measured zero-percent lines such as
+  'current coverage: 0%'. Signals inside fenced code blocks
+  do not count.
 
 Task completion (review phase):
   tasks.md lines matching '- [ ]' fail the check, including

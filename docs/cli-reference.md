@@ -174,10 +174,25 @@ different changes are never combined.
 **Coverage strategy detection** (`--phase implement`)
 
 Plan/tasks artifacts are scanned (case-insensitive) for: a
-heading containing "coverage" (negated headings such as "No
-coverage strategy" do not count); body text containing
+heading containing "coverage"; body text containing
 "coverage target", "unit test", "integration test", or
-"e2e test"; or a line matching `coverage.*%`.
+"e2e test"; or a line matching `coverage.*%`. Signals that
+deny the strategy do not count — negated headings ("No
+coverage strategy"), negated body text ("No unit tests are
+planned"), and measured zero-percent lines ("current
+coverage: 0%") — and signals inside fenced code blocks are
+documentation, not strategy.
+
+**Review marker trust boundary**
+
+The `review` and `pr` phases verify review completion by
+searching the active change's `tasks.md` for the literal
+markers `<!-- spec-review: passed -->` and
+`<!-- code-review: passed -->`. This is presence-of-text
+evidence: anyone with write access to `tasks.md` can type
+the marker without running a review. CI consumers of
+`uf gate --phase pr` should not assume a stronger guarantee
+than "the marker is present" (design R5).
 
 ### uf setup
 

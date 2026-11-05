@@ -163,7 +163,9 @@ CI coverage gate.
 - [x] 8.3 [P] File documentation issue against the
   current repo for user-facing `uf gate` usage docs.
   (Filed: #583; website tracking: unbound-force/website#343
-  per the constitution's Cross-Repo Documentation rule)
+  — the website CLI-reference update for `uf gate`, labeled
+  `docs` and `blog` — per the constitution's Cross-Repo
+  Documentation rule)
 
 <!-- spec-review: passed -->
 <!-- code-review: passed -->

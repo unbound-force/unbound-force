@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/unbound-force/unbound-force/internal/gate"
 )
@@ -63,6 +64,19 @@ func TestRunGate_JSONOutput(t *testing.T) {
 	}
 	if report.Version != gate.SchemaVersion {
 		t.Errorf("expected version %s, got %s", gate.SchemaVersion, report.Version)
+	}
+	// Pin the CLI boundary's provenance wiring (Constitution III):
+	// runGate injects the build version and Run stamps the producer
+	// and an RFC3339 timestamp — none of which the internal-layer
+	// default tests cover.
+	if report.Producer != gate.ProducerName {
+		t.Errorf("expected producer %s, got %s", gate.ProducerName, report.Producer)
+	}
+	if report.ToolVersion != version {
+		t.Errorf("expected tool version %s, got %s", version, report.ToolVersion)
+	}
+	if _, tsErr := time.Parse(time.RFC3339, report.Timestamp); tsErr != nil {
+		t.Errorf("expected RFC3339 timestamp, got %q: %v", report.Timestamp, tsErr)
 	}
 }
 
@@ -271,11 +285,13 @@ func TestNewGateCmd_Help(t *testing.T) {
 	}
 	text := out.String()
 	// The want-list pins design R4's mitigation: the coverage
-	// detection keywords are documented in the help text.
+	// detection keywords and exclusions are documented in the help
+	// text.
 	for _, want := range []string{
 		"specify", "plan", "implement", "review", "pr",
 		"--format", "Exit codes",
 		"coverage target", "unit test", "integration test", "e2e test",
+		"negated headings", "fenced code blocks",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("help output missing %q", want)

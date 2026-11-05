@@ -167,6 +167,12 @@ When `--phase implement`, the gate MUST check:
   - Body text containing any of: "coverage target",
     "unit test", "integration test", "e2e test"
   - A line matching `coverage.*%` (percentage target)
+  - None of the signals above count when the carrying line
+    denies the strategy — body text such as "No unit tests
+    are planned", or a measured zero-percent line such as
+    "current coverage: 0%" — or when the line lies inside
+    a fenced code block: documented syntax is not a
+    strategy, matching GATE-FR-007's fenced-block exclusion
 
 #### Scenario: Implement phase passes
 
@@ -198,6 +204,30 @@ When `--phase implement`, the gate MUST check:
 - **WHEN** the user runs `uf gate --phase implement`
 - **THEN** the `coverage-strategy` check fails
 
+#### Scenario: Negated body text does not satisfy detection
+
+- **GIVEN** proposal.md, design.md, and tasks.md exist,
+  and design.md contains the sentence "No unit tests are
+  planned" with no other coverage signal
+- **WHEN** the user runs `uf gate --phase implement`
+- **THEN** the `coverage-strategy` check fails
+
+#### Scenario: Measured zero-percent coverage does not satisfy detection
+
+- **GIVEN** proposal.md, design.md, and tasks.md exist,
+  and design.md contains the line "Current coverage: 0%"
+  with no other coverage signal
+- **WHEN** the user runs `uf gate --phase implement`
+- **THEN** the `coverage-strategy` check fails
+
+#### Scenario: Fenced coverage syntax does not satisfy detection
+
+- **GIVEN** proposal.md, design.md, and tasks.md exist,
+  and design.md documents a "## Coverage Strategy" heading
+  only inside a fenced code block
+- **WHEN** the user runs `uf gate --phase implement`
+- **THEN** the `coverage-strategy` check fails
+
 ### Requirement: Review phase checks
 
 **ID:** GATE-FR-007
@@ -207,7 +237,11 @@ When `--phase review`, the gate MUST check:
 - All task checkboxes in the tasks artifact are marked
   complete (`[x]`). The check scans tasks.md for lines
   matching `- [ ]` outside fenced code blocks — if any
-  unchecked boxes remain, the check fails.
+  unchecked boxes remain, the check fails. Fences close
+  only on their own marker character at least as long as
+  the opening fence (CommonMark), so a line using the
+  other marker inside an open fence is content and cannot
+  end the fence.
 - A review has been executed. The check looks for the
   `<!-- spec-review: passed -->` or
   `<!-- code-review: passed -->` marker in tasks.md.
@@ -227,6 +261,15 @@ When `--phase review`, the gate MUST check:
 - **WHEN** the user runs `uf gate --phase review`
 - **THEN** the `tasks-complete` check fails with a
   message indicating uncomplete tasks remain
+
+#### Scenario: Mixed-marker fence content does not end a fence
+
+- **GIVEN** tasks.md contains a fenced code block opened
+  with three backticks, a line of three tildes inside the
+  fence, the closing three backticks, and an unchecked
+  `- [ ]` task after the fence
+- **WHEN** the user runs `uf gate --phase review`
+- **THEN** the `tasks-complete` check fails
 
 #### Scenario: Review phase fails no review marker
 

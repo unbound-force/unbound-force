@@ -305,12 +305,17 @@ plan/tasks content for specific patterns: a heading
 containing "coverage" (case-insensitive) that does not
 negate it, body text containing "coverage target",
 "unit test", "integration test", or "e2e test", or a
-line matching `coverage.*%`. False negatives are possible
-for non-standard phrasing; negated headings ("No coverage
-strategy") are excluded so the heading signal cannot be
-satisfied by its own denial. Mitigated by documenting the
-expected keywords in the command help text and testing
-with representative examples.
+line matching `coverage.*%`. Signals that deny the
+strategy do not count — negated headings ("No coverage
+strategy"), negated body text ("No unit tests are
+planned"), and measured zero-percent lines ("current
+coverage: 0%") — and signals inside fenced code blocks
+are documentation, not strategy, using the CommonMark
+fence matching GATE-FR-007 applies to task lines. False
+negatives remain possible for non-standard phrasing.
+Mitigated by documenting the expected keywords and
+exclusions in the command help text and testing with
+representative examples.
 
 ### R5: Review markers are presence-of-text evidence
 
