@@ -51,9 +51,32 @@ describe("read_dispatch_artifact (RD-FR-057)", () => {
       correlation_id: CORRELATION,
       section: "summary",
       command: samplePayload.command,
+      mode: samplePayload.mode,
       verdict: samplePayload.verdict,
+      verdict_reason: samplePayload.verdict_reason,
+      run_counts: samplePayload.run_counts,
+      coverage: samplePayload.coverage,
+      workflow_result: samplePayload.workflow_result,
       counts: { findings: 1, advisories: 0, proposals: 2, runs: 1 },
     })
+    // Pin the full summary shape: a regression dropping any documented
+    // field (mode, verdict_reason, run_counts, coverage, workflow_result)
+    // must fail, not just the subset above (typescript.md TC-003).
+    expect(Object.keys(summary).sort()).toEqual(
+      [
+        "status",
+        "correlation_id",
+        "section",
+        "command",
+        "mode",
+        "verdict",
+        "verdict_reason",
+        "run_counts",
+        "coverage",
+        "workflow_result",
+        "counts",
+      ].sort(),
+    )
     expect(summary).not.toHaveProperty("entries")
   })
 
