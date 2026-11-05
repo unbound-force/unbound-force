@@ -268,7 +268,9 @@ the quick tier carries no spec artifacts, so unrelated
 changes must not satisfy its checks either. On branches
 without a change mapping, resolution falls back to one
 first-alphabetical change directory for the whole run —
-artifacts of different changes are never combined to
+`openspec/changes/` is probed first and `specs/` only when
+that layout holds no change directory — artifacts of
+different changes are never combined to
 satisfy a phase, and symlinked change directories are
 followed so fallback matches strict resolution. A detached HEAD —
 the default checkout state on CI runners — reports the

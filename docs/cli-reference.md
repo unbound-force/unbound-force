@@ -168,7 +168,9 @@ On a detached HEAD (the default CI checkout state), the branch
 is recovered from `GITHUB_HEAD_REF` or `GITHUB_REF_NAME` before
 the fallback applies. On branches without a change mapping,
 checks resolve the first alphabetical change directory across
-both layouts — one change for the whole run; artifacts of
+both layouts with layout priority — `openspec/changes/` first,
+then `specs/` only when that layout holds no change directory —
+one change for the whole run; artifacts of
 different changes are never combined.
 
 **Coverage strategy detection** (`--phase implement`)

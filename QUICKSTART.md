@@ -195,8 +195,8 @@ spec workflows) requires only `uf` and `opencode`.
 
 - **`uf gate`** -- Enforce constitution compliance at workflow phase
   boundaries for CI pipelines, validation loops, and pre-PR hooks.
-  Review-phase checks verify text markers in `tasks.md`, not that a
-  review actually ran. See
+  The `review` and `pr` phase checks verify text markers in
+  `tasks.md`, not that a review actually ran. See
   [CLI Reference](docs/cli-reference.md#uf-gate).
 - **`uf gateway`** -- Local LLM reverse proxy for
   Vertex AI and AWS Bedrock users. See

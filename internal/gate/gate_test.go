@@ -2148,6 +2148,32 @@ func TestCheckSpecExists_UnmappedFallback_SelectsFirstChange(t *testing.T) {
 	}
 }
 
+// TestCheckSpecExists_UnmappedFallback_PrefersOpenSpecLayout pins
+// GATE-FR-012's layout-precedence scenario: the fallback probes
+// openspec/changes/ before specs/, so an OpenSpec change wins even
+// when a Speckit change directory sorts earlier.
+func TestCheckSpecExists_UnmappedFallback_PrefersOpenSpecLayout(t *testing.T) {
+	dir := t.TempDir()
+	pinGitCeiling(t, dir)
+	scaffoldOpenSpecChange(t, dir, "zzz-change", map[string]string{
+		"proposal.md": "# Proposal",
+	})
+	scaffoldSpeckitChange(t, dir, "001-feature", map[string]string{
+		"spec.md": "# Spec",
+	})
+
+	r := checkSpecExists(testCtx(dir))
+	if !r.Passed {
+		t.Fatalf("expected pass against zzz-change, got: %s", r.Message)
+	}
+	if !strings.Contains(r.Message, "zzz-change") {
+		t.Errorf("expected message to name zzz-change, got: %s", r.Message)
+	}
+	if strings.Contains(r.Message, "001-feature") {
+		t.Errorf("expected no reference to 001-feature, got: %s", r.Message)
+	}
+}
+
 // TestRun_ImplementPhase_UnmappedFallback_DoesNotCombineChanges
 // pins GATE-FR-012's no-union scenario: the implement phase must
 // not pass by combining spec/tasks from one change with

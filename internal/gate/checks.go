@@ -9,12 +9,16 @@ import (
 	"strings"
 )
 
-// CheckFunc is the signature for all gate check functions.
+// checkFunc is the signature for all gate check functions.
 // Each function accepts a run context — the project directory
 // plus the change resolution resolved once per run — and returns
 // a structured result. Check functions are pure — they read
 // the filesystem but produce no side effects (Constitution IV).
-type CheckFunc func(ctx runContext) CheckResult
+// The type stays unexported because runContext is unexported:
+// no code outside this package can construct a context or
+// invoke a check, so an exported alias would advertise an
+// unusable API.
+type checkFunc func(ctx runContext) CheckResult
 
 // validPhases lists the accepted values for --phase per D2.
 var validPhases = []string{
@@ -31,7 +35,7 @@ func ValidPhases() []string {
 
 // phaseChecks maps each workflow phase to the check functions
 // that must pass before the phase is allowed per D2.
-var phaseChecks = map[string][]CheckFunc{
+var phaseChecks = map[string][]checkFunc{
 	"specify":   {checkSpecExists},
 	"plan":      {checkSpecExists, checkPlanExists},
 	"implement": {checkSpecExists, checkPlanExists, checkTasksExist, checkCoverageStrategy},
@@ -275,6 +279,29 @@ func internalCheck(name string, err error) CheckResult {
 	}
 }
 
+// resolutionFailure explains the two by-design resolution failures
+// shared by every artifact check: a quick branch (the tier carries
+// no spec artifacts) and a run that resolved no change directory.
+// ok reports whether the checks have a change to probe; when
+// false, message carries the failure explanation the check
+// surfaces unchanged, so a quick-branch or no-change log reads as
+// a tier limitation rather than a missing artifact.
+func resolutionFailure(res changeResolution, subject string) (message string, ok bool) {
+	if res.Quick {
+		return fmt.Sprintf(
+			"No %s can satisfy quick branch %s: quick changes carry no spec artifacts",
+			subject, res.Branch,
+		), false
+	}
+	if res.Name == "" {
+		return fmt.Sprintf(
+			"No change directory found under %s or %s",
+			openspecChangesBase, speckitBase,
+		), false
+	}
+	return "", true
+}
+
 // checkArtifactExists probes the resolved change for an artifact
 // across both OpenSpec and Speckit locations. Returns a CheckResult
 // with the given check name and label. Resolution follows the run
@@ -284,19 +311,11 @@ func internalCheck(name string, err error) CheckResult {
 func checkArtifactExists(ctx runContext, q artifactQuery) CheckResult {
 	res := ctx.res
 
-	if res.Quick {
+	if msg, ok := resolutionFailure(res, q.label+" artifact"); !ok {
 		return CheckResult{
 			Name:    q.checkName,
 			Passed:  false,
-			Message: fmt.Sprintf("No %s artifact can satisfy quick branch %s: quick changes carry no spec artifacts", q.label, res.Branch),
-		}
-	}
-
-	if res.Name == "" {
-		return CheckResult{
-			Name:    q.checkName,
-			Passed:  false,
-			Message: fmt.Sprintf("No change directory found under %s or %s", openspecChangesBase, speckitBase),
+			Message: msg,
 		}
 	}
 
@@ -381,21 +400,11 @@ var coverageKeywords = []string{
 // (case-insensitive), body text containing specific keywords,
 // or a line matching the coverage percentage regex.
 func checkCoverageStrategy(ctx runContext) CheckResult {
-	// By-design resolution failures carry the same explanation the
-	// artifact-existence checks emit, so a quick-branch or no-change
-	// log reads as a tier limitation rather than a missing artifact.
-	if ctx.res.Quick {
+	if msg, ok := resolutionFailure(ctx.res, "coverage strategy"); !ok {
 		return CheckResult{
 			Name:    "coverage-strategy",
 			Passed:  false,
-			Message: fmt.Sprintf("No coverage strategy can satisfy quick branch %s: quick changes carry no spec artifacts", ctx.res.Branch),
-		}
-	}
-	if ctx.res.Name == "" {
-		return CheckResult{
-			Name:    "coverage-strategy",
-			Passed:  false,
-			Message: fmt.Sprintf("No change directory found under %s or %s", openspecChangesBase, speckitBase),
+			Message: msg,
 		}
 	}
 	candidates, err := coverageArtifacts(ctx)
@@ -624,14 +633,8 @@ func checkTasksComplete(ctx runContext) CheckResult {
 // content. A missing file is an expected check outcome; a read failure is
 // returned so Run can classify it as an internal error.
 func loadTasksFile(ctx runContext) (rel string, content []byte, message string, readErr error) {
-	// By-design resolution failures carry the same explanation the
-	// artifact-existence checks emit, so a quick-branch or no-change
-	// log reads as a tier limitation rather than a missing artifact.
-	if ctx.res.Quick {
-		return "", nil, fmt.Sprintf("No tasks.md can satisfy quick branch %s: quick changes carry no spec artifacts", ctx.res.Branch), nil
-	}
-	if ctx.res.Name == "" {
-		return "", nil, fmt.Sprintf("No change directory found under %s or %s", openspecChangesBase, speckitBase), nil
+	if msg, ok := resolutionFailure(ctx.res, "tasks.md"); !ok {
+		return "", nil, msg, nil
 	}
 	path, err := findTasksFile(ctx)
 	if err != nil {

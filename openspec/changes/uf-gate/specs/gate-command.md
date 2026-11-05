@@ -464,9 +464,12 @@ current git branch before probing artifacts:
   tier carries no spec artifacts.
 - On branches without a change mapping, checks MUST fall
   back to the first alphabetical change directory across
-  both layouts, resolved once for the whole run: artifacts
-  of different changes MUST NOT be combined to satisfy a
-  phase.
+  both layouts, resolved once for the whole run with layout
+  priority: the first alphabetical directory under
+  `openspec/changes/`, and only when that layout holds no
+  change directory, the first alphabetical directory under
+  `specs/`. Artifacts of different changes MUST NOT be
+  combined to satisfy a phase.
 - The resolution MUST be computed once per run and shared
   by every check in that run, and the report's `branch`
   provenance field MUST reflect the branch the checks
@@ -508,6 +511,16 @@ current git branch before probing artifacts:
   `openspec/changes/aaa-first/proposal.md` exists
 - **WHEN** the user runs `uf gate --phase specify`
 - **THEN** the spec-exists check passes against `aaa-first`
+
+#### Scenario: Fallback probes OpenSpec before Speckit
+
+- **GIVEN** the branch maps to no change,
+  `openspec/changes/zzz-change/proposal.md` exists, and
+  `specs/001-feature/spec.md` also exists
+- **WHEN** the user runs `uf gate --phase specify`
+- **THEN** the spec-exists check passes against `zzz-change`
+  and its message does not reference `001-feature`, because
+  the fallback resolves `openspec/changes/` before `specs/`
 
 #### Scenario: Unmapped branch does not combine artifacts across changes
 
