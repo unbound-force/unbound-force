@@ -913,9 +913,14 @@ Each entry follows the format: `- <change-name>: <summary>`.
   `devDependencies` a target already declares, and `uf doctor`
   checks only the runtime packages. `manifest-install` fails, rather
   than passes, when an installed `package.json` exists but cannot be
-  read. Rollout: existing hero repositories can drop
-  their committed lock with
-  `git rm --cached .opencode/package-lock.json`. (Spec:
+  read. OSV-Scanner and Dependabot lose lock-based transitive
+  scanning; the Security Checks workflow compensates with a
+  throwaway-lock scan (a pinned npm builds an ephemeral lock,
+  osv-scanner reads it, and the lock is discarded), and the direct
+  `package.json` pins remain scannable. Rollout: existing hero
+  repositories can drop their committed lock with
+  `git rm --cached .opencode/package-lock.json`; review the
+  scanner-loss posture first. (Spec:
   openspec/changes/stop-shipping-plugin-lock/)
 - split-host-resolution-failure-classes: Host-resolution
   failures in the review-dispatch plugin's `executeDispatchRun`

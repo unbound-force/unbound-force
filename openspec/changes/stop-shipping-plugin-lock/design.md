@@ -11,6 +11,30 @@ of `.opencode/` package files. opencode also installs into
 `.opencode/`, and users add their own plugin dependencies there, so
 that assumption doesn't hold.
 
+## Cross-Change Reconciliation
+
+The `ci` and `scaffold` contracts touched by this change also
+carry text in sibling unarchived changes. This change cannot
+ship a MODIFIED `ci` delta of its own: OpenSpec requires a
+MODIFIED requirement to match canonical text that will not
+exist until `ts-plugin-coverage-gate` archives. The
+reconciliation lives in the sibling deltas:
+
+- `ts-plugin-coverage-gate` (`specs/ci/spec.md:12-14`,
+  `proposal.md:169`): its locked-`npm ci` MUST for the
+  `plugin-test` target and its proposal's "install discipline
+  is unchanged" note are updated to the lockless
+  `PLUGIN_TEST_NPM` install in that change's delta.
+- `init-override-stubs-gitignore-sync` (SC-FR-015): its `npm
+  ci` references (`spec.md:324,356`, `proposal.md:46`,
+  `design.md:30,222`, `tasks.md:211,230`) and its
+  exactly-four-lines `.opencode/.gitignore` MUST
+  (`spec.md:318-322`) are amended for the fifth ignored line
+  (`package-lock.json`) and the lockless install.
+
+This change archives after, or together with, the reconciled
+siblings so the canonical text lines up.
+
 ## Decisions
 
 ### D1. Stop shipping and tracking the lock
@@ -33,7 +57,10 @@ Activation runs `npm install --ignore-scripts --omit=dev
   network-light.
 
 The remediation text in both `uf init` and `uf doctor` names the
-same command.
+same command. The scripts-disabled posture applies to every
+lockless install, including `make plugin-test` in this
+repository, which runs `npm install --ignore-scripts
+--no-package-lock`.
 
 ### D2a. Ship no devDependencies
 
@@ -73,12 +100,21 @@ Without a lock, the reproducibility contract is the exact pins in
 - Packages that aren't installed remain the `dependencies` check's
   concern.
 
-### D5. Keep the historical rollback record
+### D5. Record the historical rollback values in prose
 
-`internal/scaffold/testdata/plugin-package-rollback.json` and
-`TestPluginPackageInputs_RollbackPrerequisites` document past
-baseline lock SHAs. They stay as a historical record; nothing
-deploys or verifies those locks any more.
+The pre-change rollback record
+(`internal/scaffold/testdata/plugin-package-rollback.json` and
+`TestPluginPackageInputs_RollbackPrerequisites`) verified a
+baseline lock that this change deletes, so the pair could only
+assert its own testdata against identical constants. Both are
+removed; git history preserves them. The recorded values:
+baseline lock SHA256
+`1ac9cdf171a743c69b18498e15711d628280a4748defd6334cd4276e194d32dc`;
+security-override lock SHA256
+`fef6f7f145d9dc8398233566934ff7a4e36d9505dbcb662660c773c03c1cdcba`;
+prior `.opencode/.gitignore` lines `node_modules`,
+`package.json`, `bun.lock`, `.gitignore`; and the override pins
+`toml` 4.1.1 and `uuid` 13.0.0.
 
 ## Risks / Trade-offs
 
@@ -87,9 +123,16 @@ deploys or verifies those locks any more.
   direct pins, the security overrides, `--ignore-scripts`, and the
   provider-free import and tool-definition probes, which still gate
   activation.
-- **Lock-based scanners.** OSV-Scanner and Dependabot can no longer
-  scan the npm transitive tree from a lock in this repository.
-  `package.json` remains scannable.
+- **Lock-based scanners.** OSV-Scanner and Dependabot can no
+  longer scan the npm transitive tree from a tracked lock. CI
+  compensates with a throwaway-lock step: it generates an
+  ephemeral lock via the pinned npm (`npx -y npm@11.6.2 install
+  --package-lock-only --ignore-scripts`, coordinated with
+  `PLUGIN_TEST_NPM`), runs osv-scanner against it, and discards
+  it — the lock is never tracked or shipped, so the delta
+  holds. Direct `package.json` pins remain scannable;
+  `--no-audit` on the install commands silences npm's own
+  advisory report, which the throwaway scan replaces.
 - **No byte-for-byte reproducible install** in hero repositories.
   Moving to bundled plugin sources would restore it, but is out of
   scope here.

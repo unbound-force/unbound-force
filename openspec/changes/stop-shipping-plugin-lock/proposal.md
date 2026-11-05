@@ -44,6 +44,23 @@ which turned main's Local CI red after b9e096a9 (fixed in #953).
 `package.json` stays tool-owned, with exact direct-dependency pins
 and the `toml` and `uuid` security overrides.
 
+## Capabilities
+
+### New Capabilities
+- None.
+
+### Modified Capabilities
+- `scaffold`: stops shipping, tracking, and installing from
+  `.opencode/package-lock.json`. `uf init` provisions the plugin
+  package inputs without a lock, activation installs with
+  `npm install --ignore-scripts --omit=dev --no-package-lock`,
+  `.opencode/.gitignore` ignores the lock, and `uf doctor`
+  compares `package.json` pins with installed versions
+  (`manifest-install`) instead of validating a lock.
+
+### Removed Capabilities
+- None.
+
 ## Impact
 
 - **Reproducibility is weaker.** Direct dependencies and the two
@@ -57,3 +74,64 @@ and the `toml` and `uuid` security overrides.
 - **Supersedes** parts of SC-FR-001, SC-FR-003, SC-FR-004 and
   SC-FR-005 from `review-council-multi-model-fanout` (see the
   delta).
+
+## Constitution Alignment
+
+Assessed against the Unbound Force org constitution.
+
+### I. Autonomous Collaboration
+
+**Assessment**: PASS
+
+The change removes a file that two autonomous tools (uf and
+opencode) both write, replacing the conflict with an ownership
+boundary expressed through `.gitignore` and install flags. The
+trade-off and its acceptance are recorded here and in the
+design's risk register.
+
+### II. Composability First
+
+**Assessment**: PASS
+
+Each hero repository remains independently usable: the
+scaffold ships fewer assets, the install path adds no new
+dependencies, and `package.json` retains its exact pins so the
+plugin suite composes with the surrounding tooling unchanged.
+
+### III. Observable Quality
+
+**Assessment**: PASS
+
+`uf doctor` reports an observable, machine-parseable
+`manifest-install` comparison (pin vs installed version) in
+place of the removed lock check, and `make plugin-test` fails
+closed if a lock file appears after the run.
+
+### IV. Testability
+
+**Assessment**: PASS
+
+Every flipped behavior carries a test: lock absence at
+scaffold, ignored-lock status, foreign-lock survival through
+`uf init`, `manifest-install` outcomes including the malformed
+manifest, and the lockless install command pins.
+
+### V. Security by Default
+
+**Assessment**: PASS (trade-off documented)
+
+The lock's integrity hashes and its transitive-tree freeze are
+gone. The accepted risk is recorded under Impact; direct pins
+and the `toml`/`uuid` security overrides remain, lifecycle
+scripts stay disabled on every install path, and transitive
+vulnerability scanning moves to a throwaway-lock CI step
+(design Risks).
+
+### VI. Deterministic Execution
+
+**Assessment**: PASS (trade-off documented)
+
+Installs are no longer byte-for-byte reproducible without a
+lock. Determinism is bounded by the exact direct pins plus the
+security overrides, and the residual transitive drift is
+recorded as a risk with its mitigations.

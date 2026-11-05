@@ -43,7 +43,7 @@ in-workspace paths" while `gitignoreBlock` does not ignore them
 -- an explicit contradiction in generated output. Secondary
 finding: the meta repo tracks `.opencode/.gitignore`
 (`node_modules`, `bun.lock`) but nothing deploys it, while
-`uf init` runs `npm ci` in `.opencode/`
+`uf init` runs a lockless `npm install` in `.opencode/`
 (plugin_activation.go:69), so fresh targets get an untracked
 `.opencode/node_modules/` unless their pre-existing root ignore
 happens to cover it.
