@@ -4,6 +4,10 @@ Amends `review-council-multi-model-fanout` (SC-FR-001, SC-FR-003,
 SC-FR-004, SC-FR-005). The scaffold no longer ships, tracks, or
 installs from `.opencode/package-lock.json`.
 
+Requirement numbering: no new requirement ids are allocated; this
+change modifies SC-FR-001, SC-FR-003, SC-FR-004, and SC-FR-005 in
+place.
+
 ## ADDED Requirements
 
 None.
@@ -13,6 +17,11 @@ None.
 ### Requirement: Complete Multi-Model Review Assets
 
 **ID: SC-FR-001** This requirement MUST be satisfied.
+
+Previously: the requirement also required `uf init` to provision
+`.opencode/package-lock.json` as one of the shipped plugin
+package inputs. This change drops the lock from the provisioned
+set; every other provisioned asset is unchanged.
 
 `uf init` MUST provision the advisor, `invoke-agent` plugin,
 `review-dispatch` policy plugin, matrix, reviewer-capabilities
@@ -33,16 +42,42 @@ to embedded mirrors where drift applies.
 
 **ID: SC-FR-003** This requirement MUST be satisfied.
 
+Previously: the requirement mandated tracking both
+`.opencode/package.json` and `.opencode/package-lock.json`,
+required the npm lock to retain integrity hashes with
+verification failing on license, version, manifest, lock, or
+integrity mismatch, required `.opencode/.gitignore` to not
+ignore `package-lock.json`, and required tests and `uf doctor`
+to validate manifest and lock consistency. It also carried the
+maintained-interface contract (plugin ABI, Zod runtime schemas,
+Vitest ESM mocking and thresholds, V8 instrumentation) and a
+rollback clause restoring a tracked baseline lock (SHA256
+`5ebee4af68d7a6125f5d0f52ecca7c419bbfbd9beff13503f3d5d6f36a09f965`).
+This change stops tracking the lock and drops the lock-integrity
+and rollback-lock clauses (accepted risk recorded in the
+proposal's Impact; history in design decision D5), leaves the
+maintained-interface contract to the dependency contracts
+themselves, keeps the MIT license and exact-version clause
+verified through the plugin package provenance record instead
+of the lock, flips `.opencode/.gitignore` to ignore
+`package-lock.json`, and replaces manifest-and-lock consistency
+with the `manifest-install` comparison.
+
 The repository and scaffold MUST track `.opencode/package.json`.
 They MUST NOT track or ship `.opencode/package-lock.json`. Direct
 dependencies MUST pin `@opencode-ai/plugin` 1.19.0 and Zod 4.1.8
 exactly. This repository's manifest MUST also pin the test
-dependencies Vitest 5.0.3 and `@vitest/coverage-v8` 5.0.3. The
-scaffolded manifest MUST NOT declare `devDependencies`, because a
-lockless install resolves them even under `--omit=dev`. When
-`uf init` refreshes an existing `.opencode/package.json`, it MUST
-keep the `devDependencies` that file already declares. The `toml`
-and `uuid` security overrides MUST remain.
+dependencies Vitest 5.0.3 and `@vitest/coverage-v8` 5.0.3. All
+four pinned dependencies MUST retain their MIT license and
+exact version. Tests MUST verify the license and versions
+through the plugin package provenance record
+(`plugin-package-provenance.json`), not through a lock file.
+The scaffolded manifest MUST NOT declare `devDependencies`,
+because a lockless install resolves them even under
+`--omit=dev`. When `uf init` refreshes an existing
+`.opencode/package.json`, it MUST keep the `devDependencies`
+that file already declares. The `toml` and `uuid` security
+overrides MUST remain.
 
 `.opencode/.gitignore` MUST ignore `node_modules`, `bun.lock`, and
 `package-lock.json`. It MUST NOT ignore `package.json`. Tests MUST
@@ -60,6 +95,13 @@ with the installed versions.
 
 **ID: SC-FR-004** This requirement MUST be satisfied.
 
+Previously: the requirement ran `npm ci` from the tracked lock
+in the target `.opencode/` directory with lifecycle scripts
+disabled. This change replaces `npm ci` with a lockless `npm
+install --ignore-scripts --omit=dev --no-package-lock
+--no-audit --no-fund` that neither reads nor writes a lock; the
+staging, probe, activation, and failure semantics are unchanged.
+
 After prerequisite validation, `uf init` MUST deploy non-plugin
 assets and run `npm install --ignore-scripts --omit=dev
 --no-package-lock --no-audit --no-fund` in the target `.opencode/`
@@ -74,11 +116,19 @@ requirement.
 - **GIVEN** npm cannot access required dependencies
 - **WHEN** installation fails
 - **THEN** no plugin source remains in `.opencode/plugins/`
-- **AND** remediation names `npm install --ignore-scripts --omit=dev --no-package-lock`
+- **AND** remediation names
+  `npm install --ignore-scripts --omit=dev --no-package-lock`
 
 ### Requirement: Plugin Doctor Validation
 
 **ID: SC-FR-005** This requirement MUST be satisfied.
+
+Previously: the requirement had `uf doctor` validate manifest
+and lock consistency and required
+`.opencode/package-lock.json`. This change drops the lock
+requirement and replaces lock consistency with the
+`manifest-install` comparison between `package.json` pins and
+installed versions.
 
 `uf doctor` MUST check Node and npm discovery and version support,
 agreement between the `package.json` pins and the installed versions
