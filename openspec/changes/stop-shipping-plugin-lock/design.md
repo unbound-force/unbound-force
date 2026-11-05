@@ -13,8 +13,8 @@ that assumption doesn't hold.
 
 ## Cross-Change Reconciliation
 
-The `ci` and `scaffold` contracts touched by this change carry
-replaced text in four unarchived sibling changes. This change
+The contracts touched by this change carry
+replaced text in five unarchived sibling changes. This change
 cannot ship a MODIFIED `ci` delta of its own: OpenSpec requires
 a MODIFIED requirement to match canonical text that will not
 exist until its predecessors archive. The reconciliation lives
@@ -40,11 +40,17 @@ in the sibling deltas:
   exactly-four-lines `.opencode/.gitignore` MUST
   (`spec.md:318-322`) are amended for the fifth ignored line
   (`package-lock.json`) and the lockless install.
+- `fix-triage-issue-dispatch-docs` (FR-007, Dependency Pin Lockstep
+  and Engine Floor): its lockstep enumeration names the deleted
+  `.opencode/package-lock.json` and its scaffold mirror, the deleted
+  `plugin-package-rollback.json` testdata, and the pre-rename
+  `TestPluginPackageInputs_ExactVersionsAndLockIntegrity`; the
+  enumeration is amended to the lockless lockstep set.
 
 This change archives after `review-council-multi-model-fanout`
 and `clarification-marker-superset`, so its MODIFIED deltas
 match the text those changes leave canonical, and after, or
-together with, the two reconciled siblings so the canonical
+together with, the three reconciled siblings so the canonical
 text lines up.
 
 ## Decisions

@@ -138,7 +138,7 @@ uf.triage-issue.md`:
    `@opencode-ai/plugin` 1.4.10 → 1.19.0 bump already present in
    the working tree is adopted into this change with the full
    lockstep set (scaffold asset mirrors, pin-enforcement test
-   expectation, provenance and rollback testdata, AGENTS.md
+   expectation, provenance testdata, AGENTS.md
    Technology Stack and README, upstream verification evidence) and
    validation evidence; see "Dependency Pin Update".
 
@@ -179,15 +179,15 @@ None.
   the three sibling command files and their scaffold mirrors;
   `.opencode/plugins/review-dispatch/index.ts` (new
   `read_assessment_fields` tool) and the plugin test suite under
-  `.opencode/test/`; `.opencode/package.json` /
-  `.opencode/package-lock.json` (approved pin, `engines`
-  declaration) and their scaffold asset mirrors; the
-  `TestPluginPackageInputs_ExactVersionsAndLockIntegrity`
+  `.opencode/test/`; `.opencode/package.json`
+  (approved pin, `engines`
+  declaration) and its scaffold asset
+  mirror; the
+  `TestPluginPackageInputs_ExactVersions`
   expectedRuntime map in `internal/scaffold/scaffold_test.go`;
-  `internal/scaffold/testdata/plugin-package-provenance.json` and
-  `plugin-package-rollback.json` (pin-governance testdata consumed
-  by `TestPluginPackageInputs_ApprovedMaintenanceProvenance` and
-  `TestPluginPackageInputs_RollbackPrerequisites`); `AGENTS.md`
+  `internal/scaffold/testdata/plugin-package-provenance.json`
+  (pin-governance testdata consumed
+  by `TestPluginPackageInputs_ApprovedMaintenanceProvenance`); `AGENTS.md`
   Technology Stack and `README.md` (Node engine floor); the
   `review-council-multi-model-fanout` delta (superseded-by note);
   `CHANGELOG.md` (drift-detection tests in
@@ -262,19 +262,15 @@ it in this change rather than revert. Justification and obligations:
   `make plugin-test` green against 1.19.0, and the pin-enforcement
   test green after the lockstep update.
 - **Lockstep** (tasks 3.4-3.7, 4.2): scaffold asset mirrors
-  (`internal/scaffold/assets/opencode/package.json` and
-  `package-lock.json`), the
-  `TestPluginPackageInputs_ExactVersionsAndLockIntegrity`
+  (`internal/scaffold/assets/opencode/package.json`), the
+  `TestPluginPackageInputs_ExactVersions`
   expectedRuntime map, the pin-governance testdata
   (`plugin-package-provenance.json` at 1.19.0 with fresh
-  `verified_at`; `plugin-package-rollback.json` with its
-  baseline-lock SHA256 re-verified against the 1.4.10 rollback
-  baseline), and the AGENTS.md Technology Stack and README prose.
-- **Rollback**: the baseline-lock SHA256 recorded in
-  `plugin-package-rollback.json` anchors verified rollback to
-  1.4.10; revert the coupled file groups (manifest plus lock, asset
-  mirrors, test expectations, testdata, AGENTS.md and README lines)
-  in one commit.
+  `verified_at`), and the AGENTS.md Technology Stack and README prose.
+- **Rollback**: the 1.4.10 baseline remains recoverable from git
+  history (the pin lockstep commits are revertable); revert the
+  coupled file groups (manifest, asset mirrors, test expectations,
+  testdata, AGENTS.md and README lines) in one commit.
 - **Transitive risk notes**: 1.19.0 pulls `@opencode-ai/sdk` 1.19.0
   and updates effect/ini/msgpackr transitively (msgpackr 1 → 2,
   resolved 2.1.1, verified per the upstream-verification bullet).

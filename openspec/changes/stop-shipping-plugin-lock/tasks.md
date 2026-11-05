@@ -64,3 +64,10 @@
   covering the new install command, the ignored lock, the
   compensating vulnerability-scan posture, and the rollout note
   for existing hero repositories
+- [x] 4.4 Add the compensating `osv_plugin_transitive` job to
+  `.github/workflows/ci_security.yml` (throwaway-lock OSV scan)
+- [x] 4.5 Reconcile the sibling deltas for the lockless install:
+  `ts-plugin-coverage-gate`, `init-override-stubs-gitignore-sync`,
+  and `fix-triage-issue-dispatch-docs` (FR-007 lockstep set)
+- [x] 4.6 Remove `TestPluginPackageInputs_RollbackPrerequisites`
+  and `testdata/plugin-package-rollback.json` per design D5
