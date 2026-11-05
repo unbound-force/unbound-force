@@ -636,15 +636,25 @@ const PushRefNameSchema = z
     message: "must not be HEAD, start with '-', or contain whitespace or ':'",
   })
 
+/**
+ * Remote-name argument guard for the push tools: a remote is a git
+ * config nickname, and git's remote-name validation rejects `/`, so a
+ * slash-bearing push target would be treated as a local repository
+ * path instead of a configured remote.
+ */
+const RemoteNameSchema = PushRefNameSchema.refine((value) => !value.includes("/"), {
+  message: "must not contain '/'",
+})
+
 const GitPushInputSchema = z.object({
   branch: PushRefNameSchema,
-  remote: PushRefNameSchema.optional(),
+  remote: RemoteNameSchema.optional(),
   setUpstream: z.boolean().optional(),
 })
 
 const GitPushForceWithLeaseInputSchema = z.object({
   branch: PushRefNameSchema,
-  remote: PushRefNameSchema.optional(),
+  remote: RemoteNameSchema.optional(),
   expected_sha: z
     .string()
     .regex(/^[0-9a-fA-F]{7,64}$/, "must be a 7-64 character hex commit SHA")
@@ -656,6 +666,8 @@ const GitPushForceWithLeaseInputSchema = z.object({
  * `old_sha` is the remote ref's value before the push (null when the
  * push created the branch); `updated` is false when the remote already
  * held `new_sha`, so a no-op push is distinguishable from an update.
+ * `warning` (git_push only) is set when the push landed but a
+ * follow-up step such as tracking configuration failed.
  */
 export interface GitPushData {
   readonly remote: string
@@ -663,6 +675,7 @@ export interface GitPushData {
   readonly old_sha: string | null
   readonly new_sha: string
   readonly updated: boolean
+  readonly warning?: string
 }
 
 /**
@@ -670,23 +683,35 @@ export interface GitPushData {
  * source is the HEAD commit, so a checkout switched underneath the
  * caller would otherwise push the wrong commits under the named ref.
  * Compares full ref names (`symbolic-ref`, which fails on a detached
- * HEAD) so a same-name tag cannot make the check ambiguous. Returns the
- * failure-output JSON, or null when HEAD is on `branch`.
+ * HEAD) so a same-name tag cannot make the check ambiguous. When the
+ * symbolic-ref probe itself fails, a second `rev-parse --git-dir` probe
+ * distinguishes a detached HEAD from a git-level failure so the error
+ * names the real cause. Returns the failure-output JSON, or null when
+ * HEAD is on `branch`.
  */
 function pushBranchMismatchOutput(exec: GitExec, cwd: string, branch: string): string | null {
   let current: string | null
+  let branchProbeFailed = false
   try {
     current = exec(["symbolic-ref", "-q", "HEAD"], cwd)
   } catch {
     current = null
+    try {
+      exec(["rev-parse", "--git-dir"], cwd)
+    } catch {
+      branchProbeFailed = true
+    }
   }
   if (current === `refs/heads/${branch}`) {
     return null
   }
-  const actual =
-    current === null || current === "" ? "a detached HEAD" : `branch "${current.replace(/^refs\/heads\//, "")}"`
+  const detail = branchProbeFailed
+    ? "the current branch could not be determined (git error)"
+    : current === null || current === ""
+      ? "the checkout is on a detached HEAD"
+      : `the checkout is on branch "${current.replace(/^refs\/heads\//, "")}"`
   return JSON.stringify(
-    failure(`Refusing to push "${branch}": the checkout is on ${actual}`, {
+    failure(`Refusing to push "${branch}": ${detail}`, {
       retryable: false,
       code: "BRANCH_MISMATCH",
     }),
@@ -737,7 +762,9 @@ export function createGitPushTool(exec: GitExec, cwd: string) {
       "Push the checked-out branch to the remote with an explicit refspec " +
       "(<HEAD sha>:refs/heads/<branch>). Refuses with BRANCH_MISMATCH when the " +
       "checkout is not on `branch`. Returns {remote, ref, old_sha, new_sha, " +
-      "updated}; updated is false when the remote was already up to date.",
+      "updated}; updated is false when the remote was already up to date. When " +
+      "setUpstream is set and the push lands but the tracking configuration " +
+      "fails, the result is still success with a warning field describing it.",
     args: {
       branch: z.string().describe(
         "Branch to push; MUST be the currently checked-out branch",
@@ -764,8 +791,17 @@ export function createGitPushTool(exec: GitExec, cwd: string) {
         // Push the verified commit, not HEAD, so a checkout switched
         // after the branch check cannot change what is pushed.
         const output = exec(["push", "--porcelain", remote, `${newSha}:${ref}`], cwd)
+        // The push has already landed, so a tracking-configuration failure
+        // must not surface as a push error; report it as a warning instead.
+        let warning: string | undefined
         if (setUpstream) {
-          exec(["branch", `--set-upstream-to=${remote}/${branch}`, branch], cwd)
+          try {
+            exec(["branch", `--set-upstream-to=${remote}/${branch}`, branch], cwd)
+          } catch {
+            warning =
+              `the push landed but setting the upstream tracking to ${remote}/${branch} failed; ` +
+              `run git branch --set-upstream-to=${remote}/${branch} ${branch} manually`
+          }
         }
         // A fast-forward summary is "<old>..<new>"; the old commit is an
         // ancestor of HEAD, so it resolves locally to its full SHA.
@@ -780,7 +816,8 @@ export function createGitPushTool(exec: GitExec, cwd: string) {
             return null
           }
         })
-        return { output: JSON.stringify(success(data)) }
+        const payload: GitPushData = warning === undefined ? data : { ...data, warning }
+        return { output: JSON.stringify(success(payload)) }
       } catch (err: unknown) {
         return { output: failureFromError(err, "GIT_PUSH_ERROR", true) }
       }
