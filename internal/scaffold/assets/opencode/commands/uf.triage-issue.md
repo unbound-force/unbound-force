@@ -1080,10 +1080,9 @@ Fields may be `null` when not applicable (e.g., `duplicate_of` when the issue is
 ### 4.6 Finalize Review Dispatch (Single Deterministic Call)
 
 Finalize every invocation after a valid issue content profile exists,
-including plan failure and no-success. The call runs once, at the end of
-Section 2.3 immediately after `dispatch_review_runs` and before Phase 3
-or any GitHub mutation; this section documents it and reports its
-result. User abort and partial GitHub mutation failure happen later and
+including no-success. The call runs once, at the end of Section 2.3
+immediately after `dispatch_review_runs` and before Phase 3 or any
+GitHub mutation; this section documents it and reports its result. User abort and partial GitHub mutation failure happen later and
 never change it. Never assemble, restate, or recompute the closed
 finalization payload: the dispatch session persisted during Section 2.3
 already holds the command, mode, input context, change profile, plan,
