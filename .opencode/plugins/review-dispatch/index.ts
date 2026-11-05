@@ -629,7 +629,7 @@ const CoverageSchema = z
 interface LessonProposal {
   readonly information: string
   readonly tag: string
-  readonly category?: string
+  readonly category?: (typeof LESSON_CATEGORY_VALUES)[number]
 }
 
 /** Data accumulated from child tool calls during a single dispatch_agent_run. */
@@ -862,12 +862,23 @@ const MAX_PAYLOAD_PROPOSALS = 512
  * so consumers store complete lessons from the artifact rather than from the
  * capped tool-result preview.
  */
+// Single source for the five lesson-category values shared by the
+// payload and submission schemas; both z.enum declarations reference
+// this constant so the two surfaces cannot drift apart.
+const LESSON_CATEGORY_VALUES = [
+  "decision",
+  "pattern",
+  "gotcha",
+  "context",
+  "reference",
+] as const
+
 const PayloadLessonProposalSchema = z
   .object({
     agent: AgentNameSchema,
     information: z.string().min(1).max(16_384),
     tag: z.string().min(1).max(128),
-    category: z.enum(["decision", "pattern", "gotcha", "context", "reference"]).optional(),
+    category: z.enum(LESSON_CATEGORY_VALUES).optional(),
   })
   .strict()
 
@@ -3767,7 +3778,7 @@ const SubmitLessonProposalInputSchema = z
     information: z.string().min(1).max(16_384).describe("The learning text to store."),
     tag: z.string().min(1).max(128).describe("Required topic tag (e.g. authentication, review-dispatch)."),
     category: z
-      .enum(["decision", "pattern", "gotcha", "context", "reference"])
+      .enum(LESSON_CATEGORY_VALUES)
       .optional()
       .describe("Optional category for the learning."),
   })
@@ -4076,14 +4087,6 @@ export const SUMMARY_LIMITS = {
   warningDetailChars: 256,
   maxBytes: 40 * 1024,
 } as const
-
-const LESSON_CATEGORY_VALUES = [
-  "decision",
-  "pattern",
-  "gotcha",
-  "context",
-  "reference",
-] as const
 
 interface TruncatedText {
   readonly text: string
@@ -4948,7 +4951,7 @@ export function createConsolidateDispatchTool(
             agent: run.agent,
             information: p.information,
             tag: p.tag,
-            category: p.category as z.infer<typeof PayloadLessonProposalSchema>["category"],
+            category: p.category,
           })),
         ),
       )
