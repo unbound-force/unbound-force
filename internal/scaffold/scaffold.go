@@ -2211,12 +2211,22 @@ func migrateSkillDir(opts *Options) *subToolResult {
 		}
 		switch {
 		case bytes.Equal(oldContent, newContent):
-			_ = os.Remove(oldPath)
+			if rmErr := os.Remove(oldPath); rmErr != nil {
+				_, _ = fmt.Fprintf(opts.Stdout,
+					"  ⚠ skill/%s: remove failed: %v\n", slashRel, rmErr)
+				warned++
+				continue
+			}
 			duplicates++
 		case isScaffoldSkillFile(slashRel):
 			// Tool-owned scaffold skill: skills/ holds the
 			// current version, so the legacy copy is stale.
-			_ = os.Remove(oldPath)
+			if rmErr := os.Remove(oldPath); rmErr != nil {
+				_, _ = fmt.Fprintf(opts.Stdout,
+					"  ⚠ skill/%s: remove failed: %v\n", slashRel, rmErr)
+				warned++
+				continue
+			}
 			stale++
 		default:
 			_, _ = fmt.Fprintf(opts.Stdout,
