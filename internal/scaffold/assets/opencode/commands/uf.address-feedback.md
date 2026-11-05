@@ -213,9 +213,14 @@ Record the push target that `gh pr checkout` configured for the
 actual checked-out branch (`HEAD_BRANCH`), for Section 4.4:
 
 ```bash
-git config branch.<HEAD_BRANCH>.remote
-git config branch.<HEAD_BRANCH>.merge
+git config "branch.<HEAD_BRANCH>.remote"
+git config "branch.<HEAD_BRANCH>.merge"
 ```
+
+Quote the interpolated values in every shell template below:
+git refnames may legally contain shell metacharacters, and
+`HEAD_BRANCH` and `HEAD_MERGE_REF` derive from the PR author's
+branch name.
 
 Record the first value as `HEAD_REMOTE` (a remote name or URL)
 and the second as `HEAD_MERGE_REF` (for example
@@ -224,7 +229,20 @@ that the PR head has no configured push target. If
 `HEAD_MERGE_REF` starts with `refs/pull/`, **STOP**: it is a
 read-only merge ref (a fork PR with maintainer edits disabled),
 so the Section 4.4 push would always be rejected — report that
-the PR head cannot be pushed to from this clone.
+the PR head cannot be pushed to from this clone. Finally,
+cross-check the push target against the frozen PR head context:
+`HEAD_MERGE_REF` MUST equal `refs/heads/<head_ref>` — the merge
+ref `gh pr checkout` writes for the PR's head branch. Any other
+value means the checked-out branch is not the PR head branch
+(for example `main` after the PR merged upstream carries
+`refs/heads/main`): **STOP** and report that the working tree is
+on a branch whose push target is `HEAD_MERGE_REF`, not the PR
+head branch `<head_ref>` — never push this PR's commits to a
+different branch. Ancestry alone cannot make this distinction —
+any branch that merely contains `head_sha` (such as a `main`
+that absorbed the merged PR) passes the descendant check above,
+so the merge-ref cross-check is what ties the push target to
+the frozen PR head.
 
 ### 1.3 Fetch Reviews and Comments
 
@@ -1067,7 +1085,19 @@ Before pushing, fetch the remote branch state from the push
 target recorded in Section 1.2.1:
 
 ```bash
-git fetch <HEAD_REMOTE> <HEAD_MERGE_REF>
+git fetch "<HEAD_REMOTE>" "<HEAD_MERGE_REF>"
+```
+
+If the fetch fails (network error, authentication failure, stale
+remote URL), **STOP** and report the specific error — do not run
+the divergence comparison below. A failed fetch leaves
+`FETCH_HEAD` holding the previous fetch's tip (including the
+implicit fetch `gh pr checkout` performed in Section 1.2.1), so
+the comparison would silently run against stale state.
+
+Then count divergence:
+
+```bash
 git rev-list --left-right --count HEAD...FETCH_HEAD
 ```
 
@@ -1116,11 +1146,11 @@ decision as follows:
 Push all commits:
 
 ```bash
-git push <HEAD_REMOTE> HEAD:<HEAD_MERGE_REF>
+git push "<HEAD_REMOTE>" "HEAD:<HEAD_MERGE_REF>"
 ```
 
 **If push fails** (network error, branch protection rejection): preserve local commits and report which commits are stranded. Provide guidance:
-> "Push failed. Local commits preserved. Retry with `git push <HEAD_REMOTE> HEAD:<HEAD_MERGE_REF>` after resolving the issue."
+> "Push failed. Local commits preserved. Retry with `git push "<HEAD_REMOTE>" "HEAD:<HEAD_MERGE_REF>"` after resolving the issue."
 
 > **CHECKPOINT**: Call `checkpoint` with
 > `command: "uf.address-feedback"`, `step: "push"`.
