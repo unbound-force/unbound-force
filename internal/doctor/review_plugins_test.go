@@ -261,11 +261,11 @@ func TestCheckManifestInstallConsistency_MalformedInstall(t *testing.T) {
 	dir := t.TempDir()
 	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
 	writeInstalledPackages(t, dir)
-	createFile(t, dir, ".opencode/node_modules/vitest/package.json", "not-json")
+	createFile(t, dir, ".opencode/node_modules/zod/package.json", "not-json")
 
 	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: os.ReadFile})
-	if result.Severity != Fail || !strings.Contains(result.Message, "vitest") {
-		t.Errorf("result = %v %q, want Fail naming vitest", result.Severity, result.Message)
+	if result.Severity != Fail || !strings.Contains(result.Message, "zod") {
+		t.Errorf("result = %v %q, want Fail naming zod", result.Severity, result.Message)
 	}
 }
 

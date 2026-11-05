@@ -1636,10 +1636,15 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 	readJSONFile(t, filepath.Join(root, "internal", "scaffold", "testdata", "plugin-package-provenance.json"), &provenance)
 
 	var manifest struct {
-		Dependencies    map[string]string `json:"dependencies"`
-		DevDependencies map[string]string `json:"devDependencies"`
+		Dependencies map[string]string `json:"dependencies"`
 	}
 	readJSONFile(t, filepath.Join(root, "internal", "scaffold", "assets", "opencode", "package.json"), &manifest)
+	// The scaffolded manifest ships without devDependencies (design
+	// D2a); the repository dev manifest keeps the test-tool pins.
+	var repoManifest struct {
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	readJSONFile(t, filepath.Join(root, ".opencode", "package.json"), &repoManifest)
 
 	expectedPackages := map[string]struct {
 		version string
@@ -1680,12 +1685,12 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 		}
 		declared, ok := manifest.Dependencies[name]
 		if !ok {
-			declared, ok = manifest.DevDependencies[name]
+			declared, ok = repoManifest.DevDependencies[name]
 		}
 		if !ok {
-			t.Errorf("scaffold manifest does not declare %s", name)
+			t.Errorf("%s is not declared by the scaffolded or repository manifest", name)
 		} else if entry.Version != declared {
-			t.Errorf("%s provenance version %q does not match scaffold manifest pin %q", name, entry.Version, declared)
+			t.Errorf("%s provenance version %q does not match manifest pin %q", name, entry.Version, declared)
 		}
 	}
 
