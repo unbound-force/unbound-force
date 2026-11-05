@@ -16,6 +16,14 @@ import {
 export const MAX_ERROR_LENGTH = 4_096
 export const CLEANUP_ABORT_TIMEOUT_MS = 5_000
 export const DEFAULT_TIMEOUT_MILLISECONDS = 600_000
+/**
+ * Wall-clock timeout ceiling shared by invoke_agent and every
+ * prompt-only delegation path (uf_delegate_command derives its
+ * MAX_PROMPT_DELEGATION_TIMEOUT_MS from this value). Single
+ * source of truth so the executor schema and the delegation
+ * bound cannot drift apart.
+ */
+export const MAX_TIMEOUT_MILLISECONDS = 1_800_000
 export const MAX_INLINE_PROMPT_BYTES = 128 * 1024
 export const MAX_PROMPT_FILE_BYTES = 4 * 1024 * 1024
 
@@ -25,7 +33,7 @@ export const PromptSchema = z
   .string()
   .refine((value) => Buffer.byteLength(value, "utf8") <= MAX_INLINE_PROMPT_BYTES, "prompt exceeds 128 KiB UTF-8")
 export const PromptFileSchema = z.string().max(1024)
-export const TimeoutSchema = z.number().int().positive().max(1_800_000)
+export const TimeoutSchema = z.number().int().positive().max(MAX_TIMEOUT_MILLISECONDS)
 export const VariantSchema = z.string().max(64).regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/)
 
 // ── Type derivations from the OpenCode plugin client ─────────
@@ -457,7 +465,14 @@ export async function executeAgentSession(
     abortChild()
   }
   const timeout = setTimeout(() => {
-    abortCause = "timeout"
+    // A late wall-clock timer must not overwrite an abort cause
+    // already recorded by the idle watchdog or a parent
+    // cancellation: the catch block classifies the result from
+    // `abortCause`, and the first cause wins. `linkedAbort.abort`
+    // is idempotent, so relaying the timeout stays safe either way.
+    if (abortCause === null) {
+      abortCause = "timeout"
+    }
     linkedAbort.abort(new Error("invoke_agent run timed out"))
     abortChild()
   }, effectiveMilliseconds)
