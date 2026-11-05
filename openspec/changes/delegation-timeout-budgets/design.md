@@ -230,13 +230,15 @@ prompt re-carries the description and issue reference(s).
   `children`), so up to 64 requests per child every 30 seconds.
   Bounded by the 32-session cap and only for
   `uf_delegate_command` children.
-- **Clamped review-run provenance**: `dispatch_review_runs`
-  records its derived per-run timeout in the run file before the
-  executor applies the budget clamp, so a clamped run's recorded
-  `timeout.effective_ms` overstates the applied limit. The
-  executor result's `timeout.budget_clamped` and `effective_ms`
-  are authoritative; recording the clamped value in the run file
-  is left to the review-dispatch owners.
+- **Clamped review-run provenance** (resolved): the run file now
+  records the executor outcome alongside the derived provenance —
+  `executor_effective_ms` and `executor_budget_clamped` are copied
+  from the executor result's timeout details, so a clamped run no
+  longer overstates its applied limit (`timeout.effective_ms`
+  remains the derived pre-clamp value for provenance).
+  `dispatch_status` prefers `executor_effective_ms` when present;
+  the consolidate dispatchRuns mapping omits both fields
+  (run-file audit only).
 - **`messages` ordering**: the probe relies on `limit` returning
   the most recent messages (OpenCode 1.19 behavior). If a host
   returned the oldest instead, the fingerprint would only change

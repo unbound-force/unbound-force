@@ -11,9 +11,9 @@
   unregister, lookup), `resolveInheritedDeadline` (registry hit,
   else bounded `parentID` walk, errors -> null),
   `clampToBudget` (60 s reserve, 30 s minimum), and
-  `probeSubtreeActivity` (BFS over `session.children` capped at
-  32 sessions, latest message per session, fingerprint plus
-  `pending_question`) (D1, D2).
+  `probeSubtreeActivity` (DFS over `session.children`, newest
+  child first, capped at 32 sessions, latest message per
+  session, fingerprint plus `pending_question`) (D1, D2).
 - [x] 1.2 Add `.opencode/test/delegation-budget.test.ts` covering
   registry, ancestry walk depth and errors, clamp boundaries,
   fingerprint changes, probe failures, and the session cap.
@@ -59,3 +59,7 @@
 - [x] 5.2 Add the CHANGELOG entry under Unreleased.
 - [x] 5.3 Run `make plugin-test` and
   `go test -race -count=1 ./...`.
+- [x] 5.4 File the user-facing documentation issue in
+  unbound-force/website covering `idle_timeout`, the timeout
+  ceilings, the timeout envelope fields, and the recovery
+  protocol: unbound-force/website#381.
