@@ -1233,24 +1233,33 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ### Fixed
 - address-feedback-pr-checkout (#954): `/uf.address-feedback` now
   checks out the PR head (`gh pr checkout`) in new Section 1.2.1
-  before its first `get_progress` or `checkpoint` call, and stops if
-  the tree is dirty or `HEAD` is neither the frozen `head_sha` nor a
-  descendant of it afterwards — identity is keyed on `HEAD`, not the
-  local branch name, so a failed-push retry with unpushed commits
-  resumes instead of stopping, and a fork PR whose local branch is
-  named `<owner>/<branch>` no longer stops falsely. A failed
+  before its first `get_progress` or `checkpoint` call, and stops
+  when a checkout is required but the tree is dirty (a dirty tree
+  already on the PR head still continues, so an interrupted run
+  can resume with uncommitted mid-run edits), or when `HEAD` is
+  neither the frozen `head_sha` nor a descendant of it afterwards
+  — identity is keyed on `HEAD`, not the local branch name, so a
+  failed-push retry with unpushed commits resumes instead of
+  stopping, and a fork PR whose local branch is named
+  `<owner>/<branch>` no longer stops falsely. A failed
   `gh pr checkout` stops with the specific error and remediation,
   and a read-only `refs/pull/` merge ref stops at 1.2.1 instead of
-  failing the push at 4.4. Progress is therefore keyed to the PR
+  failing the push at 4.4; the recorded push target must match
+  `refs/heads/<head_ref>`, so a branch that merely contains the
+  merged PR (such as upstream `main`) stops instead of pushing the
+  PR's commits elsewhere. Progress is therefore keyed to the PR
   branch, not whatever branch the run started on — including on
   compressed-context resume (the session-resume guard confirms the
   branch before reading progress). Section 4.4 fetches and pushes
-  through the head remote and merge ref that `gh pr checkout`
-  configured, instead of a hard-coded `origin`, which in a
-  fork-and-upstream clone is the fork, and detects divergence via
+  through the push target recorded in 1.2.1 (`gh pr checkout`
+  configures it on checkout; on resume paths that skip the
+  checkout it is read from the existing local branch config),
+  instead of a hard-coded `origin`, which in a fork-and-upstream
+  clone is the fork, and detects divergence via
   `git rev-list --left-right --count HEAD...FETCH_HEAD` (a URL
   remote's fetch updates only `FETCH_HEAD`, which `git status`
-  cannot see). (Fixes: #954)
+  cannot see); a failed fetch stops before the divergence check
+  (a failed fetch leaves `FETCH_HEAD` stale). (Fixes: #954)
 - review-dispatch-consumer-bounds (#941): lesson proposals are now
   stored with their full text. `consolidate_dispatch` persists the
   proposals in the dispatch artifact as an optional

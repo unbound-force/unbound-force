@@ -183,10 +183,18 @@ func TestCommandContracts_AddressFeedback(t *testing.T) {
 		{name: "tier two finalization", all: []string{"finalize every tier 2 item, including plan or no-success failures, with a single `consolidate_dispatch` call", "\"workflow_id\": \"uf.address-feedback\"", "never call `finalize_review_dispatch` yourself", "the scalar review verdict (`review_verdict`)"}},
 		{name: "feedback triage artifact", all: []string{".uf/artifacts/feedback-triage/pr-<pr_number>-round-<m>.json", "existing feedback-triage artifact", "emitted in addition to each tier 2 `review-dispatch` artifact"}},
 		{name: "pr head checkout", all: []string{"### 1.2.1 Check Out the PR Head", "MUST be on the PR head before the first `get_progress` or `checkpoint` call", "gh pr checkout <PR_NUMBER>", "Never fetch the head branch by guessing a remote name", "never reset or discard local commits", "Never call `get_progress` or `checkpoint` from another branch."}},
-		{name: "pr head identity keyed on head sha", all: []string{"Identity is keyed on `HEAD`, not on the local branch name", "`git merge-base --is-ancestor <head_sha> HEAD`", "carries unpushed commits from a prior run", "Record the actual checked-out branch name as `HEAD_BRANCH`", "git config branch.<HEAD_BRANCH>.remote", "git config branch.<HEAD_BRANCH>.merge"}},
+		{name: "pr head identity keyed on head sha", all: []string{"Identity is keyed on `HEAD`, not on the local branch name", "`git merge-base --is-ancestor <head_sha> HEAD`", "carries unpushed commits from a prior run", "Record the actual checked-out branch name as `HEAD_BRANCH`", `git config "branch.<HEAD_BRANCH>.remote"`, `git config "branch.<HEAD_BRANCH>.merge"`}},
 		{name: "read-only merge ref stops early", all: []string{"If `HEAD_MERGE_REF` starts with `refs/pull/`, **STOP**", "read-only merge ref (a fork PR with maintainer edits disabled)", "the Section 4.4 push would always be rejected"}},
 		{name: "checkout failure stop", all: []string{"If the checkout fails, **STOP** and report the specific error", "untracked working tree files would be overwritten", "`git stash -u` includes untracked files; plain `git stash` skips them"}},
-		{name: "push to configured head remote", all: []string{"git fetch <HEAD_REMOTE> <HEAD_MERGE_REF>", "git push <HEAD_REMOTE> HEAD:<HEAD_MERGE_REF>", "git rev-list --left-right --count HEAD...FETCH_HEAD", "no remote-tracking ref is written, so `git status` cannot observe divergence"}},
+		{name: "push to configured head remote", all: []string{`git fetch "<HEAD_REMOTE>" "<HEAD_MERGE_REF>"`, `git push "<HEAD_REMOTE>" "HEAD:<HEAD_MERGE_REF>"`, "git rev-list --left-right --count HEAD...FETCH_HEAD", "no remote-tracking ref is written, so `git status` cannot observe divergence"}},
+		{name: "resume guard confirms branch first", all: []string{"Confirm the working tree is on the PR head per Section 1.2.1", "the re-check is unconditional on resume"}},
+		{name: "progress tracking intro keyed to 1.2.1", all: []string{"As soon as Section 1.2.1 has put the working tree on the PR head, call `get_progress`"}},
+		{name: "todowrite resume confirms branch first", all: []string{"On resume from compressed context, first confirm the working tree is on the PR head per Section 1.2.1", "never read it from another branch"}},
+		{name: "dirty tree stop", all: []string{"git status --porcelain --untracked-files=no", "Working tree has uncommitted changes. Commit or stash them"}},
+		{name: "unrelated branch stop", all: []string{"the branch is unrelated to the PR head", "**STOP** and report both SHAs"}},
+		{name: "unset push target stop", all: []string{"If either is unset, **STOP** and report", "no configured push target"}},
+		{name: "merge ref cross-check stops wrong branch", all: []string{"`HEAD_MERGE_REF` MUST equal `refs/heads/<head_ref>`", "never push this PR's commits to a different branch", "any branch that merely contains `head_sha`"}},
+		{name: "fetch failure stop", all: []string{"If the fetch fails", "do not run the divergence comparison", "silently run against stale state"}},
 	}
 
 	assertCommandCopies(t, "uf.address-feedback.md", true, clauses)
@@ -212,6 +220,21 @@ func TestCommandContracts_AddressFeedback(t *testing.T) {
 		}
 		if sectionIdx > checkpointIdx {
 			t.Errorf("%s: Section 1.2.1 (index %d) must precede the first **CHECKPOINT** marker (index %d) so progress state is keyed to the PR head branch", copy.name, sectionIdx, checkpointIdx)
+		}
+
+		// The origin-hardcoded push choreography that Section 4.4
+		// replaced must not return alongside the pinned HEAD_REMOTE
+		// forms. The fragments match the exact removed invocation
+		// forms because "origin" legitimately survives in prose (the
+		// Section 1.2.1 warning against guessing a remote name).
+		for _, forbidden := range []string{
+			"git fetch origin <branch>",
+			"git push origin <branch>",
+			"Retry with `git push origin <branch>`",
+		} {
+			if strings.Contains(normalized, normalizeCommandText(forbidden)) {
+				t.Errorf("%s: origin-hardcoded push choreography must not return: %q", copy.name, forbidden)
+			}
 		}
 	}
 }
