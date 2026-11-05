@@ -160,6 +160,104 @@ func TestMigrateSkillDir_ReadFailureKeepsLegacyFile(t *testing.T) {
 	}
 }
 
+func TestMigrateSkillDir_MkdirFailureKeepsLegacyFile(t *testing.T) {
+	dir := t.TempDir()
+	// skills/blocker is a file where the merge needs a directory, so
+	// MkdirAll for the nested destination fails.
+	createFile(t, dir, ".opencode/skills/keeper/SKILL.md", "keeper")
+	createFile(t, dir, ".opencode/skills/blocker", "in the way")
+	createFile(t, dir, ".opencode/skill/blocker/SKILL.md", "legacy")
+	opts, buf := newSkillMigrationOpts(dir)
+
+	result := migrateSkillDir(opts)
+
+	if result == nil || !strings.HasSuffix(result.detail, "1 warnings") {
+		t.Fatalf("expected one warning, got %+v", result)
+	}
+	if !strings.Contains(buf.String(), "skill/blocker/SKILL.md: move failed") {
+		t.Errorf("expected move-failure warning, got:\n%s", buf.String())
+	}
+	assertFileContent(t, dir, ".opencode/skill/blocker/SKILL.md", "legacy")
+}
+
+func TestMigrateSkillDir_MoveFailureKeepsLegacyFile(t *testing.T) {
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/skill/a/SKILL.md", "legacy")
+	newDir := filepath.Join(dir, ".opencode", "skills", "a")
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// A read-only destination directory makes both the rename and the
+	// write fallback in moveFile fail, exercising the move-failure path.
+	if err := os.Chmod(newDir, 0o555); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(newDir, 0o755) })
+	opts, buf := newSkillMigrationOpts(dir)
+
+	result := migrateSkillDir(opts)
+
+	if result == nil || !strings.HasSuffix(result.detail, "1 warnings") {
+		t.Fatalf("expected one warning, got %+v", result)
+	}
+	if !strings.Contains(buf.String(), "skill/a/SKILL.md: move failed") {
+		t.Errorf("expected move-failure warning, got:\n%s", buf.String())
+	}
+	assertFileContent(t, dir, ".opencode/skill/a/SKILL.md", "legacy")
+	assertAbsent(t, dir, ".opencode/skills/a/SKILL.md")
+}
+
+func TestMigrateSkillDir_NewPathReadFailureKeepsLegacyFile(t *testing.T) {
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/skills/a/SKILL.md", "new")
+	createFile(t, dir, ".opencode/skill/a/SKILL.md", "old")
+	opts, buf := newSkillMigrationOpts(dir)
+	opts.ReadFile = func(path string) ([]byte, error) {
+		if strings.Contains(path, filepath.Join(".opencode", "skills", "a")) {
+			return nil, os.ErrPermission
+		}
+		return os.ReadFile(path)
+	}
+
+	result := migrateSkillDir(opts)
+
+	if result == nil || !strings.HasSuffix(result.detail, "1 warnings") {
+		t.Fatalf("expected one warning, got %+v", result)
+	}
+	assertFileContent(t, dir, ".opencode/skill/a/SKILL.md", "old")
+	if !strings.Contains(buf.String(), "skill/a/SKILL.md: read failed") {
+		t.Errorf("expected read-failure warning, got:\n%s", buf.String())
+	}
+}
+
+func TestMigrateSkillDir_RemoveFailureKeepsLegacyFileAndWarns(t *testing.T) {
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/skills/a/SKILL.md", "same")
+	createFile(t, dir, ".opencode/skill/a/SKILL.md", "same")
+	legacyDir := filepath.Join(dir, ".opencode", "skill", "a")
+	// A read-only legacy directory makes removing the duplicate fail,
+	// so the file must be neither counted as removed nor dropped
+	// silently.
+	if err := os.Chmod(legacyDir, 0o555); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(legacyDir, 0o755) })
+	opts, buf := newSkillMigrationOpts(dir)
+
+	result := migrateSkillDir(opts)
+
+	if result == nil || !strings.HasSuffix(result.detail, "1 warnings") {
+		t.Fatalf("expected one warning, got %+v", result)
+	}
+	if !strings.Contains(result.detail, "removed 0 duplicates and 0 stale") {
+		t.Errorf("failed remove must not count as removed: %q", result.detail)
+	}
+	if !strings.Contains(buf.String(), "skill/a/SKILL.md: remove failed") {
+		t.Errorf("expected remove-failure warning, got:\n%s", buf.String())
+	}
+	assertFileContent(t, dir, ".opencode/skill/a/SKILL.md", "same")
+}
+
 func TestMigrateSkillDir_SymlinkedDirSkipped(t *testing.T) {
 	dir := t.TempDir()
 	createFile(t, dir, "elsewhere/a/SKILL.md", "a")
