@@ -103,7 +103,9 @@ timeout result carries no resume state.
   timeout ceilings, the timeout envelope fields, and the
   recovery protocol tracked as unbound-force/website#381
   (AGENTS.md documentation gate; constitution Cross-Repo
-  Documentation rule).
+  Documentation rule). Supersedes the "wedged at the gate
+  until timeout" assessment in #838, whose wedge now ends
+  as an idle timeout with `pending_question: true`.
 - No change to `invoke_agent`'s or `dispatch_review_runs`' input
   bounds, to `run-timeout.ts` derivation (its record type gains
   optional executor-outcome audit fields), or to any quality

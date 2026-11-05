@@ -274,7 +274,7 @@ export function responseText(parts: readonly PromptPart[]): string {
 }
 
 export function validateTimeout(timeoutMilliseconds: number): void {
-  if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds <= 0 || timeoutMilliseconds > 1_800_000) {
+  if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds <= 0 || timeoutMilliseconds > MAX_TIMEOUT_MILLISECONDS) {
     throw new Error("invoke_agent timeout must be a positive integer no greater than 1800000 milliseconds")
   }
 }

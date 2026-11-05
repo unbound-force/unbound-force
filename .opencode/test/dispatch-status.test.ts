@@ -430,7 +430,9 @@ describe("dispatch_status", () => {
     // dispatch tools resolved the run's timeout through derivation or an
     // explicit argument. dispatch_status surfaces effective_ms per run,
     // strictly observational — null for older run files that predate the
-    // field.
+    // field. When the run file also carries the executor outcome
+    // (executor_effective_ms, recorded after the delegation-budget clamp),
+    // the applied value is preferred over the derived pre-clamp value.
     const derivedTimeout: TimeoutProvenanceRecord = {
       effective_ms: 1_800_000,
       source: "derived",
@@ -445,9 +447,15 @@ describe("dispatch_status", () => {
       ceiling_ms: 1_800_000,
       clamped: true,
     }
+    const executorOutcomeTimeout: TimeoutProvenanceRecord = {
+      ...derivedTimeout,
+      executor_effective_ms: 600_000,
+      executor_budget_clamped: true,
+    }
     await setupDispatchSession([
       runFixture("divisor-guard", { timeout: derivedTimeout }),
       runFixture("divisor-adversary"),
+      runFixture("divisor-architect", { timeout: executorOutcomeTimeout }),
     ])
 
     await withBun(async () => {
@@ -463,10 +471,15 @@ describe("dispatch_status", () => {
       const data = JSON.parse(result.output)
       const guard = data.runs.find((r: { agent: string }) => r.agent === "divisor-guard")
       expect(guard.status).toBe("success")
+      // Without executor outcome fields the derived pre-clamp value stands.
       expect(guard.timeout_effective_ms).toBe(1_800_000)
 
       const adversary = data.runs.find((r: { agent: string }) => r.agent === "divisor-adversary")
       expect(adversary.timeout_effective_ms).toBeNull()
+
+      const architect = data.runs.find((r: { agent: string }) => r.agent === "divisor-architect")
+      // With executor outcome fields the applied post-clamp value wins.
+      expect(architect.timeout_effective_ms).toBe(600_000)
     })
   })
 

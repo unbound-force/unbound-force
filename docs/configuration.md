@@ -571,7 +571,7 @@ non-retryable error code `budget_exhausted`. A top-level run
 
 | Parameter | Command-path delegation | Prompt-only delegation |
 |-----------|------------------------|------------------------|
-| `timeout` | 60,000 -- 14,400,000 ms | 60,000 -- 1,800,000 ms |
+| `timeout` | positive integer, 14,400,000 ms max | positive integer, 1,800,000 ms max |
 | `idle_timeout` | 60,000 -- 1,800,000 ms (default 600,000) | 60,000 -- 1,800,000 ms (default 600,000) |
 
 When an `idle_timeout` is configured, the executor polls the
