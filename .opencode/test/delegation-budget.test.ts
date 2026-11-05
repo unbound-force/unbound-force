@@ -210,7 +210,7 @@ describe("messageFingerprint", () => {
     ).toBe("s:m:::1:t:tool:running::0")
   })
 
-    it("records completion and error presence", () => {
+  it("records completion and error presence", () => {
     const open = messageFingerprint("s", message("m", []))
     const failed = messageFingerprint("s", message("m", [], { error: { name: "x" } }))
     expect(open).not.toBe(failed)
@@ -264,7 +264,7 @@ describe("probeSubtreeActivity", () => {
     expect(second?.fingerprint).not.toBe(first?.fingerprint)
   })
 
-    it("caps the number of probed sessions", async () => {
+  it("caps the number of probed sessions", async () => {
     const ids = Array.from({ length: MAX_PROBE_SESSIONS + 5 }, (_unused, index) => `c${index}`)
     const sessions: Record<string, FakeSession> = { root: { children: [...ids, "root"] } }
     const fake = treeClient({ sessions })
@@ -302,6 +302,8 @@ interface ExecutorFakeOptions {
   readonly probeDelayMs?: (call: number) => number
   /** Child prompt resolves after this many ms instead of hanging. */
   readonly resolveAfterMs?: number
+  /** Child prompt rejects this many ms after the abort signal fires (default immediate). */
+  readonly rejectAfterAbortMs?: number
 }
 
 /** Executor-facing fake: child creation, a hanging prompt, abort, and probe endpoints. */
@@ -328,7 +330,21 @@ function executorClient(options: ExecutorFakeOptions = {}) {
             options.resolveAfterMs,
           )
         }
-        request.signal?.addEventListener("abort", () => reject(request.signal?.reason), { once: true })
+        request.signal?.addEventListener(
+          "abort",
+          () => {
+            const reason = request.signal?.reason
+            // A deferred rejection lets a late wall-clock timer fire
+            // before the prompt's rejection settles, exercising the
+            // abort-cause classification race.
+            if (options.rejectAfterAbortMs !== undefined) {
+              setTimeout(() => reject(reason), options.rejectAfterAbortMs)
+            } else {
+              reject(reason)
+            }
+          },
+          { once: true },
+        )
       })
     },
     abort: async () => {
@@ -520,5 +536,76 @@ describe("executeAgentSession budgets and idle watchdog", () => {
     expect(result.timeout).toBeUndefined()
     expect(fake.calls.probes).toBe(3)
     expect(fake.calls.aborts).toBe(0)
+  })
+
+  it("fires the budget-clamped wall clock at the effective deadline", async () => {
+    // Regression guard for #930: the wall clock must use the clamped
+    // effective timeout. A regression that passes the requested
+    // timeout to setTimeout would not fire at the clamp deadline.
+    const start = Date.now()
+    register("parent", start + BUDGET_RESERVE_MS + MIN_NESTED_BUDGET_MS)
+    const pending = run(executorClient().client, { timeoutMilliseconds: 1_800_000 })
+    await vi.advanceTimersByTimeAsync(MIN_NESTED_BUDGET_MS)
+    const result = await pending
+    expect(result.error?.code).toBe("timeout")
+    expect(result.timeout).toMatchObject({
+      kind: "wall_clock",
+      effective_ms: MIN_NESTED_BUDGET_MS,
+      requested_ms: 1_800_000,
+      budget_clamped: true,
+    })
+  })
+
+  it("does not reset the idle clock on failed probes", async () => {
+    // Probe 1 at 1 s succeeds ("a", baseline and last progress);
+    // probes 2-6 fail; probe 7 at 7 s succeeds unchanged, 6 s after
+    // the last real progress. If failures reset the idle clock the
+    // run would reach the wall clock instead of aborting.
+    let call = 0
+    const fake = executorClient({
+      latest: () => {
+        call++
+        return call === 1 || call === 7
+          ? message("m", [{ id: "p", type: "text", text: "a" }])
+          : undefined
+      },
+    })
+    const pending = run(fake.client, { timeoutMilliseconds: 60_000, idleTimeoutMilliseconds: 5_000 })
+    await vi.advanceTimersByTimeAsync(7_000)
+    const result = await pending
+    expect(result.error?.code).toBe("idle_timeout")
+    expect(result.timeout).toMatchObject({ kind: "idle", elapsed_ms: 7_000 })
+    expect(result.timeout?.last_progress_ms_ago).toBe(6_000)
+  })
+
+  it("keeps the idle classification when the wall-clock timer fires before a deferred rejection", async () => {
+    // The idle watchdog aborts at 11 s (the probe at 1 s is the last
+    // progress; the 11 s probe is unchanged, 10 s later). The child's
+    // prompt rejects 5 s after the abort, so the wall-clock timer at
+    // 12 s fires while the rejection is still pending. Without the
+    // first-cause-wins guard the late timer overwrites abortCause and
+    // the run is misclassified as wall_clock.
+    const fake = executorClient({
+      rejectAfterAbortMs: 5_000,
+      latest: () => message("m", [{ id: "p", type: "text", text: "same" }]),
+    })
+    const pending = run(fake.client, { timeoutMilliseconds: 12_000, idleTimeoutMilliseconds: 10_000 })
+    await vi.advanceTimersByTimeAsync(20_000)
+    const result = await pending
+    expect(result.error?.code).toBe("idle_timeout")
+    expect(result.timeout?.kind).toBe("idle")
+  })
+
+  it("reports child_active false on a wall-clock timeout with stale progress", async () => {
+    // The only progress is the first probe at 1 s; 129 s later the
+    // 120 s activity window has lapsed, so the wall-clock timeout
+    // reports the child as inactive.
+    const fake = executorClient({ latest: () => message("m", [{ id: "p", type: "text", text: "same" }]) })
+    const pending = run(fake.client, { timeoutMilliseconds: 130_000, idleTimeoutMilliseconds: 300_000 })
+    await vi.advanceTimersByTimeAsync(130_000)
+    const result = await pending
+    expect(result.error?.code).toBe("timeout")
+    expect(result.timeout).toMatchObject({ kind: "wall_clock", child_active: false })
+    expect(result.timeout?.last_progress_ms_ago).toBe(129_000)
   })
 })
