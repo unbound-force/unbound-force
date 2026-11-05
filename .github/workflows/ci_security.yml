@@ -71,6 +71,7 @@ jobs:
           node-version: 22
 
       - name: Generate throwaway lock
+        # npm pin is the twin of Makefile PLUGIN_TEST_NPM; keep in sync.
         run: cd .opencode && npx -y npm@11.6.2 install --package-lock-only --ignore-scripts --no-audit --no-fund
 
       - name: Scan plugin transitive dependencies

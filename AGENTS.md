@@ -183,6 +183,11 @@ imported externally.
   npm 10.9.9 crashes building the lockless vitest 5 peer graph.
   The scaffolded manifest ships no `devDependencies` for the same
   reason; `uf init` keeps a target's existing ones
+- **Local lock race**: concurrent opencode hosts re-install
+  `.opencode/` plugins and can write a gitignored
+  `package-lock.json` mid-`make plugin-test`, tripping the
+  no-lock-shipped assertion locally. CI is unaffected. Remove
+  the stray lock and re-run; do not delete `node_modules`
 
 ## Behavioral Rules
 

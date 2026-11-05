@@ -40,7 +40,8 @@
 - [x] 3.1 Update `internal/scaffold/scaffold_test.go`:
   - exact-version manifest gate without the lock assertions;
   - `.gitignore` gate requires `package-lock.json` to be ignored;
-  - mirror and fresh-target gates assert no lock is embedded or deployed;
+  - mirror and fresh-target gates assert no lock is embedded
+    or deployed;
   - asset inventory, surface pairs and tool-owned tables updated;
   - gitignore merge expectations updated.
 - [x] 3.2 [P] Update `internal/scaffold/plugin_activation_test.go`

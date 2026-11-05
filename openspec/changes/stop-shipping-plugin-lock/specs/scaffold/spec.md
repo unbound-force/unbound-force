@@ -4,8 +4,13 @@ Amends `review-council-multi-model-fanout` (SC-FR-001, SC-FR-003,
 SC-FR-004, SC-FR-005). The scaffold no longer ships, tracks, or
 installs from `.opencode/package-lock.json`.
 
-Requirement numbering: no new requirement ids are allocated; this
-change modifies SC-FR-001, SC-FR-003, SC-FR-004, and SC-FR-005 in
+Requirement numbering: the SC-FR ids were allocated by
+`review-council-multi-model-fanout`, which created the scaffold
+capability; unarchived siblings amend them in place
+(`clarification-marker-superset` amends SC-FR-003,
+`init-override-stubs-gitignore-sync` carries SC-FR-015). This
+change allocates no new ids and creates no reserved range; it
+modifies SC-FR-001, SC-FR-003, SC-FR-004, and SC-FR-005 in
 place.
 
 ## ADDED Requirements

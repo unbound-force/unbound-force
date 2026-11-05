@@ -13,13 +13,22 @@ that assumption doesn't hold.
 
 ## Cross-Change Reconciliation
 
-The `ci` and `scaffold` contracts touched by this change also
-carry text in sibling unarchived changes. This change cannot
-ship a MODIFIED `ci` delta of its own: OpenSpec requires a
-MODIFIED requirement to match canonical text that will not
-exist until `ts-plugin-coverage-gate` archives. The
-reconciliation lives in the sibling deltas:
+The `ci` and `scaffold` contracts touched by this change carry
+replaced text in four unarchived sibling changes. This change
+cannot ship a MODIFIED `ci` delta of its own: OpenSpec requires
+a MODIFIED requirement to match canonical text that will not
+exist until its predecessors archive. The reconciliation lives
+in the sibling deltas:
 
+- `review-council-multi-model-fanout` authors the requirements
+  this change modifies (SC-FR-001, SC-FR-003, SC-FR-004,
+  SC-FR-005) and creates the scaffold capability; its archived
+  text is the base this delta's `Previously` paragraphs quote.
+- `clarification-marker-superset` amended SC-FR-003 after that:
+  its still-unarchived delta carries the current stack text
+  (lock tracking, integrity hashes, baseline-lock rollback SHA
+  `5ebee4af`, and the MIT license clause) that this change's
+  MODIFIED requirement replaces.
 - `ts-plugin-coverage-gate` (`specs/ci/spec.md:12-14`,
   `proposal.md:169`): its locked-`npm ci` MUST for the
   `plugin-test` target and its proposal's "install discipline
@@ -32,8 +41,11 @@ reconciliation lives in the sibling deltas:
   (`spec.md:318-322`) are amended for the fifth ignored line
   (`package-lock.json`) and the lockless install.
 
-This change archives after, or together with, the reconciled
-siblings so the canonical text lines up.
+This change archives after `review-council-multi-model-fanout`
+and `clarification-marker-superset`, so its MODIFIED deltas
+match the text those changes leave canonical, and after, or
+together with, the two reconciled siblings so the canonical
+text lines up.
 
 ## Decisions
 

@@ -1591,9 +1591,10 @@ const reviewMatrixOverrideStub = `# .uf/review-matrix.override.yaml
 // .opencode/.gitignore by ensureOpencodeGitignore (SC-FR-015, design
 // D9): the plugin-dependency and test-output noise that lands inside
 // .opencode/ when plugin activation installs there (node_modules,
-// bun.lock, and the package-lock.json npm or opencode may write; the
-// scaffold no longer ships or tracks a lock) and when the TypeScript plugin suite runs (.vitest/
-// cache, coverage/ output). It is a Go string constant rather than an
+// bun.lock, and the package-lock.json npm or opencode may write;
+// the scaffold no longer ships or tracks a lock) and when the
+// TypeScript plugin suite runs (.vitest/ cache, coverage/ output).
+// It is a Go string constant rather than an
 // embedded asset because Go's //go:embed excludes dotfiles from
 // directory matches, so the embedded assets tree cannot carry the
 // file; like the override stubs it carries no version marker and no
