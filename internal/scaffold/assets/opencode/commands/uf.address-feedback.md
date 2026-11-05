@@ -31,7 +31,12 @@ The command follows four sequential phases (Ingest → Assess → Triage → Exe
 
 - **PR number** (optional): The pull request number to address feedback for (e.g., `42`). If omitted, auto-detect the open PR for the current branch.
 
-**Argument parsing** (before any tool calls): Check the user's message for a PR number argument. If present, set `PR_NUMBER` to that value immediately. All subsequent steps use `<PR_NUMBER>` — no auto-detection commands are needed or permitted.
+**Argument parsing** (before any tool calls): Check the user's
+message for a PR number argument. If present, set `PR_NUMBER`
+to that value immediately. `PR_NUMBER` MUST be a positive
+integer (digits only) — any other form is an argument error:
+**STOP** and report it. All subsequent steps use `<PR_NUMBER>`
+— no auto-detection commands are needed or permitted.
 
 ---
 
@@ -210,17 +215,29 @@ accept `HEAD` equal to or descending from `head_sha`; otherwise
 both SHAs; never reset or discard local commits.
 
 Record the push target that `gh pr checkout` configured for the
-actual checked-out branch (`HEAD_BRANCH`), for Section 4.4:
+actual checked-out branch (`HEAD_BRANCH`), for Section 4.4.
+Before interpolating `HEAD_BRANCH` into the config keys below,
+validate it: **STOP** if it contains any character outside the
+conservative set `A-Za-z0-9._/-`:
 
 ```bash
 git config "branch.<HEAD_BRANCH>.remote"
 git config "branch.<HEAD_BRANCH>.merge"
 ```
 
-Quote the interpolated values in every shell template below:
-git refnames may legally contain shell metacharacters, and
+The same charset gate applies to every PR-derived value before
+it reaches any shell template in this command: **STOP** when
+`HEAD_BRANCH` or `HEAD_MERGE_REF` contains any character outside
+`A-Za-z0-9._/-`, or when `HEAD_REMOTE` is neither a plain remote
+name (`A-Za-z0-9._-`) nor an `https://` URL without userinfo
+(`https://[A-Za-z0-9._/-]+`). Quoting the interpolated values —
+as every template below does — is defense-in-depth, not
+neutralization: `$`, backtick, and `"` are legal git refname
+characters that remain active inside double quotes, and
 `HEAD_BRANCH` and `HEAD_MERGE_REF` derive from the PR author's
-branch name.
+branch name. The charset gate is the enforcement that makes the
+templates safe to render; #965 tracks the argument-array tool
+that removes string interpolation entirely.
 
 Record the first value as `HEAD_REMOTE` (a remote name or URL)
 and the second as `HEAD_MERGE_REF` (for example

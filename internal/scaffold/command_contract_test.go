@@ -195,6 +195,8 @@ func TestCommandContracts_AddressFeedback(t *testing.T) {
 		{name: "unset push target stop", all: []string{"If either is unset, **STOP** and report", "no configured push target"}},
 		{name: "merge ref cross-check stops wrong branch", all: []string{"`HEAD_MERGE_REF` MUST equal `refs/heads/<head_ref>`", "never push this PR's commits to a different branch", "any branch that merely contains `head_sha`"}},
 		{name: "fetch failure stop", all: []string{"If the fetch fails", "do not run the divergence comparison", "silently run against stale state"}},
+		{name: "refname charset gate", all: []string{"Before interpolating `HEAD_BRANCH` into the config keys below", "**STOP** if it contains any character outside", "`A-Za-z0-9._/-`", "defense-in-depth, not neutralization", "remain active inside double quotes", "#965 tracks the argument-array tool"}},
+		{name: "pr number digits only", all: []string{"`PR_NUMBER` MUST be a positive integer (digits only)", "any other form is an argument error"}},
 	}
 
 	assertCommandCopies(t, "uf.address-feedback.md", true, clauses)
