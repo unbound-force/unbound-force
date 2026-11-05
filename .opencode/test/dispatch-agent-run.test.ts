@@ -1695,5 +1695,85 @@ describe("dispatch_agent_run", () => {
       const run = await readRunFile(outcome.correlation_id, "divisor-guard")
       expect("timeout" in run).toBe(false)
     })
+
+    it("records the executor outcome alongside derived provenance when the run times out", async () => {
+      // The derived effective_ms can overstate the applied limit after
+      // the delegation-budget clamp, so the run file records the
+      // executor's post-clamp outcome next to the derived provenance
+      // (run-file audit only; dispatch_status prefers executor_effective_ms).
+      const derivedTimeout: TimeoutProvenanceRecord = {
+        effective_ms: 1_800_000,
+        source: "derived",
+        base_ms: 1_200_000,
+        prompt_bytes: 179_200,
+        prompt_term_ms: 166_500,
+        profile_term_ms: 120_000,
+        resolved_tier: "standard",
+        session_profile_tier: "standard",
+        contention_multiplier: 1.45,
+        max_parallel_runs: 4,
+        ceiling_ms: 1_800_000,
+        clamped: true,
+      }
+      const hangingClient = {
+        session: {
+          create: async (): Promise<unknown> => ({
+            data: { id: "child-session" },
+            error: undefined,
+          }),
+          message: async (): Promise<unknown> => ({
+            data: {
+              info: { id: "m", sessionID: "s", role: "assistant", providerID: "p", modelID: "m", variant: "active" },
+              parts: [],
+            },
+            error: undefined,
+          }),
+          // Hang until the executor's wall clock aborts, then reject.
+          prompt: (request: unknown): Promise<unknown> =>
+            new Promise((_resolve, reject) => {
+              const req = request as { signal?: AbortSignal }
+              req.signal?.addEventListener("abort", () => reject(req.signal?.reason), { once: true })
+            }),
+          abort: async (): Promise<unknown> => ({ data: true, error: undefined }),
+        },
+      }
+      const outcome = await executeDispatchRun(
+        {
+          agent: "divisor-guard",
+          promptText: "Review this change.",
+          correlationId: "3d2f8e4a-8b6c-5f43-9c99-5e1b3f4a6d7e",
+          sequence: 1,
+          readOnly: true,
+          timeoutMilliseconds: 50,
+          timeoutProvenance: derivedTimeout,
+          source: "explicit",
+          model: "provider/standard",
+          tier: "standard",
+          variant: null,
+        },
+        toolContext(),
+        makeDeps({ client: hangingClient as unknown as Client }),
+      )
+      trackForCleanup(outcome.correlation_id)
+
+      expect(outcome.result.status).toBe("failed")
+      expect(outcome.result.timeout).toMatchObject({
+        kind: "wall_clock",
+        effective_ms: 50,
+        budget_clamped: false,
+      })
+      expect(outcome.runData?.timeout).toMatchObject({
+        effective_ms: 1_800_000,
+        executor_effective_ms: 50,
+        executor_budget_clamped: false,
+      })
+
+      const run = await readRunFile(outcome.correlation_id, "divisor-guard")
+      expect(run.timeout).toMatchObject({
+        effective_ms: 1_800_000,
+        executor_effective_ms: 50,
+        executor_budget_clamped: false,
+      })
+    })
   })
 })
