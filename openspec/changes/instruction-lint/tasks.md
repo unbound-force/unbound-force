@@ -47,8 +47,9 @@
 
 - [x] 5.1 Unit suite for every rule, suppression, config, CLI
   (instruction-lint.test.ts)
-- [x] 5.2 Seam tests: declaration, round-trip, no-deps, entry
-  and partial installs, split-root
+- [x] 5.2 Seam tests: registration surface (declaration),
+  documented output shape (rendered rows and summary lines),
+  round-trips, no-deps, entry and partial installs, split-root
   (instruction-lint-preflight.test.ts)
 - [x] 5.3 Posting-list cap: exact-duplicate clustering beyond
   the cap; near-identical cliff pinned
