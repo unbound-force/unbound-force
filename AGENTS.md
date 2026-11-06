@@ -83,7 +83,7 @@ unbound-force/
 │   ├── test/                         # TypeScript plugin unit/integration/smoke tests
 │   ├── skill/                        # Swarm skills packages
 │   ├── skills/                       # Additional skills packages
-│   ├── package.json                  # Plugin npm manifest (locked by package-lock.json)
+│   ├── package.json                  # Plugin npm manifest (exact pins; no lock tracked)
 │   └── uf/packs/                     # Convention packs
 ├── council-review-action/             # AI code review composite GitHub Action
 │   ├── action.yml                    # Composite action definition
@@ -169,15 +169,26 @@ imported externally.
 - **TypeScript plugins**: `.opencode/plugins/` review plugins
   (registered via the `opencode.json` `plugin` array) and the
   `.opencode/lib/` shared library use
-  `@opencode-ai/plugin` 1.19.0 and `zod` 4.1.8 (runtime), and
+  `@opencode-ai/plugin` 1.19.0 and `zod` 4.6.6 (runtime), and
   `vitest` 5.0.3 + `@vitest/coverage-v8` 5.0.3 (dev), managed
-  by `.opencode/package.json` / `package-lock.json`.
+  by exact pins in `.opencode/package.json` (no lock is tracked
+  or shipped; installs use `npm install --no-package-lock`).
 - **Node runtime floor** (plugin suite): transitive `ini@7.0.0`
   requires ^22.22.2 || ^24.15.0 || >=26.0.0, declared in the
   `engines` field of `.opencode/package.json` and its scaffold
   mirror; CI `node-version: 22` resolves to v22.23.3 (in range,
   verified 2026-10-19); older Node sees npm EBADENGINE warnings,
   not hard failures
+- **npm for plugin-test**: `make plugin-test` installs through
+  `npx -y npm@11.6.2` (`PLUGIN_TEST_NPM`); node 22's bundled
+  npm 10.9.9 crashes building the lockless vitest 5 peer graph.
+  The scaffolded manifest ships no `devDependencies` for the same
+  reason; `uf init` keeps a target's existing ones
+- **Local lock race**: concurrent opencode hosts re-install
+  `.opencode/` plugins and can write a gitignored
+  `package-lock.json` mid-`make plugin-test`, tripping the
+  no-lock-shipped assertion locally. CI is unaffected. Remove
+  the stray lock and re-run; do not delete `node_modules`
 
 ## Behavioral Rules
 

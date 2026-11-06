@@ -273,12 +273,11 @@ byte-identical after the edits.
 **ID: FR-007** This requirement MUST be satisfied.
 
 The change SHALL adopt the maintainer-approved `@opencode-ai/plugin`
-1.4.10 → 1.19.0 pin with its full lockstep set: the manifests and
-locks (`.opencode/package.json`, `.opencode/package-lock.json`) and
-their scaffold asset mirrors, the
-`TestPluginPackageInputs_ExactVersionsAndLockIntegrity`
+1.4.10 → 1.19.0 pin with its full lockstep set: the manifests
+(`.opencode/package.json`) and their scaffold asset mirrors, the
+`TestPluginPackageInputs_ExactVersions`
 expectedRuntime map, the pin-governance testdata
-(`plugin-package-provenance.json`, `plugin-package-rollback.json`),
+(`plugin-package-provenance.json`),
 the AGENTS.md Technology Stack, and the README engine floor.
 Upstream verification SHALL record each package's actual upstream
 license — MIT for `@opencode-ai/plugin` and `@opencode-ai/sdk`;
@@ -297,7 +296,7 @@ plugin-tool edits.
 
 - **GIVEN** the pin update is applied
 - **WHEN** the lockstep set is updated
-- **THEN** manifests, locks, scaffold mirrors, test expectations,
+- **THEN** manifests, scaffold mirrors, test expectations,
   and testdata all reference 1.19.0 consistently
 - **AND** `make plugin-test` and the pin-enforcement test pass
 

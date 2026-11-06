@@ -316,12 +316,14 @@ ignored in fresh targets:
   dotfiles from directory matches and the embedded assets tree
   cannot carry it;
 - the canonical `.opencode/.gitignore` in this repository MUST
-  contain exactly `node_modules`, `bun.lock`, `.vitest/`, and
-  `coverage/` (one per line), and the deployed content MUST
-  equal the canonical content, pinned by the existing
-  canonical-inputs test's want-string;
+  contain exactly `node_modules`, `bun.lock`,
+  `package-lock.json`, `.vitest/`, and `coverage/` (one per
+  line; `package-lock.json` joined the set through the
+  stop-shipping-plugin-lock reconciliation), and the deployed
+  content MUST equal the canonical content, pinned by the
+  existing canonical-inputs test's want-string;
 - the sub-tool MUST run independently of the review-plugin
-  activation result (`npm ci` may fail or be skipped while
+  activation result (the install may fail or be skipped while
   `node_modules/` can still appear);
 - the writer MUST be idempotent and MUST preserve unknown user
   lines: when the file exists, only canonical lines missing
@@ -339,7 +341,7 @@ ignored in fresh targets:
 - **GIVEN** an empty target directory
 - **WHEN** `uf init` runs in full mode
 - **THEN** `.opencode/.gitignore` is created with exactly the
-  canonical four lines
+  canonical five lines
 
 #### Scenario: User lines preserved, canonical lines added
 
@@ -353,7 +355,7 @@ ignored in fresh targets:
 #### Scenario: Deployment survives plugin-activation failure
 
 - **GIVEN** a target where review-plugin activation fails
-  (for example, `npm ci` errors)
+  (for example, install errors)
 - **WHEN** `uf init` runs
 - **THEN** `.opencode/.gitignore` is still written and its
   disposition is reported

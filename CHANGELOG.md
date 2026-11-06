@@ -891,6 +891,43 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/remove-mutimind-mxf-orchestration/, Fixes: #565, Fixes: #566)
 
 ### Changed
+- stop-shipping-plugin-lock: `uf init` no longer ships or tracks
+  `.opencode/package-lock.json`. opencode and users also install into
+  `.opencode/`, so a tool-owned lock was overwritten on every
+  `uf init` or broke `npm ci`. Plugin activation now runs
+  `npm install --ignore-scripts --omit=dev --no-package-lock
+  --no-audit --no-fund`, which neither reads nor writes a lock.
+  `.opencode/.gitignore` gains `package-lock.json` through the
+  existing merge-only writer. `uf doctor` replaces its manifest-lock
+  check with `manifest-install`, which compares each `package.json`
+  pin with the installed version. `package.json` keeps its exact
+  direct pins and the `toml`/`uuid`/`zod` overrides; other
+  transitive versions now resolve at install time. This repository
+  also stops tracking the lock, and `make plugin-test` installs with
+  `--no-package-lock` through an exact-pinned npm 11
+  (`npx -y npm@11.6.2`), because node 22's bundled npm 10.9.9
+  crashes in Arborist building the lockless vitest 5 peer graph.
+  The scaffolded `package.json` ships no `devDependencies`, since a
+  lockless install resolves them even under `--omit=dev` and the
+  same crash would break activation on npm 10; `uf init` keeps any
+  `devDependencies` a target already declares, and `uf doctor`
+  checks only the runtime packages. `manifest-install` fails, rather
+  than passes, when an installed `package.json` exists but cannot be
+  read. OSV-Scanner and Dependabot lose lock-based transitive
+  scanning; the Security Checks workflow compensates with a
+  throwaway-lock scan (a pinned npm builds an ephemeral lock,
+  osv-scanner reads it, and the lock is discarded), and the direct
+  `package.json` pins remain scannable. The throwaway-lock scan
+  already caught vulnerable pins (zod 4.1.8, toml 4.2.0); they now
+  ship as zod 4.6.6 and toml 5.0.1, with a `zod` override forcing
+  the nested copy `@opencode-ai/plugin` pins onto the fixed
+  version. Rollout: existing hero
+  repositories can drop their committed lock with
+  `git rm --cached .opencode/package-lock.json`; review the
+  scanner-loss posture first. `uf doctor` now warns when the lock
+  is still git-tracked and points at that command as the
+  remediation. (Spec:
+  openspec/changes/stop-shipping-plugin-lock/)
 - split-host-resolution-failure-classes: Host-resolution
   failures in the review-dispatch plugin's `executeDispatchRun`
   now split by cause instead of collapsing into one retryable
@@ -1231,6 +1268,18 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- stop-shipping-plugin-lock: bump the review-plugin pins for CVE
+  remediation after the CI throwaway-lock OSV scan surfaced five
+  HIGH advisories: zod 4.1.8 → 4.6.6 (GHSA-mrhx-c7xc-m3w5) and
+  toml 4.2.0 → 5.0.1 (GHSA-4qx8-w7c3-pj3p, GHSA-9j65-hcg3-gc64,
+  GHSA-9qmh-m7c6-f92p, GHSA-h895-cgqg-jf52). zod also gains a
+  matching `overrides` entry because `@opencode-ai/plugin`
+  1.19.0 declares its own exact zod 4.1.8 dependency, so a root
+  pin bump alone would leave a nested vulnerable copy in place.
+  The provenance record carries the new upstream git heads and
+  integrity hashes, verified 2026-11-06. Rollback: revert this
+  commit to restore zod 4.1.8 and toml 4.2.0.
+  (Spec: openspec/changes/stop-shipping-plugin-lock/)
 - review-dispatch-consumer-bounds (#941): lesson proposals are now
   stored with their full text. `consolidate_dispatch` persists the
   proposals in the dispatch artifact as an optional

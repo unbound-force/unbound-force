@@ -2,17 +2,19 @@ package scaffold
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
 const (
 	pluginRuntimeRemediation = "install Node.js 22 and npm 10, then rerun uf init"
-	pluginInstallRemediation = "run npm ci --ignore-scripts --omit=dev in .opencode, then rerun uf init"
+	pluginInstallRemediation = "run npm install --ignore-scripts --omit=dev --no-package-lock in .opencode, then rerun uf init"
 	pluginProbeDirectoryName = "uf-review-plugin-probe"
 )
 
@@ -66,9 +68,13 @@ func installAndActivateReviewPlugins(opts *Options) ([]string, []byte, error) {
 		return nil, output, err
 	}
 
-	output, err = opts.ExecCmdInDir(opencodeDir, npmPath, "ci", "--ignore-scripts", "--omit=dev")
+	// No lock is shipped or written: .opencode/package.json pins the
+	// direct dependencies exactly, and --no-package-lock keeps npm from
+	// reading a stale lock or writing a new one that users and opencode
+	// would then fight over.
+	output, err = opts.ExecCmdInDir(opencodeDir, npmPath, "install", "--ignore-scripts", "--omit=dev", "--no-package-lock", "--no-audit", "--no-fund")
 	if err != nil {
-		return nil, output, fmt.Errorf("install locked plugin dependencies: %w; %s", err, pluginInstallRemediation)
+		return nil, output, fmt.Errorf("install plugin dependencies: %w; %s", err, pluginInstallRemediation)
 	}
 
 	stageRoot, err := opts.MkdirTemp(opencodeDir, ".uf-review-plugins-")
@@ -426,4 +432,60 @@ func normalizePluginActivationOptions(opts *Options) {
 	if opts.RemoveAll == nil {
 		opts.RemoveAll = os.RemoveAll
 	}
+}
+
+// pluginManifestAsset is the embedded path of the review plugin manifest.
+const pluginManifestAsset = "opencode/package.json"
+
+// preservePluginDevDependencies keeps a target's existing devDependencies
+// when uf init refreshes the tool-owned .opencode/package.json. The shipped
+// manifest has no devDependencies: activation installs with --omit=dev, yet
+// a lockless npm install still resolves devDependencies, and the vitest 5
+// peer graph crashes npm 10.9.9's Arborist. A repository that runs the
+// plugin suite itself (this one) declares its devDependencies locally, and
+// uf init must not strip them. The block is re-inserted before "overrides"
+// with sorted keys in the manifest's two-space layout, so an unchanged
+// target stays byte-identical and is skipped.
+func preservePluginDevDependencies(shipped, existing []byte) []byte {
+	var target struct {
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(existing, &target); err != nil || len(target.DevDependencies) == 0 {
+		return shipped
+	}
+	anchor := []byte("\n  \"overrides\": {\n")
+	at := bytes.Index(shipped, anchor)
+	if at < 0 {
+		return shipped
+	}
+	names := make([]string, 0, len(target.DevDependencies))
+	for name := range target.DevDependencies {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var block bytes.Buffer
+	block.WriteString("  \"devDependencies\": {\n")
+	for i, name := range names {
+		sep := ","
+		if i == len(names)-1 {
+			sep = ""
+		}
+		fmt.Fprintf(&block, "    %s: %s%s\n", jsonString(name), jsonString(target.DevDependencies[name]), sep)
+	}
+	block.WriteString("  },")
+	out := make([]byte, 0, len(shipped)+block.Len()+1)
+	out = append(out, shipped[:at+1]...)
+	out = append(out, block.Bytes()...)
+	out = append(out, shipped[at:]...)
+	return out
+}
+
+// jsonString encodes s as a JSON string literal without HTML escaping, so
+// version ranges such as ">=1.0.0" keep their literal form.
+func jsonString(s string) string {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(s)
+	return strings.TrimSuffix(buf.String(), "\n")
 }

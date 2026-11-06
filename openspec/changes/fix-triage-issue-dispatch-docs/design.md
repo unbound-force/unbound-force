@@ -227,13 +227,11 @@ live `CHECKPOINT_ERROR` failures documented in its retrospective),
 and 1.19.0 tracks the current SDK line. The pin is governance-gated,
 so the change ships the complete lockstep set in the same PR:
 scaffold asset mirrors (`internal/scaffold/assets/opencode/
-package.json`, `package-lock.json`), the
-`TestPluginPackageInputs_ExactVersionsAndLockIntegrity`
+package.json`), the
+`TestPluginPackageInputs_ExactVersions`
 expectedRuntime map, the pin-governance testdata
 (`plugin-package-provenance.json` updated to 1.19.0 with fresh
-`verified_at` and recorded upstream-verification evidence;
-`plugin-package-rollback.json` baseline-lock SHA256 re-verified
-against the 1.4.10 rollback baseline), and the AGENTS.md Technology
+`verified_at` and recorded upstream-verification evidence), and the AGENTS.md Technology
 Stack and README prose — with upstream verification (npm registry
 integrity and each package's actual license — MIT for
 `@opencode-ai/plugin` and `@opencode-ai/sdk`; Apache-2.0 for
@@ -251,7 +249,7 @@ npm enforces engines advisively, not strictly) declared in the
 (task 4.4), and `make
 plugin-test` (33 files, 903 tests, coverage 94.55% statements /
 86.98% branches) plus the pin-enforcement test
-(`TestPluginPackageInputs_ExactVersionsAndLockIntegrity`) as
+(`TestPluginPackageInputs_ExactVersions`) as
 validation evidence, both green against 1.19.0 on 2026-10-19,
 and a single-commit rollback path. The lockstep file group ships as
 a dedicated commit staged by explicit path, separate from the

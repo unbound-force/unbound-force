@@ -38,7 +38,7 @@
   CLI override leaves the config file untouched; confirm `git
   diff -- .opencode/vitest.config.ts` shows only task 1.1's edit.
 - [x] 2.3 Full target: run `make plugin-test` — green with the
-  raised floor (locked `npm ci` followed by
+  raised floor (lockless pinned-npm install followed by
   `npx vitest run --coverage`).
 - [x] 2.4 CI parity: run `make check` — lint, Go tests (including
   the scaffold drift contracts, which cover the live-only status

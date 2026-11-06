@@ -5,7 +5,9 @@
 # Runs OSV-Scanner (dependency CVEs), Trivy source scan
 # (secrets and misconfigurations), and OpenSSF Scorecards
 # (supply chain security posture). Uploads SARIF results
-# to GitHub Security tab.
+# to GitHub Security tab. Also scans the plugin suite's
+# transitive dependencies against OSV through a
+# throwaway lock that is never tracked or shipped.
 
 name: Security Checks
 
@@ -48,3 +50,35 @@ jobs:
       id-token: write
       security-events: write
     uses: complytime/org-infra/.github/workflows/reusable_security.yml@8f347ba1aa2c7e9eb3b70e69c1709ddb456cd64a # v0.9.0
+
+  osv_plugin_transitive:
+    name: OSV-Scanner (plugin transitive)
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Set up Node 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Generate throwaway lock
+        # npm pin is the twin of Makefile PLUGIN_TEST_NPM; keep in sync.
+        run: cd .opencode && npx -y npm@11.6.2 install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Scan plugin transitive dependencies
+        # setup-go v7 pins GOTOOLCHAIN=local (go 1.25.0 from go.mod), but
+        # osv-scanner v2.7.0 requires go >= 1.27.0; auto lets Go fetch
+        # the needed toolchain for the install below.
+        run: |
+          export GOTOOLCHAIN=auto
+          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.7.0
+          "$(go env GOPATH)/bin/osv-scanner" scan source --lockfile=.opencode/package-lock.json
