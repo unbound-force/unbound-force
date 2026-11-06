@@ -76,4 +76,22 @@ describe("instruction-lint pre-flight check", () => {
     expect(passing.checks.map((c) => [c.status, c.exit_code])).toEqual([["ADVISORY PASS", 0]])
     expect(passing.checks[0]?.output).toContain("1 files: 0 errors, 0 warnings, 0 info")
   }, 30_000)
+
+  it("exits 2 with an actionable message when dependencies are not installed", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "uf-instruction-lint-nodeps-"))
+    scratch.push(dir)
+    await mkdir(join(dir, ".opencode", "lib"), { recursive: true })
+    await copyFile(repo(".opencode/lib/instruction-lint.ts"), join(dir, ".opencode", "lib", "instruction-lint.ts"))
+    const { execFile } = await import("node:child_process")
+    const result = await new Promise<{ code: number | undefined; stderr: string }>((resolve) => {
+      execFile(
+        repo(".uf/scripts/instruction-lint"),
+        [],
+        { env: { ...process.env, UF_PREFLIGHT_PROJECT_ROOT: dir }, cwd: dir },
+        (err, _stdout, stderr) => resolve({ code: err?.code, stderr: String(stderr) }),
+      )
+    })
+    expect(result.code).toBe(2)
+    expect(result.stderr).toContain("dependencies not installed")
+  })
 })

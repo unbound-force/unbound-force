@@ -4,7 +4,13 @@
 # Lints the tree in the working directory (the checkout, or a merge-base
 # worktree during soft-gate baselines) with the primary checkout's
 # linter, so rules and node_modules resolution are identical for both
-# runs. Exit 1 means the linter reported errors; warnings never fail.
+# runs. Exit 1 means the linter reported errors; exit 2 means the
+# linter could not run (dependencies missing, runtime crash); warnings
+# never fail.
 set -eu
 root="${UF_PREFLIGHT_PROJECT_ROOT:-$PWD}"
+if [ ! -d "$root/.opencode/node_modules" ]; then
+  echo "instruction-lint: dependencies not installed - run: (cd .opencode && npm install)" >&2
+  exit 2
+fi
 exec node "$root/.opencode/lib/instruction-lint.ts" --root "$PWD" "$@"
