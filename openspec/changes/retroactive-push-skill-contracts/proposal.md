@@ -125,49 +125,66 @@ None.
 ## Constitution Alignment
 
 Assessed against the Unbound Force org constitution (v1.4.0).
+This is a pure spec-record change: deltas, annotations, and
+archive-order constraints bring the spec surface back in line
+with shipped behavior. It discharges prior council findings
+(the round-2 tier-routing and spec-consistency items) through
+their accepted remedies, changes no council-reviewed code, and
+passes through the council gate again as part of the PR.
 
 ### I. Autonomous Collaboration
 
 **Assessment**: PASS. The change records the design rationale
 for contracts the swarm's review council already demanded be
 recorded, closing the loop between review findings and the
-spec record without re-opening settled code.
+spec record without re-opening settled code. The
+retroactive-documentation duty (MP-008), triggered when review
+finds a quick-tier changeset tripped risk floors, is discharged
+through self-describing spec artifacts that future heroes
+consume asynchronously.
 
-### II. Deterministic Execution
+### II. Composability First
+
+**Assessment**: PASS. The restated plugin-tool and
+skill-resolution contracts are extension points every hero
+repository consumes standalone through its scaffolded command
+copies; the change introduces no mandatory cross-hero
+dependency and requires no hero to patch or fork another to
+integrate.
+
+### III. Observable Quality
 
 **Assessment**: PASS. The restated contracts pin the exact
-structured tool arguments, lease semantics, and failure codes
-the implementation enforces, keeping push and skill-resolution
-behavior inspectable and test-pinned rather than
-convention-only.
+structured tool arguments, structured outputs ({remote, ref,
+old_sha, new_sha, updated}), lease semantics, and failure
+codes the implementation enforces, keeping push and
+skill-resolution behavior inspectable and test-pinned rather
+than convention-only.
 
-### III. Spec-Driven Development
+### IV. Testability
 
-**Assessment**: PASS. This is a pure spec-record change:
-deltas, annotations, and archive-order constraints bring the
-spec surface back in line with shipped behavior, per the
-retroactive-documentation duty (MP-008) triggered when review
-finds a quick-tier changeset tripped risk floors.
+**Assessment**: PASS. Every restated contract cites its
+enforcing tests: TestCommandContracts_PushToolInvocationPins
+census-pins the push call sites across uf.finale, uf.fix-ci,
+and uf.rebase-pr; the uf-workflow INVALID_INPUT tables cover
+the branch and remote schemas; migrate_skill_test.go covers
+the skill-dir migration failure paths.
 
-### IV. Review Council Authority
+### V. Security by Default
 
-**Assessment**: PASS. The change discharges round-2 findings
-(divisor-guard HIGH tier-routing item, divisor-architect MEDIUM
-spec-consistency item) through their accepted remedies; it
-changes no council-reviewed code and passes through the
-council gate again as part of the PR.
+**Assessment**: PASS. The recorded contracts preserve the
+fail-closed postures the implementation enforces: the
+force-push lease on the pre-push head SHA, the traversal guard
+on repo-root skill references, and RemoteNameSchema's
+rejection of local-path push targets. No security control is
+weakened; the accepted whitespace-restriction and
+warn-not-fail tradeoffs are recorded with their rationale.
 
-### V. Knowledge Preservation
-
-**Assessment**: PASS. The design disposition — including the
-accepted whitespace-restriction tradeoff and the
-warn-not-fail semantics for tracking-config and removal
-failures — is now recorded where future agents will find it,
-not just in code comments.
-
-### VI. Deterministic Execution (Execution Surfaces)
+### VI. Deterministic Execution
 
 **Assessment**: PASS. No gates are modified: coverage
 thresholds, CI flags, review limits, and severity definitions
-are untouched. The change adds spec text and test-visible
-contract pins only.
+are untouched. The change pins the deterministic resolution
+order (skill name first, then repo-root file) and the exact
+push-tool arguments, removing convention-only ambiguity from
+execution surfaces.
