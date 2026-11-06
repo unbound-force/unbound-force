@@ -11,8 +11,8 @@ permission:
     # --root to the working directory; run the linter only through it.
     ".uf/scripts/instruction-lint*": "allow"
     # git diff reads the working tree for the review scope; the narrow
-    # denies after the allow block its flag-based escape hatches (the
-    # last matching rule wins): --output writes files, difftool
+    # denies after the allow block close its flag-based escape hatches
+    # (the last matching rule wins): --output writes files, difftool
     # --extcmd executes commands.
     "git diff*": "allow"
     "git diff --output*": "deny"

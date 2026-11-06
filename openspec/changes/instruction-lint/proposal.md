@@ -54,9 +54,10 @@ and acceptance criteria after the fact, per review feedback.
   lines); `internal/scaffold/scaffold_test.go` extends-canonical
   checks.
 - Instruction delta (DE-004): `divisor-linguist.md` is new, 261
-  lines (~4.2k self tokens, ~13.4k loaded); `AGENTS.md` grows by
-  10 lines (lint-instructions command, `.uf/scripts/` structure
-  entry). Baseline lint findings are unchanged: 1 error, 31
+  lines (~4.2k self tokens, ~13.4k loaded); `AGENTS.md` grows
+  by 5 lines net (+7/-2: lint-instructions command,
+  `.uf/scripts/` structure entry, yaml devDependency note).
+  Baseline lint findings are unchanged: 1 error, 31
   warnings, 23 info before and after.
 - Docs: CHANGELOG entry; AGENTS.md build-command and structure
   updates; documentation issue filed for user-facing coverage.
