@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"slices"
@@ -119,17 +120,18 @@ func expectedEmbedded(relPath string, source []byte) []byte {
 
 // projectOwnedPolicyMirrors are uf/ policy assets whose embedded copy is
 // the canonical default shipped to generated projects. They are project
-// extension points (uf init never overwrites them), and this repository
-// extends its own .uf/ copies — registering the repo-local
-// divisor-linguist reviewer and declaring the instruction-lint pre-flight
-// check — so its copies MAY diverge from the embedded asset. Canonical
-// content is asserted against the embedded asset (internal/schemas and
-// TestRun_PreflightChecksPreservedOnRerun), and the repository copies are
-// checked to preserve or validate against it.
+// extension points (uf init never overwrites them), so an exemption is
+// earned only by actual divergence and must carry a replacement check
+// that pins the repository copy to the canonical content:
+// uf/reviewer-capabilities.yaml (repo-local divisor-linguist) is covered
+// by TestReviewerCapabilities_RepositoryManifestExtendsCanonical, and
+// uf/preflight.yaml (instruction-lint check) by
+// TestPreflightYaml_RepositoryManifestExtendsCanonical. Any mirror not
+// listed here — including uf/review-matrix.yaml, which has not diverged
+// — stays under byte-identity enforcement below.
 var projectOwnedPolicyMirrors = map[string]bool{
 	"uf/preflight.yaml":             true,
 	"uf/reviewer-capabilities.yaml": true,
-	"uf/review-matrix.yaml":         true,
 }
 
 func TestEmbeddedAssets_MatchSource(t *testing.T) {
@@ -1598,6 +1600,7 @@ func TestPluginPackageInputs_ExactVersions(t *testing.T) {
 	expectedDevelopment := map[string]string{
 		"@vitest/coverage-v8": "5.0.3",
 		"vitest":              "5.0.3",
+		"yaml":                "2.9.1",
 	}
 	expectedOverrides := map[string]string{
 		"toml": "5.0.1",
@@ -1679,11 +1682,13 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 	expectedPackages := map[string]struct {
 		version string
 		project string
+		license string
 	}{
-		"@opencode-ai/plugin": {version: "1.19.0", project: "OpenCode"},
-		"zod":                 {version: "4.6.6", project: "Zod"},
-		"vitest":              {version: "5.0.3", project: "Vitest"},
-		"@vitest/coverage-v8": {version: "5.0.3", project: "Vitest"},
+		"@opencode-ai/plugin": {version: "1.19.0", project: "OpenCode", license: "MIT"},
+		"zod":                 {version: "4.6.6", project: "Zod", license: "MIT"},
+		"vitest":              {version: "5.0.3", project: "Vitest", license: "MIT"},
+		"@vitest/coverage-v8": {version: "5.0.3", project: "Vitest", license: "MIT"},
+		"yaml":                {version: "2.9.1", project: "yaml", license: "ISC"},
 	}
 	if provenance.VerifiedAt != "2026-11-06" {
 		t.Errorf("provenance verification date = %q, want 2026-11-06", provenance.VerifiedAt)
@@ -1697,8 +1702,8 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 			t.Errorf("provenance is missing %s", name)
 			continue
 		}
-		if entry.License != "MIT" {
-			t.Errorf("%s provenance license = %q, want MIT", name, entry.License)
+		if entry.License != expected.license {
+			t.Errorf("%s provenance license = %q, want %s", name, entry.License, expected.license)
 		}
 		if entry.MaintainedBy != expected.project {
 			t.Errorf("%s maintained_by = %q, want %q", name, entry.MaintainedBy, expected.project)
@@ -2312,6 +2317,101 @@ func TestSCFR001_CanonicalAssetSurfaceMatchesMirrors(t *testing.T) {
 				t.Errorf("embedded asset %q drifted from %q", asset.asset, asset.source)
 			}
 		})
+	}
+}
+
+// TestPreflightYaml_RepositoryManifestExtendsCanonical verifies that the
+// repository's .uf/preflight.yaml — a project-owned policy mirror —
+// extends the canonical embedded template: every canonical check is
+// preserved verbatim (name, run, args, requires, paths, gate, timeout)
+// and in canonical order, and every repository-added check has an
+// executable run target and a valid gate. It replaces the byte-identity
+// exemption for uf/preflight.yaml, which legitimately diverges from the
+// embedded asset to declare the instruction-lint check.
+func TestPreflightYaml_RepositoryManifestExtendsCanonical(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Skip("project root not found; skipping preflight extends-canonical check")
+	}
+
+	type preflightCheck struct {
+		Name           string   `yaml:"name"`
+		Run            string   `yaml:"run"`
+		Args           []string `yaml:"args"`
+		Requires       []string `yaml:"requires"`
+		Paths          []string `yaml:"paths"`
+		Gate           string   `yaml:"gate"`
+		TimeoutSeconds int      `yaml:"timeout_seconds"`
+	}
+	type preflightDoc struct {
+		Version int              `yaml:"version"`
+		Checks  []preflightCheck `yaml:"checks"`
+	}
+
+	canonicalContent, err := assetContent("uf/preflight.yaml")
+	if err != nil {
+		t.Fatalf("read canonical preflight asset: %v", err)
+	}
+	repositoryContent, err := os.ReadFile(filepath.Join(root, ".uf", "preflight.yaml"))
+	if err != nil {
+		t.Fatalf("read repository preflight policy: %v", err)
+	}
+
+	var canonical, repository preflightDoc
+	if err := yaml.Unmarshal(canonicalContent, &canonical); err != nil {
+		t.Fatalf("parse canonical preflight asset: %v", err)
+	}
+	if err := yaml.Unmarshal(repositoryContent, &repository); err != nil {
+		t.Fatalf("parse repository preflight policy: %v", err)
+	}
+
+	canonicalNames := make(map[string]bool, len(canonical.Checks))
+	for _, check := range canonical.Checks {
+		canonicalNames[check.Name] = true
+	}
+	byName := make(map[string]preflightCheck, len(repository.Checks))
+	positions := make(map[string]int, len(repository.Checks))
+	for i, check := range repository.Checks {
+		byName[check.Name] = check
+		positions[check.Name] = i
+	}
+
+	// Every canonical check is preserved verbatim and in order.
+	lastPosition := -1
+	for _, want := range canonical.Checks {
+		got, ok := byName[want.Name]
+		if !ok {
+			t.Errorf("repository preflight drops canonical check %q", want.Name)
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("repository preflight modifies canonical check %q: got %+v, want %+v", want.Name, got, want)
+		}
+		if positions[want.Name] <= lastPosition {
+			t.Errorf("canonical check %q is out of order in the repository policy", want.Name)
+			continue
+		}
+		lastPosition = positions[want.Name]
+	}
+
+	// Repository-added checks must have an executable run target and a
+	// valid gate.
+	for _, check := range repository.Checks {
+		if canonicalNames[check.Name] {
+			continue
+		}
+		run := filepath.Join(root, filepath.FromSlash(check.Run))
+		info, err := os.Stat(run)
+		if err != nil {
+			t.Errorf("repository check %q run target %q: %v", check.Name, check.Run, err)
+			continue
+		}
+		if info.Mode()&0o111 == 0 {
+			t.Errorf("repository check %q run target %q is not executable", check.Name, check.Run)
+		}
+		if check.Gate != "" && check.Gate != "required" && check.Gate != "advisory" {
+			t.Errorf("repository check %q gate = %q, want required or advisory", check.Name, check.Gate)
+		}
 	}
 }
 
