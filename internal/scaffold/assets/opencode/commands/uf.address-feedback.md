@@ -15,7 +15,9 @@ The command follows four sequential phases (Ingest → Assess → Triage → Exe
 > **SESSION-RESUME GUARD**: If this session has been resumed
 > from compressed context, you MUST:
 > 1. Re-read this full command template
-> 2. Call `get_progress` with `command: "uf.address-feedback"`
+> 2. Confirm the working tree is on the PR head per Section
+>    1.2.1 — the re-check is unconditional on resume — then
+>    call `get_progress` with `command: "uf.address-feedback"`
 >    to recover checkpoint-based progress state
 > 3. Check `.uf/feedback/pr-<PR_NUMBER>/state.json` for
 >    cached assessment state
@@ -29,17 +31,26 @@ The command follows four sequential phases (Ingest → Assess → Triage → Exe
 
 - **PR number** (optional): The pull request number to address feedback for (e.g., `42`). If omitted, auto-detect the open PR for the current branch.
 
-**Argument parsing** (before any tool calls): Check the user's message for a PR number argument. If present, set `PR_NUMBER` to that value immediately. All subsequent steps use `<PR_NUMBER>` — no auto-detection commands are needed or permitted.
+**Argument parsing** (before any tool calls): Check the user's
+message for a PR number argument. If present, set `PR_NUMBER`
+to that value immediately. `PR_NUMBER` MUST be a positive
+integer (digits only) — any other form is an argument error:
+**STOP** and report it. All subsequent steps use `<PR_NUMBER>`
+— no auto-detection commands are needed or permitted.
 
 ---
 
 
 ## Progress Tracking
 
-At the start of execution, call `get_progress` with
-`command: "uf.address-feedback"` to check for existing
-progress from a prior session. If progress exists, resume
-from the first incomplete phase.
+Progress state is keyed by the checked-out branch, so read
+it only from the PR head branch. As soon as Section 1.2.1
+has put the working tree on the PR head, call
+`get_progress` with `command: "uf.address-feedback"` to
+check for existing progress from a prior session. If
+progress exists, resume from the first incomplete phase.
+Never call `get_progress` or `checkpoint` from another
+branch.
 
 After each phase or sub-step completes, call `checkpoint`
 with `command: "uf.address-feedback"` and the step name
@@ -68,8 +79,11 @@ After completing each phase/sub-step, mark it `completed`.
 This runs alongside `checkpoint` tool progress tracking —
 both MUST be maintained.
 
-On resume from compressed context, call `get_progress`
-with `command: "uf.address-feedback"` and re-initialize the
+On resume from compressed context, first confirm the working
+tree is on the PR head per Section 1.2.1 (progress state is
+keyed by the checked-out branch — never read it from another
+branch), then call `get_progress` with
+`command: "uf.address-feedback"` and re-initialize the
 TodoWrite list from the returned progress state: completed
 steps become `completed`, the first incomplete step becomes
 `in_progress`, and remaining steps become `pending`.
@@ -138,6 +152,114 @@ context for every Tier 2 plan, prompt, and artifact created by this invocation:
 Both object IDs MUST be resolved 40-character lowercase commit SHAs. Do not
 replace them later when a branch ref moves. If the immutable context cannot be
 resolved, **STOP** rather than assess against mutable or partial context.
+
+### 1.2.1 Check Out the PR Head
+
+Phase 4 commits to and pushes the PR head branch, and every
+checkpoint is keyed by the checked-out branch, so the working
+tree MUST be on the PR head before the first `get_progress` or
+`checkpoint` call. Compare the current state with the frozen
+context:
+
+```bash
+git branch --show-current
+git rev-parse HEAD
+```
+
+Identity is keyed on `HEAD`, not on the local branch name:
+`gh pr checkout` does not guarantee the local branch is named
+`head_ref` (a cross-repo PR whose head is the fork's default
+branch checks out as `<owner>/<branch>`, for example
+`contrib/main`). Record the actual checked-out branch name as
+`HEAD_BRANCH` for the push-target lookup below.
+
+- **`HEAD` equals `head_sha`**: the tree is exactly at the PR
+  head — continue.
+- **`HEAD` is a descendant of `head_sha`** (`git merge-base
+  --is-ancestor <head_sha> HEAD` holds): the local branch
+  carries unpushed commits from a prior run (for example a
+  failed-push retry) — continue; never reset or discard local
+  commits.
+- **Otherwise**: if `git status --porcelain --untracked-files=no`
+  prints anything, **STOP** with error:
+  > "Working tree has uncommitted changes. Commit or stash them,
+  > then rerun `/uf.address-feedback <PR_NUMBER>`."
+
+  Then run:
+
+  ```bash
+  gh pr checkout <PR_NUMBER>
+  ```
+
+  If the checkout fails, **STOP** and report the specific error.
+  The common cause is untracked files that collide with tracked
+  files on the PR branch — the dirty check above passes them
+  because it excludes untracked files, so git aborts with
+  "untracked working tree files would be overwritten".
+  Remediate by removing, renaming, or stashing them
+  (`git stash -u` includes untracked files; plain `git stash`
+  skips them), then rerun `/uf.address-feedback <PR_NUMBER>`.
+
+  `gh pr checkout` resolves the PR's head repository (fork or
+  same-repo) and records the checked-out branch's remote and
+  merge ref (for a fork PR with maintainer edits disabled, the
+  merge ref is the read-only `refs/pull/<N>/head` — detected
+  below). Never fetch the head branch by guessing a remote
+  name — in a fork-and-upstream clone, `origin` is usually the
+  fork and does not carry the PR.
+
+After the checkout, re-run `git branch --show-current` and
+`git rev-parse HEAD`, and re-apply the identity checks above:
+accept `HEAD` equal to or descending from `head_sha`; otherwise
+(the branch is unrelated to the PR head), **STOP** and report
+both SHAs; never reset or discard local commits.
+
+Record the push target that `gh pr checkout` configured for the
+actual checked-out branch (`HEAD_BRANCH`), for Section 4.4.
+Before interpolating `HEAD_BRANCH` into the config keys below,
+validate it: **STOP** if it contains any character outside the
+conservative set `A-Za-z0-9._/-`:
+
+```bash
+git config "branch.<HEAD_BRANCH>.remote"
+git config "branch.<HEAD_BRANCH>.merge"
+```
+
+The same charset gate applies to every PR-derived value before
+it reaches any shell template in this command: **STOP** when
+`HEAD_BRANCH` or `HEAD_MERGE_REF` contains any character outside
+`A-Za-z0-9._/-`, or when `HEAD_REMOTE` is neither a plain remote
+name (`A-Za-z0-9._-`) nor an `https://` URL without userinfo
+(`https://[A-Za-z0-9._/-]+`). Quoting the interpolated values —
+as every template below does — is defense-in-depth, not
+neutralization: `$`, backtick, and `"` are legal git refname
+characters that remain active inside double quotes, and
+`HEAD_BRANCH` and `HEAD_MERGE_REF` derive from the PR author's
+branch name. The charset gate is the enforcement that makes the
+templates safe to render; #965 tracks the argument-array tool
+that removes string interpolation entirely.
+
+Record the first value as `HEAD_REMOTE` (a remote name or URL)
+and the second as `HEAD_MERGE_REF` (for example
+`refs/heads/<head_ref>`). If either is unset, **STOP** and report
+that the PR head has no configured push target. If
+`HEAD_MERGE_REF` starts with `refs/pull/`, **STOP**: it is a
+read-only merge ref (a fork PR with maintainer edits disabled),
+so the Section 4.4 push would always be rejected — report that
+the PR head cannot be pushed to from this clone. Finally,
+cross-check the push target against the frozen PR head context:
+`HEAD_MERGE_REF` MUST equal `refs/heads/<head_ref>` — the merge
+ref `gh pr checkout` writes for the PR's head branch. Any other
+value means the checked-out branch is not the PR head branch
+(for example `main` after the PR merged upstream carries
+`refs/heads/main`): **STOP** and report that the working tree is
+on a branch whose push target is `HEAD_MERGE_REF`, not the PR
+head branch `<head_ref>` — never push this PR's commits to a
+different branch. Ancestry alone cannot make this distinction —
+any branch that merely contains `head_sha` (such as a `main`
+that absorbed the merged PR) passes the descendant check above,
+so the merge-ref cross-check is what ties the push target to
+the frozen PR head.
 
 ### 1.3 Fetch Reviews and Comments
 
@@ -976,16 +1098,36 @@ progress. Record the final passing iteration only.
 
 ### 4.4 Push Changes
 
-Before pushing, fetch the remote branch state:
+Before pushing, fetch the remote branch state from the push
+target recorded in Section 1.2.1:
 
 ```bash
-git fetch origin <branch>
-git status
+git fetch "<HEAD_REMOTE>" "<HEAD_MERGE_REF>"
 ```
 
-**If branch has diverged** (another contributor pushed
-commits): warn the author and present the decision as
-follows:
+If the fetch fails (network error, authentication failure, stale
+remote URL), **STOP** and report the specific error — do not run
+the divergence comparison below. A failed fetch leaves
+`FETCH_HEAD` holding the previous fetch's tip (including the
+implicit fetch `gh pr checkout` performed in Section 1.2.1), so
+the comparison would silently run against stale state.
+
+Then count divergence:
+
+```bash
+git rev-list --left-right --count HEAD...FETCH_HEAD
+```
+
+`HEAD_REMOTE` may be a URL, and fetching from a URL updates
+only `FETCH_HEAD` — no remote-tracking ref is written, so
+`git status` cannot observe divergence. The `git rev-list
+--left-right --count HEAD...FETCH_HEAD` output is two counts:
+commits only on HEAD (left) and commits only on FETCH_HEAD
+(right).
+
+**If branch has diverged** (a nonzero right count — another
+contributor pushed commits): warn the author and present the
+decision as follows:
 
 1. Print the decision content as plain session text **above**
    the question tool (visibility directive — the printed text
@@ -1021,11 +1163,11 @@ follows:
 Push all commits:
 
 ```bash
-git push origin <branch>
+git push "<HEAD_REMOTE>" "HEAD:<HEAD_MERGE_REF>"
 ```
 
 **If push fails** (network error, branch protection rejection): preserve local commits and report which commits are stranded. Provide guidance:
-> "Push failed. Local commits preserved. Retry with `git push origin <branch>` after resolving the issue."
+> "Push failed. Local commits preserved. Retry with `git push "<HEAD_REMOTE>" "HEAD:<HEAD_MERGE_REF>"` after resolving the issue."
 
 > **CHECKPOINT**: Call `checkpoint` with
 > `command: "uf.address-feedback"`, `step: "push"`.
