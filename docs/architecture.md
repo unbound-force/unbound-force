@@ -365,7 +365,7 @@ ownership (destructive -- resets your customizations).
 |------|------|--------------------|----------------|
 | **Cobalt-Crush** | Developer | Spec-driven code implementation, convention pack adherence, test hook generation | Embedded agent in `uf init` |
 | **Gaze** | Tester | CRAP scores, coverage metrics, side effect classification, test generation (Go) | Separate repo: unbound-force/gaze |
-| **The Divisor** | Reviewer | 9-persona review council, auto-detected code vs spec mode, convention-based criteria | Embedded in `uf init` (9 agent files) |
+| **The Divisor** | Reviewer | 11-persona review council (9 canonical, 2 repo-local), auto-detected code vs spec mode, convention-based criteria | Embedded in `uf init` (9 canonical agent files) |
 
 See [docs/heroes.md](heroes.md) for full hero
 descriptions with current vs planned capabilities.

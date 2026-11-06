@@ -1,4 +1,5 @@
 import type { PluginInput, ToolContext } from "@opencode-ai/plugin"
+import { spawnSync } from "node:child_process"
 import { constants } from "node:fs"
 import { access, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -133,7 +134,7 @@ describe("instruction-lint pre-flight check", () => {
     const makefile = await readFile(repo("Makefile"), "utf8")
     expect(makefile).toMatch(/^lint-instructions:.*\n\t\.uf\/scripts\/instruction-lint \$\(ARGS\)$/m)
     const persona = await readFile(repo(".opencode/agents/divisor-linguist.md"), "utf8")
-    expect(persona).toContain(".uf/scripts/instruction-lint --json --only")
+    expect(persona).toContain(".uf/scripts/instruction-lint --json --base BASE --changed")
     expect(makefile + persona).not.toMatch(/node\s+\S*instruction-lint\.ts/)
   })
 
@@ -232,5 +233,30 @@ describe("instruction-lint pre-flight check", () => {
     })
     expect(result.code).toBe(0)
     expect(result.stdout).toContain("1 files: 0 errors, 0 warnings, 0 info")
+  }, 30_000)
+
+  it("steers the linter binary from UF_PREFLIGHT_PROJECT_ROOT and the target from the cwd independently", async () => {
+    const check = await declaredCheck()
+    const linterTree = await mkdtemp(join(tmpdir(), "uf-instruction-lint-env-"))
+    const targetTree = await mkdtemp(join(tmpdir(), "uf-instruction-lint-cwd-"))
+    scratch.push(linterTree, targetTree)
+    await mkdir(join(linterTree, ".opencode", "lib"), { recursive: true })
+    await mkdir(join(targetTree, ".opencode", "agents"), { recursive: true })
+    await copyFile(repo(".opencode/lib/instruction-lint.ts"), join(linterTree, ".opencode", "lib", "instruction-lint.ts"))
+    await copyFile(repo(".opencode/lib/cli-common.ts"), join(linterTree, ".opencode", "lib", "cli-common.ts"))
+    await symlink(repo(".opencode/node_modules"), join(linterTree, ".opencode", "node_modules"))
+    await writeFile(join(targetTree, ".opencode", "agents", "a.md"), "# no frontmatter\n")
+
+    // Env names the tree that owns the linter; cwd names the tree being
+    // linted. The distinct values prove the wrapper reads both: dropping
+    // the env var would miss the linter (it does not exist in the cwd
+    // tree), and conflating the two would lint the wrong tree.
+    const r = spawnSync(repo(check.run), [], {
+      cwd: targetTree,
+      env: { ...process.env, UF_PREFLIGHT_PROJECT_ROOT: linterTree },
+      encoding: "utf8",
+    })
+    expect(r.status).toBe(1)
+    expect(r.stdout).toContain(".opencode/agents/a.md:1  error    IL-001  file has no YAML frontmatter")
   }, 30_000)
 })

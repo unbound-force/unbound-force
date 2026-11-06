@@ -32,7 +32,7 @@ by slash commands. You rarely need to call them directly.
 | Agent | Invoked by | Role |
 |-------|-----------|------|
 | `cobalt-crush-dev` | `/uf.cobalt-crush` | Developer persona |
-| `divisor-*` (9 agents) | `/uf.review-council` | Review council personas |
+| `divisor-*` (11 agents) | `/uf.review-council` | Review council personas |
 | `gaze-reporter` | `/gaze` | Quality analysis |
 | `gaze-test-generator` | `/gaze-fix` | Test generation |
 
@@ -289,7 +289,7 @@ command documentation with flags and examples.
 
 | Command | Description |
 |---------|-------------|
-| `/uf.review-council` | Run the 9-persona review council |
+| `/uf.review-council` | Run the 11-persona review council |
 | `/uf.review-pr` | Review a GitHub PR (post-PR) |
 | `/uf.address-feedback` | Triage and address PR review feedback |
 | `/uf.fix-ci` | Diagnose and fix failing PR CI checks |
