@@ -6,6 +6,40 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- divisor-determinism: new repo-local Divisor persona, The
+  Determinist (`.opencode/agents/divisor-determinism.md`), which
+  owns determinism pack rules DE-001 through DE-008 and is
+  registered in this repository's `.uf/reviewer-capabilities.yaml`
+  with scopes `documentation` and `standard`. `divisor-linguist`
+  no longer runs a DE review: it defers DE findings and the
+  IL-040 to IL-042 hints to the new persona, and keeps lint
+  evidence and instruction clarity. New deterministic evidence
+  for the persona: `instruction-lint` rule IL-042 flags
+  `uf_delegate_command` and `replicator_forge_spawn_subtask` call
+  blocks that omit `task_classification` or the skill contract
+  (DE-008); `instruction-lint --base REF` reports per-file line,
+  token and load-set deltas since merge-base(REF, HEAD) (DE-004);
+  and the new `.opencode/lib/tool-inventory.ts` lists registered
+  plugin tools and repo scripts (`--match WORDS` for owner lookup,
+  pinned to the runtime registry by test) and, with
+  `--seams --base REF`, maps added, modified or removed tools to
+  their tests by seam layer (DE-007). Instruction size:
+  divisor-determinism +246 lines (~3842 tokens); divisor-linguist
+  236 -> 203 lines (-836 tokens, load set -3880 tokens). Round 2
+  (PR #959 feedback): `instruction-lint --changed` (requires
+  `--base`) scopes findings and deltas to the files changed since
+  the merge base -- working-tree aware, matching the delta
+  semantics -- and anchors IL-050 duplicate clusters at a scoped
+  member so the finding survives scoping; `--json` output stamps
+  producer provenance (tool, version, generatedAt); `--config`
+  values are validated with zod; base-tree reads validate the
+  git cat-file header. The Determinist and Linguist personas now
+  derive their review scope from the linter's changed-file set
+  (frontmatter git allowances dropped, lint commands run
+  unconditionally), error-handling prose collapsed to tool-sourced
+  scope, and divisor-guard defers DE-008 to The Determinist when
+  a determinism persona is enrolled. Instruction size round 2:
+  divisor-determinism 246 lines; divisor-linguist 202 lines.
 - preflight-declared-output: `uf_preflight_declared_checks` now
   returns `rendered_output`, one tool-rendered block per declared
   check that ran with output, whatever its status, so advisory

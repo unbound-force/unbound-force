@@ -48,6 +48,10 @@ make coverage-gate
 # Lint (vet + golangci-lint)
 make lint
 # or: go vet ./... && golangci-lint run
+
+# Lint instruction prose (agents, commands, skills, packs)
+make lint-instructions
+# or: node .opencode/lib/instruction-lint.ts
 ```
 
 `make check` now depends on both `make coverage-gate` (scope-based Go
@@ -76,10 +80,10 @@ unbound-force/
 │   ├── model-matrix.yaml             # Tracked model matrix (profiles, packs)
 │   └── model-matrix.override.yaml    # Gitignored override (model identities)
 ├── .opencode/
-│   ├── agents/                       # Hero persona agents (17 active, model-matrix-classifier hidden)
+│   ├── agents/                       # Hero persona agents (18 active, model-matrix-classifier hidden)
 │   ├── commands/                     # Slash commands (33 files)
 │   ├── plugins/                      # Plugins registered in opencode.json (invoke-agent, review-dispatch, uf-workflow, uf-finale)
-│   ├── lib/                          # Shared TypeScript plugin library (incl. model-matrix.ts)
+│   ├── lib/                          # Shared TS plugin library (model-matrix.ts; runnable CLIs instruction-lint.ts, tool-inventory.ts)
 │   ├── test/                         # TypeScript plugin unit/integration/smoke tests
 │   ├── skill/                        # Swarm skills packages
 │   ├── skills/                       # Additional skills packages
@@ -152,6 +156,7 @@ imported externally.
 - **Naming**: `TestXxx_Description`
 - **Isolation**: `t.TempDir()` for filesystem tests
 - **Drift detection**: Tests MUST verify embedded tool-owned assets match canonical sources; custom packs (`*-custom.md`) are exempt as user-owned initial deployment templates
+- **Policy mirrors**: `.uf/preflight.yaml` and `.uf/reviewer-capabilities.yaml` are project-owned and intentionally diverge from embedded assets; compensating tests pin their shape (`projectOwnedPolicyMirrors` in scaffold_test.go, the repo-local persona enrollment lock in reviewer_capabilities_test.go)
 - **Plugin coverage floor**: The `.opencode/` TypeScript plugin suite carries a 94 percent statements coverage floor (`.opencode/vitest.config.ts`); this floor is governance-controlled and may only be changed through a spec-workflow governance change per the Gatekeeping rule.
 
 ## Technology Stack
