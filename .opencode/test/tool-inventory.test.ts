@@ -2,7 +2,8 @@ import type { PluginInput, PluginModule } from "@opencode-ai/plugin"
 import { execFileSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import {
@@ -24,7 +25,7 @@ import UfFinalePlugin from "../plugins/uf-finale/index.js"
 import UfWorkflowPlugin from "../plugins/uf-workflow/index.js"
 import { withBun } from "./helpers/bun-runtime.js"
 
-const REPO = resolve(__dirname, "..", "..")
+const REPO = fileURLToPath(new URL("../..", import.meta.url))
 const roots: string[] = []
 
 function repo(files: Record<string, string>): string {

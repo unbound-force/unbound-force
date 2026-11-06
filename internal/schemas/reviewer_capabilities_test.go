@@ -210,6 +210,39 @@ func TestReviewerCapabilities_RepositoryManifestExtendsCanonical(t *testing.T) {
 	}
 }
 
+// TestReviewerCapabilities_RepoLocalPersonasEnrolled pins the inverse
+// direction of the extension lock: every divisor-* agent definition in
+// .opencode/agents/ must have an entry in the repository manifest, so
+// deleting an enrollment fails the suite instead of silently dropping a
+// persona from dispatch.
+func TestReviewerCapabilities_RepoLocalPersonasEnrolled(t *testing.T) {
+	repository := loadReviewerManifestForTest(t, repositoryReviewerManifestPath())
+
+	agentsDir := filepath.Join(repoSchemasDir(), "..", ".opencode", "agents")
+	entries, err := os.ReadDir(agentsDir)
+	if err != nil {
+		t.Fatalf("read agents directory: %v", err)
+	}
+	enrolled := make(map[string]bool, len(repository.Reviewers))
+	for _, entry := range repository.Reviewers {
+		enrolled[entry.Agent] = true
+	}
+	found := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "divisor-") || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		found++
+		agent := strings.TrimSuffix(entry.Name(), ".md")
+		if !enrolled[agent] {
+			t.Errorf("agent %s has no reviewer-capabilities entry; deleting an enrollment must fail this test", agent)
+		}
+	}
+	if found == 0 {
+		t.Fatal("no divisor-* agent definitions found; agents directory layout changed")
+	}
+}
+
 func TestReviewerCapabilities_CanonicalManifestHasExactOrderAndScopes(t *testing.T) {
 	manifest := loadCanonicalReviewerManifestForTest(t)
 	want := knownReviewerEntriesForTest()

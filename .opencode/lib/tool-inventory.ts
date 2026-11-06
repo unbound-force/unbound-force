@@ -90,10 +90,6 @@ function skipNonCode(text: string, i: number): number {
   return i
 }
 
-/**
- * Parse the `tool: { name: factory(...), ... }` registry of a plugin
- * module. Only entries directly inside the registry object count.
- */
 /** Index of the registry's opening brace, or -1 when absent. Only code
  * positions count: `tool: {` inside a comment or string must not hijack
  * registry parsing. */
@@ -115,6 +111,10 @@ function findRegistryStart(text: string): number {
   return -1
 }
 
+/** Parse the `tool: { name: factory(...), ... }` registry of a plugin
+ * module. Only entries directly inside the registry object count.
+ * @param text Plugin module source text.
+ * @returns Tool name, factory function name, and 1-based line per entry. */
 export function parseRegistry(text: string): Array<{ name: string; factory: string; line: number }> {
   const start = findRegistryStart(text)
   if (start === -1) return []
@@ -147,7 +147,10 @@ export function parseRegistry(text: string): Array<{ name: string; factory: stri
   return out
 }
 
-/** Read a string-literal concatenation ("a" + 'b' + `c`) at offset i. */
+/** Read a string-literal concatenation ("a" + 'b' + `c`) at offset i.
+ * @param text Source text to read from.
+ * @param i Offset of the opening quote.
+ * @returns The unescaped string value, or null when `i` is not a quote. */
 export function readStringConcat(text: string, i: number): string | null {
   let out = ""
   let any = false
@@ -157,7 +160,17 @@ export function readStringConcat(text: string, i: number): string | null {
     if (q !== '"' && q !== "'" && q !== "`") return any ? out : null
     const end = skipNonCode(text, i)
     const raw = text.slice(i + 1, end - 1)
-    out += q === '"' ? (JSON.parse(`"${raw}"`) as string) : raw.replace(/\\(.)/g, "$1")
+    if (q === '"') {
+      try {
+        out += JSON.parse(`"${raw}"`) as string
+      } catch {
+        // TypeScript-only escapes (\x27, \u{2026}) are invalid JSON but
+        // valid TS; unescape leniently instead of crashing.
+        out += raw.replace(/\\(.)/g, "$1")
+      }
+    } else {
+      out += raw.replace(/\\(.)/g, "$1")
+    }
     any = true
     i = end
     while (/\s/.test(text[i] ?? "")) i++
@@ -224,7 +237,11 @@ function locateIn(file: string, text: string, factory: string): FactoryLocation 
   return { file, line, endLine, description: d ? readStringConcat(body, d.index + d[0].length) : null }
 }
 
-/** Find a factory in the plugin file or in a relative module it imports. */
+/** Find a factory in the plugin file or in a relative module it imports.
+ * @param pluginFile Repo-relative plugin index path.
+ * @param factory Factory function name from the registry.
+ * @param read File reader, injectable for tests.
+ * @returns The factory's location and description, or null. */
 export function locateFactory(pluginFile: string, factory: string, read: Reader): FactoryLocation | null {
   const text = read(pluginFile)
   if (text === null) return null
@@ -244,12 +261,19 @@ const listDir = (root: string, rel: string): string[] => {
   return existsSync(abs) && statSync(abs).isDirectory() ? readdirSync(abs).sort() : []
 }
 
+/** List the repo-relative index paths of the installed plugins.
+ * @param root Repository root.
+ * @returns One `.opencode/plugins/<name>/index.ts` per installed plugin. */
 export function pluginFiles(root: string): string[] {
   return listDir(root, ".opencode/plugins")
     .map((d) => `.opencode/plugins/${d}/index.ts`)
     .filter((f) => existsSync(join(root, f)))
 }
 
+/** Collect every registered plugin tool across the plugin files.
+ * @param plugins Repo-relative plugin index paths.
+ * @param read File reader, injectable for tests.
+ * @returns Tool entries sorted by name, with resolved factory locations. */
 export function collectTools(plugins: string[], read: Reader): ToolEntry[] {
   const out: ToolEntry[] = []
   for (const file of plugins) {
@@ -273,6 +297,10 @@ export function collectTools(plugins: string[], read: Reader): ToolEntry[] {
   return out.sort((x, y) => x.name.localeCompare(y.name))
 }
 
+/** Collect the repo-local runnable CLIs: lib modules with an
+ * `import.meta.main` entry point and `.uf/scripts/` members.
+ * @param root Repository root.
+ * @returns CLI entries with file and first-comment summary. */
 export function collectClis(root: string): CliEntry[] {
   const out: CliEntry[] = []
   for (const f of listDir(root, ".opencode/lib")) {
@@ -290,6 +318,9 @@ export function collectClis(root: string): CliEntry[] {
   return out
 }
 
+/** Build the full tool and CLI inventory for a repository.
+ * @param root Repository root.
+ * @returns Every registered plugin tool and repo-local CLI. */
 export function inventory(root: string): Inventory {
   return { tools: collectTools(pluginFiles(root), fsReader(root)), clis: collectClis(root) }
 }
@@ -298,6 +329,9 @@ export function inventory(root: string): Inventory {
  * Rank inventory entries by how many of the query words appear in the
  * name, summary, or description (case-insensitive). Zero-score entries
  * are dropped; ties sort by name.
+ * @param inv The full inventory to filter.
+ * @param words Query words.
+ * @returns Matching entries ranked by score.
  */
 export function match(inv: Inventory, words: string[]): Inventory {
   const ws = words.map((w) => w.toLowerCase()).filter(Boolean)
@@ -348,6 +382,9 @@ type Git = (args: string[]) => string
 const realGit = (root: string): Git => (args) => git(root, args).toString("utf8")
 
 /** Parse `git diff -U0` output into head-side changed lines per file. */
+/** Map a unified diff to its per-file changed head-revision lines.
+ * @param diff Unified diff text (`git diff -U0` output).
+ * @returns File path to the set of changed line numbers. */
 export function parseChangedLines(diff: string): Map<string, Set<number>> {
   const out = new Map<string, Set<number>>()
   let cur: Set<number> | null = null
@@ -375,12 +412,24 @@ const LAYER_FILE: Array<[RegExp, SeamLayer]> = [
   [/round-?trip/, "round-trip"],
 ]
 
+/** Classify a test file's seam layer for one tool.
+ * @param file Test file path; layer suites match on the file name first.
+ * @param text Test file source.
+ * @param tool Tool name to look for in round-trip test titles.
+ * @returns The seam layer the test covers. */
 export function classifyTest(file: string, text: string, tool: string): SeamLayer {
   for (const [re, layer] of LAYER_FILE) if (re.test(file)) return layer
   const titled = new RegExp(`\\b(?:describe|it|test)\\([^\\n]*${ident(tool)}[^\\n]*round[- ]?trip|\\b(?:describe|it|test)\\([^\\n]*round[- ]?trip[^\\n]*${ident(tool)}`, "i")
   return titled.test(text) ? "round-trip" : "other"
 }
 
+/** Build the DE-007 seam evidence: plugin tools added, modified, or
+ * removed since merge-base(ref, HEAD), with the test files that
+ * reference each and the layers left uncovered.
+ * @param root Repository root.
+ * @param ref Base ref to diff against.
+ * @param git Git runner, injectable for tests.
+ * @returns The seam report for the change. */
 export function seamReport(root: string, ref: string, git: Git = realGit(root)): SeamReport {
   const mergeBase = git(["merge-base", ref, "HEAD"]).trim()
   const untracked = git(["ls-files", "--others", "--exclude-standard", "--", ".opencode"]).split("\n").filter(Boolean)
@@ -469,6 +518,11 @@ const USAGE = `usage: tool-inventory [--root DIR] [--json] [--match WORDS]
 
 const one = (s: string | null): string => (s ?? "").replace(/\s+/g, " ").trim()
 
+/** CLI entry point.
+ * @param argv Arguments after the program name.
+ * @param io Output writers and working directory.
+ * @param git Git runner, injectable for tests.
+ * @returns Process exit code (0 ok, 1 findings, 2 usage or IO error). */
 export function main(argv: string[], io: CliIO, git?: Git): number {
   const flags = new Set<string>()
   let root: string | null = null
