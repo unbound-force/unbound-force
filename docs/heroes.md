@@ -110,7 +110,7 @@ The Divisor, as the Reviewer Council, serves as the definitive, single source of
 The Divisor acts as the ultimate guarantor of technical quality, ensuring that the velocity gained by Cobalt-Crush's execution is sustainable and does not accrue crippling technical debt.
 
 **Current Capabilities**:
-- 9-persona review council (Guard, Architect, Adversary, SRE, Testing, Curator, Scribe, Herald, Envoy)
+- 11-persona review council (Guard, Architect, Adversary, SRE, Testing, Curator, Scribe, Herald, Envoy, plus repo-local Linguist and Determinist)
 - Dynamic agent discovery
 - Convention pack enforcement
 - Auto-detection of code vs spec review mode

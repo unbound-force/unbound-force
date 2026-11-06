@@ -107,7 +107,6 @@ type packageLockEntry struct {
 var projectOwnedPolicyMirrors = map[string]bool{
 	"uf/preflight.yaml":             true,
 	"uf/reviewer-capabilities.yaml": true,
-	"uf/review-matrix.yaml":         true,
 }
 
 func TestEmbeddedAssets_MatchSource(t *testing.T) {

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -532,5 +533,102 @@ describe("base deltas (--base)", () => {
     writeFileSync(join(root, ".opencode/agents/a.md"), AGENT("x"))
     const parsed = JSON.parse(cli(["--json", "--base", "main"], root).out)
     expect(parsed.delta.files.map((d: Delta) => d.status)).toEqual(["added"])
+  })
+
+  it("requires --base with --changed", { timeout: 30000 }, () => {
+    const root = gitRepo({ ".opencode/agents/a.md": AGENT("x") })
+    const r = cli(["--changed"], root)
+    expect(r.code).toBe(2)
+    expect(r.err).toMatch(/--changed requires --base/)
+  })
+
+  it("scopes findings and deltas to files changed since the merge base", { timeout: 30000 }, () => {
+    const root = gitRepo({
+      ".opencode/agents/a.md": AGENT("ok"),
+      ".opencode/commands/c.md": COMMAND("Load the missing `.opencode/skills/nope/SKILL.md` file."),
+    })
+    sh(root, "checkout", "-q", "-b", "feature")
+    writeFileSync(join(root, ".opencode/commands/new.md"), COMMAND("fresh"))
+    sh(root, "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A")
+    sh(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "change")
+
+    const whole = JSON.parse(cli(["--json", "--base", "main"], root).out)
+    expect(whole.findings.some((f: Finding) => f.file === ".opencode/commands/c.md")).toBe(true)
+
+    const scoped = JSON.parse(cli(["--json", "--base", "main", "--changed"], root).out)
+    expect(scoped.delta.files.map((d: Delta) => d.file)).toEqual([".opencode/commands/new.md"])
+    expect(scoped.findings).toEqual([])
+  })
+
+  it("anchors IL-050 at a changed copy under --changed", { timeout: 30000 }, () => {
+    const para = Array.from({ length: 12 }, (_, i) => `word${i} number${i} shared${i} text${i}`).join(" ")
+    const root = gitRepo({
+      ".opencode/agents/a.md": AGENT(para),
+      ".opencode/agents/b.md": AGENT("unique"),
+    })
+    sh(root, "checkout", "-q", "-b", "feature")
+    writeFileSync(join(root, ".opencode/agents/b.md"), AGENT(para))
+    sh(root, "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A")
+    sh(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "copy")
+
+    const scoped = JSON.parse(cli(["--json", "--base", "main", "--changed"], root).out)
+    const il050 = scoped.findings.filter((f: Finding) => f.rule === "IL-050")
+    expect(il050).toHaveLength(1)
+    expect(il050[0].file).toBe(".opencode/agents/b.md")
+
+    // Contrast case: --only post-filters after alphabetically-first
+    // anchoring, so the old prose-scoping path drops the cluster.
+    const unscoped = JSON.parse(cli(["--json", "--base", "main", "--only", ".opencode/agents/b.md"], root).out)
+    expect(unscoped.findings.filter((f: Finding) => f.rule === "IL-050")).toEqual([])
+  })
+})
+
+describe("cli config validation and provenance", () => {
+  function cli(args: string[], cwd: string) {
+    const out: string[] = []
+    const err: string[] = []
+    const code = main(args, { cwd, out: (s) => out.push(s), err: (s) => err.push(s) })
+    return { code, out: out.join("\n"), err: err.join("\n") }
+  }
+
+  it("rejects unknown or invalid config keys with exit 2", () => {
+    const root = repo({ ".opencode/agents/a.md": AGENT("x") })
+
+    writeFileSync(join(root, "cfg.json"), JSON.stringify({ maxFileToken: 5000 }))
+    const typo = cli(["--config", "cfg.json", "--root", root], root)
+    expect(typo.code).toBe(2)
+    expect(typo.err).toMatch(/invalid config .*maxFileToken/)
+
+    writeFileSync(join(root, "cfg.json"), JSON.stringify({ maxFileTokens: "lots" }))
+    expect(cli(["--config", "cfg.json", "--root", root], root).code).toBe(2)
+
+    writeFileSync(join(root, "cfg.json"), JSON.stringify({ disable: ["IL-050"] }))
+    expect(cli(["--config", "cfg.json", "--root", root], root).code).toBe(0)
+  })
+
+  it("stamps --json output with producer provenance", () => {
+    const root = repo({ ".opencode/agents/a.md": AGENT("x") })
+    const parsed = JSON.parse(cli(["--json", "--root", root], root).out)
+    expect(parsed.provenance.tool).toBe("instruction-lint")
+    expect(parsed.provenance.version === null || typeof parsed.provenance.version === "string").toBe(true)
+    expect(new Date(parsed.provenance.generatedAt).toString()).not.toBe("Invalid Date")
+  })
+})
+
+describe("runtime dependencies", () => {
+  it("resolves the yaml import the instruction linter depends on", () => {
+    // Resolution guard: `yaml` is not a declared dependency in
+    // .opencode/package.json (the scaffold pins exactly two runtime
+    // dependencies). The import resolves through transitive hoisting
+    // today; when that graph changes, this failure names the package
+    // instead of leaving instruction-lint crashing downstream.
+    const require = createRequire(new URL("../lib/instruction-lint.ts", import.meta.url))
+    let resolved: string
+    try {
+      resolved = require.resolve("yaml")
+    } catch (e) {
+      throw new Error(`yaml is not resolvable from .opencode/lib (transitive hoisting changed): ${(e as Error).message}`)
+    }
+    expect(resolved).toContain("yaml")
   })
 })

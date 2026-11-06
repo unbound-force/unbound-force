@@ -8,7 +8,7 @@
 // belong in a review pack, not in this tool.
 //
 // Run from the repository root:
-//   node .opencode/lib/instruction-lint.ts [--json] [--strict] [--all] [--report] [--base REF]
+//   node .opencode/lib/instruction-lint.ts [--json] [--strict] [--all] [--report] [--base REF] [--changed]
 //
 // Suppress a finding with an HTML comment in the instruction file:
 //   <!-- instruction-lint-disable-next-line IL-023 -->
@@ -20,6 +20,7 @@ import { join, relative, resolve, sep } from "node:path"
 // package to exactly two runtime dependencies. It is installed
 // transitively (via @opencode-ai/plugin -> effect, and vitest -> vite).
 import { parseDocument } from "yaml"
+import { z } from "zod"
 // The cli-common import uses the explicit .ts specifier: this module
 // runs under plain node (type stripping), which does not remap .js
 // specifiers to .ts files the way the vite/vitest resolver does.
@@ -92,6 +93,21 @@ export const DEFAULT_OPTIONS: LintOptions = {
   ignorePaths: [],
 }
 
+// --config payloads are validated, not cast: a typo'd key or a
+// non-numeric budget would otherwise disable its check silently
+// (fail-open lint). Unknown keys are rejected.
+const ConfigSchema = z
+  .object({
+    maxFileTokens: z.number().int().positive(),
+    maxLoadTokens: z.number().int().positive(),
+    duplicateThreshold: z.number().min(0).max(1),
+    duplicateMinWords: z.number().int().positive(),
+    disable: z.array(z.string()),
+    ignorePaths: z.array(z.string()),
+  })
+  .partial()
+  .strict()
+
 // Built-in opencode slash commands and subagents that resolve without
 // a file in this repository.
 const BUILTIN_COMMANDS = new Set([
@@ -126,10 +142,19 @@ export interface Artifact {
 // Parsing
 // ---------------------------------------------------------------------
 
+/** Estimated token count for `text` (4 chars per token).
+ * @param text Raw text to estimate.
+ * @returns Ceiling of length / 4. */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
 
+/** Parse one instruction file into an Artifact.
+ * @param file Repo-relative posix path, used for findings.
+ * @param rawText File contents; CRLF is normalized.
+ * @param kind Artifact kind, selecting the frontmatter rules.
+ * @param name Artifact name (file stem, skill directory, or AGENTS).
+ * @returns The parsed artifact with frontmatter, fence map, and suppressions. */
 export function buildArtifact(file: string, rawText: string, kind: ArtifactKind, name: string): Artifact {
   const text = rawText.replace(/\r\n/g, "\n")
   const lines = text.split("\n")
@@ -208,9 +233,11 @@ function toPosix(p: string): string {
   return p.split(sep).join("/")
 }
 
-// Classify a repo-relative posix path as an instruction artifact using
-// the same layout discoverArtifacts walks, so base-revision trees read
-// from git are discovered identically to the working tree.
+/** Classify a repo-relative posix path as an instruction artifact using
+ * the same layout discoverArtifacts walks, so base-revision trees read
+ * from git are discovered identically to the working tree.
+ * @param rel Repo-relative posix path.
+ * @returns The artifact kind and name, or null for non-instruction paths. */
 export function classifyInstructionPath(rel: string): { kind: ArtifactKind; name: string } | null {
   if (rel === "AGENTS.md") return { kind: "context", name: "AGENTS" }
   const flat = /^\.opencode\/(agents|commands|uf\/packs)\/([^/]+)\.md$/.exec(rel)
@@ -222,6 +249,9 @@ export function classifyInstructionPath(rel: string): { kind: ArtifactKind; name
   return skill ? { kind: "skill", name: skill[1] } : null
 }
 
+/** Walk the `.opencode/` instruction layout and `AGENTS.md` under `root`.
+ * @param root Repository root to walk.
+ * @returns One artifact per discovered instruction file, in walk order. */
 export function discoverArtifacts(root: string): Artifact[] {
   const out: Artifact[] = []
   const oc = join(root, ".opencode")
@@ -325,6 +355,9 @@ interface PackRule {
 
 const RULE_DEF = /^(\s*)[-*]\s+\*\*([A-Z]{2,5}-\d{3})\*\*\s*(?:\[(MUST|SHOULD|MAY)\])?/
 
+/** Extract the convention-pack rule definitions from a pack artifact.
+ * @param a The pack artifact to parse.
+ * @returns Rule ID, marker, 1-based line, and masked body per definition. */
 export function parsePackRules(a: Artifact): PackRule[] {
   const rules: PackRule[] = []
   for (let i = a.bodyStart; i < a.lines.length; i++) {
@@ -644,7 +677,7 @@ function shingles(text: string): Set<string> {
   return out
 }
 
-function checkDuplicates(all: Artifact[], opts: LintOptions, emit: Emit): void {
+function checkDuplicates(all: Artifact[], opts: LintOptions, emit: Emit, inScope?: (file: string) => boolean): void {
   interface Para { a: Artifact; line: number; sh: Set<string> }
   const paras: Para[] = []
   for (const a of all) {
@@ -685,10 +718,15 @@ function checkDuplicates(all: Artifact[], opts: LintOptions, emit: Emit): void {
     const files = [...new Set(members.map((m) => m.a.file))].sort()
     if (files.length < 2) continue
     const ordered = [...members].sort((x, y) => x.a.file.localeCompare(y.a.file) || x.line - y.line)
+    // With a scope active, anchor at the first scoped member so the
+    // cluster survives post-filtering, and skip clusters with no scoped
+    // member entirely: IL-050 membership is decided here, not in prose.
+    const anchor = inScope ? ordered.find((m) => inScope(m.a.file)) : ordered[0]
+    if (!anchor) continue
     const key = files.join("\0")
     const g = groups.get(key)
     if (g) g.count++
-    else groups.set(key, { first: ordered[0], others: ordered.filter((m) => m.a !== ordered[0].a), count: 1 })
+    else groups.set(key, { first: anchor, others: ordered.filter((m) => m.a !== anchor.a), count: 1 })
   }
   for (const g of groups.values()) {
     const firstPerFile = new Map<string, string>()
@@ -704,11 +742,21 @@ export interface LintResult {
   loadTokens: Map<string, number>
 }
 
+/** Run every instruction check over `artifacts`.
+ * @param root Repository root; reference paths resolve against it.
+ * @param artifacts Parsed instruction artifacts to check.
+ * @param options Overrides for the numeric thresholds and disable lists.
+ * @param exists Path-existence predicate for reference checks.
+ * @param inScope Optional file-scope predicate; when given, IL-050
+ *   duplicate clusters anchor at a scoped member and clusters with no
+ *   scoped member are skipped.
+ * @returns Findings, artifacts, and per-file load-token totals. */
 export function lint(
   root: string,
   artifacts: Artifact[],
   options: Partial<LintOptions> = {},
   exists: (rel: string) => boolean = (rel) => existsSync(join(root, rel)),
+  inScope?: (file: string) => boolean,
 ): LintResult {
   const opts: LintOptions = { ...DEFAULT_OPTIONS, ...options }
   const findings: Finding[] = []
@@ -773,7 +821,7 @@ export function lint(
 
   const defined = checkPackRules(artifacts.filter((a) => a.kind === "pack"), emit)
   checkRuleIdRefs(artifacts, defined, emit)
-  checkDuplicates(artifacts, opts, emit)
+  checkDuplicates(artifacts, opts, emit, inScope)
 
   const rank: Record<Severity, number> = { error: 0, warning: 1, info: 2 }
   findings.sort((x, y) => x.file.localeCompare(y.file) || x.line - y.line || rank[x.severity] - rank[y.severity] || x.rule.localeCompare(y.rule))
@@ -784,6 +832,9 @@ export function lint(
 // Base-revision deltas (DE-004 evidence)
 // ---------------------------------------------------------------------
 
+/** Count lines the way `wc -l` does.
+ * @param text Text to count.
+ * @returns Number of newline-terminated lines (0 for empty text). */
 export function countLines(text: string): number {
   if (text === "") return 0
   const n = text.split("\n").length
@@ -798,8 +849,12 @@ export interface BaseTree {
   paths: Set<string>
 }
 
-// Read the instruction artifacts at merge-base(ref, HEAD), so a base
-// that moved ahead of the branch does not count its own changes.
+/** Read the instruction artifacts at merge-base(ref, HEAD), so a base
+ * that moved ahead of the branch does not count its own changes.
+ * @param root Repository root to run git in.
+ * @param ref Base ref to merge with HEAD.
+ * @returns The base ref, merge-base SHA, parsed artifacts, and every
+ *   `.opencode/` (and AGENTS.md) path at the merge base. */
 export function readBaseTree(root: string, ref: string): BaseTree {
   const mergeBase = git(root, ["merge-base", ref, "HEAD"]).toString("utf8").trim()
   const paths = git(root, ["ls-tree", "-r", "-z", "--name-only", mergeBase, "--", ".opencode", "AGENTS.md"])
@@ -811,7 +866,12 @@ export function readBaseTree(root: string, ref: string): BaseTree {
     let off = 0
     for (const w of wanted) {
       const nl = out.indexOf(10, off)
-      const size = Number(out.subarray(off, nl).toString("utf8").split(" ")[2])
+      const header = out.subarray(off, nl).toString("utf8")
+      const parts = header.split(" ")
+      if (parts.length < 3 || !/^\d+$/.test(parts[2])) {
+        throw new Error(`malformed cat-file header for ${w.p}: ${header.trim()}`)
+      }
+      const size = Number(parts[2])
       const text = out.subarray(nl + 1, nl + 1 + size).toString("utf8")
       off = nl + 1 + size + 1
       artifacts.push(buildArtifact(w.p, text, w.c!.kind, w.c!.name))
@@ -831,6 +891,10 @@ export interface Delta {
 
 const pair = (base: number, head: number) => ({ base, head, delta: head - base })
 
+/** Compute per-file instruction deltas between two lint runs.
+ * @param base The base-revision lint result.
+ * @param head The working-tree lint result.
+ * @returns One delta per added, deleted, modified, or load-only file. */
 export function computeDeltas(base: LintResult, head: LintResult): Delta[] {
   const b = new Map(base.artifacts.map((a) => [a.file, a]))
   const h = new Map(head.artifacts.map((a) => [a.file, a]))
@@ -865,7 +929,7 @@ const signed = (n: number): string => (n > 0 ? `+${n}` : String(n))
 // CLI
 // ---------------------------------------------------------------------
 
-const USAGE = `usage: instruction-lint [--root DIR] [--config FILE] [--only PATH]... [--json] [--strict] [--all] [--report] [--base REF] [--rules]
+const USAGE = `usage: instruction-lint [--root DIR] [--config FILE] [--only PATH]... [--json] [--strict] [--all] [--report] [--base REF] [--changed] [--rules]
 
   --root DIR     repository root (default: nearest ancestor containing .opencode/)
   --config FILE  JSON options (default: <root>/.opencode/instruction-lint.json if present)
@@ -878,8 +942,25 @@ const USAGE = `usage: instruction-lint [--root DIR] [--config FILE] [--only PATH
   --report       print per-file token and load-set sizes
   --base REF     also report line, token, and load-set deltas for instruction files
                  changed since merge-base(REF, HEAD) (DE-004 evidence)
+  --changed      scope findings and deltas to the files changed since
+                 merge-base(--base REF, HEAD); requires --base
   --rules        list rule IDs and exit`
 
+// Producer version for --json output; null when ../package.json is
+// unreadable (Constitution Principle III provenance).
+const TOOL_VERSION: string | null = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: string }
+    return pkg.version ?? null
+  } catch {
+    return null
+  }
+})()
+
+/** CLI entry point.
+ * @param argv Arguments after the program name.
+ * @param io Output writers and working directory.
+ * @returns Process exit code (0 ok, 1 findings, 2 usage or IO error). */
 export function main(argv: string[], io: CliIO): number {
   const flags = new Set<string>()
   let root: string | null = null
@@ -898,7 +979,7 @@ export function main(argv: string[], io: CliIO): number {
       else if (a === "--config") config = resolve(io.cwd, v)
       else if (a === "--base") baseRef = v
       else for (const p of v.split(",")) if (p.trim()) only.add(p.trim().replace(/^\.\//, ""))
-    } else if (["--json", "--strict", "--all", "--report", "--rules", "--help"].includes(a)) {
+    } else if (["--json", "--strict", "--all", "--report", "--changed", "--rules", "--help"].includes(a)) {
       flags.add(a)
     } else {
       io.err(`unknown argument: ${a}\n${USAGE}`)
@@ -913,6 +994,10 @@ export function main(argv: string[], io: CliIO): number {
     for (const [id, r] of Object.entries(RULES)) io.out(`${id}  ${r.severity.padEnd(7)}  ${r.summary}`)
     return 0
   }
+  if (flags.has("--changed") && baseRef === null) {
+    io.err(`--changed requires --base\n${USAGE}`)
+    return 2
+  }
   root = root ?? findRoot(io.cwd)
   if (!root) {
     io.err("no .opencode/ directory found; pass --root")
@@ -921,18 +1006,24 @@ export function main(argv: string[], io: CliIO): number {
   let options: Partial<LintOptions> = {}
   const cfg = config ?? join(root, ".opencode", "instruction-lint.json")
   if (config || existsSync(cfg)) {
+    let raw: unknown
     try {
-      options = JSON.parse(readFileSync(cfg, "utf8")) as Partial<LintOptions>
+      raw = JSON.parse(readFileSync(cfg, "utf8"))
     } catch (e) {
       io.err(`cannot read config ${cfg}: ${(e as Error).message}`)
       return 2
     }
+    const parsed = ConfigSchema.safeParse(raw)
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")
+      io.err(`invalid config ${cfg}: ${issues}`)
+      return 2
+    }
+    options = parsed.data
   }
 
-  const result = lint(root, discoverArtifacts(root), options)
-  let delta: { base: string; mergeBase: string; files: Delta[]; totals: { lines: number; tokens: number } } | null = null
+  let tree: BaseTree | null = null
   if (baseRef !== null) {
-    let tree: BaseTree
     try {
       tree = readBaseTree(root, baseRef)
     } catch (e) {
@@ -940,12 +1031,44 @@ export function main(argv: string[], io: CliIO): number {
       io.err(`cannot read base ${baseRef}: ${detail}`)
       return 2
     }
+  }
+  // --changed scopes findings and deltas to the files changed since the
+  // merge base. The linter derives the list itself so callers never
+  // reconstruct it from a diff (DE-001).
+  // Working-tree semantics: the linter always reads files from disk, so
+  // the changed set must too -- `git diff <mergeBase>` (no HEAD) covers
+  // committed and uncommitted edits alike, and `ls-files --others`
+  // covers untracked files. This keeps --changed scoping in lockstep
+  // with the delta rows, which compare on-disk artifacts against the
+  // merge-base tree.
+  const changedFiles: Set<string> | null =
+    flags.has("--changed") && tree !== null
+      ? new Set(
+          [
+            ...git(root, ["diff", "--name-only", tree.mergeBase]).toString("utf8").split("\n"),
+            ...git(root, ["ls-files", "--others", "--exclude-standard"]).toString("utf8").split("\n"),
+          ]
+            .map((l) => l.trim())
+            .filter(Boolean),
+        )
+      : null
+  const result = lint(
+    root,
+    discoverArtifacts(root),
+    options,
+    undefined,
+    changedFiles === null ? undefined : (f) => changedFiles.has(f),
+  )
+  let delta: { base: string; mergeBase: string; files: Delta[]; totals: { lines: number; tokens: number } } | null = null
+  if (tree !== null) {
     const baseResult = lint(root, tree.artifacts, options, (rel) => tree.paths.has(rel))
     let files = computeDeltas(baseResult, result)
+    if (changedFiles !== null) files = files.filter((d) => changedFiles.has(d.file))
     if (only.size > 0) files = files.filter((d) => only.has(d.file))
     const sum = (k: "lines" | "tokens"): number => files.reduce((n, d) => n + d[k].delta, 0)
-    delta = { base: baseRef, mergeBase: tree.mergeBase, files, totals: { lines: sum("lines"), tokens: sum("tokens") } }
+    delta = { base: baseRef as string, mergeBase: tree.mergeBase, files, totals: { lines: sum("lines"), tokens: sum("tokens") } }
   }
+  if (changedFiles !== null) result.findings = result.findings.filter((f) => changedFiles.has(f.file))
   if (only.size > 0) result.findings = result.findings.filter((f) => only.has(f.file))
   const count = (s: Severity): number => result.findings.filter((f) => f.severity === s).length
   const summary = { files: result.artifacts.length, errors: count("error"), warnings: count("warning"), info: count("info") }
@@ -953,7 +1076,10 @@ export function main(argv: string[], io: CliIO): number {
   if (flags.has("--json")) {
     const loadTokens = Object.fromEntries(result.loadTokens)
     const tokens = Object.fromEntries(result.artifacts.map((a) => [a.file, a.tokens]))
-    io.out(JSON.stringify({ summary, findings: result.findings, tokens, loadTokens, ...(delta ? { delta } : {}) }, null, 2))
+    // Constitution Principle III: machine-readable output carries its
+    // producer identity, version, and generation time.
+    const provenance = { tool: "instruction-lint", version: TOOL_VERSION, generatedAt: new Date().toISOString() }
+    io.out(JSON.stringify({ provenance, summary, findings: result.findings, tokens, loadTokens, ...(delta ? { delta } : {}) }, null, 2))
   } else {
     for (const f of result.findings) {
       if (f.severity === "info" && !flags.has("--all")) continue

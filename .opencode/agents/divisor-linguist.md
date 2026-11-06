@@ -8,8 +8,6 @@ permission:
   bash:
     "*": "deny"
     "node .opencode/lib/instruction-lint.ts*": "allow"
-    "git diff*": "allow"
-    "git status*": "allow"
 ---
 
 <!-- repo-local persona (not a scaffold asset): depends on the
@@ -73,16 +71,16 @@ This is the default mode. Use this when the caller asks you to review code chang
 
 ### Review Scope
 
-Use the diff the caller supplies. When invoked without one, identify changes with `git diff` and `git status`. Collect the changed instruction files (see [Instruction Files](#instruction-files)); that list drives every step below. Follow the caller's changed-line confinement rule: if it excludes a file-level finding, drop the finding rather than re-anchoring it to an unrelated line.
+Use the diff the caller supplies. The changed instruction files (see [Instruction Files](#instruction-files)) are the linter's `delta.files` from Step 1, run with `--base BASE --changed`; that list drives every step below. When the caller supplies no BASE, see [Graceful Degradation](#graceful-degradation). Follow the caller's changed-line confinement rule: if it excludes a file-level finding, drop the finding rather than re-anchoring it to an unrelated line.
 
 Review **new and modified** instruction. Unchanged prose in a changed file produces no IQ finding unless the change edits the same section.
 
 ### Step 1: Linter Evidence (deterministic)
 
-Run the instruction linter once, restricted to the changed instruction files:
+Run the instruction linter once, scoped to the files changed since BASE:
 
 ```bash
-node .opencode/lib/instruction-lint.ts --json --only <changed instruction files, comma-separated>
+node .opencode/lib/instruction-lint.ts --json --base BASE --changed
 ```
 
 The caller's pre-flight evidence may already include an `instruction-lint` row and its text output (the advisory check declared in `.uf/preflight.yaml`). That output covers the whole repository; still run the command above for structured findings scoped to the change, and report each finding once — never once from pre-flight output and again from this run.
@@ -108,7 +106,7 @@ Rules for linter evidence:
 - **Use `reviewSeverity` as the finding severity.** Do not re-map it.
 - Report each finding with Constraint `Instruction Lint (IL-NNN)`, the linter's `file:line`, and its message. Write the Recommendation yourself — that part is judgment.
 - **IL-040, IL-041, and IL-042 are determinism hints owned by The Determinist.** Do not report them, and do not classify them.
-- **IL-050 (duplication)**: report it only when the changed text is one of the copies. Recommend one source of truth — a skill or pack the files load — over synchronized copies.
+- **IL-050 (duplication)**: report the finding where the linter anchors it — under `--changed` scoping the anchor is a changed copy. Recommend one source of truth — a skill or pack the files load — over synchronized copies.
 - **False positives**: you MAY dismiss a linter finding only by quoting the text that proves it wrong. Report the dismissal as LOW, recommending either a suppression comment with a reason (`<!-- instruction-lint-disable-next-line IL-NNN -->`) or a fix to the rule in `.opencode/lib/instruction-lint.ts`. Never drop a linter finding silently.
 
 ### Step 2: Instruction Clarity Review (judgment)
@@ -181,6 +179,7 @@ End your review with a clear **APPROVE** or **REQUEST CHANGES** verdict and a su
 
 | Condition | Behavior |
 |-----------|----------|
+| No BASE (caller supplied none) | Run Step 1 without `--base` and without `--changed` (whole-repo findings); report only findings anchored at files the caller's diff names, and note the scope in the summary. |
 | `.opencode/lib/instruction-lint.ts` absent | Skip Step 1 with an informational note. Run Step 2. Do not hand-run the linter's checks in its place. |
 | Linter output is not JSON (node missing, bash denied, crash) | Report one LOW finding with the command and its error output. Continue with Step 2; do not hand-run the linter's checks. |
 | Dewey not available | Skip Step 0, proceed with standard review. Note the skip as informational. |
