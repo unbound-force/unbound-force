@@ -65,6 +65,28 @@ func TestCommandContracts_TriageIssue(t *testing.T) {
 	assertCommandCopies(t, "uf.triage-issue.md", true, clauses)
 }
 
+// TestCommandContracts_RunPipelinePlanTimeoutRecovery pins the
+// delegation-timeout-budgets recovery protocol (issue #930): the
+// /uf.unleash delegation runs at the command-path ceiling, and timeout
+// envelopes are resumed by kind instead of re-delegated into the cap.
+func TestCommandContracts_RunPipelinePlanTimeoutRecovery(t *testing.T) {
+	clauses := []commandClause{
+		{name: "command-path ceiling", all: []string{"set `timeout: 14400000`", "omit `idle_timeout`", "nested delegations inside the child are clamped to its remaining budget"}},
+		{name: "timeout envelope fields", all: []string{"**delegation timeout recovery**", "`timeout` object (`kind`, `child_active`, `pending_question`)", "`resume` (`last_checkpoint_step`, `completed_steps`)"}},
+		{name: "branch on timeout kind", all: []string{"`timeout.pending_question: true`", "apply gate-timeout recovery", "`timeout.kind: \"idle\"` without a pending question", "re-delegate the same command once as a resume", "the re-run is effectively a fresh start", "a second idle timeout on the same item routes through the blocked-item protocol", "`timeout.kind: \"wall_clock\"`", "`timeout.kind: \"budget\"`"}},
+		{name: "finale idle window", all: []string{"set `timeout: 600000` (10 minutes) and `idle_timeout: 300000` (5 minutes)"}},
+		{name: "no fresh restart", all: []string{"when `resume.last_checkpoint_step` is non-null, never restart the item fresh on `main`"}},
+	}
+
+	assertCommandCopies(t, "uf.run-pipeline-plan.md", true, clauses)
+
+	for _, copy := range loadCommandCopies(t, "uf.run-pipeline-plan.md", true) {
+		if strings.Contains(normalizeCommandText(copy.text), "set `timeout: 1800000`") {
+			t.Errorf("%s: stale 30-minute /uf.unleash delegation timeout remains", copy.name)
+		}
+	}
+}
+
 func TestCommandContracts_FixCiCommandStructure(t *testing.T) {
 	clauses := []commandClause{
 		{name: "never-merge rule", all: []string{"MUST NEVER merge", "no option offers it", "rebase only"}},

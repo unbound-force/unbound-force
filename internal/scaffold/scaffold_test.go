@@ -2094,9 +2094,10 @@ var expectedAssetPaths = []string{
 	"opencode/lib/uf-workflow-types.ts",
 	// UF finale plugin (1)
 	"opencode/plugins/uf-finale/index.ts",
-	// Shared lib modules (12)
+	// Shared lib modules (13)
 	"opencode/lib/agent-executor.ts",
 	"opencode/lib/branch-classification.ts",
+	"opencode/lib/delegation-budget.ts",
 	"opencode/lib/model-matrix.ts",
 	"opencode/lib/preflight-declared.ts",
 	"opencode/lib/review-dispatch-artifact.ts",
@@ -2149,6 +2150,7 @@ var task42CanonicalAssets = []struct {
 	{asset: "opencode/lib/uf-workflow-types.ts", source: ".opencode/lib/uf-workflow-types.ts"},
 	{asset: "opencode/lib/agent-executor.ts", source: ".opencode/lib/agent-executor.ts"},
 	{asset: "opencode/lib/branch-classification.ts", source: ".opencode/lib/branch-classification.ts"},
+	{asset: "opencode/lib/delegation-budget.ts", source: ".opencode/lib/delegation-budget.ts"},
 	{asset: "opencode/lib/model-matrix.ts", source: ".opencode/lib/model-matrix.ts"},
 	{asset: "opencode/lib/preflight-declared.ts", source: ".opencode/lib/preflight-declared.ts"},
 	{asset: "opencode/lib/review-dispatch-artifact.ts", source: ".opencode/lib/review-dispatch-artifact.ts"},
@@ -4183,6 +4185,7 @@ func TestIsToolOwned(t *testing.T) {
 		// Tool-owned: shared agent executor library
 		{"opencode/lib/agent-executor.ts", true},
 		{"opencode/lib/branch-classification.ts", true},
+		{"opencode/lib/delegation-budget.ts", true},
 		{"opencode/lib/review-dispatch-artifact.ts", true},
 		// Tool-owned: review-dispatch acquisition module
 		{"opencode/lib/review-dispatch-lesson-proposal.ts", true},
@@ -4867,6 +4870,7 @@ func TestIsDivisorAsset(t *testing.T) {
 		// Shared agent executor library
 		{"opencode/lib/agent-executor.ts", true},
 		{"opencode/lib/branch-classification.ts", true},
+		{"opencode/lib/delegation-budget.ts", true},
 		{"opencode/lib/review-dispatch-artifact.ts", true},
 		// Divisor acquisition implementation
 		{"opencode/lib/review-dispatch-lesson-proposal.ts", true},

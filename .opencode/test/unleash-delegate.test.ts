@@ -91,6 +91,18 @@ interface FakeClientOptions {
   readonly hangPrompt?: boolean
   /** Hang session.message on its abort signal (host-resolution cancellation). */
   readonly hangMessage?: boolean
+  /** Expose the activity-probe endpoints with a never-changing child (idle paths). */
+  readonly stalledProbe?: boolean
+  /**
+   * Expose the activity-probe endpoints whose latest part is a running
+   * question tool call (question-gate wedge).
+   */
+  readonly questionProbe?: boolean
+  /**
+   * Expose the activity-probe endpoints with a growing text part
+   * (never idle-aborts; long wall-clock paths).
+   */
+  readonly activeProbe?: boolean
 }
 
 function fieldsResponse<T>(data: T): T {
@@ -145,6 +157,9 @@ function finishPart(cost: number, input: number, output: number): Record<string,
  */
 function fakeClient(options: FakeClientOptions = {}): { readonly client: Client; readonly calls: FakeCalls } {
   const calls: FakeCalls = { creates: [], messages: [], prompts: [], aborts: [] }
+  // Probe counter backing the activeProbe option: each probe reports a new
+  // text part so the activity fingerprint changes on every sample.
+  let probeCount = 0
   const session = {
     create: async (request: CreateOptions): Promise<CreateResponse> => {
       calls.creates.push(request)
@@ -199,6 +214,51 @@ function fakeClient(options: FakeClientOptions = {}): { readonly client: Client;
       calls.aborts.push(request)
       return fieldsResponse({ data: true, error: undefined } as unknown as AbortResponse)
     },
+    // Activity-probe endpoints (delegation-timeout-budgets D2), present only
+    // for idle-path tests: the child never changes and has no descendants.
+    ...(options.stalledProbe === true
+      ? {
+          children: async () => ({ data: [] }),
+          messages: async () => ({
+            data: [{ info: { id: "message-child" }, parts: [textPart("thinking")] }],
+          }),
+        }
+      : {}),
+    // Question-gate wedge: the latest part of the latest message is a
+    // running question tool call, so the idle path reports
+    // pending_question instead of a plain stall.
+    ...(options.questionProbe === true
+      ? {
+          children: async () => ({ data: [] }),
+          messages: async () => ({
+            data: [
+              {
+                info: { id: "message-child" },
+                parts: [
+                  {
+                    id: "tool-question",
+                    sessionID: "child-session",
+                    messageID: "message-child",
+                    type: "tool",
+                    tool: "question",
+                    state: { status: "running" },
+                  },
+                ],
+              },
+            ],
+          }),
+        }
+      : {}),
+    // Long wall-clock paths: the probed message grows every probe, so the
+    // fingerprint keeps changing and the idle clock keeps resetting.
+    ...(options.activeProbe === true
+      ? {
+          children: async () => ({ data: [] }),
+          messages: async () => ({
+            data: [{ info: { id: "message-child" }, parts: [textPart(`thinking-${++probeCount}`)] }],
+          }),
+        }
+      : {}),
   }
   return { client: { session } as unknown as Client, calls }
 }
@@ -2909,5 +2969,262 @@ describe("uf_delegate_command path traversal", () => {
     expect(fake.calls.creates).toHaveLength(0)
     expect(fake.calls.prompts).toHaveLength(0)
     expect(artifact.calls).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// uf_delegate_command — timeout budgets (delegation-timeout-budgets)
+// ---------------------------------------------------------------------------
+
+describe("uf_delegate_command timeout budgets", () => {
+  const baseDeps = (client: Client, files: Record<string, string> = {}): DelegateCommandDependencies => ({
+    client,
+    modelMatrix: matrixFreeDeps,
+    readText: fakeReadText(files).readText,
+    fileExists: fakeFileExists([]).fileExists,
+  })
+
+  it("rejects a prompt-only timeout above the executor bound before spawning", async () => {
+    const fake = fakeClient()
+    const result = await invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+      prompt: "Run the delegation.",
+      task_classification: "judgment",
+      timeout: 1_800_001,
+    })
+
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("INVALID_INPUT")
+      expect(result.message).toContain("prompt-only delegation timeout must not exceed 1800000 ms")
+    }
+    expect(fake.calls.creates).toHaveLength(0)
+  })
+
+  it("rejects a command-path timeout above the 4-hour ceiling and an idle_timeout below 60 s", async () => {
+    const fake = fakeClient()
+    const tooLong = await invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+      command_path: "cmd.md",
+      timeout: 14_400_001,
+    })
+    const tooIdle = await invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+      command_path: "cmd.md",
+      idle_timeout: 59_999,
+    })
+
+    expect(tooLong.status === "error" && tooLong.code).toBe("INVALID_INPUT")
+    expect(tooIdle.status === "error" && tooIdle.code).toBe("INVALID_INPUT")
+    expect(fake.calls.creates).toHaveLength(0)
+  })
+
+  it("accepts a 4-hour command-path timeout", async () => {
+    const commandAbs = resolve(FAKE_CWD, "cmd.md")
+    const fake = fakeClient()
+    const result = await invokeDelegate(recordingExec().exec, baseDeps(fake.client, { [commandAbs]: "Run." }), {
+      command_path: "cmd.md",
+      timeout: 14_400_000,
+    })
+
+    expect(result.status).toBe("ok")
+  })
+
+  it("threads timeout details and durable resume state into a command-path timeout", async () => {
+    const commandAbs = resolve(FAKE_CWD, ".opencode/commands/uf.unleash.md")
+    const fake = fakeClient({ hangPrompt: true })
+    const state: ProgressState = {
+      command: "uf.unleash",
+      branch: "opsx-unleash-deterministic-tools",
+      key: "opsx-unleash-deterministic-tools",
+      current_step: "plan",
+      completed_steps: ["spec-review", "plan"],
+      data: {},
+      created_at: "2026-11-03T00:00:00.000Z",
+      updated_at: "2026-11-03T00:00:00.000Z",
+    }
+    vi.mocked(lstatSync).mockImplementation(
+      () => ({ isSymbolicLink: () => false }) as unknown as ReturnType<typeof lstatSync>,
+    )
+    vi.mocked(readFileSync).mockImplementation(() => JSON.stringify(state))
+
+    const result = (await invokeDelegate(
+      recordingExec().exec,
+      baseDeps(fake.client, { [commandAbs]: "Run the pipeline." }),
+      { command_path: ".opencode/commands/uf.unleash.md", timeout: 5 },
+    )) as unknown as Record<string, unknown>
+
+    expect(result.status).toBe("error")
+    expect(result.code).toBe("DELEGATE_FAILED")
+    expect(result.child_session_id).toBe("child-session")
+    expect(result.timeout).toMatchObject({ kind: "wall_clock", effective_ms: 5, idle_timeout_ms: 600_000 })
+    expect(result.resume).toEqual({
+      command: "uf.unleash",
+      key: "opsx-unleash-deterministic-tools",
+      last_checkpoint_step: "plan",
+      completed_steps: ["spec-review", "plan"],
+    })
+    // The resume read goes through the progress state store path.
+    expect(String(vi.mocked(readFileSync).mock.calls[0]?.[0])).toBe(
+      resolve(FAKE_CWD, ".uf/progress/opsx-unleash-deterministic-tools/uf.unleash.json"),
+    )
+  })
+
+  it("reports null resume state when no checkpoint exists or the key cannot be derived", async () => {
+    const commandAbs = resolve(FAKE_CWD, "cmd.md")
+    const fake = fakeClient({ hangPrompt: true })
+    const deps = baseDeps(fake.client, { [commandAbs]: "Run." })
+
+    const fresh = (await invokeDelegate(recordingExec().exec, deps, {
+      command_path: "cmd.md",
+      timeout: 5,
+    })) as unknown as Record<string, unknown>
+    expect(fresh.resume).toMatchObject({ command: "cmd", last_checkpoint_step: null, completed_steps: [] })
+
+    const detached = (await invokeDelegate(recordingExec("HEAD").exec, deps, {
+      command_path: "cmd.md",
+      timeout: 5,
+    })) as unknown as Record<string, unknown>
+    expect(detached.resume).toBeNull()
+  })
+
+  it("omits resume state for prompt-only timeouts", async () => {
+    const fake = fakeClient({ hangPrompt: true })
+    const result = (await invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+      prompt: "Run the delegation.",
+      task_classification: "judgment",
+      timeout: 5,
+    })) as unknown as Record<string, unknown>
+
+    expect(result.timeout).toMatchObject({ kind: "wall_clock" })
+    expect("resume" in result).toBe(false)
+  })
+
+  it("aborts a stalled child on the default 10-minute idle timeout long before the wall clock", async () => {
+    vi.useFakeTimers()
+    try {
+      const fake = fakeClient({ hangPrompt: true, stalledProbe: true })
+      const pending = invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+        prompt: "Run the delegation.",
+        task_classification: "judgment",
+        timeout: 1_800_000,
+      })
+      await vi.advanceTimersByTimeAsync(700_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.retryable).toBe(true)
+      expect(result.message).toBe("idle_timeout: invoke_agent run made no progress for 600000 ms")
+      expect(result.timeout).toMatchObject({
+        kind: "idle",
+        idle_timeout_ms: 600_000,
+        child_active: false,
+        pending_question: false,
+      })
+      expect(fake.calls.aborts).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("threads resume state into an idle-timeout failure on a checkpointed command", async () => {
+    vi.useFakeTimers()
+    try {
+      const commandAbs = resolve(FAKE_CWD, ".opencode/commands/uf.unleash.md")
+      const fake = fakeClient({ hangPrompt: true, stalledProbe: true })
+      const state: ProgressState = {
+        command: "uf.unleash",
+        branch: "opsx-unleash-deterministic-tools",
+        key: "opsx-unleash-deterministic-tools",
+        current_step: "plan",
+        completed_steps: ["spec-review", "plan"],
+        data: {},
+        created_at: "2026-11-03T00:00:00.000Z",
+        updated_at: "2026-11-03T00:00:00.000Z",
+      }
+      vi.mocked(lstatSync).mockImplementation(
+        () => ({ isSymbolicLink: () => false }) as unknown as ReturnType<typeof lstatSync>,
+      )
+      vi.mocked(readFileSync).mockImplementation(() => JSON.stringify(state))
+
+      const pending = invokeDelegate(
+        recordingExec().exec,
+        baseDeps(fake.client, { [commandAbs]: "Run the pipeline." }),
+        { command_path: ".opencode/commands/uf.unleash.md", timeout: 1_800_000 },
+      )
+      await vi.advanceTimersByTimeAsync(700_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.status).toBe("error")
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.retryable).toBe(true)
+      expect(result.child_session_id).toBe("child-session")
+      expect(result.timeout).toMatchObject({ kind: "idle", idle_timeout_ms: 600_000 })
+      expect(result.resume).toMatchObject({
+        command: "uf.unleash",
+        key: "opsx-unleash-deterministic-tools",
+        last_checkpoint_step: "plan",
+        completed_steps: ["spec-review", "plan"],
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("reports pending_question on the envelope when the stalled child holds a running question", async () => {
+    vi.useFakeTimers()
+    try {
+      const fake = fakeClient({ hangPrompt: true, questionProbe: true })
+      const pending = invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+        prompt: "Run the delegation.",
+        task_classification: "judgment",
+        timeout: 1_800_000,
+      })
+      await vi.advanceTimersByTimeAsync(700_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.timeout).toMatchObject({
+        kind: "idle",
+        idle_timeout_ms: 600_000,
+        pending_question: true,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("rejects an idle_timeout above the 1,800,000 ms bound", async () => {
+    const fake = fakeClient()
+    const tooIdle = await invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+      command_path: "cmd.md",
+      idle_timeout: 1_800_001,
+    })
+
+    expect(tooIdle.status === "error" && tooIdle.code).toBe("INVALID_INPUT")
+    expect(fake.calls.creates).toHaveLength(0)
+  })
+
+  it("threads a 4-hour command-path timeout through to the executor wall clock", async () => {
+    vi.useFakeTimers()
+    try {
+      const commandAbs = resolve(FAKE_CWD, "cmd.md")
+      const fake = fakeClient({ hangPrompt: true, activeProbe: true })
+      const pending = invokeDelegate(
+        recordingExec().exec,
+        baseDeps(fake.client, { [commandAbs]: "Run." }),
+        { command_path: "cmd.md", timeout: 14_400_000 },
+      )
+      await vi.advanceTimersByTimeAsync(14_400_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.status).toBe("error")
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.timeout).toMatchObject({
+        kind: "wall_clock",
+        effective_ms: 14_400_000,
+        requested_ms: 14_400_000,
+        budget_clamped: false,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
