@@ -9,7 +9,8 @@ permission:
     "*": "deny"
     "node .opencode/lib/instruction-lint.ts*": "allow"
     "node .opencode/lib/tool-inventory.ts*": "allow"
-    "git diff*": "allow"
+    "git diff --name-only": "allow"
+    "git diff --stat": "allow"
     "git status*": "allow"
 ---
 
@@ -76,7 +77,7 @@ This is the default mode. Use this when the caller asks you to review code chang
 
 ### Review Scope
 
-Use the diff the caller supplies. When invoked without one, identify changes with `git diff` and `git status`. Sort the changed paths into the two kinds in [Review Surface](#review-surface); those two lists drive every step below. Follow the caller's changed-line confinement rule: if it excludes a file-level finding, drop the finding rather than re-anchoring it to an unrelated line.
+Use the diff the caller supplies. When invoked without one, identify changes with `git diff --name-only` and `git status`. Sort the changed paths into the two kinds in [Review Surface](#review-surface); those two lists drive every step below. Follow the caller's changed-line confinement rule: if it excludes a file-level finding, drop the finding rather than re-anchoring it to an unrelated line.
 
 **BASE** is the base ref the caller supplies. If the caller supplies none, BASE is the `ref` field that `resolve_base_ref` returns. If neither is available, there is no BASE; see [Graceful Degradation](#graceful-degradation).
 
