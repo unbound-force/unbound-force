@@ -299,6 +299,19 @@ describe("prose checks", () => {
     expect(dup[0]?.file).toBe(".opencode/commands/f0.md")
     expect(dup[0]?.message).toContain("also appear near-verbatim")
   })
+
+  it("pins the posting-list cap cliff: near-identical copies beyond the cap report nothing", () => {
+    // Accepted boilerplate-filtering behavior, pinned: 70 near-identical
+    // (not byte-identical) paragraphs share only over-cap shingles, so
+    // candidate generation skips them and IL-050 stays silent. The
+    // exact-duplicate test above covers the byte-identical path.
+    const files: Record<string, string> = {}
+    for (let i = 0; i < 70; i++) {
+      const para = `${Array.from({ length: 49 }, (_, j) => `word${j}`).join(" ")} unique${i}`
+      files[`.opencode/commands/f${i}.md`] = COMMAND(para)
+    }
+    expect(run(files).filter((f) => f.rule === "IL-050")).toEqual([])
+  })
 })
 
 describe("suppression and options", () => {
@@ -396,7 +409,9 @@ describe("cli", () => {
     expect(cli(["--only", ".opencode/agents/b.md"], root).code).toBe(1)
     expect(cli(["--only"], root).code).toBe(2)
     const ghost = cli(["--only", ".opencode/agents/ghost.md"], root)
+    expect(ghost.code).toBe(2)
     expect(ghost.err).toContain("--only .opencode/agents/ghost.md matches no lintable file")
+    expect(cli(["--only", ".opencode/agents/b.md", "--only", ".opencode/agents/ghost.md"], root).code).toBe(2)
   })
 
   it("reads options from the default and explicit config files", () => {
@@ -428,6 +443,24 @@ describe("cli", () => {
     const bad2 = cli([], root2)
     expect(bad2.code).toBe(2)
     expect(bad2.err).toContain("duplicateThreshold")
+  })
+
+  it("rejects empty ignorePaths entries and unknown config keys", () => {
+    const root = repo({
+      ".opencode/agents/a.md": AGENT("You MUST act appropriately."),
+      ".opencode/instruction-lint.json": JSON.stringify({ ignorePaths: [""] }),
+    })
+    const badEmpty = cli([], root)
+    expect(badEmpty.code).toBe(2)
+    expect(badEmpty.err).toContain("ignorePaths")
+
+    const root2 = repo({
+      ".opencode/agents/a.md": AGENT("You MUST act appropriately."),
+      ".opencode/instruction-lint.json": JSON.stringify({ disabled: ["IL-023"] }),
+    })
+    const badUnknown = cli([], root2)
+    expect(badUnknown.code).toBe(2)
+    expect(badUnknown.err).toContain("disabled")
   })
 
   it("exits 2 when the linter crashes instead of reporting errors", async () => {
