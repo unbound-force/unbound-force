@@ -127,6 +127,75 @@ uf doctor --format json
 uf doctor --dir /path/to/project
 ```
 
+### uf gate
+
+Run phase-specific constitution compliance checks. Designed
+for headless use in CI pipelines, validation loops, and
+pre-PR hooks.
+
+Exit code 0 when all checks pass. Exit code 1 when a check
+fails or an argument is invalid. Exit code 2 on internal
+error.
+
+```
+uf gate --phase <specify|plan|implement|review|pr> [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--phase` | string | `""` | Workflow phase to check (required) |
+| `--format` | string | `"text"` | Output format: `text` or `json` |
+| `--dir` | string | `"."` | Project root directory to check |
+
+**Example**
+
+```bash
+# Pre-PR hook check (code review passed, not on main)
+uf gate --phase pr
+
+# JSON output for CI pipelines
+uf gate --phase implement --format json
+```
+
+**Artifact resolution**
+
+When the current branch names a change (`opsx/<name>` or
+`NNN-<name>`), checks resolve artifacts from that change only
+(`openspec/changes/<name>/` or `specs/<name>/`) — an unrelated
+change cannot mask a missing artifact. `quick/<name>` branches
+carry no spec artifacts, so their checks always fail by design.
+On a detached HEAD (the default CI checkout state), the branch
+is recovered from `GITHUB_HEAD_REF` or `GITHUB_REF_NAME` before
+the fallback applies. On branches without a change mapping,
+checks resolve the first alphabetical change directory across
+both layouts with layout priority — `openspec/changes/` first,
+then `specs/` only when that layout holds no change directory —
+one change for the whole run; artifacts of
+different changes are never combined.
+
+**Coverage strategy detection** (`--phase implement`)
+
+Plan/tasks artifacts are scanned (case-insensitive) for: a
+heading containing "coverage"; body text containing
+"coverage target", "unit test", "integration test", or
+"e2e test"; or a line matching `coverage.*%`. Signals that
+deny the strategy do not count — negated headings ("No
+coverage strategy"), negated body text ("No unit tests are
+planned"), and measured zero-percent lines ("current
+coverage: 0%") — and signals inside fenced code blocks are
+documentation, not strategy.
+
+**Review marker trust boundary**
+
+The `review` and `pr` phases verify review completion by
+searching the active change's `tasks.md` for the literal
+markers `<!-- spec-review: passed -->` and
+`<!-- code-review: passed -->`. This is presence-of-text
+evidence: anyone with write access to `tasks.md` can type
+the marker without running a review. CI consumers of
+`uf gate --phase pr` should not assume a stronger guarantee
+than "the marker is present" (design R5).
+
 ### uf setup
 
 Install and configure the Unbound Force development tool chain.

@@ -1240,6 +1240,15 @@ Each entry follows the format: `- <change-name>: <summary>`.
   metrics.md. No CI gate added (conformance validated
   with change-time rg checks). (Spec:
   openspec/changes/command-prose-pilot/)
+- uf-gate: Add `uf gate --phase <specify|plan|implement|
+  review|pr> --format json` headless CLI command for
+  constitution compliance enforcement. Eight check
+  functions verify spec/plan/tasks existence, coverage
+  strategy, task completion, review markers, and branch
+  protection. JSON output includes provenance metadata
+  per Constitution III. Three-tier exit codes (0/1/2).
+  Follows the `internal/doctor/` package pattern.
+  (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
 - review-dispatch-consumer-bounds (#941): lesson proposals are now

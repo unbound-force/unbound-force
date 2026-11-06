@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 
 	"github.com/spf13/cobra"
 	"github.com/unbound-force/unbound-force/internal/config"
@@ -19,6 +21,16 @@ var (
 )
 
 func main() {
+	root := newRootCmd()
+	if err := root.Execute(); err != nil {
+		os.Exit(exitCode(err))
+	}
+}
+
+// newRootCmd builds the root command with every subcommand
+// registered. Extracted from main so tests can verify the real
+// registration surface (for example the gate command, GATE-FR-001).
+func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:     "unbound-force",
 		Short:   "Unbound Force specification framework toolkit (alias: uf)",
@@ -34,10 +46,40 @@ func main() {
 	root.AddCommand(newGatewayCmd())
 	root.AddCommand(newConfigCmd())
 	root.AddCommand(newHomebrewCaskCmd())
+	root.AddCommand(newGateCmd())
 
-	if err := root.Execute(); err != nil {
-		os.Exit(1)
+	return root
+}
+
+// exitCoder is implemented by errors that carry their own process
+// exit code. Commands opt in by implementing the method; main maps
+// exit codes through this interface without naming any concrete
+// error type. *exec.ExitError also satisfies the interface
+// structurally — its ExitCode method reports the child process's
+// status — so exitCode exempts it explicitly.
+type exitCoder interface {
+	ExitCode() int
+}
+
+// exitCode maps a command error to a process exit code: 0 for nil,
+// the error's own code when it implements exitCoder, 1 otherwise.
+// A bare *exec.ExitError — raw or wrapped — never maps to the child
+// process's status: it satisfies exitCoder structurally, but only
+// errors that explicitly opt in (for example *gate.InternalError,
+// including when it wraps an exec failure) carry their own code.
+// Commands that propagate subprocess failures exit 1 like every
+// other command error.
+func exitCode(err error) int {
+	if err == nil {
+		return 0
 	}
+	var coded exitCoder
+	if errors.As(err, &coded) {
+		if _, isExecErr := coded.(*exec.ExitError); !isExecErr {
+			return coded.ExitCode()
+		}
+	}
+	return 1
 }
 
 type initParams struct {

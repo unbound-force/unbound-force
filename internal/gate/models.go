@@ -1,0 +1,70 @@
+// Package gate implements phase-specific constitution compliance
+// checking for the Unbound Force development workflow. It verifies
+// that required spec artifacts, plans, tasks, coverage strategies,
+// review markers, and branch discipline exist before allowing
+// progression to the next workflow phase.
+//
+// Results are reported as structured data suitable for both
+// colored terminal display and JSON output with provenance
+// metadata per Constitution III.
+package gate
+
+// SchemaVersion is the JSON output schema version for backward
+// compatibility tracking.
+const SchemaVersion = "1.0.0"
+
+// ProducerName identifies the tool that produced the gate report
+// in provenance metadata per Constitution III.
+const ProducerName = "uf-gate"
+
+// CheckResult represents a single gate check finding.
+// Gate checks are binary pass/fail — there is no warn severity
+// because constitution compliance is not gradual.
+type CheckResult struct {
+	Name        string `json:"name"`
+	Passed      bool   `json:"passed"`
+	Message     string `json:"message"`
+	internalErr error
+}
+
+// Summary provides aggregate counts of check results.
+type Summary struct {
+	Total  int `json:"total"`
+	Passed int `json:"passed"`
+	Failed int `json:"failed"`
+}
+
+// InternalError indicates an unexpected execution (exit code 2) failure,
+// such as a filesystem or output error. Callers use
+// errors.As to distinguish internal errors from check failures
+// (exit code 1).
+type InternalError struct {
+	Err error
+}
+
+// Error returns the wrapped error's message.
+func (e *InternalError) Error() string { return e.Err.Error() }
+
+// Unwrap returns the wrapped error so errors.Is and errors.As
+// traverse the chain.
+func (e *InternalError) Unwrap() error { return e.Err }
+
+// ExitCode returns the process exit code for an internal error (2).
+// It lets a CLI map exit codes through a generic interface without
+// naming this type.
+func (e *InternalError) ExitCode() int { return 2 }
+
+// GateReport is the complete output from a gate run, including
+// provenance metadata per Constitution III.
+type GateReport struct {
+	Version     string        `json:"version"`
+	ToolVersion string        `json:"tool_version"`
+	Producer    string        `json:"producer"`
+	Timestamp   string        `json:"timestamp"`
+	Branch      string        `json:"branch"`
+	Commit      string        `json:"commit"`
+	Phase       string        `json:"phase"`
+	Passed      bool          `json:"passed"`
+	Checks      []CheckResult `json:"checks"`
+	Summary     Summary       `json:"summary"`
+}

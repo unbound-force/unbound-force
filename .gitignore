@@ -28,6 +28,9 @@ node_modules/
 # Gaze build artifacts
 .gaze/
 
+# opencode run logs written under an unresolved path (.opencode/undefined/)
+.opencode/undefined/
+
 # Unbound Force — managed by uf init
 # Runtime data under .uf/ (databases, caches, locks, logs)
 .uf/artifacts/

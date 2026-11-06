@@ -76,7 +76,7 @@ This repo contains architectural design specs for all heroes and shared standard
 
 - **`specs/`** -- 35 architectural specifications covering constitution, hero architectures, swarm orchestration, tooling, and workflows
 - **`cmd/unbound-force/`** -- Go CLI binary for framework distribution
-- **`internal/`** -- Business logic packages (scaffold, sandbox, gateway, config, doctor, setup, schemas, artifacts, coveragegate, textutil, homebrew)
+- **`internal/`** -- Business logic packages (scaffold, sandbox, gateway, config, doctor, gate, setup, schemas, artifacts, coveragegate, textutil, homebrew)
 - **`.specify/memory/constitution.md`** -- The org constitution (highest authority)
 - **`openspec/`** -- OpenSpec tactical workflow configuration and schema
 - **`schemas/`** -- JSON Schema registry

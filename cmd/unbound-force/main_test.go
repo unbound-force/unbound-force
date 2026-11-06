@@ -668,3 +668,16 @@ func TestInitCmd_OverridesHelpText(t *testing.T) {
 		t.Errorf("expected the --overrides paragraph to follow the --check paragraph:\n%s", long)
 	}
 }
+
+// TestRootCmd_RegistersGate pins GATE-FR-001's registration
+// scenario against the real root command built by newRootCmd:
+// removing the registration line must fail this test.
+func TestRootCmd_RegistersGate(t *testing.T) {
+	root := newRootCmd()
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "gate" {
+			return
+		}
+	}
+	t.Errorf("root command does not register the gate subcommand (GATE-FR-001)")
+}
