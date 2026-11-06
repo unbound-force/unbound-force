@@ -24,9 +24,11 @@ Each entry follows the format: `- <change-name>: <summary>`.
   an exact-pinned devDependency (previously a phantom
   transitive import). Linter: 937 lines; tests: 483 + 160
   lines. Instruction delta (DE-004): divisor-linguist.md +261
-  lines (~4.2k self tokens, ~13.4k loaded); AGENTS.md +10
-  lines; baseline findings unchanged (1 error / 31 warnings /
-  23 info). (Spec: openspec/changes/instruction-lint/)
+  lines (~4.2k self tokens, ~13.4k loaded); AGENTS.md +7/-2
+  lines (lint-instructions command, `.uf/scripts/` structure
+  entry, yaml devDependency note); baseline findings unchanged
+  (1 error / 31 warnings / 23 info). (Spec:
+  openspec/changes/instruction-lint/)
 - preflight-declared-output: `uf_preflight_declared_checks` now
   returns `rendered_output`, one tool-rendered block per declared
   check that ran with output, whatever its status, so advisory

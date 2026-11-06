@@ -74,3 +74,12 @@ Non-Goals:
   pre-flight (the repo baseline carries one pre-existing error);
   tightening to required is deferred until the baseline is
   clean.
+- Accepted residuals, tracked in issue #971: the metacharacter
+  deny set does not cover newline command separation or
+  backslash-newline continuation (the permission engine's
+  multi-line matching semantics are themselves unverified);
+  the wrapper's package checks verify manifest presence, not
+  loadability, so a corrupted-but-manifested package still
+  exits 1; and node-binary absence exits 127 at the make and
+  persona lanes (the pre-flight lane guards it with
+  `requires: [node]`).
