@@ -19,9 +19,11 @@
 // Discovery is static (no plugin is loaded), so it runs under plain
 // node; test/tool-inventory.test.ts pins it to the runtime registry.
 
-import { execFileSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
+// Plain-node CLI (type stripping): import the shared module by its real
+// .ts extension; node does not remap .js specifiers to .ts files.
+import { findRoot, git, runMain, spawnDetail, type CliIO } from "./cli-common.ts"
 
 export interface ToolEntry {
   name: string
@@ -343,10 +345,7 @@ export interface SeamReport {
 
 type Git = (args: string[]) => string
 
-const realGit =
-  (root: string): Git =>
-  (args) =>
-    execFileSync("git", args, { cwd: root, maxBuffer: 256 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"] }).toString("utf8")
+const realGit = (root: string): Git => (args) => git(root, args).toString("utf8")
 
 /** Parse `git diff -U0` output into head-side changed lines per file. */
 export function parseChangedLines(diff: string): Map<string, Set<number>> {
@@ -458,12 +457,6 @@ export function seamReport(root: string, ref: string, git: Git = realGit(root)):
 // CLI
 // ---------------------------------------------------------------------
 
-export interface CliIO {
-  cwd: string
-  out: (s: string) => void
-  err: (s: string) => void
-}
-
 const USAGE = `usage: tool-inventory [--root DIR] [--json] [--match WORDS]
        tool-inventory --seams --base REF [--root DIR] [--json]
 
@@ -473,16 +466,6 @@ const USAGE = `usage: tool-inventory [--root DIR] [--json] [--match WORDS]
                  merge-base(REF, HEAD) with their tests per DE-007 seam layer
   --base REF     base ref for --seams
   --json         machine-readable output`
-
-function findRoot(start: string): string | null {
-  let dir = resolve(start)
-  for (;;) {
-    if (existsSync(join(dir, ".opencode"))) return dir
-    const parent = resolve(dir, "..")
-    if (parent === dir) return null
-    dir = parent
-  }
-}
 
 const one = (s: string | null): string => (s ?? "").replace(/\s+/g, " ").trim()
 
@@ -529,7 +512,7 @@ export function main(argv: string[], io: CliIO, git?: Git): number {
     try {
       report = seamReport(root, base, git)
     } catch (e) {
-      const detail = (e as { stderr?: Buffer }).stderr?.toString("utf8").trim() || (e as Error).message
+      const detail = spawnDetail(e)
       io.err(`cannot read base ${base}: ${detail}`)
       return 2
     }
@@ -562,10 +545,4 @@ export function main(argv: string[], io: CliIO, git?: Git): number {
   return 0
 }
 
-if (import.meta.main) {
-  process.exitCode = main(process.argv.slice(2), {
-    cwd: process.cwd(),
-    out: (s) => process.stdout.write(s + "\n"),
-    err: (s) => process.stderr.write(s + "\n"),
-  })
-}
+if (import.meta.main) runMain(main)
