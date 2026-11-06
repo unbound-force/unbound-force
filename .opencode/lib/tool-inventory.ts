@@ -62,6 +62,12 @@ const lineOf = (text: string, offset: number): number => {
   return n
 }
 
+/** Escape a literal so it interpolates safely into a RegExp. */
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/** Identifier boundary: names may contain $, which \b mishandles. */
+const ident = (name: string): string => `(?<![\\w$])${escapeRegExp(name)}(?![\\w$])`
+
 // Skip a string literal or comment starting at i; returns the index
 // after it, or i when nothing is skipped.
 function skipNonCode(text: string, i: number): number {
@@ -86,14 +92,35 @@ function skipNonCode(text: string, i: number): number {
  * Parse the `tool: { name: factory(...), ... }` registry of a plugin
  * module. Only entries directly inside the registry object count.
  */
+/** Index of the registry's opening brace, or -1 when absent. Only code
+ * positions count: `tool: {` inside a comment or string must not hijack
+ * registry parsing. */
+function findRegistryStart(text: string): number {
+  let i = 0
+  while (i < text.length) {
+    const skipped = skipNonCode(text, i)
+    if (skipped !== i) {
+      i = skipped
+      continue
+    }
+    if (text.startsWith("tool:", i) && (i === 0 || !/[\w$]/.test(text[i - 1]))) {
+      let j = i + 5
+      while (j < text.length && /\s/.test(text[j])) j++
+      if (text[j] === "{") return j
+    }
+    i++
+  }
+  return -1
+}
+
 export function parseRegistry(text: string): Array<{ name: string; factory: string; line: number }> {
-  const start = /\btool:\s*\{/.exec(text)
-  if (!start) return []
+  const start = findRegistryStart(text)
+  if (start === -1) return []
   const out: Array<{ name: string; factory: string; line: number }> = []
   const entry = /^\s*([A-Za-z_$][\w$]*)\s*:\s*([A-Za-z_$][\w$]*)\s*\(/
   let depth = 0
   let atEntry = false
-  for (let i = start.index + start[0].length - 1; i < text.length; ) {
+  for (let i = start; i < text.length; ) {
     const skipped = skipNonCode(text, i)
     if (skipped !== i) {
       i = skipped
@@ -145,17 +172,51 @@ interface FactoryLocation {
 }
 
 function locateIn(file: string, text: string, factory: string): FactoryLocation | null {
-  const decl = new RegExp(`^(?:export\\s+)?(?:async\\s+)?(?:function\\s+${factory}\\b|const\\s+${factory}\\s*=)`, "m").exec(text)
+  const decl = new RegExp(`^(?:export\\s+)?(?:async\\s+)?(?:function\\s+${escapeRegExp(factory)}(?![\\w$])|const\\s+${escapeRegExp(factory)}\\s*=)`, "m").exec(text)
   if (!decl) return null
   const line = lineOf(text, decl.index)
   const lines = text.split("\n")
+  // The declaration closes on the first line after which bracket depth
+  // (comments and strings skipped) returns to zero, so both `export
+  // function f() { ... }` and `const f = (...) => tool({ ... })` forms
+  // end correctly.
   let endLine = lines.length
-  for (let i = line; i < lines.length; i++) {
-    if (/^\}\s*$/.test(lines[i])) {
-      endLine = i + 1
-      break
+  let depth = 0
+  let opened = false
+  let pendingArrow = false
+  let lineNo = line
+  for (let i = decl.index; i < text.length; ) {
+    const skipped = skipNonCode(text, i)
+    if (skipped !== i) {
+      i = skipped
+      continue
     }
+    const c = text[i]
+    if (c === "{" || c === "(" || c === "[") {
+      depth++
+      opened = true
+    } else if (c === "}" || c === ")" || c === "]") {
+      depth--
+    } else if (c === "=" && text[i + 1] === ">" && depth === 0) {
+      // A dangling arrow (`=>` then end of line): the body starts on a
+      // later line, so the parameter brackets closing at depth 0 above
+      // do not end the declaration.
+      let j = i + 2
+      while (j < text.length && (text[j] === " " || text[j] === "\t")) j++
+      if (text[j] === "\n" || j === text.length) pendingArrow = true
+      i += 2
+      continue
+    } else if (c === "\n") {
+      if (opened && depth <= 0 && !pendingArrow) {
+        endLine = lineNo
+        break
+      }
+      pendingArrow = false
+      lineNo++
+    }
+    i++
   }
+  if (endLine === lines.length && opened && depth <= 0) endLine = lineNo
   const body = lines.slice(line - 1, endLine).join("\n")
   const d = /\bdescription\s*:/.exec(body)
   return { file, line, endLine, description: d ? readStringConcat(body, d.index + d[0].length) : null }
@@ -168,7 +229,7 @@ export function locateFactory(pluginFile: string, factory: string, read: Reader)
   const local = locateIn(pluginFile, text, factory)
   if (local) return local
   for (const m of text.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["'](\.[^"']+)["']/g)) {
-    if (!new RegExp(`\\b${factory}\\b`).test(m[1])) continue
+    if (!new RegExp(ident(factory)).test(m[1])) continue
     const rel = join(dirname(pluginFile), m[2]).replace(/\.js$/, ".ts").split("\\").join("/")
     const target = read(rel)
     if (target !== null) return locateIn(rel, target, factory)
@@ -317,7 +378,7 @@ const LAYER_FILE: Array<[RegExp, SeamLayer]> = [
 
 export function classifyTest(file: string, text: string, tool: string): SeamLayer {
   for (const [re, layer] of LAYER_FILE) if (re.test(file)) return layer
-  const titled = new RegExp(`\\b(?:describe|it|test)\\([^\\n]*\\b${tool}\\b[^\\n]*round[- ]?trip|\\b(?:describe|it|test)\\([^\\n]*round[- ]?trip[^\\n]*\\b${tool}\\b`, "i")
+  const titled = new RegExp(`\\b(?:describe|it|test)\\([^\\n]*${ident(tool)}[^\\n]*round[- ]?trip|\\b(?:describe|it|test)\\([^\\n]*round[- ]?trip[^\\n]*${ident(tool)}`, "i")
   return titled.test(text) ? "round-trip" : "other"
 }
 
@@ -369,7 +430,7 @@ export function seamReport(root: string, ref: string, git: Git = realGit(root)):
     const names = [tool, ...(factory ? [factory] : [])]
     const tests: TestRef[] = []
     for (const [file, text] of testText) {
-      if (!names.some((n) => new RegExp(`\\b${n}\\b`).test(text))) continue
+      if (!names.some((n) => new RegExp(ident(n)).test(text))) continue
       tests.push({ file, layer: classifyTest(file, text, tool), changed: changedTests.has(file) })
     }
     const genericRegistration = status !== "removed" && genericPlugins.has(plugin)
