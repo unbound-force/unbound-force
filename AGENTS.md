@@ -170,7 +170,8 @@ imported externally.
   (registered via the `opencode.json` `plugin` array) and the
   `.opencode/lib/` shared library use
   `@opencode-ai/plugin` 1.19.0 and `zod` 4.1.8 (runtime), and
-  `vitest` 5.0.3 + `@vitest/coverage-v8` 5.0.3 (dev), managed
+  `vitest` 5.0.3 + `@vitest/coverage-v8` 5.0.3 + `yaml` 2.9.1 (dev;
+  yaml parses instruction-lint frontmatter), managed
   by `.opencode/package.json` / `package-lock.json`.
 - **Node runtime floor** (plugin suite): transitive `ini@7.0.0`
   requires ^22.22.2 || ^24.15.0 || >=26.0.0, declared in the
