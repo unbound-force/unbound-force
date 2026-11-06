@@ -23,14 +23,19 @@ import { join, relative, resolve, sep } from "node:path"
 import { parseDocument } from "yaml"
 import { z } from "zod"
 
+/** Linter finding severity: errors fail the run, warnings only with --strict. */
 export type Severity = "error" | "warning" | "info"
+
+/** The kind of instruction file an artifact was discovered as. */
 export type ArtifactKind = "agent" | "command" | "skill" | "pack" | "context"
 
+/** Static catalog entry for one rule: its severity and one-line summary. */
 export interface RuleInfo {
   severity: Severity
   summary: string
 }
 
+/** Every rule the linter can emit, keyed by rule ID (printed by --rules). */
 export const RULES: Record<string, RuleInfo> = {
   "IL-001": { severity: "error", summary: "Frontmatter missing, unterminated, or not a YAML mapping" },
   "IL-002": { severity: "error", summary: "Frontmatter field missing or invalid for this artifact type" },
@@ -53,8 +58,10 @@ export const RULES: Record<string, RuleInfo> = {
   "IL-050": { severity: "info", summary: "Near-duplicate paragraphs across files (instruction drift risk)" },
 }
 
+/** Divisor review severity (.opencode/uf/packs/severity.md) for a finding. */
 export type ReviewSeverity = "HIGH" | "MEDIUM" | "LOW"
 
+/** One lint finding: rule, location, message, and both severity scales. */
 export interface Finding {
   rule: string
   severity: Severity
@@ -68,6 +75,7 @@ export interface Finding {
 
 const REVIEW_SEVERITY: Record<Severity, ReviewSeverity> = { error: "HIGH", warning: "MEDIUM", info: "LOW" }
 
+/** Tunables for a lint run; a partial subset may come from a config file. */
 export interface LintOptions {
   maxFileTokens: number
   maxLoadTokens: number
@@ -77,6 +85,7 @@ export interface LintOptions {
   ignorePaths: string[]
 }
 
+/** Option values used when neither the caller nor a config file supplies one. */
 export const DEFAULT_OPTIONS: LintOptions = {
   maxFileTokens: 8000,
   maxLoadTokens: 20000,
@@ -96,9 +105,12 @@ const LintOptionsSchema = z
     duplicateThreshold: z.number().min(0).max(1),
     duplicateMinWords: z.number().int().positive(),
     disable: z.array(z.string().regex(/^IL-\d{3}$/)),
-    ignorePaths: z.array(z.string()),
+    ignorePaths: z.array(z.string().min(1)),
   })
   .partial()
+  // Unknown keys are rejected, not stripped: a typo like "disabled"
+  // must fail loudly as an invalid config, never run with defaults.
+  .strict()
 
 // Built-in opencode slash commands and subagents that resolve without
 // a file in this repository.
@@ -113,6 +125,7 @@ interface LineSuppression {
   rules: Set<string>
 }
 
+/** One parsed instruction file: lines, frontmatter, fences, suppressions. */
 export interface Artifact {
   kind: ArtifactKind
   name: string
@@ -134,10 +147,16 @@ export interface Artifact {
 // Parsing
 // ---------------------------------------------------------------------
 
+/** Estimate a text's token count at ~4 characters per token. */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
 
+/**
+ * Parse one instruction file into an {@link Artifact}: normalize line
+ * endings, extract frontmatter, track fenced-code spans, and record
+ * suppression comments. `file` is the repo-relative POSIX path.
+ */
 export function buildArtifact(file: string, rawText: string, kind: ArtifactKind, name: string): Artifact {
   const text = rawText.replace(/\r\n/g, "\n")
   const lines = text.split("\n")
@@ -216,6 +235,11 @@ function toPosix(p: string): string {
   return p.split(sep).join("/")
 }
 
+/**
+ * Find every instruction file under `root`: `.opencode/agents`,
+ * `.opencode/commands`, `.opencode/uf/packs` (flat), `.opencode/skills`
+ * and `.opencode/skill` (one directory per skill), and `AGENTS.md`.
+ */
 export function discoverArtifacts(root: string): Artifact[] {
   const out: Artifact[] = []
   const oc = join(root, ".opencode")
@@ -319,6 +343,10 @@ interface PackRule {
 
 const RULE_DEF = /^(\s*)[-*]\s+\*\*([A-Z]{2,5}-\d{3})\*\*\s*(?:\[(MUST|SHOULD|MAY)\])?/
 
+/**
+ * Extract the `**XX-NNN** [MUST]` rule definitions from a convention
+ * pack, with their continuation lines and 1-based source lines.
+ */
 export function parsePackRules(a: Artifact): PackRule[] {
   const rules: PackRule[] = []
   for (let i = a.bodyStart; i < a.lines.length; i++) {
@@ -465,11 +493,11 @@ function checkFrontmatter(a: Artifact, emit: Emit): void {
   }
 }
 
-function checkPackRules(packs: Artifact[], emit: Emit): Set<string> {
+function checkPackRules(packs: Artifact[], rulesByFile: Map<string, PackRule[]>, emit: Emit): Set<string> {
   const defined = new Set<string>()
   for (const a of packs) {
     const seen = new Map<string, number>()
-    for (const r of parsePackRules(a)) {
+    for (const r of rulesByFile.get(a.file) ?? []) {
       defined.add(r.id)
       const prev = seen.get(r.id)
       if (prev !== undefined) emit("IL-014", a, r.line, `${r.id} already defined at line ${prev}`)
@@ -497,7 +525,7 @@ function checkPackRules(packs: Artifact[], emit: Emit): Set<string> {
   return defined
 }
 
-function checkRuleIdRefs(all: Artifact[], defined: Set<string>, emit: Emit): void {
+function checkRuleIdRefs(all: Artifact[], defined: Set<string>, rulesByFile: Map<string, PackRule[]>, emit: Emit): void {
   const prefixes = new Set([...defined].map((id) => id.split("-")[0]))
   if (prefixes.size === 0) return
   // Prefix -> packs defining it. Spec workflows reuse pack-like ID
@@ -507,7 +535,7 @@ function checkRuleIdRefs(all: Artifact[], defined: Set<string>, emit: Emit): voi
   const owners = new Map<string, Set<string>>()
   for (const a of all) {
     if (a.kind !== "pack") continue
-    for (const r of parsePackRules(a)) {
+    for (const r of rulesByFile.get(a.file) ?? []) {
       const set = owners.get(r.id.split("-")[0]) ?? new Set<string>()
       set.add(a.name)
       owners.set(r.id.split("-")[0], set)
@@ -532,9 +560,9 @@ function checkRuleIdRefs(all: Artifact[], defined: Set<string>, emit: Emit): voi
   }
 }
 
-function checkProse(a: Artifact, emit: Emit): void {
+function checkProse(a: Artifact, units: Unit[], emit: Emit): void {
   const procedural = a.kind === "agent" || a.kind === "command" || a.kind === "skill"
-  for (const u of proseUnits(a)) {
+  for (const u of units) {
     for (const s of sentences(u.masked)) {
       if (!NORMATIVE.test(s.text)) continue
       const seen = new Set<string>()
@@ -578,11 +606,11 @@ function shingles(text: string): Set<string> {
   return out
 }
 
-function checkDuplicates(all: Artifact[], opts: LintOptions, emit: Emit): void {
+function checkDuplicates(all: Artifact[], opts: LintOptions, unitsByFile: Map<string, Unit[]>, emit: Emit): void {
   interface Para { a: Artifact; line: number; sh: Set<string> }
   const paras: Para[] = []
   for (const a of all) {
-    for (const u of proseUnits(a)) {
+    for (const u of unitsByFile.get(a.file) ?? []) {
       if ((u.raw.match(/\S+/g)?.length ?? 0) < opts.duplicateMinWords) continue
       paras.push({ a, line: u.line, sh: shingles(u.raw) })
     }
@@ -615,6 +643,12 @@ function checkDuplicates(all: Artifact[], opts: LintOptions, emit: Emit): void {
   // generation; verification below still scores every shingle, so the
   // cap only changes which pairs are verified, never how they score.
   const MAX_POSTING = 64
+  // Accepted recall cliff, pinned by test: near- (not byte-)
+  // identical paragraphs copied into more than MAX_POSTING files share
+  // only over-cap shingles, generate no candidates, and report
+  // nothing. Byte-identical copies stay caught by the exact-duplicate
+  // pass above; near-duplicates are still caught while any shared
+  // shingle remains under the cap.
   paras.forEach((p, i) => {
     const cand = new Set<number>()
     for (const s of p.sh) {
@@ -655,12 +689,18 @@ function checkDuplicates(all: Artifact[], opts: LintOptions, emit: Emit): void {
   }
 }
 
+/** The output of a lint run: sorted findings plus discovery side data. */
 export interface LintResult {
   findings: Finding[]
   artifacts: Artifact[]
   loadTokens: Map<string, number>
 }
 
+/**
+ * Run every check over `artifacts` discovered under `root` and return
+ * the sorted findings, the artifacts, and per-artifact load-set token
+ * counts. `options` overrides {@link DEFAULT_OPTIONS} per field.
+ */
 export function lint(root: string, artifacts: Artifact[], options: Partial<LintOptions> = {}): LintResult {
   const opts: LintOptions = { ...DEFAULT_OPTIONS, ...options }
   const findings: Finding[] = []
@@ -684,9 +724,15 @@ export function lint(root: string, artifacts: Artifact[], options: Partial<LintO
   const contextTokens = context.reduce((n, a) => n + a.tokens, 0)
   const loadTokens = new Map<string, number>()
 
+  // Prose units and pack rules are each consumed by two checks; parse
+  // them once per artifact and thread them through both.
+  const unitsByFile = new Map(artifacts.map((a) => [a.file, proseUnits(a)]))
+  const packs = artifacts.filter((a) => a.kind === "pack")
+  const packRulesByFile = new Map(packs.map((a) => [a.file, parsePackRules(a)]))
+
   for (const a of artifacts) {
     checkFrontmatter(a, emit)
-    checkProse(a, emit)
+    checkProse(a, unitsByFile.get(a.file) ?? [], emit)
     if (a.tokens > opts.maxFileTokens) {
       emit("IL-030", a, 1, `~${a.tokens} tokens exceeds the ${opts.maxFileTokens}-token file budget`)
     }
@@ -722,9 +768,9 @@ export function lint(root: string, artifacts: Artifact[], options: Partial<LintO
     }
   }
 
-  const defined = checkPackRules(artifacts.filter((a) => a.kind === "pack"), emit)
-  checkRuleIdRefs(artifacts, defined, emit)
-  checkDuplicates(artifacts, opts, emit)
+  const defined = checkPackRules(packs, packRulesByFile, emit)
+  checkRuleIdRefs(artifacts, defined, packRulesByFile, emit)
+  checkDuplicates(artifacts, opts, unitsByFile, emit)
 
   const rank: Record<Severity, number> = { error: 0, warning: 1, info: 2 }
   findings.sort((x, y) => x.file.localeCompare(y.file) || x.line - y.line || rank[x.severity] - rank[y.severity] || x.rule.localeCompare(y.rule))
@@ -735,6 +781,7 @@ export function lint(root: string, artifacts: Artifact[], options: Partial<LintO
 // CLI
 // ---------------------------------------------------------------------
 
+/** Process seams the CLI reads and writes through (injectable for tests). */
 export interface CliIO {
   cwd: string
   out: (s: string) => void
@@ -747,13 +794,15 @@ const USAGE = `usage: instruction-lint [--root DIR] [--config FILE] [--only PATH
   --config FILE  JSON options (default: <root>/.opencode/instruction-lint.json if present)
   --only PATH    report only findings in these repo-relative files (repeatable or
                  comma-separated); the whole repo is still analyzed for references,
-                 rule IDs, load sets, and duplicates
+                 rule IDs, load sets, and duplicates; a path that matches no
+                 lintable file exits 2
   --json         machine-readable output
   --strict       exit 1 on warnings as well as errors
   --all          show info findings (hidden by default, always counted)
   --report       print per-file token and load-set sizes
   --rules        list rule IDs and exit`
 
+/** Find the nearest ancestor of `start` containing a `.opencode/` directory. */
 export function findRoot(start: string): string | null {
   let dir = resolve(start)
   for (;;) {
@@ -764,6 +813,12 @@ export function findRoot(start: string): string | null {
   }
 }
 
+/**
+ * CLI entry: parse `argv`, resolve the root, load the optional config,
+ * lint, and print findings (or JSON / the token report). Returns the
+ * process exit code: 0 clean, 1 findings (errors, or warnings with
+ * --strict), 2 usage errors and could-not-run failures.
+ */
 export function main(argv: string[], io: CliIO): number {
   const flags = new Set<string>()
   let root: string | null = null
@@ -825,12 +880,20 @@ export function main(argv: string[], io: CliIO): number {
   }
 
   const artifacts = discoverArtifacts(root)
+  // A --only path matching no lintable file is a usage error, not a
+  // clean run: a typo would otherwise filter every finding away.
+  if (only.size > 0) {
+    const known = new Set(artifacts.map((a) => a.file))
+    for (const p of only) {
+      if (!known.has(p)) {
+        io.err(`--only ${p} matches no lintable file`)
+        return 2
+      }
+    }
+  }
   const result = lint(root, artifacts, options)
   if (only.size > 0) {
     result.findings = result.findings.filter((f) => only.has(f.file))
-    for (const p of only) {
-      if (!artifacts.some((a) => a.file === p)) io.err(`--only ${p} matches no lintable file`)
-    }
   }
   const count = (s: Severity): number => result.findings.filter((f) => f.severity === s).length
   const summary = { files: result.artifacts.length, errors: count("error"), warnings: count("warning"), info: count("info") }
