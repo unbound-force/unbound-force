@@ -901,9 +901,9 @@ Each entry follows the format: `- <change-name>: <summary>`.
   existing merge-only writer. `uf doctor` replaces its manifest-lock
   check with `manifest-install`, which compares each `package.json`
   pin with the installed version. `package.json` keeps its exact
-  direct pins and the `toml`/`uuid` overrides; other transitive
-  versions now resolve at install time. This repository also stops
-  tracking the lock, and `make plugin-test` installs with
+  direct pins and the `toml`/`uuid`/`zod` overrides; other
+  transitive versions now resolve at install time. This repository
+  also stops tracking the lock, and `make plugin-test` installs with
   `--no-package-lock` through an exact-pinned npm 11
   (`npx -y npm@11.6.2`), because node 22's bundled npm 10.9.9
   crashes in Arborist building the lockless vitest 5 peer graph.
@@ -917,7 +917,11 @@ Each entry follows the format: `- <change-name>: <summary>`.
   scanning; the Security Checks workflow compensates with a
   throwaway-lock scan (a pinned npm builds an ephemeral lock,
   osv-scanner reads it, and the lock is discarded), and the direct
-  `package.json` pins remain scannable. Rollout: existing hero
+  `package.json` pins remain scannable. The throwaway-lock scan
+  already caught vulnerable pins (zod 4.1.8, toml 4.2.0); they now
+  ship as zod 4.6.6 and toml 5.0.1, with a `zod` override forcing
+  the nested copy `@opencode-ai/plugin` pins onto the fixed
+  version. Rollout: existing hero
   repositories can drop their committed lock with
   `git rm --cached .opencode/package-lock.json`; review the
   scanner-loss posture first. (Spec:

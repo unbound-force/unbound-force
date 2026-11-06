@@ -70,7 +70,7 @@ with the `manifest-install` comparison.
 
 The repository and scaffold MUST track `.opencode/package.json`.
 They MUST NOT track or ship `.opencode/package-lock.json`. Direct
-dependencies MUST pin `@opencode-ai/plugin` 1.19.0 and Zod 4.1.8
+dependencies MUST pin `@opencode-ai/plugin` 1.19.0 and Zod 4.6.6
 exactly. This repository's manifest MUST also pin the test
 dependencies Vitest 5.0.3 and `@vitest/coverage-v8` 5.0.3. All
 four pinned dependencies MUST retain their MIT license and
@@ -81,7 +81,7 @@ The scaffolded manifest MUST NOT declare `devDependencies`,
 because a lockless install resolves them even under
 `--omit=dev`. When `uf init` refreshes an existing
 `.opencode/package.json`, it MUST keep the `devDependencies`
-that file already declares. The `toml` and `uuid` security
+that file already declares. The `toml`, `uuid`, and `zod` security
 overrides MUST remain.
 
 `.opencode/.gitignore` MUST ignore `node_modules`, `bun.lock`, and
@@ -145,8 +145,8 @@ MUST fail.
 
 #### Scenario: Installed version drifts from its pin
 
-- **GIVEN** `.opencode/package.json` pins zod 4.1.8
-- **AND** `node_modules/zod` reports 4.2.0
+- **GIVEN** `.opencode/package.json` pins zod 4.6.6
+- **AND** `node_modules/zod` reports 4.6.7
 - **WHEN** `uf doctor` runs
 - **THEN** `manifest-install` fails and names zod
 
