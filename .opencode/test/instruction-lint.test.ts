@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   buildArtifact,
@@ -192,14 +193,18 @@ describe("pack rule checks", () => {
     ])
   })
 
-  it("flags references to undefined rule IDs with a known prefix, except in commands", () => {
+  it("flags undefined rule IDs only when the line names the owning pack; spec IDs and commands are exempt", () => {
     const fs = run({
       ".opencode/uf/packs/p.md": PACK("p", "- **AB-001** [MUST] Things MUST happen."),
-      ".opencode/agents/a.md": AGENT("Apply AB-001 and AB-009 but not ZZ-001.\n```\nAB-008\n```"),
+      ".opencode/uf/packs/go.md": PACK("go", "- **SC-001** [MUST] Things MUST happen.\n\nSee AB-099 for more."),
+      ".opencode/agents/a.md": AGENT(
+        "Apply AB-001 and AB-009 but not ZZ-001.\n```\nAB-008\n```\nVerify SC-003 from the spec.\nPer p.md, apply AB-010.",
+      ),
       ".opencode/commands/c.md": COMMAND("Template uses AB-777."),
     })
     expect(fs.filter((f) => f.rule === "IL-015").map((f) => `${f.file} ${f.message}`)).toEqual([
-      ".opencode/agents/a.md AB-009 is not defined in any pack",
+      ".opencode/agents/a.md AB-010 is not defined in any pack",
+      ".opencode/uf/packs/go.md AB-099 is not defined in any pack",
     ])
   })
 
@@ -283,6 +288,16 @@ describe("prose checks", () => {
       ".opencode/commands/a.md:5 1 paragraph(s) also appear near-verbatim in .opencode/commands/b.md:5, .opencode/commands/c.md:5; keep one source of truth",
       ".opencode/commands/a.md:7 1 paragraph(s) also appear near-verbatim in .opencode/commands/b.md:7; keep one source of truth",
     ])
+  })
+
+  it("still clusters exact duplicates shared by more paragraphs than the posting-list cap", () => {
+    const para = Array.from({ length: 50 }, (_, i) => `word${i}`).join(" ")
+    const files: Record<string, string> = {}
+    for (let i = 0; i < 70; i++) files[`.opencode/commands/f${i}.md`] = COMMAND(para)
+    const dup = run(files).filter((f) => f.rule === "IL-050")
+    expect(dup).toHaveLength(1)
+    expect(dup[0]?.file).toBe(".opencode/commands/f0.md")
+    expect(dup[0]?.message).toContain("also appear near-verbatim")
   })
 })
 
@@ -373,8 +388,15 @@ describe("cli", () => {
     expect(files(["--only", ".opencode/agents/b.md", "--only", ".opencode/commands/c.md"]).sort()).toEqual([
       ".opencode/agents/b.md", ".opencode/commands/c.md",
     ])
+    expect(files(["--only", join(root, ".opencode", "agents", "b.md")])).toEqual([".opencode/agents/b.md"])
+    expect(files(["--only", join(root, ".opencode", "agents", "..", "agents", "b.md")])).toEqual([
+      ".opencode/agents/b.md",
+    ])
+    expect(files(["--only", ".opencode\\agents\\b.md"])).toEqual([".opencode/agents/b.md"])
     expect(cli(["--only", ".opencode/agents/b.md"], root).code).toBe(1)
     expect(cli(["--only"], root).code).toBe(2)
+    const ghost = cli(["--only", ".opencode/agents/ghost.md"], root)
+    expect(ghost.err).toContain("--only .opencode/agents/ghost.md matches no lintable file")
   })
 
   it("reads options from the default and explicit config files", () => {
@@ -387,5 +409,42 @@ describe("cli", () => {
     const bad = cli(["--config", "alt.json"], root)
     expect(bad.code).toBe(2)
     expect(bad.err).toMatch(/cannot read config/)
+  })
+
+  it("rejects invalid config shapes with the offending field named", () => {
+    const root = repo({
+      ".opencode/agents/a.md": AGENT("You MUST act appropriately."),
+      ".opencode/instruction-lint.json": JSON.stringify({ disable: "IL-0231" }),
+    })
+    const bad = cli([], root)
+    expect(bad.code).toBe(2)
+    expect(bad.err).toMatch(/invalid config/)
+    expect(bad.err).toContain("disable")
+
+    const root2 = repo({
+      ".opencode/agents/a.md": AGENT("You MUST act appropriately."),
+      ".opencode/instruction-lint.json": JSON.stringify({ duplicateThreshold: 1.5 }),
+    })
+    const bad2 = cli([], root2)
+    expect(bad2.code).toBe(2)
+    expect(bad2.err).toContain("duplicateThreshold")
+  })
+
+  it("exits 2 when the linter crashes instead of reporting errors", async () => {
+    const root = repo({ ".opencode/agents/a.md": AGENT() })
+    // A dangling symlink makes readFileSync throw ENOENT inside main();
+    // the CLI entry catch must report it as could-not-run, not as errors.
+    symlinkSync(join(root, ".opencode", "agents", "gone.md"), join(root, ".opencode", "agents", "broken.md"))
+    const linter = join(dirname(fileURLToPath(import.meta.url)), "..", "lib", "instruction-lint.ts")
+    const { execFile } = await import("node:child_process")
+    const result = await new Promise<{ code: number | undefined; stderr: string }>((resolve) => {
+      execFile(
+        process.execPath,
+        [linter, "--root", root],
+        (err, _stdout, stderr) => resolve({ code: err?.code, stderr: String(stderr) }),
+      )
+    })
+    expect(result.code).toBe(2)
+    expect(result.stderr).toContain("could not run")
   })
 })
