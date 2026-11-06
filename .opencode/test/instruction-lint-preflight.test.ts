@@ -94,4 +94,67 @@ describe("instruction-lint pre-flight check", () => {
     expect(result.code).toBe(2)
     expect(result.stderr).toContain("dependencies not installed")
   })
+
+  it("exits 2 when the linter entry is missing or a dependency package is incomplete", async () => {
+    const { execFile } = await import("node:child_process")
+    const run = (cwd: string) =>
+      new Promise<{ code: number | undefined; stderr: string }>((resolve) => {
+        execFile(
+          repo(".uf/scripts/instruction-lint"),
+          [],
+          { env: { ...process.env, UF_PREFLIGHT_PROJECT_ROOT: cwd }, cwd },
+          (err, _stdout, stderr) => resolve({ code: err?.code, stderr: String(stderr) }),
+        )
+      })
+
+    const noEntry = await mkdtemp(join(tmpdir(), "uf-instruction-lint-noentry-"))
+    scratch.push(noEntry)
+    await mkdir(join(noEntry, ".opencode"), { recursive: true })
+    await symlink(repo(".opencode/node_modules"), join(noEntry, ".opencode", "node_modules"))
+    const entryMissing = await run(noEntry)
+    expect(entryMissing.code).toBe(2)
+    expect(entryMissing.stderr).toContain("linter entry not found")
+
+    const partial = await mkdtemp(join(tmpdir(), "uf-instruction-lint-partial-"))
+    scratch.push(partial)
+    await mkdir(join(partial, ".opencode", "lib"), { recursive: true })
+    await copyFile(repo(".opencode/lib/instruction-lint.ts"), join(partial, ".opencode", "lib", "instruction-lint.ts"))
+    await mkdir(join(partial, ".opencode", "node_modules"), { recursive: true })
+    await symlink(repo(".opencode/node_modules/yaml"), join(partial, ".opencode", "node_modules", "yaml"))
+    const noZod = await run(partial)
+    expect(noZod.code).toBe(2)
+    expect(noZod.stderr).toContain("dependencies not installed")
+    expect(noZod.stderr).toContain("node_modules/zod")
+  }, 30_000)
+
+  it("lints the working directory using the primary checkout's linter (split roots)", async () => {
+    const primary = await mkdtemp(join(tmpdir(), "uf-instruction-lint-primary-"))
+    const worktree = await mkdtemp(join(tmpdir(), "uf-instruction-lint-worktree-"))
+    scratch.push(primary, worktree)
+    await mkdir(join(primary, ".opencode", "lib"), { recursive: true })
+    await mkdir(join(primary, ".opencode", "agents"), { recursive: true })
+    await copyFile(repo(".opencode/lib/instruction-lint.ts"), join(primary, ".opencode", "lib", "instruction-lint.ts"))
+    await symlink(repo(".opencode/node_modules"), join(primary, ".opencode", "node_modules"))
+    // The primary checkout is dirty and the worktree clean: exit 0 with
+    // the worktree's file count proves the working directory was
+    // linted (linting the primary instead would report its dirty agent
+    // as an IL-001 error), using the primary's linter and deps.
+    await writeFile(join(primary, ".opencode", "agents", "dirty.md"), "# no frontmatter\n")
+    await mkdir(join(worktree, ".opencode", "agents"), { recursive: true })
+    await writeFile(
+      join(worktree, ".opencode", "agents", "clean.md"),
+      "---\ndescription: \"Reviews instruction prose for the project.\"\nmode: subagent\n---\n\nBody.\n",
+    )
+    const { execFile } = await import("node:child_process")
+    const result = await new Promise<{ code: number; stdout: string }>((resolve) => {
+      execFile(
+        repo(".uf/scripts/instruction-lint"),
+        [],
+        { env: { ...process.env, UF_PREFLIGHT_PROJECT_ROOT: primary }, cwd: worktree },
+        (err, stdout, _stderr) => resolve({ code: err?.code ?? 0, stdout: String(stdout) }),
+      )
+    })
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain("1 files: 0 errors, 0 warnings, 0 info")
+  }, 30_000)
 })
