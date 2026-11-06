@@ -429,6 +429,17 @@ describe("delegation contract check (IL-042, DE-008)", () => {
     expect(f[0].message).toMatch(/neither skill nor skill_absent_reason/)
   })
 
+  it("does not read a `word:` inside a parameter value as a key", () => {
+    // `skill:` sits inside the prompt string, not at a parameter position.
+    const inValue = il042(block('uf_delegate_command\n  prompt: "See the lint skill: rules"\n  task_classification: "deterministic"'))
+    expect(inValue).toHaveLength(1)
+    expect(inValue[0].message).toMatch(/neither skill nor skill_absent_reason/)
+    // `note:` inside the classification value must not end the value early.
+    const cutShort = il042(block("uf_delegate_command\n  prompt: p\n  task_classification: [judgment, or note: deterministic when a script applies]"))
+    expect(cutShort).toHaveLength(1)
+    expect(cutShort[0].message).toMatch(/neither skill nor skill_absent_reason/)
+  })
+
   it("treats each call in a block separately and ignores prose, other tools, and packs", () => {
     const two = il042(block("uf_delegate_command\n  command_path: a\nuf_delegate_command\n  prompt: p"))
     expect(two.map((f) => f.line)).toEqual([8])
