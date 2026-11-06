@@ -2262,6 +2262,7 @@ func checkReviewPlugins(opts *Options) *CheckGroup {
 		Results: []CheckResult{},
 	}
 	group.Results = append(group.Results, checkManifestInstallConsistency(opts))
+	group.Results = append(group.Results, checkTrackedPluginLock(opts))
 	group.Results = append(group.Results, checkReviewPluginDependencies(opts))
 	group.Results = append(group.Results, checkReviewPluginRuntime(opts, "node", true))
 	group.Results = append(group.Results, checkReviewPluginRuntime(opts, "npm", false))
@@ -2343,6 +2344,32 @@ func checkManifestInstallConsistency(opts *Options) CheckResult {
 		Name:     "manifest-install",
 		Severity: Pass,
 		Message:  "installed packages match package.json pins",
+	}
+}
+
+// checkTrackedPluginLock warns when .opencode/package-lock.json is still
+// git-tracked. The merged .gitignore line (stop-shipping-plugin-lock D3)
+// does not untrack an already-committed lock, so hero repositories that
+// adopted the lock keep committing rewrites after the migration. The check
+// is advisory: Pass when git cannot run or the lock is not tracked, Warn
+// with the untrack command when it is.
+func checkTrackedPluginLock(opts *Options) CheckResult {
+	if opts.ExecCmd == nil {
+		return CheckResult{Name: "tracked lock", Severity: Pass, Message: "not checked"}
+	}
+	lockPath := filepath.Join(".opencode", "package-lock.json")
+	output, err := opts.ExecCmd("git", "-C", opts.TargetDir, "ls-files", "--", lockPath)
+	if err != nil {
+		return CheckResult{Name: "tracked lock", Severity: Pass, Message: "not a git repository"}
+	}
+	if strings.TrimSpace(string(output)) == "" {
+		return CheckResult{Name: "tracked lock", Severity: Pass, Message: "no tracked plugin lock"}
+	}
+	return CheckResult{
+		Name:        "tracked lock",
+		Severity:    Warn,
+		Message:     "package-lock.json is gitignored but still tracked",
+		InstallHint: "git rm --cached .opencode/package-lock.json, then commit",
 	}
 }
 

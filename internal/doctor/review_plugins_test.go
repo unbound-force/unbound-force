@@ -16,7 +16,7 @@ const reviewPluginManifestFixture = `{
   "type": "module",
   "dependencies": {
     "@opencode-ai/plugin": "1.4.10",
-    "zod": "4.1.8"
+    "zod": "4.6.6"
   }
 }`
 
@@ -24,7 +24,7 @@ const reviewPluginManifestFixture = `{
 // node_modules; they match reviewPluginManifestFixture's pins.
 var reviewPluginInstalledVersions = map[string]string{
 	"@opencode-ai/plugin": "1.4.10",
-	"zod":                 "4.1.8",
+	"zod":                 "4.6.6",
 }
 
 // writeInstalledPackages installs every review plugin package under
@@ -154,7 +154,12 @@ func TestCheckReviewPlugins_AllPass(t *testing.T) {
 	writeReviewPluginScaffold(t, dir)
 	opts := reviewPluginDoctorOpts(dir,
 		map[string]string{"node": "/usr/local/bin/node", "npm": "/usr/local/bin/npm"},
-		map[string]string{"node --version": "v22.15.0", "npm --version": "10.9.2"},
+		map[string]string{
+			"node --version": "v22.15.0",
+			"npm --version":  "10.9.2",
+			// Empty git ls-files output: the lock is untracked.
+			"git -C " + dir + " ls-files -- .opencode/package-lock.json": "",
+		},
 	)
 
 	group := checkReviewPlugins(opts)
@@ -165,7 +170,7 @@ func TestCheckReviewPlugins_AllPass(t *testing.T) {
 	for _, r := range group.Results {
 		byName[r.Name] = r
 	}
-	for _, name := range []string{"manifest-install", "dependencies", "node version", "npm version", "registration", "plugin tools"} {
+	for _, name := range []string{"manifest-install", "tracked lock", "dependencies", "node version", "npm version", "registration", "plugin tools"} {
 		r, ok := byName[name]
 		if !ok {
 			t.Errorf("missing result %q in group", name)
@@ -290,7 +295,7 @@ func TestCheckManifestInstallConsistency_ReadErrorFails(t *testing.T) {
 
 func TestCheckManifestInstallConsistency_Undeclared(t *testing.T) {
 	dir := t.TempDir()
-	createFile(t, dir, ".opencode/package.json", strings.Replace(reviewPluginManifestFixture, `"zod": "4.1.8"`, `"other": "1.0.0"`, 1))
+	createFile(t, dir, ".opencode/package.json", strings.Replace(reviewPluginManifestFixture, `"zod": "4.6.6"`, `"other": "1.0.0"`, 1))
 
 	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: os.ReadFile})
 	if result.Severity != Fail || !strings.Contains(result.Message, "zod not declared") {
@@ -487,6 +492,57 @@ func TestCheckReviewPlugins_RepairableVsBroken(t *testing.T) {
 		byName := resultMap(group)
 		if r := byName["manifest-install"]; r.Severity != Fail {
 			t.Errorf("manifest-install severity = %v, want Fail (broken)", r.Severity)
+		}
+	})
+}
+
+func TestCheckTrackedPluginLock(t *testing.T) {
+	t.Run("warns when the lock is still tracked", func(t *testing.T) {
+		dir := t.TempDir()
+		opts := reviewPluginDoctorOpts(dir, nil,
+			map[string]string{
+				"git -C " + dir + " ls-files -- .opencode/package-lock.json": ".opencode/package-lock.json\n",
+			})
+		result := checkTrackedPluginLock(opts)
+		if result.Severity != Warn {
+			t.Errorf("severity = %v, want Warn (tracked lock)", result.Severity)
+		}
+		if !strings.Contains(result.Message, "still tracked") {
+			t.Errorf("message %q should say the lock is still tracked", result.Message)
+		}
+		if !strings.Contains(result.InstallHint, "git rm --cached") {
+			t.Errorf("install hint %q should name git rm --cached", result.InstallHint)
+		}
+	})
+
+	t.Run("passes when no lock is tracked", func(t *testing.T) {
+		dir := t.TempDir()
+		opts := reviewPluginDoctorOpts(dir, nil,
+			map[string]string{
+				"git -C " + dir + " ls-files -- .opencode/package-lock.json": "",
+			})
+		result := checkTrackedPluginLock(opts)
+		if result.Severity != Pass {
+			t.Errorf("severity = %v, want Pass (untracked)", result.Severity)
+		}
+	})
+
+	t.Run("passes outside a git repository", func(t *testing.T) {
+		dir := t.TempDir()
+		// Unstubbed commands error inside the stub, standing in for a
+		// missing git or a directory outside any repository.
+		opts := reviewPluginDoctorOpts(dir, nil, nil)
+		result := checkTrackedPluginLock(opts)
+		if result.Severity != Pass {
+			t.Errorf("severity = %v, want Pass (not a git repository)", result.Severity)
+		}
+	})
+
+	t.Run("passes without an ExecCmd", func(t *testing.T) {
+		opts := &Options{TargetDir: t.TempDir(), ReadFile: os.ReadFile}
+		result := checkTrackedPluginLock(opts)
+		if result.Severity != Pass {
+			t.Errorf("severity = %v, want Pass (not checked)", result.Severity)
 		}
 	})
 }
