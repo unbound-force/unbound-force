@@ -45,6 +45,9 @@ make plugin-test
 # Scope-based Go coverage gate (changed packages)
 make coverage-gate
 
+# Static lint of agent/command/skill/pack instruction prose
+make lint-instructions
+
 # Lint (vet + golangci-lint)
 make lint
 # or: go vet ./... && golangci-lint run
@@ -74,7 +77,8 @@ unbound-force/
 ├── .specify/                         # Speckit framework (templates, scripts, memory)
 ├── .uf/                              # Review + model matrix config (matrices, overrides, sibling repos)
 │   ├── model-matrix.yaml             # Tracked model matrix (profiles, packs)
-│   └── model-matrix.override.yaml    # Gitignored override (model identities)
+│   ├── model-matrix.override.yaml    # Gitignored override (model identities)
+│   └── scripts/                      # Pre-flight scripts (instruction-lint wrapper)
 ├── .opencode/
 │   ├── agents/                       # Hero persona agents (17 active, model-matrix-classifier hidden)
 │   ├── commands/                     # Slash commands (33 files)
