@@ -36,8 +36,10 @@
 ## 3. Verification
 
 - [x] 3.1 [P] Confirm the working diff is exactly the one
-  repinned line and that `8bdfb59` no longer appears anywhere
-  in the repository (`git diff` plus repo-wide grep).
+  repinned line and that `8bdfb59` has no remaining functional
+  references (`uses:` pins, scripts, configs) via repo-wide
+  grep; the rollback documentation in the change artifacts
+  and CHANGELOG deliberately retains the old SHA.
 - [x] 3.2 [P] Validate the edited workflow still parses as
   YAML (for example `python3 -c "import
   yaml,sys; yaml.safe_load(open('.github/workflows/ci_local.yml'))"`)
@@ -56,6 +58,12 @@
   `8bdfb59f8b10de854ba289e5e545d1eb9fee0f56` as the documented
   rollback path and closes the originating issue
   (`originating_issue: 961` in `.openspec.yaml` threads
-  `Closes #961` via `/uf.finale`). Confirm the
-  `Standardized CI / Verify action versions` check passes on
-  the PR (pinact runs in CI, not locally).
+  `Closes #961` via `/uf.finale`). Record the verification
+  surface accurately: the `Standardized CI / Verify action
+  versions` check does not run on this PR while
+  `ci_checks.yml` pins org-infra reusable CI at v0.8.0 (the
+  pinact job ships in v0.9.0, on the dependabot bump PR
+  #864), so this PR's evidence is the authoring-time API
+  verification (tasks 1.1-1.2) plus the written pin's
+  compliance with the pinact `--verify` contract; the check
+  itself first runs when the v0.9.0 bump merges.
