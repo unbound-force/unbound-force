@@ -625,11 +625,33 @@ const DELEGATION_TOOLS: Record<string, { optionalWith: string | null }> = {
   replicator_forge_spawn_subtask: { optionalWith: null },
 }
 const DELEGATION_CALL = new RegExp(`^\\s*(${Object.keys(DELEGATION_TOOLS).join("|")})\\b\\s*(?:\\(|\\{|$)`)
-const PARAM_KEY = /(?:^|[\s{,(])["']?([a-z_][a-z0-9_]*)["']?\s*:/g
+
+// Parameter keys are positional: a key either starts a line at the
+// call's parameter indentation or follows an opening bracket or comma
+// on the call's first line. A `word:` inside a parameter value matches
+// neither position, so it never registers as a key and never ends the
+// classification value early.
+const LINE_KEY = /^([ \t]*)(["']?)([a-z_][a-z0-9_]*)\2[ \t]*:/
+const INLINE_KEY = /([{,][ \t]*)(["']?)([a-z_][a-z0-9_]*)\2[ \t]*:/g
+
+function delegationKeys(text: string): Map<string, number> {
+  const keys = new Map<string, number>()
+  const lines = text.split("\n")
+  const atLine: Array<{ name: string; at: number; indent: number }> = []
+  let offset = 0
+  lines.forEach((line, idx) => {
+    const m = idx > 0 ? LINE_KEY.exec(line) : null
+    if (m) atLine.push({ name: m[3], at: offset + m[1].length, indent: m[1].length })
+    offset += line.length + 1
+  })
+  const paramIndent = atLine.reduce((min, k) => Math.min(min, k.indent), Number.POSITIVE_INFINITY)
+  for (const k of atLine) if (k.indent === paramIndent && !keys.has(k.name)) keys.set(k.name, k.at)
+  for (const m of lines[0].matchAll(INLINE_KEY)) if (!keys.has(m[3])) keys.set(m[3], (m.index ?? 0) + m[1].length)
+  return keys
+}
 
 function checkDelegationCall(a: Artifact, tool: string, line: number, text: string, emit: Emit): void {
-  const keys = new Map<string, number>()
-  for (const m of text.matchAll(PARAM_KEY)) if (!keys.has(m[1])) keys.set(m[1], m.index ?? 0)
+  const keys = delegationKeys(text)
   const { optionalWith } = DELEGATION_TOOLS[tool]
   const at = keys.get("task_classification")
   if (at === undefined) {
