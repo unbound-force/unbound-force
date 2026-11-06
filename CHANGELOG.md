@@ -6,6 +6,27 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- instruction-lint: a deterministic linter for the instruction
+  prose that drives the agent ecosystem (agents, commands,
+  skills, convention packs, AGENTS.md): frontmatter shape,
+  slash-command / agent / skill / path references, pack rule
+  markers and RFC 2119 force, vague qualifiers in normative
+  sentences, file and load-set token budgets, and near-duplicate
+  paragraphs (IL-001..IL-050), every finding carrying its
+  Divisor review severity. Runs through the
+  `.uf/scripts/instruction-lint` wrapper (dependency checks
+  before node, exit 0/1/2 contract — 2 is could-not-run), the
+  `make lint-instructions` target, an advisory
+  `.uf/preflight.yaml` check, and the `divisor-linguist`
+  persona (linter evidence first, then DE and IQ tables), whose
+  bash allows only the wrapper, `git diff`, and `git status`
+  behind terminal metacharacter denies. `yaml` is declared as
+  an exact-pinned devDependency (previously a phantom
+  transitive import). Linter: 937 lines; tests: 483 + 160
+  lines. Instruction delta (DE-004): divisor-linguist.md +261
+  lines (~4.2k self tokens, ~13.4k loaded); AGENTS.md +10
+  lines; baseline findings unchanged (1 error / 31 warnings /
+  23 info). (Spec: openspec/changes/instruction-lint/)
 - preflight-declared-output: `uf_preflight_declared_checks` now
   returns `rendered_output`, one tool-rendered block per declared
   check that ran with output, whatever its status, so advisory
