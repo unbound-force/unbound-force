@@ -46,6 +46,13 @@ in the sibling deltas:
   `plugin-package-rollback.json` testdata, and the pre-rename
   `TestPluginPackageInputs_ExactVersionsAndLockIntegrity`; the
   enumeration is amended to the lockless lockstep set.
+- The security bump to Zod 4.6.6 and `toml` 5.0.1 (D6) amends this
+  delta's pin sentences, override enumeration, and drift scenario in
+  place. Predecessor deltas that still name Zod 4.1.8
+  (`review-council-multi-model-fanout`,
+  `clarification-marker-superset`) carry superseded staging text
+  that this change's MODIFIED SC-FR-003 replaces at archive; they
+  are not edited.
 
 This change archives after `review-council-multi-model-fanout`
 and `clarification-marker-superset`, so its MODIFIED deltas
@@ -133,6 +140,32 @@ security-override lock SHA256
 prior `.opencode/.gitignore` lines `node_modules`,
 `package.json`, `bun.lock`, `.gitignore`; and the override pins
 `toml` 4.1.1 and `uuid` 13.0.0.
+
+### D6. Bump zod to 4.6.6 and toml to 5.0.1 for CVE remediation
+
+The throwaway-lock OSV scan added under Risks found five HIGH
+advisories in the pinned runtime tree: GHSA-mrhx-c7xc-m3w5 in zod
+4.1.8 (fixed in 4.6.6) and GHSA-4qx8-w7c3-pj3p, GHSA-9j65-hcg3-gc64,
+GHSA-9qmh-m7c6-f92p, and GHSA-h895-cgqg-jf52 in toml 4.2.0 (all
+fixed in 5.0.1). The bump executes the gatekeeping security-fix
+path: documented advisories, upstream verification recorded in the
+provenance record (git head and registry integrity per bump),
+review and CI approval, and rollback by reverting the commit.
+
+`@opencode-ai/plugin` 1.19.0 declares zod 4.1.8 as its own exact
+dependency, so bumping only the root pin would leave a nested
+vulnerable copy under the plugin. The manifest therefore gains a
+zod 4.6.6 override at the same version as the root pin (npm
+rejects a conflicting override), which forces the nested copy to
+the patched version.
+
+The `toml` override moves across a major version because all four
+advisories are fixed only in 5.0.1. Its sole requiring package,
+`effect` 4.0.0-beta.83, uses toml only in an unimported unstable
+CLI fileParse path (`src/unstable/cli/Primitive.ts`), so forcing
+5.0.1 parallels the accepted `uuid` 13.0.1-versus-^14.0.0
+divergence. The provenance record carries the new versions, git
+heads, and integrity hashes, and `verified_at` moves to 2026-11-06.
 
 ## Risks / Trade-offs
 

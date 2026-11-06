@@ -71,3 +71,9 @@
   and `fix-triage-issue-dispatch-docs` (FR-007 lockstep set)
 - [x] 4.6 Remove `TestPluginPackageInputs_RollbackPrerequisites`
   and `testdata/plugin-package-rollback.json` per design D5
+- [x] 4.7 Bump the zod pin to 4.6.6 (plus a matching override) and
+  the toml override to 5.0.1 per design D6, sweeping every literal
+  site: both manifests, the provenance record, the spec delta,
+  the proposal, and the tests
+- [x] 4.8 Add the `uf doctor` tracked-lock warning per SC-FR-005,
+  with unit tests for the warn, untracked, and unavailable paths

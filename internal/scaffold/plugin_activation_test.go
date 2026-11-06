@@ -1059,7 +1059,7 @@ func TestPreservePluginDevDependencies_Cases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read shipped manifest: %v", err)
 	}
-	for _, existing := range []string{`{"dependencies": {"zod": "4.1.8"}}`, `not json`, `{"devDependencies": {}}`} {
+	for _, existing := range []string{`{"dependencies": {"zod": "4.6.6"}}`, `not json`, `{"devDependencies": {}}`} {
 		if got := preservePluginDevDependencies(shipped, []byte(existing)); !bytes.Equal(got, shipped) {
 			t.Errorf("existing %q: got %s, want the shipped manifest unchanged", existing, got)
 		}

@@ -1715,7 +1715,7 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 		"zod": {
 			Version:      "4.6.6",
 			License:      "MIT",
-			GitHead:      "284243fb0d6532665afdc9239188773bb624f73c",
+			GitHead:      "9c219833c3a3764fa1f1ea9c5ecec8254a63c0b1",
 			Integrity:    "sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==",
 			MaintainedBy: "Zod",
 			ProjectURL:   "https://github.com/colinhacks/zod",

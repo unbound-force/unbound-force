@@ -924,7 +924,9 @@ Each entry follows the format: `- <change-name>: <summary>`.
   version. Rollout: existing hero
   repositories can drop their committed lock with
   `git rm --cached .opencode/package-lock.json`; review the
-  scanner-loss posture first. (Spec:
+  scanner-loss posture first. `uf doctor` now warns when the lock
+  is still git-tracked and points at that command as the
+  remediation. (Spec:
   openspec/changes/stop-shipping-plugin-lock/)
 - split-host-resolution-failure-classes: Host-resolution
   failures in the review-dispatch plugin's `executeDispatchRun`
@@ -1257,6 +1259,18 @@ Each entry follows the format: `- <change-name>: <summary>`.
   openspec/changes/command-prose-pilot/)
 
 ### Fixed
+- stop-shipping-plugin-lock: bump the review-plugin pins for CVE
+  remediation after the CI throwaway-lock OSV scan surfaced five
+  HIGH advisories: zod 4.1.8 → 4.6.6 (GHSA-mrhx-c7xc-m3w5) and
+  toml 4.2.0 → 5.0.1 (GHSA-4qx8-w7c3-pj3p, GHSA-9j65-hcg3-gc64,
+  GHSA-9qmh-m7c6-f92p, GHSA-h895-cgqg-jf52). zod also gains a
+  matching `overrides` entry because `@opencode-ai/plugin`
+  1.19.0 declares its own exact zod 4.1.8 dependency, so a root
+  pin bump alone would leave a nested vulnerable copy in place.
+  The provenance record carries the new upstream git heads and
+  integrity hashes, verified 2026-11-06. Rollback: revert this
+  commit to restore zod 4.1.8 and toml 4.2.0.
+  (Spec: openspec/changes/stop-shipping-plugin-lock/)
 - review-dispatch-consumer-bounds (#941): lesson proposals are now
   stored with their full text. `consolidate_dispatch` persists the
   proposals in the dispatch artifact as an optional

@@ -81,7 +81,7 @@ The scaffolded manifest MUST NOT declare `devDependencies`,
 because a lockless install resolves them even under
 `--omit=dev`. When `uf init` refreshes an existing
 `.opencode/package.json`, it MUST keep the `devDependencies`
-that file already declares. The `toml`, `uuid`, and `zod` security
+that file already declares. The `toml`, `zod`, and `uuid` security
 overrides MUST remain.
 
 `.opencode/.gitignore` MUST ignore `node_modules`, `bun.lock`, and
@@ -141,14 +141,25 @@ agreement between the `package.json` pins and the installed versions
 imports, and the plugin registration state. It MUST NOT require
 `.opencode/package-lock.json`. An installed version that differs
 from its pin, or a declared package missing from `package.json`,
-MUST fail.
+MUST fail. `uf doctor` MUST warn when `.opencode/package-lock.json`
+is still git-tracked, because the merged `.gitignore` line does not
+untrack an already-committed lock, and the warning MUST point at
+`git rm --cached` as the remediation.
 
 #### Scenario: Installed version drifts from its pin
 
 - **GIVEN** `.opencode/package.json` pins zod 4.6.6
-- **AND** `node_modules/zod` reports 4.6.7
+- **AND** `node_modules/zod` reports 4.2.0
 - **WHEN** `uf doctor` runs
 - **THEN** `manifest-install` fails and names zod
+
+#### Scenario: Lock file remains tracked after the migration
+
+- **GIVEN** `.opencode/package-lock.json` is git-tracked and now
+  gitignored
+- **WHEN** `uf doctor` runs
+- **THEN** the tracked-lock check warns and names
+  `git rm --cached .opencode/package-lock.json` as the remediation
 
 ## REMOVED Requirements
 

@@ -42,7 +42,7 @@ which turned main's Local CI red after b9e096a9 (fixed in #953).
   `.opencode/node_modules/`.
 
 `package.json` stays tool-owned, with exact direct-dependency pins
-and the `toml` and `uuid` security overrides.
+and the `toml`, `zod`, and `uuid` security overrides.
 
 ## Capabilities
 
@@ -122,7 +122,7 @@ manifest, and the lockless install command pins.
 
 The lock's integrity hashes and its transitive-tree freeze are
 gone. The accepted risk is recorded under Impact; direct pins
-and the `toml`/`uuid` security overrides remain, lifecycle
+and the `toml`/`zod`/`uuid` security overrides remain, lifecycle
 scripts stay disabled on every install path, and transitive
 vulnerability scanning moves to a throwaway-lock CI step
 (design Risks).
