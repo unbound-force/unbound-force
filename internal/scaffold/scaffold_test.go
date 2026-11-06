@@ -1562,7 +1562,7 @@ func TestPluginPackageInputs_ExactVersionsAndLockIntegrity(t *testing.T) {
 
 	expectedRuntime := map[string]string{
 		"@opencode-ai/plugin": "1.19.0",
-		"zod":                 "4.1.8",
+		"zod":                 "4.6.6",
 	}
 	expectedDevelopment := map[string]string{
 		"@vitest/coverage-v8": "5.0.3",
@@ -1579,8 +1579,9 @@ func TestPluginPackageInputs_ExactVersionsAndLockIntegrity(t *testing.T) {
 		"zod":                 "MIT",
 	}
 	expectedOverrides := map[string]string{
-		"toml": "4.2.0",
+		"toml": "5.0.1",
 		"uuid": "13.0.1",
+		"zod":  "4.6.6",
 	}
 	expectedEngines := map[string]string{
 		"node": "^22.22.2 || ^24.15.0 || >=26.0.0",
@@ -1655,10 +1656,12 @@ func TestPluginPackageInputs_ExactVersionsAndLockIntegrity(t *testing.T) {
 			t.Errorf("locked package %s integrity = %q, want sha512 integrity", path, entry.Integrity)
 		}
 	}
-	assertLockedSecurityOverride(t, lock.Packages, "toml", "4.2.0",
-		"sha512-TvAJjbHZlYmI323+srtqHQFyJsoWy6mI09ppkuj9+iRsqsVKG9fvTcOP7FHF2UCb0QSYtjEavffrKzdd0XgClg==")
+	assertLockedSecurityOverride(t, lock.Packages, "toml", "5.0.1",
+		"sha512-EqYNA/YvUNndrA2B3O2ojzLQoTQrBxeZ9UIjQwk8t10oe6n7dwclBwd9IdZQTOKwe6vWX+AXtl6IntXRbepdxQ==")
 	assertLockedSecurityOverride(t, lock.Packages, "uuid", "13.0.1",
 		"sha512-9ezox2roIft6ExBVTVqibSd5dc5/47Sw/uY6b4SjQUT2TzQ0tltNquWA46y4xPQmdZYqvnio22SgWd41M86+jw==")
+	assertLockedSecurityOverride(t, lock.Packages, "zod", "4.6.6",
+		"sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==")
 }
 
 func assertLockedDirectPackage(
@@ -1748,13 +1751,13 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 		license string
 	}{
 		"@opencode-ai/plugin": {version: "1.19.0", project: "OpenCode", license: "MIT"},
-		"zod":                 {version: "4.1.8", project: "Zod", license: "MIT"},
+		"zod":                 {version: "4.6.6", project: "Zod", license: "MIT"},
 		"vitest":              {version: "5.0.3", project: "Vitest", license: "MIT"},
 		"@vitest/coverage-v8": {version: "5.0.3", project: "Vitest", license: "MIT"},
 		"yaml":                {version: "2.9.1", project: "yaml", license: "ISC"},
 	}
-	if provenance.VerifiedAt != "2026-10-19" {
-		t.Errorf("provenance verification date = %q, want 2026-10-19", provenance.VerifiedAt)
+	if provenance.VerifiedAt != "2026-11-06" {
+		t.Errorf("provenance verification date = %q, want 2026-11-06", provenance.VerifiedAt)
 	}
 	if len(provenance.Packages) != len(expectedPackages) {
 		t.Errorf("provenance has %d packages, want %d", len(provenance.Packages), len(expectedPackages))
@@ -1785,10 +1788,10 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 
 	expectedOverrides := map[string]overrideProvenance{
 		"toml": {
-			Version:      "4.2.0",
+			Version:      "5.0.1",
 			License:      "MIT",
-			GitHead:      "6d42b7e4fa693f8e6fb025d419b10b38107e83e2",
-			Integrity:    "sha512-TvAJjbHZlYmI323+srtqHQFyJsoWy6mI09ppkuj9+iRsqsVKG9fvTcOP7FHF2UCb0QSYtjEavffrKzdd0XgClg==",
+			GitHead:      "9ebfa698682500bbd30ce28e612ecc0208d9f70e",
+			Integrity:    "sha512-EqYNA/YvUNndrA2B3O2ojzLQoTQrBxeZ9UIjQwk8t10oe6n7dwclBwd9IdZQTOKwe6vWX+AXtl6IntXRbepdxQ==",
 			MaintainedBy: "toml-node",
 			ProjectURL:   "https://github.com/BinaryMuse/toml-node",
 		},
@@ -1799,6 +1802,14 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 			Integrity:    "sha512-9ezox2roIft6ExBVTVqibSd5dc5/47Sw/uY6b4SjQUT2TzQ0tltNquWA46y4xPQmdZYqvnio22SgWd41M86+jw==",
 			MaintainedBy: "uuidjs",
 			ProjectURL:   "https://github.com/uuidjs/uuid",
+		},
+		"zod": {
+			Version:      "4.6.6",
+			License:      "MIT",
+			GitHead:      "284243fb0d6532665afdc9239188773bb624f73c",
+			Integrity:    "sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==",
+			MaintainedBy: "Zod",
+			ProjectURL:   "https://github.com/colinhacks/zod",
 		},
 	}
 	if len(provenance.SecurityOverrides) != len(expectedOverrides) {

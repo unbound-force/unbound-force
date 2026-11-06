@@ -173,10 +173,14 @@ imported externally.
 - **TypeScript plugins**: `.opencode/plugins/` review plugins
   (registered via the `opencode.json` `plugin` array) and the
   `.opencode/lib/` shared library use
-  `@opencode-ai/plugin` 1.19.0 and `zod` 4.1.8 (runtime), and
+  `@opencode-ai/plugin` 1.19.0 and `zod` 4.6.6 (runtime), and
   `vitest` 5.0.3 + `@vitest/coverage-v8` 5.0.3 + `yaml` 2.9.1 (dev;
   yaml parses instruction-lint frontmatter), managed
   by `.opencode/package.json` / `package-lock.json`.
+  npm security overrides pin `toml` 5.0.1, `uuid` 13.0.1, and
+  `zod` 4.6.6 (past the plugin's exact `zod` 4.1.8 pin;
+  GHSA-mrhx-c7xc-m3w5), with upstream provenance in
+  `internal/scaffold/testdata/plugin-package-provenance.json`.
 - **Node runtime floor** (plugin suite): transitive `ini@7.0.0`
   requires ^22.22.2 || ^24.15.0 || >=26.0.0, declared in the
   `engines` field of `.opencode/package.json` and its scaffold

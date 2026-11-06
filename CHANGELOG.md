@@ -1254,6 +1254,20 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- instruction-lint-deps (#958): the newly tracked
+  `.opencode/package-lock.json` cleared its OSV-Scanner gate by
+  bumping the three vulnerable pins to their fixed versions:
+  `zod` 4.1.8 -> 4.6.6 (GHSA-mrhx-c7xc-m3w5, forced past
+  `@opencode-ai/plugin` 1.19.0's exact `zod` 4.1.8 pin via a
+  security override), `toml` override 4.2.0 -> 5.0.1
+  (GHSA-4qx8-w7c3-pj3p, GHSA-9j65-hcg3-gc64,
+  GHSA-9qmh-m7c6-f92p, GHSA-h895-cgqg-jf52), and transitive
+  dev `vite` 8.3.2 -> 8.3.6 (six GHSAs, fix floor 8.3.3).
+  Upstream provenance (git heads, tarball integrities)
+  recorded in plugin-package-provenance.json (verified
+  2026-11-06); scaffold mirrors, scaffold_test.go
+  expectations, and the AGENTS.md stack pin updated in
+  lockstep. `npm audit`: 0 vulnerabilities.
 - review-dispatch-consumer-bounds (#941): lesson proposals are now
   stored with their full text. `consolidate_dispatch` persists the
   proposals in the dispatch artifact as an optional
