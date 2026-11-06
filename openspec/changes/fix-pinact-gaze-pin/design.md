@@ -21,8 +21,11 @@ Principle III (Observable Quality).
 
 ### Goals
 
-- Restore the `Standardized CI / Verify action versions`
-  check to green on the fixing PR.
+- Make the Gaze pin compliant with the
+  `Standardized CI / Verify action versions` (pinact
+  `--verify`) contract so the check passes once it runs
+  (it executes only where org-infra reusable CI v0.9.0 is
+  pinned, currently the dependabot bump PR #864).
 - Keep the pin a full 40-character immutable commit SHA --
   never a mutable tag ref (Constitution Principle V).
 - Guarantee zero behavior change: the referenced
@@ -76,25 +79,35 @@ Principle III (Observable Quality).
    diff and is named in the PR body as the documented rollback
    path; reverting is a one-line change.
 
-5. **Verification surface is the PR itself.** The
-   `gaze-ai-report` job runs only on push to `main`
-   (`if: github.event_name == 'push' && github.ref ==
-   'refs/heads/main'`), so the fix PR proves correctness
-   through the pinact check (which runs on PRs via
-   Standardized CI) rather than by exercising the repinned
-   job. This keeps the cross-repo consumption opt-in and
-   self-describing -- the version comment names the consumed
-   Gaze release (Principle I, Autonomous Collaboration), and
-   the pin stays a published-artifact reference with no
-   coupling (Principle II, Composability First).
+5. **Verification surface is authoring-time API evidence,
+   not the fixing PR's checks.** The `gaze-ai-report` job
+   runs only on push to `main` (`if: github.event_name ==
+   'push' && github.ref == 'refs/heads/main'`), so the fix
+   PR does not exercise the repinned job. The pinact check
+   does not run on this PR either: `ci_checks.yml` pins
+   org-infra reusable CI at v0.8.0 (`bd3718a`), whose job
+   set has no pinact job -- the failing observation came
+   from the v0.9.0 dependabot bump branch (PR #864). The
+   PR proves correctness through the authoring-time API
+   verification (decision 3) and the written line's
+   compliance with the pinact `--verify` contract; the
+   check first runs where v0.9.0 is pinned, including the
+   bump PR itself. This keeps the cross-repo consumption
+   opt-in and self-describing -- the version comment names
+   the consumed Gaze release (Principle I, Autonomous
+   Collaboration), and the pin stays a published-artifact
+   reference with no coupling (Principle II, Composability
+   First).
 
 ## Risks / Trade-offs
 
 - **Upstream tag mutation**: the v2.3.0 tag could be retagged
   between authoring-time verification and merge. Mitigated by
-  re-running the verification commands at authoring time and
-  by pinact `--verify` running on the fix PR; once written,
-  the 40-character SHA is immutable.
+  re-running the verification commands at authoring time;
+  once written, the 40-character SHA is immutable. pinact
+  `--verify` re-checks the tag-to-SHA equality wherever
+  org-infra reusable CI v0.9.0 runs (starting with the bump
+  PR #864), not on this PR.
 - **Byte-identity claim wrong**: if `reusable_gaze_ai_report.yml`
   differs between the two SHAs, the "zero behavior change"
   premise fails. Mitigated by the decision-3 content check
@@ -112,6 +125,6 @@ Principle III (Observable Quality).
   `.pinact.yaml`), so the young tag does not trip it. Noted
   and accepted.
 - **No new tests**: the change is one configuration line; its
-  observable effect (the pinact check passing) is verified by
-  CI on the PR. CI-only changes are exempt from the
-  documentation-issue gate.
+  correctness is verified by the authoring-time API checks
+  (tasks 1.1-1.2), reproducible by any contributor. CI-only
+  changes are exempt from the documentation-issue gate.

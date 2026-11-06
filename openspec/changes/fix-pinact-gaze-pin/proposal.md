@@ -47,8 +47,11 @@ PR as the documented rollback path.
   version-comment verifiability. Every SHA-pinned `uses:`
   reference MUST carry a version comment naming a tag whose
   commit exactly equals the pinned SHA (the pinact `--verify`
-  contract), and the Gaze reusable workflow pin in
-  `ci_local.yml` MUST point at the v2.3.0 tagged commit.
+  contract), and untagged pins MUST move to tagged commits
+  with the previous SHA recorded as rollback. The Gaze
+  reusable workflow pin in `ci_local.yml` moves to the
+  v2.3.0 tagged commit in this change -- the durable rule
+  is the invariant, not the specific version.
 
 ### Removed Capabilities
 
@@ -64,8 +67,13 @@ PR as the documented rollback path.
   secrets, permissions, and job behavior are unchanged. The
   `gaze-ai-report` job runs only on push to `main`, so the fix
   PR does not exercise it post-repin.
-- **Gates**: the `Standardized CI / Verify action versions`
-  check changes from red to green. The gate is strengthened,
+- **Gates**: the change makes the pin compliant with the
+  `Standardized CI / Verify action versions` (pinact)
+  contract. The check does not run on this PR -- it ships
+  with org-infra reusable CI v0.9.0 while `ci_checks.yml`
+  pins v0.8.0 -- so it first runs (against this compliant
+  pin) when the v0.9.0 bump merges; the red observation was
+  on the bump branch (PR #864). The gate is strengthened,
   not bypassed -- suppressing the finding via `.pinact.yaml`
   ignore rules is rejected as supply-chain gate weakening.
 - **Gatekeeping conditions** (pinned-dependency update policy):
@@ -103,19 +111,22 @@ is introduced or removed.
 
 **Assessment**: PASS
 
-The fix restores a machine-verified quality signal: the pinact
-`--verify` check passes. The tag-to-SHA mapping and the
-byte-identity claims are backed by reproducible `gh api`
-commands any contributor can re-run.
+The fix restores a machine-verifiable quality signal: the
+pin satisfies the pinact `--verify` contract (the version
+comment names a tag whose commit equals the pinned SHA).
+The tag-to-SHA mapping and the byte-identity claims are
+backed by reproducible `gh api` commands any contributor
+can re-run.
 
 ### IV. Testability
 
 **Assessment**: PASS
 
-The change's observable effect -- the `Standardized CI / Verify
-action versions` check passing on the fix PR -- is verifiable
-in isolation without external services beyond GitHub Actions.
-No new code components are introduced.
+The change's observable effect -- the pin's compliance with
+the pinact `--verify` contract -- is verifiable in isolation
+through reproducible GitHub API commands (tag-to-SHA equality
+plus workflow-file byte-identity), without external services
+beyond the GitHub API. No new code components are introduced.
 
 ### V. Security by Default
 

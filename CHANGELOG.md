@@ -1234,10 +1234,13 @@ Each entry follows the format: `- <change-name>: <summary>`.
 - fix-pinact-gaze-pin: the Gaze reusable workflow pin in
   `ci_local.yml` moved from the untagged commit `8bdfb59` to
   the v2.3.0 tag commit `8031d419` with a `# v2.3.0` version
-  comment, restoring the `Standardized CI / Verify action
-  versions` (pinact) check; the referenced workflow file is
-  byte-identical between the two SHAs so behavior is
-  unchanged; rollback is the previous SHA.
+  comment, making the pin compliant with the
+  `Standardized CI / Verify action versions` (pinact)
+  contract (the check ships with org-infra reusable CI
+  v0.9.0 and runs once that bump merges, not on this PR);
+  the referenced workflow file is byte-identical between
+  the two SHAs so behavior is unchanged; rollback is the
+  previous SHA.
   (Spec: openspec/changes/fix-pinact-gaze-pin/, Fixes: #961)
 - review-dispatch-consumer-bounds (#941): lesson proposals are now
   stored with their full text. `consolidate_dispatch` persists the
