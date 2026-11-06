@@ -61,6 +61,7 @@ describe("instruction-lint pre-flight check", () => {
     await writeFile(join(dir, ".uf", "preflight.yaml"), JSON.stringify({ version: 1, checks: [check] }))
     await copyFile(repo(check.run), join(dir, check.run))
     await copyFile(repo(".opencode/lib/instruction-lint.ts"), join(dir, ".opencode", "lib", "instruction-lint.ts"))
+    await copyFile(repo(".opencode/lib/cli-common.ts"), join(dir, ".opencode", "lib", "cli-common.ts"))
     await symlink(repo(".opencode/node_modules"), join(dir, ".opencode", "node_modules"))
     const agent = join(dir, ".opencode", "agents", "a.md")
 

@@ -14,13 +14,19 @@
 //   <!-- instruction-lint-disable-next-line IL-023 -->
 //   <!-- instruction-lint-disable IL-041 -->   (whole file)
 
-import { execFileSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, resolve, sep } from "node:path"
 // `yaml` is not a declared dependency: the scaffold tests pin the plugin
 // package to exactly two runtime dependencies. It is installed
 // transitively (via @opencode-ai/plugin -> effect, and vitest -> vite).
 import { parseDocument } from "yaml"
+// The cli-common import uses the explicit .ts specifier: this module
+// runs under plain node (type stripping), which does not remap .js
+// specifiers to .ts files the way the vite/vitest resolver does.
+import { findRoot, git, runMain, spawnDetail, type CliIO } from "./cli-common.ts"
+
+export { findRoot } from "./cli-common.ts"
+export type { CliIO } from "./cli-common.ts"
 
 export type Severity = "error" | "warning" | "info"
 export type ArtifactKind = "agent" | "command" | "skill" | "pack" | "context"
@@ -792,9 +798,6 @@ export interface BaseTree {
   paths: Set<string>
 }
 
-const git = (root: string, args: string[], input?: string): Buffer =>
-  execFileSync("git", args, { cwd: root, input, maxBuffer: 256 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"] })
-
 // Read the instruction artifacts at merge-base(ref, HEAD), so a base
 // that moved ahead of the branch does not count its own changes.
 export function readBaseTree(root: string, ref: string): BaseTree {
@@ -862,12 +865,6 @@ const signed = (n: number): string => (n > 0 ? `+${n}` : String(n))
 // CLI
 // ---------------------------------------------------------------------
 
-export interface CliIO {
-  cwd: string
-  out: (s: string) => void
-  err: (s: string) => void
-}
-
 const USAGE = `usage: instruction-lint [--root DIR] [--config FILE] [--only PATH]... [--json] [--strict] [--all] [--report] [--base REF] [--rules]
 
   --root DIR     repository root (default: nearest ancestor containing .opencode/)
@@ -882,16 +879,6 @@ const USAGE = `usage: instruction-lint [--root DIR] [--config FILE] [--only PATH
   --base REF     also report line, token, and load-set deltas for instruction files
                  changed since merge-base(REF, HEAD) (DE-004 evidence)
   --rules        list rule IDs and exit`
-
-export function findRoot(start: string): string | null {
-  let dir = resolve(start)
-  for (;;) {
-    if (isDir(join(dir, ".opencode"))) return dir
-    const parent = resolve(dir, "..")
-    if (parent === dir) return null
-    dir = parent
-  }
-}
 
 export function main(argv: string[], io: CliIO): number {
   const flags = new Set<string>()
@@ -949,7 +936,7 @@ export function main(argv: string[], io: CliIO): number {
     try {
       tree = readBaseTree(root, baseRef)
     } catch (e) {
-      const detail = (e as { stderr?: Buffer }).stderr?.toString("utf8").trim() || (e as Error).message
+      const detail = spawnDetail(e)
       io.err(`cannot read base ${baseRef}: ${detail}`)
       return 2
     }
@@ -994,10 +981,4 @@ export function main(argv: string[], io: CliIO): number {
   return summary.errors > 0 || (flags.has("--strict") && summary.warnings > 0) ? 1 : 0
 }
 
-if (import.meta.main) {
-  process.exitCode = main(process.argv.slice(2), {
-    cwd: process.cwd(),
-    out: (s) => process.stdout.write(s + "\n"),
-    err: (s) => process.stderr.write(s + "\n"),
-  })
-}
+if (import.meta.main) runMain(main)
