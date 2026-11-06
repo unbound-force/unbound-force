@@ -75,6 +75,10 @@ jobs:
         run: cd .opencode && npx -y npm@11.6.2 install --package-lock-only --ignore-scripts --no-audit --no-fund
 
       - name: Scan plugin transitive dependencies
+        # setup-go v7 pins GOTOOLCHAIN=local (go 1.25.0 from go.mod), but
+        # osv-scanner v2.7.0 requires go >= 1.27.0; auto lets Go fetch
+        # the needed toolchain for the install below.
         run: |
+          export GOTOOLCHAIN=auto
           go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.7.0
           "$(go env GOPATH)/bin/osv-scanner" scan source --lockfile=.opencode/package-lock.json
