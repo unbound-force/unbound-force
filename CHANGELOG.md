@@ -1231,6 +1231,23 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- plugin-suite-osv-bump: the plugin suite's npm tree moves to
+  patched versions, clearing the 11 known vulnerabilities (6 High,
+  4 Medium, 1 Low) OSV-Scanner reported against the newly tracked
+  `.opencode/package-lock.json` (the scan step runs
+  `--fail-on-vuln=true`): `zod` 4.1.8 -> 4.6.6 (GHSA-mrhx-c7xc-m3w5)
+  as a direct dependency plus a matching `overrides` pin -- without
+  the pin a nested vulnerable `zod@4.1.8` survives under
+  `@opencode-ai/plugin`, which declares it exactly; the `toml`
+  override 4.2.0 -> 5.0.1 (GHSA-4qx8-w7c3-pj3p, GHSA-9j65-hcg3-gc64,
+  GHSA-9qmh-m7c6-f92p, GHSA-h895-cgqg-jf52); and transitive dev
+  `vite` 8.3.2 -> 8.3.6 (7 GHSAs) via lockfile refresh. Pinned-
+  dependency update under the documented security-fix exception:
+  patched versions verified published on npm, every existing gate
+  unchanged (94% statements floor, `--fail-on-vuln`), rollback is
+  reverting this commit. The scaffold mirrors under
+  `internal/scaffold/assets/opencode/` are updated byte-identically
+  and the AGENTS.md tech-stack line follows the new `zod` version.
 - skill-dir-migration (#933): `uf init` now migrates the legacy
   `.opencode/skill/` directory into `.opencode/skills/`, so
   opencode stops warning about duplicate skills such as

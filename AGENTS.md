@@ -168,7 +168,7 @@ imported externally.
 - **TypeScript plugins**: `.opencode/plugins/` review plugins
   (registered via the `opencode.json` `plugin` array) and the
   `.opencode/lib/` shared library use
-  `@opencode-ai/plugin` 1.19.0 and `zod` 4.1.8 (runtime), and
+  `@opencode-ai/plugin` 1.19.0 and `zod` 4.6.6 (runtime), and
   `vitest` 5.0.3 + `@vitest/coverage-v8` 5.0.3 (dev), managed
   by `.opencode/package.json` / `package-lock.json`.
 - **Node runtime floor** (plugin suite): transitive `ini@7.0.0`
