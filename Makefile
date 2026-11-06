@@ -34,7 +34,7 @@ plugin-test: ## run TypeScript plugin unit, integration, smoke, and coverage che
 
 .PHONY: lint-instructions
 lint-instructions: ## static checks on agent/command/skill/pack prose (add --strict to fail on warnings)
-	node .opencode/lib/instruction-lint.ts $(ARGS)
+	.uf/scripts/instruction-lint $(ARGS)
 
 ##@ CRAP Load Monitoring
 
