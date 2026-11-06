@@ -30,6 +30,12 @@ coverage-gate: coverage ## enforce scope-based coverage thresholds on changed pa
 plugin-test: ## run TypeScript plugin unit, integration, smoke, and coverage checks
 	cd .opencode && npm ci && npx vitest run --coverage
 
+##@ Instruction Lint (agents, commands, skills, packs)
+
+.PHONY: lint-instructions
+lint-instructions: ## static checks on agent/command/skill/pack prose (add --strict to fail on warnings)
+	.uf/scripts/instruction-lint $(ARGS)
+
 ##@ CRAP Load Monitoring
 
 GAZE_VERSION ?= latest

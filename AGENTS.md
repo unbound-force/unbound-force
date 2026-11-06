@@ -45,6 +45,9 @@ make plugin-test
 # Scope-based Go coverage gate (changed packages)
 make coverage-gate
 
+# Static lint of agent/command/skill/pack instruction prose
+make lint-instructions
+
 # Lint (vet + golangci-lint)
 make lint
 # or: go vet ./... && golangci-lint run
@@ -74,9 +77,10 @@ unbound-force/
 ├── .specify/                         # Speckit framework (templates, scripts, memory)
 ├── .uf/                              # Review + model matrix config (matrices, overrides, sibling repos)
 │   ├── model-matrix.yaml             # Tracked model matrix (profiles, packs)
-│   └── model-matrix.override.yaml    # Gitignored override (model identities)
+│   ├── model-matrix.override.yaml    # Gitignored override (model identities)
+│   └── scripts/                      # Pre-flight scripts (instruction-lint wrapper)
 ├── .opencode/
-│   ├── agents/                       # Hero persona agents (17 active, model-matrix-classifier hidden)
+│   ├── agents/                       # Hero persona agents (18 active, model-matrix-classifier hidden)
 │   ├── commands/                     # Slash commands (33 files)
 │   ├── plugins/                      # Plugins registered in opencode.json (invoke-agent, review-dispatch, uf-workflow, uf-finale)
 │   ├── lib/                          # Shared TypeScript plugin library (incl. model-matrix.ts)
@@ -169,9 +173,14 @@ imported externally.
 - **TypeScript plugins**: `.opencode/plugins/` review plugins
   (registered via the `opencode.json` `plugin` array) and the
   `.opencode/lib/` shared library use
-  `@opencode-ai/plugin` 1.19.0 and `zod` 4.1.8 (runtime), and
-  `vitest` 5.0.3 + `@vitest/coverage-v8` 5.0.3 (dev), managed
+  `@opencode-ai/plugin` 1.19.0 and `zod` 4.6.6 (runtime), and
+  `vitest` 5.0.3 + `@vitest/coverage-v8` 5.0.3 + `yaml` 2.9.1 (dev;
+  yaml parses instruction-lint frontmatter), managed
   by `.opencode/package.json` / `package-lock.json`.
+  npm security overrides pin `toml` 5.0.1, `uuid` 13.0.1, and
+  `zod` 4.6.6 (past the plugin's exact `zod` 4.1.8 pin;
+  GHSA-mrhx-c7xc-m3w5), with upstream provenance in
+  `internal/scaffold/testdata/plugin-package-provenance.json`.
 - **Node runtime floor** (plugin suite): transitive `ini@7.0.0`
   requires ^22.22.2 || ^24.15.0 || >=26.0.0, declared in the
   `engines` field of `.opencode/package.json` and its scaffold

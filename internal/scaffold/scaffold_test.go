@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"slices"
@@ -95,6 +96,22 @@ type packageLockEntry struct {
 // internal/scaffold/assets/ is byte-identical to the canonical
 // source file at the repo root. This prevents drift between the
 // embedded copies and the files developers actually use.
+// projectOwnedPolicyMirrors are uf/ policy assets whose embedded copy is
+// the canonical default shipped to generated projects. They are project
+// extension points (uf init never overwrites them), so an exemption is
+// earned only by actual divergence and must carry a replacement check
+// that pins the repository copy to the canonical content:
+// uf/reviewer-capabilities.yaml (repo-local divisor-linguist) is covered
+// by TestReviewerCapabilities_RepositoryManifestExtendsCanonical, and
+// uf/preflight.yaml (instruction-lint check) by
+// TestPreflightYaml_RepositoryManifestExtendsCanonical. Any mirror not
+// listed here — including uf/review-matrix.yaml, which has not diverged
+// — stays under byte-identity enforcement below.
+var projectOwnedPolicyMirrors = map[string]bool{
+	"uf/preflight.yaml":             true,
+	"uf/reviewer-capabilities.yaml": true,
+}
+
 func TestEmbeddedAssets_MatchSource(t *testing.T) {
 	root := findProjectRoot(t)
 	if root == "" {
@@ -134,6 +151,9 @@ func TestEmbeddedAssets_MatchSource(t *testing.T) {
 		// templates — the canonical repo copies MAY legitimately diverge.
 		if strings.HasPrefix(relPath, "opencode/uf/packs/") &&
 			strings.HasSuffix(relPath, "-custom.md") {
+			continue
+		}
+		if projectOwnedPolicyMirrors[relPath] {
 			continue
 		}
 
@@ -1542,15 +1562,26 @@ func TestPluginPackageInputs_ExactVersionsAndLockIntegrity(t *testing.T) {
 
 	expectedRuntime := map[string]string{
 		"@opencode-ai/plugin": "1.19.0",
-		"zod":                 "4.1.8",
+		"zod":                 "4.6.6",
 	}
 	expectedDevelopment := map[string]string{
 		"@vitest/coverage-v8": "5.0.3",
 		"vitest":              "5.0.3",
+		"yaml":                "2.9.1",
+	}
+	// Direct-package licenses: the pinned toolchain is MIT; yaml (the
+	// instruction linter's frontmatter parser) is ISC.
+	directPackageLicenses := map[string]string{
+		"@opencode-ai/plugin": "MIT",
+		"@vitest/coverage-v8": "MIT",
+		"vitest":              "MIT",
+		"yaml":                "ISC",
+		"zod":                 "MIT",
 	}
 	expectedOverrides := map[string]string{
-		"toml": "4.2.0",
+		"toml": "5.0.1",
 		"uuid": "13.0.1",
+		"zod":  "4.6.6",
 	}
 	expectedEngines := map[string]string{
 		"node": "^22.22.2 || ^24.15.0 || >=26.0.0",
@@ -1608,10 +1639,14 @@ func TestPluginPackageInputs_ExactVersionsAndLockIntegrity(t *testing.T) {
 	assertStringMap(t, "locked development dependencies", lockRoot.DevDependencies, expectedDevelopment)
 
 	for name, version := range expectedRuntime {
-		assertLockedDirectPackage(t, lock.Packages, name, version, false)
+		assertLockedDirectPackage(t, lock.Packages, name, version, directPackageLicenses[name], false)
 	}
+	// yaml is a direct devDependency, but npm records it without the
+	// dev-only flag: effect (a runtime dependency of @opencode-ai/plugin)
+	// also requires yaml, so the lockfile entry serves both trees.
 	for name, version := range expectedDevelopment {
-		assertLockedDirectPackage(t, lock.Packages, name, version, true)
+		wantDevelopment := name != "yaml"
+		assertLockedDirectPackage(t, lock.Packages, name, version, directPackageLicenses[name], wantDevelopment)
 	}
 	for path, entry := range lock.Packages {
 		if path == "" || entry.Resolved == "" {
@@ -1621,16 +1656,18 @@ func TestPluginPackageInputs_ExactVersionsAndLockIntegrity(t *testing.T) {
 			t.Errorf("locked package %s integrity = %q, want sha512 integrity", path, entry.Integrity)
 		}
 	}
-	assertLockedSecurityOverride(t, lock.Packages, "toml", "4.2.0",
-		"sha512-TvAJjbHZlYmI323+srtqHQFyJsoWy6mI09ppkuj9+iRsqsVKG9fvTcOP7FHF2UCb0QSYtjEavffrKzdd0XgClg==")
+	assertLockedSecurityOverride(t, lock.Packages, "toml", "5.0.1",
+		"sha512-EqYNA/YvUNndrA2B3O2ojzLQoTQrBxeZ9UIjQwk8t10oe6n7dwclBwd9IdZQTOKwe6vWX+AXtl6IntXRbepdxQ==")
 	assertLockedSecurityOverride(t, lock.Packages, "uuid", "13.0.1",
 		"sha512-9ezox2roIft6ExBVTVqibSd5dc5/47Sw/uY6b4SjQUT2TzQ0tltNquWA46y4xPQmdZYqvnio22SgWd41M86+jw==")
+	assertLockedSecurityOverride(t, lock.Packages, "zod", "4.6.6",
+		"sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==")
 }
 
 func assertLockedDirectPackage(
 	t *testing.T,
 	packages map[string]packageLockEntry,
-	name, version string,
+	name, version, license string,
 	wantDevelopment bool,
 ) {
 	t.Helper()
@@ -1643,8 +1680,8 @@ func assertLockedDirectPackage(
 	if locked.Version != version {
 		t.Errorf("locked %s version = %q, want %q", name, locked.Version, version)
 	}
-	if locked.License != "MIT" {
-		t.Errorf("locked %s license = %q, want MIT", name, locked.License)
+	if locked.License != license {
+		t.Errorf("locked %s license = %q, want %s", name, locked.License, license)
 	}
 	if locked.Dev != wantDevelopment {
 		t.Errorf("locked %s dev = %t, want %t", name, locked.Dev, wantDevelopment)
@@ -1711,14 +1748,16 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 	expectedPackages := map[string]struct {
 		version string
 		project string
+		license string
 	}{
-		"@opencode-ai/plugin": {version: "1.19.0", project: "OpenCode"},
-		"zod":                 {version: "4.1.8", project: "Zod"},
-		"vitest":              {version: "5.0.3", project: "Vitest"},
-		"@vitest/coverage-v8": {version: "5.0.3", project: "Vitest"},
+		"@opencode-ai/plugin": {version: "1.19.0", project: "OpenCode", license: "MIT"},
+		"zod":                 {version: "4.6.6", project: "Zod", license: "MIT"},
+		"vitest":              {version: "5.0.3", project: "Vitest", license: "MIT"},
+		"@vitest/coverage-v8": {version: "5.0.3", project: "Vitest", license: "MIT"},
+		"yaml":                {version: "2.9.1", project: "yaml", license: "ISC"},
 	}
-	if provenance.VerifiedAt != "2026-10-19" {
-		t.Errorf("provenance verification date = %q, want 2026-10-19", provenance.VerifiedAt)
+	if provenance.VerifiedAt != "2026-11-06" {
+		t.Errorf("provenance verification date = %q, want 2026-11-06", provenance.VerifiedAt)
 	}
 	if len(provenance.Packages) != len(expectedPackages) {
 		t.Errorf("provenance has %d packages, want %d", len(provenance.Packages), len(expectedPackages))
@@ -1729,8 +1768,8 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 			t.Errorf("provenance is missing %s", name)
 			continue
 		}
-		if entry.License != "MIT" {
-			t.Errorf("%s provenance license = %q, want MIT", name, entry.License)
+		if entry.License != expected.license {
+			t.Errorf("%s provenance license = %q, want %s", name, entry.License, expected.license)
 		}
 		if entry.MaintainedBy != expected.project {
 			t.Errorf("%s maintained_by = %q, want %q", name, entry.MaintainedBy, expected.project)
@@ -1749,10 +1788,10 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 
 	expectedOverrides := map[string]overrideProvenance{
 		"toml": {
-			Version:      "4.2.0",
+			Version:      "5.0.1",
 			License:      "MIT",
-			GitHead:      "6d42b7e4fa693f8e6fb025d419b10b38107e83e2",
-			Integrity:    "sha512-TvAJjbHZlYmI323+srtqHQFyJsoWy6mI09ppkuj9+iRsqsVKG9fvTcOP7FHF2UCb0QSYtjEavffrKzdd0XgClg==",
+			GitHead:      "9ebfa698682500bbd30ce28e612ecc0208d9f70e",
+			Integrity:    "sha512-EqYNA/YvUNndrA2B3O2ojzLQoTQrBxeZ9UIjQwk8t10oe6n7dwclBwd9IdZQTOKwe6vWX+AXtl6IntXRbepdxQ==",
 			MaintainedBy: "toml-node",
 			ProjectURL:   "https://github.com/BinaryMuse/toml-node",
 		},
@@ -1763,6 +1802,14 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 			Integrity:    "sha512-9ezox2roIft6ExBVTVqibSd5dc5/47Sw/uY6b4SjQUT2TzQ0tltNquWA46y4xPQmdZYqvnio22SgWd41M86+jw==",
 			MaintainedBy: "uuidjs",
 			ProjectURL:   "https://github.com/uuidjs/uuid",
+		},
+		"zod": {
+			Version:      "4.6.6",
+			License:      "MIT",
+			GitHead:      "284243fb0d6532665afdc9239188773bb624f73c",
+			Integrity:    "sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==",
+			MaintainedBy: "Zod",
+			ProjectURL:   "https://github.com/colinhacks/zod",
 		},
 	}
 	if len(provenance.SecurityOverrides) != len(expectedOverrides) {
@@ -2198,6 +2245,9 @@ func TestSCFR001_CanonicalAssetSurfaceMatchesMirrors(t *testing.T) {
 			if got := mapAssetToSource(asset.asset); got != asset.source {
 				t.Fatalf("mapAssetToSource(%q) = %q, want %q", asset.asset, got, asset.source)
 			}
+			if projectOwnedPolicyMirrors[asset.asset] {
+				return // repository copy may extend the canonical default
+			}
 			mirror, err := assetContent(asset.asset)
 			if err != nil {
 				t.Fatalf("read embedded asset: %v", err)
@@ -2210,6 +2260,101 @@ func TestSCFR001_CanonicalAssetSurfaceMatchesMirrors(t *testing.T) {
 				t.Errorf("embedded asset %q drifted from %q", asset.asset, asset.source)
 			}
 		})
+	}
+}
+
+// TestPreflightYaml_RepositoryManifestExtendsCanonical verifies that the
+// repository's .uf/preflight.yaml — a project-owned policy mirror —
+// extends the canonical embedded template: every canonical check is
+// preserved verbatim (name, run, args, requires, paths, gate, timeout)
+// and in canonical order, and every repository-added check has an
+// executable run target and a valid gate. It replaces the byte-identity
+// exemption for uf/preflight.yaml, which legitimately diverges from the
+// embedded asset to declare the instruction-lint check.
+func TestPreflightYaml_RepositoryManifestExtendsCanonical(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Skip("project root not found; skipping preflight extends-canonical check")
+	}
+
+	type preflightCheck struct {
+		Name           string   `yaml:"name"`
+		Run            string   `yaml:"run"`
+		Args           []string `yaml:"args"`
+		Requires       []string `yaml:"requires"`
+		Paths          []string `yaml:"paths"`
+		Gate           string   `yaml:"gate"`
+		TimeoutSeconds int      `yaml:"timeout_seconds"`
+	}
+	type preflightDoc struct {
+		Version int              `yaml:"version"`
+		Checks  []preflightCheck `yaml:"checks"`
+	}
+
+	canonicalContent, err := assetContent("uf/preflight.yaml")
+	if err != nil {
+		t.Fatalf("read canonical preflight asset: %v", err)
+	}
+	repositoryContent, err := os.ReadFile(filepath.Join(root, ".uf", "preflight.yaml"))
+	if err != nil {
+		t.Fatalf("read repository preflight policy: %v", err)
+	}
+
+	var canonical, repository preflightDoc
+	if err := yaml.Unmarshal(canonicalContent, &canonical); err != nil {
+		t.Fatalf("parse canonical preflight asset: %v", err)
+	}
+	if err := yaml.Unmarshal(repositoryContent, &repository); err != nil {
+		t.Fatalf("parse repository preflight policy: %v", err)
+	}
+
+	canonicalNames := make(map[string]bool, len(canonical.Checks))
+	for _, check := range canonical.Checks {
+		canonicalNames[check.Name] = true
+	}
+	byName := make(map[string]preflightCheck, len(repository.Checks))
+	positions := make(map[string]int, len(repository.Checks))
+	for i, check := range repository.Checks {
+		byName[check.Name] = check
+		positions[check.Name] = i
+	}
+
+	// Every canonical check is preserved verbatim and in order.
+	lastPosition := -1
+	for _, want := range canonical.Checks {
+		got, ok := byName[want.Name]
+		if !ok {
+			t.Errorf("repository preflight drops canonical check %q", want.Name)
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("repository preflight modifies canonical check %q: got %+v, want %+v", want.Name, got, want)
+		}
+		if positions[want.Name] <= lastPosition {
+			t.Errorf("canonical check %q is out of order in the repository policy", want.Name)
+			continue
+		}
+		lastPosition = positions[want.Name]
+	}
+
+	// Repository-added checks must have an executable run target and a
+	// valid gate.
+	for _, check := range repository.Checks {
+		if canonicalNames[check.Name] {
+			continue
+		}
+		run := filepath.Join(root, filepath.FromSlash(check.Run))
+		info, err := os.Stat(run)
+		if err != nil {
+			t.Errorf("repository check %q run target %q: %v", check.Name, check.Run, err)
+			continue
+		}
+		if info.Mode()&0o111 == 0 {
+			t.Errorf("repository check %q run target %q is not executable", check.Name, check.Run)
+		}
+		if check.Gate != "" && check.Gate != "required" && check.Gate != "advisory" {
+			t.Errorf("repository check %q gate = %q, want required or advisory", check.Name, check.Gate)
+		}
 	}
 }
 
@@ -4737,6 +4882,9 @@ var knownNonEmbeddedFiles = map[string]bool{
 	// and are registered in expectedAssetPaths)
 	".opencode/uf/packs/determinism.md":           true,
 	".opencode/skills/determinism-first/SKILL.md": true,
+	// Meta-prompt reviewer — repo-local persona that depends on the
+	// repo-local instruction linter and determinism pack
+	".opencode/agents/divisor-linguist.md": true,
 }
 
 func TestCanonicalSources_AreEmbedded(t *testing.T) {

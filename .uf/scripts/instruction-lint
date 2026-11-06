@@ -1,0 +1,35 @@
+#!/bin/sh
+# Pre-flight wrapper for the instruction linter (.uf/preflight.yaml).
+#
+# Lints the tree in the working directory (the checkout, or a merge-base
+# worktree during soft-gate baselines) with the primary checkout's
+# linter, so rules and node_modules resolution are identical for both
+# runs. Exit 1 means the linter reported errors; exit 2 means the
+# linter could not run (dependencies missing, runtime crash); warnings
+# never fail.
+#
+# The dependency checks run before node so a missing or partial
+# install exits 2 (could-not-run) instead of an ESM load failure,
+# which node reports as exit 1 and would masquerade as findings.
+set -eu
+root="${UF_PREFLIGHT_PROJECT_ROOT:-$PWD}"
+
+if [ ! -f "$root/.opencode/lib/instruction-lint.ts" ]; then
+  echo "instruction-lint: linter entry not found: $root/.opencode/lib/instruction-lint.ts" >&2
+  exit 2
+fi
+
+if [ ! -d "$root/.opencode/node_modules" ]; then
+  echo "instruction-lint: dependencies not installed - run: (cd .opencode && npm install)" >&2
+  exit 2
+fi
+
+for pkg in yaml zod; do
+  if [ ! -f "$root/.opencode/node_modules/$pkg/package.json" ]; then
+    echo "instruction-lint: dependencies not installed - run: (cd .opencode && npm install)" >&2
+    echo "instruction-lint: missing or incomplete package: .opencode/node_modules/$pkg" >&2
+    exit 2
+  fi
+done
+
+exec node "$root/.opencode/lib/instruction-lint.ts" --root "$PWD" "$@"

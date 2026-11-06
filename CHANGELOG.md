@@ -6,6 +6,29 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- instruction-lint: a deterministic linter for the instruction
+  prose that drives the agent ecosystem (agents, commands,
+  skills, convention packs, AGENTS.md): frontmatter shape,
+  slash-command / agent / skill / path references, pack rule
+  markers and RFC 2119 force, vague qualifiers in normative
+  sentences, file and load-set token budgets, and near-duplicate
+  paragraphs (IL-001..IL-050), every finding carrying its
+  Divisor review severity. Runs through the
+  `.uf/scripts/instruction-lint` wrapper (dependency checks
+  before node, exit 0/1/2 contract — 2 is could-not-run), the
+  `make lint-instructions` target, an advisory
+  `.uf/preflight.yaml` check, and the `divisor-linguist`
+  persona (linter evidence first, then DE and IQ tables), whose
+  bash allows only the wrapper, `git diff`, and `git status`
+  behind terminal metacharacter denies. `yaml` is declared as
+  an exact-pinned devDependency (previously a phantom
+  transitive import). Linter: 937 lines; tests: 483 + 160
+  lines. Instruction delta (DE-004): divisor-linguist.md +261
+  lines (~4.2k self tokens, ~13.4k loaded); AGENTS.md +7/-2
+  lines (lint-instructions command, `.uf/scripts/` structure
+  entry, yaml devDependency note); baseline findings unchanged
+  (1 error / 31 warnings / 23 info). (Spec:
+  openspec/changes/instruction-lint/)
 - preflight-declared-output: `uf_preflight_declared_checks` now
   returns `rendered_output`, one tool-rendered block per declared
   check that ran with output, whatever its status, so advisory
@@ -1231,6 +1254,20 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- instruction-lint-deps (#958): the newly tracked
+  `.opencode/package-lock.json` cleared its OSV-Scanner gate by
+  bumping the three vulnerable pins to their fixed versions:
+  `zod` 4.1.8 -> 4.6.6 (GHSA-mrhx-c7xc-m3w5, forced past
+  `@opencode-ai/plugin` 1.19.0's exact `zod` 4.1.8 pin via a
+  security override), `toml` override 4.2.0 -> 5.0.1
+  (GHSA-4qx8-w7c3-pj3p, GHSA-9j65-hcg3-gc64,
+  GHSA-9qmh-m7c6-f92p, GHSA-h895-cgqg-jf52), and transitive
+  dev `vite` 8.3.2 -> 8.3.6 (six GHSAs, fix floor 8.3.3).
+  Upstream provenance (git heads, tarball integrities)
+  recorded in plugin-package-provenance.json (verified
+  2026-11-06); scaffold mirrors, scaffold_test.go
+  expectations, and the AGENTS.md stack pin updated in
+  lockstep. `npm audit`: 0 vulnerabilities.
 - review-dispatch-consumer-bounds (#941): lesson proposals are now
   stored with their full text. `consolidate_dispatch` persists the
   proposals in the dispatch artifact as an optional
