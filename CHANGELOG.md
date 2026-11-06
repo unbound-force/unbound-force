@@ -1231,6 +1231,14 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- fix-pinact-gaze-pin: the Gaze reusable workflow pin in
+  `ci_local.yml` moved from the untagged commit `8bdfb59` to
+  the v2.3.0 tag commit `8031d419` with a `# v2.3.0` version
+  comment, restoring the `Standardized CI / Verify action
+  versions` (pinact) check; the referenced workflow file is
+  byte-identical between the two SHAs so behavior is
+  unchanged; rollback is the previous SHA.
+  (Spec: openspec/changes/fix-pinact-gaze-pin/, Fixes: #961)
 - review-dispatch-consumer-bounds (#941): lesson proposals are now
   stored with their full text. `consolidate_dispatch` persists the
   proposals in the dispatch artifact as an optional
