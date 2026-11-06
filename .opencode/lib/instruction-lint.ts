@@ -14,7 +14,6 @@
 //   <!-- instruction-lint-disable-next-line IL-023 -->
 //   <!-- instruction-lint-disable IL-041 -->   (whole file)
 
-import { execFileSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -24,6 +23,16 @@ import { fileURLToPath } from "node:url"
 // .opencode/node_modules.
 import { parseDocument } from "yaml"
 import { z } from "zod"
+// The cli-common import uses the explicit .ts specifier: this module
+// runs under plain node (type stripping), which does not remap .js
+// specifiers to .ts files the way the vite/vitest resolver does.
+// runMain is deliberately not imported: the entry block below compares
+// realpath(process.argv[1]) against this module because import.meta.main
+// is undefined on runtimes older than Node 24.2.
+import { findRoot, git, spawnDetail, type CliIO } from "./cli-common.ts"
+
+export { findRoot } from "./cli-common.ts"
+export type { CliIO } from "./cli-common.ts"
 
 /** Linter finding severity: errors fail the run, warnings only with --strict. */
 export type Severity = "error" | "warning" | "info"
@@ -899,9 +908,6 @@ export interface BaseTree {
   paths: Set<string>
 }
 
-const git = (root: string, args: string[], input?: string): Buffer =>
-  execFileSync("git", args, { cwd: root, input, maxBuffer: 256 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"] })
-
 // Read the instruction artifacts at merge-base(ref, HEAD), so a base
 // that moved ahead of the branch does not count its own changes.
 export function readBaseTree(root: string, ref: string): BaseTree {
@@ -969,13 +975,6 @@ const signed = (n: number): string => (n > 0 ? `+${n}` : String(n))
 // CLI
 // ---------------------------------------------------------------------
 
-/** Process seams the CLI reads and writes through (injectable for tests). */
-export interface CliIO {
-  cwd: string
-  out: (s: string) => void
-  err: (s: string) => void
-}
-
 const USAGE = `usage: instruction-lint [--root DIR] [--config FILE] [--only PATH]... [--json] [--strict] [--all] [--report] [--base REF] [--rules]
 
   --root DIR     repository root (default: nearest ancestor containing .opencode/)
@@ -991,17 +990,6 @@ const USAGE = `usage: instruction-lint [--root DIR] [--config FILE] [--only PATH
   --base REF     also report line, token, and load-set deltas for instruction files
                  changed since merge-base(REF, HEAD) (DE-004 evidence)
   --rules        list rule IDs and exit`
-
-/** Find the nearest ancestor of `start` containing a `.opencode/` directory. */
-export function findRoot(start: string): string | null {
-  let dir = resolve(start)
-  for (;;) {
-    if (isDir(join(dir, ".opencode"))) return dir
-    const parent = resolve(dir, "..")
-    if (parent === dir) return null
-    dir = parent
-  }
-}
 
 /**
  * Escape C0 and C1 control characters, keeping tab and newline. Without
@@ -1155,7 +1143,7 @@ export function main(argv: string[], io: CliIO): number {
     try {
       tree = readBaseTree(root, baseRef)
     } catch (e) {
-      const detail = (e as { stderr?: Buffer }).stderr?.toString("utf8").trim() || (e as Error).message
+      const detail = spawnDetail(e)
       io.err(`cannot read base ${baseRef}: ${detail}`)
       return 2
     }

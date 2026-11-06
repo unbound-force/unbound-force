@@ -69,6 +69,7 @@ describe("instruction-lint pre-flight check", () => {
     await writeFile(join(dir, ".uf", "preflight.yaml"), JSON.stringify({ version: 1, checks: [check] }))
     await copyFile(repo(check.run), join(dir, check.run))
     await copyFile(repo(".opencode/lib/instruction-lint.ts"), join(dir, ".opencode", "lib", "instruction-lint.ts"))
+    await copyFile(repo(".opencode/lib/cli-common.ts"), join(dir, ".opencode", "lib", "cli-common.ts"))
     await symlink(repo(".opencode/node_modules"), join(dir, ".opencode", "node_modules"))
     const agent = join(dir, ".opencode", "agents", "a.md")
 
@@ -208,6 +209,7 @@ describe("instruction-lint pre-flight check", () => {
     await mkdir(join(primary, ".opencode", "lib"), { recursive: true })
     await mkdir(join(primary, ".opencode", "agents"), { recursive: true })
     await copyFile(repo(".opencode/lib/instruction-lint.ts"), join(primary, ".opencode", "lib", "instruction-lint.ts"))
+    await copyFile(repo(".opencode/lib/cli-common.ts"), join(primary, ".opencode", "lib", "cli-common.ts"))
     await symlink(repo(".opencode/node_modules"), join(primary, ".opencode", "node_modules"))
     // The primary checkout is dirty and the worktree clean: exit 0 with
     // the worktree's file count proves the working directory was
