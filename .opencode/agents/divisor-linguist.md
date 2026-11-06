@@ -8,7 +8,14 @@ permission:
   bash:
     "*": "deny"
     "node .opencode/lib/instruction-lint.ts*": "allow"
+    # git diff reads the working tree for the review scope; the narrow
+    # denies after the allow block its write/exec escape hatches (the
+    # last matching rule wins): --output writes files, difftool
+    # --extcmd executes commands, > redirects output into a file.
     "git diff*": "allow"
+    "git diff --output*": "deny"
+    "git difftool*": "deny"
+    "git diff *>*": "deny"
     "git status*": "allow"
 ---
 
