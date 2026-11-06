@@ -16,10 +16,12 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, resolve, sep } from "node:path"
-// `yaml` is not a declared dependency: the scaffold tests pin the plugin
-// package to exactly two runtime dependencies. It is installed
-// transitively (via @opencode-ai/plugin -> effect, and vitest -> vite).
+// `yaml` and `zod` are declared in .opencode/package.json (zod as a
+// runtime dependency, yaml as a development dependency: the linter only
+// runs where devDependencies are installed). Both resolve from
+// .opencode/node_modules.
 import { parseDocument } from "yaml"
+import { z } from "zod"
 
 export type Severity = "error" | "warning" | "info"
 export type ArtifactKind = "agent" | "command" | "skill" | "pack" | "context"
@@ -83,6 +85,20 @@ export const DEFAULT_OPTIONS: LintOptions = {
   disable: [],
   ignorePaths: [],
 }
+
+// Config files are untrusted input: validate their shape before use so
+// a string "disable" cannot degrade rule filtering to substring
+// matches and out-of-range numbers cannot silently skew the checks.
+const LintOptionsSchema = z
+  .object({
+    maxFileTokens: z.number().int().positive(),
+    maxLoadTokens: z.number().int().positive(),
+    duplicateThreshold: z.number().min(0).max(1),
+    duplicateMinWords: z.number().int().positive(),
+    disable: z.array(z.string().regex(/^IL-\d{3}$/)),
+    ignorePaths: z.array(z.string()),
+  })
+  .partial()
 
 // Built-in opencode slash commands and subagents that resolve without
 // a file in this repository.
@@ -484,14 +500,33 @@ function checkPackRules(packs: Artifact[], emit: Emit): Set<string> {
 function checkRuleIdRefs(all: Artifact[], defined: Set<string>, emit: Emit): void {
   const prefixes = new Set([...defined].map((id) => id.split("-")[0]))
   if (prefixes.size === 0) return
+  // Prefix -> packs defining it. Spec workflows reuse pack-like ID
+  // prefixes (SC-001, FR-001), so outside packs an undefined ID is only
+  // stale when its line names the owning pack file; unqualified
+  // references in agents, skills, and AGENTS.md are usually spec IDs.
+  const owners = new Map<string, Set<string>>()
+  for (const a of all) {
+    if (a.kind !== "pack") continue
+    for (const r of parsePackRules(a)) {
+      const set = owners.get(r.id.split("-")[0]) ?? new Set<string>()
+      set.add(a.name)
+      owners.set(r.id.split("-")[0], set)
+    }
+  }
   for (const a of all) {
     if (a.kind === "command") continue // command templates use speckit IDs (FR-001, SC-001)
     for (let i = a.bodyStart; i < a.lines.length; i++) {
       if (a.fenced[i]) continue
       for (const m of a.lines[i].matchAll(/\b([A-Z]{2,5})-(\d{3})\b/g)) {
-        if (prefixes.has(m[1]) && !defined.has(m[0])) {
-          emit("IL-015", a, i + 1, `${m[0]} is not defined in any pack`)
+        if (!prefixes.has(m[1]) || defined.has(m[0])) continue
+        if (a.kind !== "pack") {
+          const line = a.lines[i]
+          const named = [...(owners.get(m[1]) ?? [])].some(
+            (p) => line.includes(`${p}.md`) || line.includes(`packs/${p}`),
+          )
+          if (!named) continue
         }
+        emit("IL-015", a, i + 1, `${m[0]} is not defined in any pack`)
       }
     }
   }
@@ -564,9 +599,32 @@ function checkDuplicates(all: Artifact[], opts: LintOptions, emit: Emit): void {
   // one finding per distinct set of files sharing copied text.
   const parent = paras.map((_, i) => i)
   const find = (x: number): number => (parent[x] === x ? x : (parent[x] = find(parent[x])))
+  // Exact duplicates (identical shingle sets) are unioned in O(n) so
+  // verbatim copies stay clusterable even when their shared shingles'
+  // posting lists exceed the cap below.
+  const exactFirst = new Map<string, number>()
+  paras.forEach((p, i) => {
+    const key = [...p.sh].sort().join("\u0000")
+    const first = exactFirst.get(key)
+    if (first === undefined) exactFirst.set(key, i)
+    else if (paras[first].a !== p.a) parent[find(i)] = find(first)
+  })
+  // Shingles shared by more than MAX_POSTING paragraphs are boilerplate
+  // (stop-word-like): they carry no similarity signal but dominate the
+  // candidate walk with quadratic iteration. Skip them at candidate
+  // generation; verification below still scores every shingle, so the
+  // cap only changes which pairs are verified, never how they score.
+  const MAX_POSTING = 64
   paras.forEach((p, i) => {
     const cand = new Set<number>()
-    for (const s of p.sh) for (const j of index.get(s) ?? []) if (j > i && paras[j].a !== p.a) cand.add(j)
+    for (const s of p.sh) {
+      const list = index.get(s)
+      if (!list || list.length > MAX_POSTING) continue
+      for (let k = 0; k < list.length; k++) {
+        const j = list[k]
+        if (j > i && paras[j].a !== p.a) cand.add(j)
+      }
+    }
     for (const j of cand) {
       const q = paras[j]
       let inter = 0
@@ -710,7 +768,7 @@ export function main(argv: string[], io: CliIO): number {
   const flags = new Set<string>()
   let root: string | null = null
   let config: string | null = null
-  const only = new Set<string>()
+  const onlyRaw = new Set<string>()
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === "--root" || a === "--config" || a === "--only") {
@@ -721,7 +779,7 @@ export function main(argv: string[], io: CliIO): number {
       }
       if (a === "--root") root = resolve(io.cwd, v)
       else if (a === "--config") config = resolve(io.cwd, v)
-      else for (const p of v.split(",")) if (p.trim()) only.add(p.trim().replace(/^\.\//, ""))
+      else for (const p of v.split(",")) if (p.trim()) onlyRaw.add(p.trim())
     } else if (["--json", "--strict", "--all", "--report", "--rules", "--help"].includes(a)) {
       flags.add(a)
     } else {
@@ -742,19 +800,38 @@ export function main(argv: string[], io: CliIO): number {
     io.err("no .opencode/ directory found; pass --root")
     return 2
   }
+  // Normalize --only values against the resolved root so absolute
+  // paths, parent-relative segments, and Windows separators still match
+  // the repo-relative artifact paths.
+  const only = new Set<string>()
+  for (const p of onlyRaw) only.add(toPosix(relative(root, resolve(io.cwd, p.replace(/\\/g, "/")))))
   let options: Partial<LintOptions> = {}
   const cfg = config ?? join(root, ".opencode", "instruction-lint.json")
   if (config || existsSync(cfg)) {
+    let raw: unknown
     try {
-      options = JSON.parse(readFileSync(cfg, "utf8")) as Partial<LintOptions>
+      raw = JSON.parse(readFileSync(cfg, "utf8"))
     } catch (e) {
       io.err(`cannot read config ${cfg}: ${(e as Error).message}`)
       return 2
     }
+    const parsed = LintOptionsSchema.safeParse(raw)
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")
+      io.err(`invalid config ${cfg}: ${issues}`)
+      return 2
+    }
+    options = parsed.data
   }
 
-  const result = lint(root, discoverArtifacts(root), options)
-  if (only.size > 0) result.findings = result.findings.filter((f) => only.has(f.file))
+  const artifacts = discoverArtifacts(root)
+  const result = lint(root, artifacts, options)
+  if (only.size > 0) {
+    result.findings = result.findings.filter((f) => only.has(f.file))
+    for (const p of only) {
+      if (!artifacts.some((a) => a.file === p)) io.err(`--only ${p} matches no lintable file`)
+    }
+  }
   const count = (s: Severity): number => result.findings.filter((f) => f.severity === s).length
   const summary = { files: result.artifacts.length, errors: count("error"), warnings: count("warning"), info: count("info") }
 
@@ -782,9 +859,16 @@ export function main(argv: string[], io: CliIO): number {
 }
 
 if (import.meta.main) {
-  process.exitCode = main(process.argv.slice(2), {
-    cwd: process.cwd(),
-    out: (s) => process.stdout.write(s + "\n"),
-    err: (s) => process.stderr.write(s + "\n"),
-  })
+  try {
+    process.exitCode = main(process.argv.slice(2), {
+      cwd: process.cwd(),
+      out: (s) => process.stdout.write(s + "\n"),
+      err: (s) => process.stderr.write(s + "\n"),
+    })
+  } catch (e) {
+    // Crash paths (EACCES, EISDIR, ENOTDIR, ...) must not masquerade as
+    // lint errors: exit 2 is the could-not-run code.
+    process.stderr.write(`instruction-lint: could not run: ${(e as Error).message}\n`)
+    process.exitCode = 2
+  }
 }
