@@ -181,6 +181,52 @@ describe("parsing", () => {
     expect(classifyTest(".opencode/test/x.test.ts", 'it("round trip of other_tool")', "my_tool")).toBe("other")
   })
 
+  it("finds the registry only in code, ignoring comment and string decoys", () => {
+    const text = [
+      "// tool: { fake: createFake() }",
+      'const s = "tool: { in_string: createS() }"',
+      "export default {",
+      "  tool: {",
+      "    real: createReal(),",
+      "  },",
+      "}",
+    ].join("\n")
+    expect(parseRegistry(text)).toEqual([{ name: "real", factory: "createReal", line: 5 }])
+  })
+
+  it("closes const-arrow factories on balanced brackets, not a column-0 brace", () => {
+    const files = {
+      ".opencode/plugins/p/index.ts": [
+        'import { createA } from "../../lib/a.js"',
+        "export default { server() { return { tool: { a_tool: createA() } } } }",
+      ].join("\n"),
+      ".opencode/lib/a.ts": [
+        "export const createA = (x: string) =>",
+        "  tool({",
+        '    description: "a tool",',
+        "  })",
+        "const later = 1",
+      ].join("\n"),
+    }
+    expect(locateFactory(".opencode/plugins/p/index.ts", "createA", memReader(files))).toEqual({
+      file: ".opencode/lib/a.ts", line: 1, endLine: 4, description: "a tool",
+    })
+  })
+
+  it("locates factories and classifies tests for names containing $", () => {
+    const files = {
+      ".opencode/plugins/p/index.ts": [
+        'import { create$Tool } from "../../lib/d.js"',
+        "export default { server() { return { tool: { t: create$Tool() } } } }",
+      ].join("\n"),
+      ".opencode/lib/d.ts": 'export function create$Tool() {\n  return tool({ description: "dollar" })\n}\n',
+    }
+    expect(locateFactory(".opencode/plugins/p/index.ts", "create$Tool", memReader(files))).toEqual({
+      file: ".opencode/lib/d.ts", line: 1, endLine: 3, description: "dollar",
+    })
+    expect(classifyTest(".opencode/test/x.test.ts", 'it("round-trips through my$tool")', "my$tool")).toBe("round-trip")
+  })
+
   it("collects lib CLIs and .uf scripts with their first comment line", () => {
     const root = repo({
       ".opencode/lib/cli.ts": "// Does the thing.\nif (import.meta.main) {}\n",
