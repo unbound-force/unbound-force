@@ -8,9 +8,11 @@
 # linter could not run (dependencies missing, runtime crash); warnings
 # never fail.
 #
-# The dependency checks run before node so a missing or partial
-# install exits 2 (could-not-run) instead of an ESM load failure,
-# which node reports as exit 1 and would masquerade as findings.
+# The dependency and runtime checks run before the linter so a missing
+# or partial install, or a node without type stripping, exits 2
+# (could-not-run) instead of a load failure, which node reports as
+# exit 1 and would masquerade as findings. The runtime check probes the
+# capability the .ts entry needs rather than comparing versions.
 set -eu
 root="${UF_PREFLIGHT_PROJECT_ROOT:-$PWD}"
 
@@ -31,5 +33,10 @@ for pkg in yaml zod; do
     exit 2
   fi
 done
+
+if ! node -e 'process.exit(process.features.typescript ? 0 : 1)' >/dev/null 2>&1; then
+  echo "instruction-lint: node is missing or cannot run TypeScript - use a version matching engines in .opencode/package.json" >&2
+  exit 2
+fi
 
 exec node "$root/.opencode/lib/instruction-lint.ts" --root "$PWD" "$@"

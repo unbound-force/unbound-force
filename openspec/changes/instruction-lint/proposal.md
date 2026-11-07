@@ -46,21 +46,23 @@ and acceptance criteria after the fact, per review feedback.
 
 ## Impact
 
-- Code: `.opencode/lib/instruction-lint.ts` (937 lines),
-  `.uf/scripts/instruction-lint` (35 lines), Makefile,
+- Code: `.opencode/lib/instruction-lint.ts` (958 lines),
+  `.uf/scripts/instruction-lint` (42 lines), Makefile,
   `.uf/preflight.yaml`, `.uf/reviewer-capabilities.yaml`.
-- Tests: `.opencode/test/instruction-lint.test.ts` (483 lines),
-  `.opencode/test/instruction-lint-preflight.test.ts` (160
+- Tests: `.opencode/test/instruction-lint.test.ts` (514 lines),
+  `.opencode/test/instruction-lint-preflight.test.ts` (203
   lines); `internal/scaffold/scaffold_test.go` extends-canonical
   checks.
 - Instruction delta (DE-004): `divisor-linguist.md` is new, 261
-  lines (~4.2k self tokens, ~13.4k loaded); `AGENTS.md` grows
-  by 5 lines net (+7/-2: lint-instructions command,
-  `.uf/scripts/` structure entry, yaml devDependency note).
+  lines (~4.2k self tokens, ~13.5k loaded); `AGENTS.md` grows
+  by 9 lines net (+13/-4: lint-instructions command,
+  `.uf/scripts/` structure entry, agent count, yaml
+  devDependency note, zod pin, npm security overrides).
   Baseline lint findings are unchanged: 1 error, 31
   warnings, 23 info before and after.
 - Docs: CHANGELOG entry; AGENTS.md build-command and structure
-  updates; documentation issue filed for user-facing coverage.
+  updates; docs/heroes.md and docs/usage.md repo-local Linguist
+  notes; documentation issue filed for user-facing coverage.
 
 ## Constitution Alignment
 

@@ -93,6 +93,49 @@ describe("instruction-lint pre-flight check", () => {
     })
     expect(result.code).toBe(2)
     expect(result.stderr).toContain("dependencies not installed")
+    expect(result.stderr).toContain("npm install")
+  })
+
+  it("exits 2 when node is absent or cannot run TypeScript", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "uf-instruction-lint-nonode-"))
+    scratch.push(dir)
+    await mkdir(join(dir, ".opencode", "lib"), { recursive: true })
+    await mkdir(join(dir, "absent"))
+    await mkdir(join(dir, "old"))
+    await copyFile(repo(".opencode/lib/instruction-lint.ts"), join(dir, ".opencode", "lib", "instruction-lint.ts"))
+    await symlink(repo(".opencode/node_modules"), join(dir, ".opencode", "node_modules"))
+    await writeFile(join(dir, "old", "node"), "#!/bin/sh\nexit 1\n", { mode: 0o755 })
+    const { execFile } = await import("node:child_process")
+    for (const bin of ["absent", "old"]) {
+      const result = await new Promise<{ code: number | undefined; stderr: string }>((resolve) => {
+        execFile(
+          repo(".uf/scripts/instruction-lint"),
+          [],
+          { env: { ...process.env, PATH: join(dir, bin), UF_PREFLIGHT_PROJECT_ROOT: dir }, cwd: dir },
+          (err, _stdout, stderr) => resolve({ code: err?.code as number | undefined, stderr: String(stderr) }),
+        )
+      })
+      expect(result.code).toBe(2)
+      expect(result.stderr).toContain("cannot run TypeScript")
+    }
+  })
+
+  it("routes the make target and the persona through the wrapper", async () => {
+    const makefile = await readFile(repo("Makefile"), "utf8")
+    expect(makefile).toMatch(/^lint-instructions:.*\n\t\.uf\/scripts\/instruction-lint \$\(ARGS\)$/m)
+    const persona = await readFile(repo(".opencode/agents/divisor-linguist.md"), "utf8")
+    expect(persona).toContain(".uf/scripts/instruction-lint --json --only")
+    expect(makefile + persona).not.toMatch(/node\s+\S*instruction-lint\.ts/)
+  })
+
+  it("keeps the persona's metacharacter denies after every bash allow", async () => {
+    // The permission engine is last-match-wins: an allow after these
+    // denies would reopen redirection and chaining on its prefix.
+    const persona = await readFile(repo(".opencode/agents/divisor-linguist.md"), "utf8")
+    const frontmatter = persona.split(/^---$/m)[1] ?? ""
+    const bash = Object.entries((parse(frontmatter) as { permission: { bash: Record<string, string> } }).permission.bash)
+    const terminal = ["*>*", "*<*", "*|*", "*;*", "*&*", "*$(*", "*`*"]
+    expect(bash.slice(-terminal.length)).toEqual(terminal.map((pattern) => [pattern, "deny"]))
   })
 
   it("exits 2 when the linter entry is missing or a dependency package is incomplete", async () => {

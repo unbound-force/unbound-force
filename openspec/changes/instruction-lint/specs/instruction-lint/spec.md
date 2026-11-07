@@ -39,8 +39,9 @@ warnings under --strict), and 2 when it could not run. Every
 entry point that invokes the linter — the make target, the
 pre-flight check, and the divisor-linguist persona — MUST
 invoke it through the `.uf/scripts/instruction-lint` wrapper,
-which verifies the linter entry file and the yaml and zod
-packages before starting node.
+which verifies the linter entry file, the yaml and zod
+packages, and that node can run TypeScript before starting the
+linter. A run that finds no lintable files MUST exit 2.
 
 #### Scenario: Fresh checkout without dependencies
 
@@ -50,6 +51,19 @@ packages before starting node.
 - **THEN** it exits 2 with a remediation message naming the
   install command
 - **AND** never exits 1 from a module-resolution crash
+
+#### Scenario: Node runtime without type stripping
+
+- **GIVEN** a node binary that is absent or cannot run TypeScript
+- **WHEN** the wrapper runs
+- **THEN** it exits 2 naming the engines requirement
+- **AND** never exits 1 from a module-load crash
+
+#### Scenario: No lintable files
+
+- **GIVEN** a root with no lintable instruction files
+- **WHEN** the linter runs
+- **THEN** it exits 2 and reports no clean summary
 
 #### Scenario: Typo in --only
 

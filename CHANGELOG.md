@@ -22,11 +22,13 @@ Each entry follows the format: `- <change-name>: <summary>`.
   bash allows only the wrapper, `git diff`, and `git status`
   behind terminal metacharacter denies. `yaml` is declared as
   an exact-pinned devDependency (previously a phantom
-  transitive import). Linter: 937 lines; tests: 483 + 160
+  transitive import). Linter: 958 lines; tests: 514 + 203
   lines. Instruction delta (DE-004): divisor-linguist.md +261
-  lines (~4.2k self tokens, ~13.4k loaded); AGENTS.md +7/-2
-  lines (lint-instructions command, `.uf/scripts/` structure
-  entry, yaml devDependency note); baseline findings unchanged
+  lines (~4.2k self tokens, ~13.5k loaded); AGENTS.md +8/-3
+  lines here (lint-instructions command, `.uf/scripts/`
+  structure entry, agent count, yaml devDependency note), +13/-4
+  with the +5/-1 in the instruction-lint-deps entry;
+  baseline findings unchanged
   (1 error / 31 warnings / 23 info). (Spec:
   openspec/changes/instruction-lint/)
 - preflight-declared-output: `uf_preflight_declared_checks` now

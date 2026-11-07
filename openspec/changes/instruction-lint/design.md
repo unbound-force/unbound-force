@@ -67,7 +67,7 @@ Non-Goals:
 - The IL-050 posting-list cap trades recall for bounded runtime
   at scale; the cliff is narrow (near- but not byte-identical
   text replicated beyond 64 files) and pinned by test.
-- The persona's token load (~13.4k) consumes most of the 20k
+- The persona's token load (~13.5k) consumes most of the 20k
   budget; further persona growth needs pruning, not budget
   raises.
 - Advisory gating: instruction-lint findings do not fail
@@ -78,8 +78,7 @@ Non-Goals:
   deny set does not cover newline command separation or
   backslash-newline continuation (the permission engine's
   multi-line matching semantics are themselves unverified);
-  the wrapper's package checks verify manifest presence, not
+  and the wrapper's package checks verify manifest presence, not
   loadability, so a corrupted-but-manifested package still
-  exits 1; and node-binary absence exits 127 at the make and
-  persona lanes (the pre-flight lane guards it with
-  `requires: [node]`).
+  exits 1. A node that is absent or cannot run TypeScript exits
+  2 at the wrapper on every lane.

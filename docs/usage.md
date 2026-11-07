@@ -54,6 +54,11 @@ operations, intent drift). You receive an **APPROVE** or
 council auto-detects whether to review code or specs
 based on what changed on your branch.
 
+The unbound-force repository also runs a repo-local
+`divisor-linguist` reviewer for instruction prose, which
+`uf init` does not deliver. Run its linter on its own with
+`make lint-instructions`.
+
 ### Address Review Feedback
 
 After creating a PR and receiving reviewer feedback, use
