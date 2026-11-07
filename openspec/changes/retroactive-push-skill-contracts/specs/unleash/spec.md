@@ -157,18 +157,6 @@ or variant), the resulting error envelope MUST be classified
 non-retryable and MUST name the remediation; only transient
 causes MAY be classified retryable.
 
-Previously: the requirement (as restated by
-model-matrix-delegation) resolved a `skill` value without `/`
-against two skill roots — `.opencode/skills/<name>/SKILL.md`,
-then `.opencode/skill/<name>/SKILL.md` — with no repo-root
-file fallback, and carried a "Skill-root collision resolves to
-the first root" scenario exercising the two-root collision.
-The legacy `.opencode/skill/` root is retired (the
-`uf init` skill-directory migration moves it to
-`.opencode/skills/`), and the shipped resolver (#934) probes
-the single `.opencode/skills/` root, then falls back to a
-repo-root file, and rejects whitespace-bearing values.
-
 #### Scenario: Deterministic delegation carries a skill
 
 - **GIVEN** a per-task delegation classified
@@ -412,6 +400,18 @@ rejected
 - **WHEN** the error envelope is returned
 - **THEN** it is classified non-retryable and includes
   the remediation (configure or pass an explicit model)
+
+Previously: the requirement (as restated by
+model-matrix-delegation) resolved a `skill` value without `/`
+against two skill roots — `.opencode/skills/<name>/SKILL.md`,
+then `.opencode/skill/<name>/SKILL.md` — with no repo-root
+file fallback, and carried a "Skill-root collision resolves to
+the first root" scenario exercising the two-root collision.
+The legacy `.opencode/skill/` root is retired (the
+`uf init` skill-directory migration moves it to
+`.opencode/skills/`), and the shipped resolver (#934) probes
+the single `.opencode/skills/` root, then falls back to a
+repo-root file, and rejects whitespace-bearing values.
 
 ## REMOVED Requirements
 

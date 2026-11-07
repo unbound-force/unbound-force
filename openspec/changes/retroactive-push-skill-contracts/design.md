@@ -120,9 +120,10 @@ reported as a successful migration: the warning makes the
 residue visible without aborting the whole migration over one
 file.
 
-**Constitution alignment**: Knowledge Preservation — failures
-surface with their remediation instead of silently
-misreporting success.
+**Constitution alignment**: Observable Quality (III) — the
+structured `warning` field surfaces a partial failure in
+machine-parseable output with its remediation instead of
+silently misreporting success.
 
 ### D4: Always-plugin-tool force-push in rebase-pr
 
@@ -165,9 +166,12 @@ has no mechanical cross-change ordering guard, so the
 constraint must be recorded redundantly in every place a future
 archiver will look.
 
-**Constitution alignment**: Spec-Driven Development; Review
-Council Authority — the strategy is the accepted remedy from
-the round-2 findings.
+**Constitution alignment**: Autonomous Collaboration (I) — the
+retroactive record is the collaboration artifact: restatements,
+superseded-by annotations, and archive-order constraints are
+recorded where a future archiver will look, discoverable from
+the artifacts themselves without runtime coordination. The
+strategy is the accepted remedy from the round-2 findings.
 
 ## Risks / Trade-offs
 
