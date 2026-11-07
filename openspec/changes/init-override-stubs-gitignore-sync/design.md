@@ -27,7 +27,8 @@ from the repo's own `.gitignore`: six patterns
 scaffolded AGENTS.md sibling section (scaffold.go:1744)
 explicitly contradicts the block. And `.opencode/.gitignore`
 is tracked in this repo but never deployed, while `uf init`
-runs `npm ci` in `.opencode/` (plugin_activation.go:69), so
+runs a lockless `npm install` in `.opencode/`
+(plugin_activation.go:69), so
 fresh targets get an untracked `.opencode/node_modules/`.
 
 Two prior contracts record a never-scaffolded stance for the
@@ -216,20 +217,22 @@ re-running recreates it with the sentinel.
 Go's `//go:embed` excludes dotfiles from directory matches, so
 the assets tree cannot carry the file; it is written from a Go
 string constant by an ensure-style writer. Canonical content:
-`node_modules`, `bun.lock`, `.vitest/`, `coverage/` (the
-vitest v8 provider writes coverage to `.opencode/coverage/`
-by default; `.vitest/` is the cache). The writer is a
-sub-tool independent of the plugin-activation result (npm ci
-may fail or be skipped while `node_modules/` can still
-appear), runs in full and `--divisor` mode (both run plugin
+`node_modules`, `bun.lock`, `package-lock.json`, `.vitest/`,
+`coverage/` (the vitest v8 provider writes coverage to
+`.opencode/coverage/` by default; `.vitest/` is the cache;
+`package-lock.json` joined the canonical set through the
+stop-shipping-plugin-lock reconciliation). The writer is a
+sub-tool independent of the plugin-activation result (the
+install may fail or be skipped while `node_modules/` can
+still appear), runs in full and `--divisor` mode (both run plugin
 activation inside `.opencode/`), and is skipped under
 `--stealth` (the wholesale `.opencode/` exclusion already
 keeps the tree clean) and in `--overrides` mode. Merge
 semantics: file absent -> write the canonical lines; file
 present -> append only canonical lines missing from it,
 retaining every existing user line in place. The repo's
-canonical `.opencode/.gitignore` is updated to the four lines
-and pinned by the
+canonical `.opencode/.gitignore` is updated to the five
+canonical lines and pinned by the
 `TestPluginPackageInputs_GitignoreTracksCanonicalInputs`
 want-string (scaffold_test.go:1616); the now-redundant root
 `.opencode/.vitest/` and `coverage/` lines are dropped from

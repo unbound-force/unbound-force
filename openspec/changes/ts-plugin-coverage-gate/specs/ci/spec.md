@@ -10,11 +10,12 @@ The floor MUST sit near the recorded evidence baselines
 verification rounds, 95.18 percent measured 2026-10-22).
 
 The gate MUST be enforced by the `plugin-test` Make target
-(locked `npm ci` followed by `npx vitest run --coverage`), and
-Local CI MUST invoke that same target, so local and CI
-enforcement are identical. A threshold failure MUST produce a
-non-zero exit and name the metric, the measured value, and the
-configured threshold.
+(a lockless install through the pinned `PLUGIN_TEST_NPM` runner
+with lifecycle scripts disabled, followed by `npx vitest run
+--coverage`), and Local CI MUST invoke that same target, so
+local and CI enforcement are identical. A threshold failure
+MUST produce a non-zero exit and name the metric, the measured
+value, and the configured threshold.
 
 The branches threshold MUST remain at least 85 percent (the
 review-council-multi-model-fanout design D14 floor). The

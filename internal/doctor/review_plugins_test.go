@@ -1,6 +1,8 @@
 package doctor
 
 import (
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,41 +10,33 @@ import (
 )
 
 // reviewPluginManifestFixture mirrors the scaffolded .opencode/package.json
-// declared dependencies (design D13): two runtime deps and two dev deps.
+// declared dependencies (design D13): two runtime deps, no dev deps.
 const reviewPluginManifestFixture = `{
   "name": "unbound-force-opencode-plugins",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@opencode-ai/plugin": "1.4.10",
-    "zod": "4.1.8"
-  },
-  "devDependencies": {
-    "@vitest/coverage-v8": "5.0.3",
-    "vitest": "5.0.3"
+    "@opencode-ai/plugin": "1.19.0",
+    "zod": "4.6.6"
   }
 }`
 
-// reviewPluginLockFixture mirrors the package-lock.json root entry with
-// matching versions and lockfileVersion 3.
-const reviewPluginLockFixture = `{
-  "name": "unbound-force-opencode-plugins",
-  "lockfileVersion": 3,
-  "requires": true,
-  "packages": {
-    "": {
-      "name": "unbound-force-opencode-plugins",
-      "dependencies": {
-        "@opencode-ai/plugin": "1.4.10",
-        "zod": "4.1.8"
-      },
-      "devDependencies": {
-        "@vitest/coverage-v8": "5.0.3",
-        "vitest": "5.0.3"
-      }
-    }
-  }
-}`
+// reviewPluginInstalledVersions are the versions the fixture installs under
+// node_modules; they match reviewPluginManifestFixture's pins.
+var reviewPluginInstalledVersions = map[string]string{
+	"@opencode-ai/plugin": "1.19.0",
+	"zod":                 "4.6.6",
+}
+
+// writeInstalledPackages installs every review plugin package under
+// .opencode/node_modules at its pinned version.
+func writeInstalledPackages(t *testing.T, dir string) {
+	t.Helper()
+	for _, pkg := range reviewPluginPackages {
+		createFile(t, dir, filepath.Join(".opencode", "node_modules", pkg, "package.json"),
+			`{"version": "`+reviewPluginInstalledVersions[pkg]+`"}`)
+	}
+}
 
 // reviewPluginOpencodeJSONFixture mirrors the scaffolded opencode.json
 // plugin-array entries for the two review plugins.
@@ -66,16 +60,13 @@ const reviewDispatchSourceFixture = `export default async () => ({
 })`
 
 // writeReviewPluginScaffold creates a minimal, consistent review plugin
-// scaffold under dir: package.json, package-lock.json, node_modules for the
-// four declared packages, both plugin sources, and the opencode.json
+// scaffold under dir: package.json, node_modules for the
+// declared runtime packages, both plugin sources, and the opencode.json
 // registration entries.
 func writeReviewPluginScaffold(t *testing.T, dir string) {
 	t.Helper()
 	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
-	createFile(t, dir, ".opencode/package-lock.json", reviewPluginLockFixture)
-	for _, pkg := range reviewPluginPackages {
-		createFile(t, dir, filepath.Join(".opencode", "node_modules", pkg, "package.json"), "{}")
-	}
+	writeInstalledPackages(t, dir)
 	createFile(t, dir, ".opencode/plugins/invoke-agent/index.ts", invokeAgentSourceFixture)
 	createFile(t, dir, ".opencode/plugins/review-dispatch/index.ts", reviewDispatchSourceFixture)
 	createFile(t, dir, "opencode.json", reviewPluginOpencodeJSONFixture)
@@ -164,7 +155,12 @@ func TestCheckReviewPlugins_AllPass(t *testing.T) {
 	writeReviewPluginScaffold(t, dir)
 	opts := reviewPluginDoctorOpts(dir,
 		map[string]string{"node": "/usr/local/bin/node", "npm": "/usr/local/bin/npm"},
-		map[string]string{"node --version": "v22.15.0", "npm --version": "10.9.2"},
+		map[string]string{
+			"node --version": "v22.15.0",
+			"npm --version":  "10.9.2",
+			// Empty git ls-files output: the lock is untracked.
+			"git -C " + dir + " ls-files -- .opencode/package-lock.json": "",
+		},
 	)
 
 	group := checkReviewPlugins(opts)
@@ -175,7 +171,7 @@ func TestCheckReviewPlugins_AllPass(t *testing.T) {
 	for _, r := range group.Results {
 		byName[r.Name] = r
 	}
-	for _, name := range []string{"manifest-lock", "dependencies", "node version", "npm version", "registration", "plugin tools"} {
+	for _, name := range []string{"manifest-install", "tracked lock", "dependencies", "node version", "npm version", "registration", "plugin tools"} {
 		r, ok := byName[name]
 		if !ok {
 			t.Errorf("missing result %q in group", name)
@@ -193,14 +189,14 @@ func TestCheckReviewPlugins_AllPass(t *testing.T) {
 	}
 }
 
-func TestCheckManifestLockConsistency_Mismatch(t *testing.T) {
+func TestCheckManifestInstallConsistency_Mismatch(t *testing.T) {
 	dir := t.TempDir()
 	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
-	mismatchedLock := strings.Replace(reviewPluginLockFixture, `"zod": "4.1.8"`, `"zod": "4.2.0"`, 1)
-	createFile(t, dir, ".opencode/package-lock.json", mismatchedLock)
+	writeInstalledPackages(t, dir)
+	createFile(t, dir, ".opencode/node_modules/zod/package.json", `{"version": "4.2.0"}`)
 
 	opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
-	result := checkManifestLockConsistency(opts)
+	result := checkManifestInstallConsistency(opts)
 	if result.Severity != Fail {
 		t.Errorf("severity = %v, want Fail (hard version mismatch)", result.Severity)
 	}
@@ -209,24 +205,111 @@ func TestCheckManifestLockConsistency_Mismatch(t *testing.T) {
 	}
 }
 
-func TestCheckManifestLockConsistency_MissingLock(t *testing.T) {
+func TestCheckManifestInstallConsistency_NotInstalledPasses(t *testing.T) {
+	// Packages that are not installed are the dependencies check's
+	// concern; with no lock shipped there is nothing else to compare.
 	dir := t.TempDir()
 	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
 	opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
 
-	result := checkManifestLockConsistency(opts)
+	result := checkManifestInstallConsistency(opts)
+	if result.Severity != Pass {
+		t.Errorf("severity = %v, want Pass (message=%q)", result.Severity, result.Message)
+	}
+}
+
+func TestCheckManifestInstallConsistency_MissingManifest(t *testing.T) {
+	dir := t.TempDir()
+	opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
+
+	result := checkManifestInstallConsistency(opts)
 	if result.Severity != Warn {
-		t.Errorf("severity = %v, want Warn (repairable missing lock)", result.Severity)
+		t.Errorf("severity = %v, want Warn (repairable missing manifest)", result.Severity)
 	}
 	if result.InstallHint == "" {
-		t.Error("missing-lock result should carry a remediation hint")
+		t.Error("missing-manifest result should carry a remediation hint")
+	}
+}
+
+func TestCheckManifestInstallConsistency_MalformedManifest(t *testing.T) {
+	// A present-but-unparseable package.json must warn with a
+	// remediation hint rather than pass as a healthy manifest.
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/package.json", "not-json")
+
+	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: os.ReadFile})
+	if result.Severity != Warn {
+		t.Errorf("severity = %v, want Warn (repairable malformed manifest)", result.Severity)
+	}
+	if result.Message != "package.json malformed" {
+		t.Errorf("message = %q, want %q", result.Message, "package.json malformed")
+	}
+	if result.InstallHint == "" {
+		t.Error("malformed-manifest result should carry a remediation hint")
+	}
+}
+
+func TestCheckManifestInstallConsistency_MissingVersion(t *testing.T) {
+	// Valid JSON whose version key is absent must fail like a malformed
+	// install rather than pass silently.
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
+	writeInstalledPackages(t, dir)
+	createFile(t, dir, ".opencode/node_modules/zod/package.json", "{}")
+
+	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: os.ReadFile})
+	if result.Severity != Fail || !strings.Contains(result.Message, "zod") {
+		t.Errorf("result = %v %q, want Fail naming zod", result.Severity, result.Message)
+	}
+}
+
+func TestCheckManifestInstallConsistency_MalformedInstall(t *testing.T) {
+	// A present-but-unparseable installed package.json must fail
+	// like any other unreadable install rather than pass silently.
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
+	writeInstalledPackages(t, dir)
+	createFile(t, dir, ".opencode/node_modules/zod/package.json", "not-json")
+
+	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: os.ReadFile})
+	if result.Severity != Fail || !strings.Contains(result.Message, "zod") {
+		t.Errorf("result = %v %q, want Fail naming zod", result.Severity, result.Message)
+	}
+}
+
+func TestCheckManifestInstallConsistency_ReadErrorFails(t *testing.T) {
+	// A present-but-unreadable install (EACCES, EISDIR) must not pass
+	// silently as if the package were absent.
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
+	writeInstalledPackages(t, dir)
+	readFile := func(path string) ([]byte, error) {
+		if strings.Contains(path, filepath.Join("node_modules", "zod")) {
+			return nil, fs.ErrPermission
+		}
+		return os.ReadFile(path)
+	}
+
+	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: readFile})
+	if result.Severity != Fail || !strings.Contains(result.Message, "zod: installed package.json unreadable") {
+		t.Errorf("result = %v %q, want Fail naming unreadable zod", result.Severity, result.Message)
+	}
+}
+
+func TestCheckManifestInstallConsistency_Undeclared(t *testing.T) {
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/package.json", strings.Replace(reviewPluginManifestFixture, `"zod": "4.6.6"`, `"other": "1.0.0"`, 1))
+
+	result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: os.ReadFile})
+	if result.Severity != Fail || !strings.Contains(result.Message, "zod not declared") {
+		t.Errorf("result = %v %q, want Fail naming undeclared zod", result.Severity, result.Message)
 	}
 }
 
 func TestCheckReviewPluginDependencies_Missing(t *testing.T) {
 	dir := t.TempDir()
 	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
-	// Only one of the four packages is installed.
+	// Only one of the two runtime packages is installed.
 	createFile(t, dir, ".opencode/node_modules/zod/package.json", "{}")
 
 	opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
@@ -234,7 +317,10 @@ func TestCheckReviewPluginDependencies_Missing(t *testing.T) {
 	if result.Severity != Warn {
 		t.Errorf("severity = %v, want Warn", result.Severity)
 	}
-	for _, missing := range []string{"@opencode-ai/plugin", "vitest", "@vitest/coverage-v8"} {
+	if strings.Contains(result.Message, "vitest") {
+		t.Errorf("message %q must not require devDependencies the scaffold never installs", result.Message)
+	}
+	for _, missing := range []string{"@opencode-ai/plugin"} {
 		if !strings.Contains(result.Message, missing) {
 			t.Errorf("message %q should report missing %q", result.Message, missing)
 		}
@@ -270,6 +356,56 @@ func TestCheckReviewPluginRuntime_Boundaries(t *testing.T) {
 				t.Errorf("severity = %v, want %v (message=%q)", result.Severity, tt.wantSever, result.Message)
 			}
 		})
+	}
+}
+
+func TestCheckReviewPluginRuntime_NpmDevDependencies(t *testing.T) {
+	const withDev = `{"dependencies":{"zod":"4.6.6"},"devDependencies":{"vitest":"5.0.3"}}`
+	const withoutDev = `{"dependencies":{"zod":"4.6.6"}}`
+	tests := []struct {
+		name      string
+		manifest  string
+		version   string
+		wantSever Severity
+	}{
+		{name: "npm 10 with devDependencies warns", manifest: withDev, version: "10.9.9", wantSever: Warn},
+		{name: "npm 10 without devDependencies passes", manifest: withoutDev, version: "10.9.9", wantSever: Pass},
+		{name: "npm 10 with malformed manifest passes", manifest: "{not json", version: "10.9.9", wantSever: Pass},
+		{name: "npm 11 with devDependencies passes", manifest: withDev, version: "11.6.2", wantSever: Pass},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			opencodeDir := filepath.Join(dir, ".opencode")
+			if err := os.MkdirAll(opencodeDir, 0o755); err != nil {
+				t.Fatalf("create .opencode: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(opencodeDir, "package.json"), []byte(tt.manifest), 0o644); err != nil {
+				t.Fatalf("write manifest: %v", err)
+			}
+			opts := reviewPluginDoctorOpts(dir,
+				map[string]string{"npm": "/usr/local/bin/npm"},
+				map[string]string{"npm --version": tt.version},
+			)
+			result := checkReviewPluginRuntime(opts, "npm", false)
+			if result.Severity != tt.wantSever {
+				t.Fatalf("severity = %v, want %v (message=%q)", result.Severity, tt.wantSever, result.Message)
+			}
+			if tt.wantSever == Warn && !strings.Contains(result.InstallHint, "npm 11") {
+				t.Errorf("install hint %q should name npm 11", result.InstallHint)
+			}
+		})
+	}
+}
+
+func TestReviewPluginRemediation_NamesNpm11(t *testing.T) {
+	for name, hint := range map[string]string{
+		"runtime": reviewPluginRuntimeRemediation,
+		"install": reviewPluginInstallRemediation,
+	} {
+		if !strings.Contains(hint, "npm 11") {
+			t.Errorf("%s remediation %q must name npm 11: npm 10 crashes on targets with devDependencies", name, hint)
+		}
 	}
 }
 
@@ -376,14 +512,11 @@ func TestCheckPluginToolRegistration(t *testing.T) {
 
 func TestCheckReviewPlugins_RepairableVsBroken(t *testing.T) {
 	t.Run("repairable inactive", func(t *testing.T) {
-		// Manifest, lock, and node_modules are consistent, but the plugin
+		// Manifest and node_modules are consistent, but the plugin
 		// sources were never activated: recoverable partial.
 		dir := t.TempDir()
 		createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
-		createFile(t, dir, ".opencode/package-lock.json", reviewPluginLockFixture)
-		for _, pkg := range reviewPluginPackages {
-			createFile(t, dir, filepath.Join(".opencode", "node_modules", pkg, "package.json"), "{}")
-		}
+		writeInstalledPackages(t, dir)
 		opts := reviewPluginDoctorOpts(dir,
 			map[string]string{"node": "/usr/local/bin/node", "npm": "/usr/local/bin/npm"},
 			map[string]string{"node --version": "v22.0.0", "npm --version": "10.0.0"},
@@ -397,21 +530,114 @@ func TestCheckReviewPlugins_RepairableVsBroken(t *testing.T) {
 			t.Errorf("plugin tools severity = %v, want Warn (repairable)", r.Severity)
 		}
 		// Everything else that is repairable stays non-Fail.
-		if r := byName["manifest-lock"]; r.Severity == Fail {
-			t.Errorf("manifest-lock severity = Fail, want non-Fail in repairable state")
+		if r := byName["manifest-install"]; r.Severity == Fail {
+			t.Errorf("manifest-install severity = Fail, want non-Fail in repairable state")
 		}
 	})
 
-	t.Run("broken mismatched lock", func(t *testing.T) {
+	t.Run("broken mismatched install", func(t *testing.T) {
 		dir := t.TempDir()
 		createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)
-		brokenLock := strings.Replace(reviewPluginLockFixture, `"@opencode-ai/plugin": "1.4.10"`, `"@opencode-ai/plugin": "9.9.9"`, 1)
-		createFile(t, dir, ".opencode/package-lock.json", brokenLock)
+		writeInstalledPackages(t, dir)
+		createFile(t, dir, ".opencode/node_modules/@opencode-ai/plugin/package.json", `{"version": "9.9.9"}`)
 		opts := &Options{TargetDir: dir, ReadFile: os.ReadFile}
 		group := checkReviewPlugins(opts)
 		byName := resultMap(group)
-		if r := byName["manifest-lock"]; r.Severity != Fail {
-			t.Errorf("manifest-lock severity = %v, want Fail (broken)", r.Severity)
+		if r := byName["manifest-install"]; r.Severity != Fail {
+			t.Errorf("manifest-install severity = %v, want Fail (broken)", r.Severity)
+		}
+	})
+}
+
+func TestCheckTrackedPluginLock(t *testing.T) {
+	t.Run("warns when the lock is still tracked", func(t *testing.T) {
+		dir := t.TempDir()
+		opts := reviewPluginDoctorOpts(dir, nil,
+			map[string]string{
+				"git -C " + dir + " ls-files -- .opencode/package-lock.json": ".opencode/package-lock.json\n",
+			})
+		result := checkTrackedPluginLock(opts)
+		if result.Severity != Warn {
+			t.Errorf("severity = %v, want Warn (tracked lock)", result.Severity)
+		}
+		if !strings.Contains(result.Message, "still tracked") {
+			t.Errorf("message %q should say the lock is still tracked", result.Message)
+		}
+		if !strings.Contains(result.InstallHint, "git rm --cached") {
+			t.Errorf("install hint %q should name git rm --cached", result.InstallHint)
+		}
+	})
+
+	t.Run("passes when no lock is tracked", func(t *testing.T) {
+		dir := t.TempDir()
+		opts := reviewPluginDoctorOpts(dir, nil,
+			map[string]string{
+				"git -C " + dir + " ls-files -- .opencode/package-lock.json": "",
+			})
+		result := checkTrackedPluginLock(opts)
+		if result.Severity != Pass {
+			t.Errorf("severity = %v, want Pass (untracked)", result.Severity)
+		}
+	})
+
+	t.Run("passes outside a git repository", func(t *testing.T) {
+		dir := t.TempDir()
+		// git exits 128 with a fatal message outside a repository.
+		// ExecCmd returns the combined output, so the check can
+		// recognize the signature and pass instead of warning.
+		cmd := "git -C " + dir + " ls-files -- .opencode/package-lock.json"
+		opts := &Options{
+			TargetDir: dir,
+			ReadFile:  os.ReadFile,
+			ExecCmd: stubExecCmd(
+				map[string]string{cmd: "fatal: not a git repository (or any of the parent directories): .git\n"},
+				map[string]error{cmd: fmt.Errorf("exit status 128")},
+			),
+		}
+		result := checkTrackedPluginLock(opts)
+		if result.Severity != Pass {
+			t.Errorf("severity = %v, want Pass (git failed)", result.Severity)
+		}
+		// The message names the benign cause, distinguishing this
+		// skip from the "no tracked plugin lock" pass branch and
+		// from the Warn branch that real git failures take.
+		if !strings.Contains(result.Message, "not a git repository") {
+			t.Errorf("message %q should name the outside-repository skip", result.Message)
+		}
+	})
+
+	t.Run("warns when git itself fails", func(t *testing.T) {
+		dir := t.TempDir()
+		// A git failure without the not-a-repository signature
+		// (for example a corrupted checkout) must surface as a
+		// warning rather than silently pass, and carry the
+		// command output so the cause is observable.
+		cmd := "git -C " + dir + " ls-files -- .opencode/package-lock.json"
+		opts := &Options{
+			TargetDir: dir,
+			ReadFile:  os.ReadFile,
+			ExecCmd: stubExecCmd(
+				map[string]string{cmd: "fatal: dubious ownership in repository at '" + dir + "'\n"},
+				map[string]error{cmd: fmt.Errorf("exit status 128")},
+			),
+		}
+		result := checkTrackedPluginLock(opts)
+		if result.Severity != Warn {
+			t.Errorf("severity = %v, want Warn (git failure)", result.Severity)
+		}
+		if !strings.Contains(result.Message, "git ls-files failed") {
+			t.Errorf("message %q should name the git failure", result.Message)
+		}
+		if !strings.Contains(result.Message, "dubious ownership") {
+			t.Errorf("message %q should surface the git output", result.Message)
+		}
+	})
+
+	t.Run("passes without an ExecCmd", func(t *testing.T) {
+		opts := &Options{TargetDir: t.TempDir(), ReadFile: os.ReadFile}
+		result := checkTrackedPluginLock(opts)
+		if result.Severity != Pass {
+			t.Errorf("severity = %v, want Pass (not checked)", result.Severity)
 		}
 	})
 }

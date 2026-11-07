@@ -33,25 +33,30 @@ fix, and only when all hold: verified upstream immutable target commit SHA; exis
 enforced; documented rollback to the previous SHA; reproducible validation evidence; normal review
 and CI approval. Pins MUST NOT become mutable tags or other name-addressed refs. The exception is
 never satisfied by bundling manifest changes into an unrelated feature branch: undeclared changes
-to `package.json`, `package-lock.json`, or `go.mod` are gatekeeping violations even when the
+to `package.json` or `go.mod` are gatekeeping violations even when the
 declared spec work is clean. Reviewers always diff a proposal's declared impact list against the
 actual working-tree diff; spec review mode does not exempt dependency changes from scrutiny.
 
 ### Lockstep record sets
 
-A pin is a multi-record lockstep set: manifest plus lockfile; scaffold/embedded mirror copies
-(inherited by `uf init`); test constants and testdata baseline hashes; AGENTS.md Technology Stack;
-and the mandating spec requirement text. A bump that migrates manifest, tests, and docs but not the
+A pin is a multi-record lockstep set: manifest; scaffold/embedded mirror copies
+(inherited by `uf init`); the provenance records (plugin-package-provenance.json); test constants;
+AGENTS.md Technology Stack; and the mandating spec requirement text. The tracked lockfile left the
+set when stop-shipping-plugin-lock stopped shipping it. A bump that migrates manifest, tests, and
+docs but not the
 spec record archives a governance MUST contradicting the shipped pin — reconcile the spec
 requirement in the same change via a MODIFIED requirement or explicit supersession. Enumeration
-claims and upstream-verification lists derive from `git diff <lockfile>`: newly added transitive
+claims and upstream-verification lists derive from the throwaway lock the CI scan generates
+(`npx -y npm@11.6.2 install --package-lock-only`): newly added transitive
 packages plus major-version changes of already-present ones are the supply-chain delta, not just
-visible major bumps; license claims come from the lock's own license field so evidence cannot
-contradict the lockfile it certifies. The same lockstep rule governs value corrections inside a
+visible major bumps; license claims come from that generated lock's license field so evidence
+cannot contradict the records it certifies. The same lockstep rule governs value corrections
+inside a
 set (e.g., an engines value): enumerate every surface repeating the value — canonical manifest,
 scaffold mirror, README, AGENTS.md, CHANGELOG, in-flight spec delta text, value-pinning tests —
 grep the repo for the value string, diff every hit against the authoritative source (the
-lockfile's entry for the binding transitive) and every other hit, then land all corrections in
+manifest pin, cross-checked against the generated lock's entry for the binding transitive) and
+every other hit, then land all corrections in
 one lockstep commit staged by explicit path. Values have no independent pin: `MirrorsMatchCanonical`
 enforces only canonical/mirror byte parity, so the same wrong value in both files passes
 `make check` — value and assertion must land atomically.
@@ -80,9 +85,9 @@ requirement, giving contributors an unactionable signal.
 - CI `node-version: 22` resolves to v22.23.3 (in range, verified 2026-10-19); older Node sees
   EBADENGINE warnings, not hard failures.
 - The engines value requires an exact-value assertion in
-  `TestPluginPackageInputs_ExactVersionsAndLockIntegrity` (internal/scaffold), the same way
-  dependency versions are pinned; the lockfile root `packages[""]` may not record root engines —
-  verify lock impact with `npm install` plus a diff.
+  `TestPluginPackageInputs_ExactVersions` (internal/scaffold), the same way
+  dependency versions are pinned; no lockfile ships anymore (stop-shipping-plugin-lock),
+  so the floor is verified against the live runtime, not a lock.
 
 ### Workflow SHA discipline
 

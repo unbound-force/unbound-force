@@ -27,8 +27,17 @@ coverage-gate: coverage ## enforce scope-based coverage thresholds on changed pa
 
 ##@ Plugin Tests (TypeScript)
 
+# plugin-test installs through an exact-pinned npm 11: node 22's bundled
+# npm 10.9.9 crashes in Arborist ("Cannot read properties of null
+# (reading 'edgesOut')") building the lockless tree for the vitest 5
+# peer graph. uf init avoids the crash by shipping no devDependencies.
+# Twin of the npm pin in .github/workflows/ci_security.yml
+# (osv_plugin_transitive job); keep the two in sync.
+PLUGIN_TEST_NPM ?= npx -y npm@11.6.2
+
 plugin-test: ## run TypeScript plugin unit, integration, smoke, and coverage checks
-	cd .opencode && npm ci && npx vitest run --coverage
+	cd .opencode && $(PLUGIN_TEST_NPM) install --ignore-scripts --no-package-lock --no-audit --no-fund && npx vitest run --coverage
+	@test ! -e .opencode/package-lock.json || { echo 'package-lock.json must not exist after plugin-test'; exit 1; }
 
 ##@ CRAP Load Monitoring
 
