@@ -380,6 +380,7 @@ describe("cli", () => {
     const j = cli(["--json", "--root", root], "/")
     expect(j.code).toBe(1)
     const parsed = JSON.parse(j.out)
+    expect(parsed.root).toBe(root)
     expect(parsed.summary).toEqual({ files: 2, errors: 1, warnings: 0, info: 0 })
     expect(Object.keys(parsed.loadTokens).sort()).toEqual([".opencode/agents/a.md", ".opencode/commands/c.md"])
     expect(parsed.findings[0]).toMatchObject({
@@ -443,6 +444,20 @@ describe("cli", () => {
     expect(text).toContain("\\x1b[31m")
     expect(text).not.toContain("\u001b")
     expect(JSON.parse(cli(["--json"], root).out).findings[0].message).toContain("\u001b")
+  })
+
+  it("escapes control characters from config content on stderr", () => {
+    const root = repo({
+      ".opencode/agents/a.md": AGENT("Body."),
+      "syntax.json": "\u001b[31m",
+      "keys.json": '{ "\\u001b[31m": true }',
+    })
+    for (const config of ["syntax.json", "keys.json"]) {
+      const r = cli(["--config", config], root)
+      expect(r.code).toBe(2)
+      expect(r.err).toContain("\\x1b")
+      expect(r.err).not.toContain("\u001b")
+    }
   })
 
   it("reads options from the default and explicit config files", () => {

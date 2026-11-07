@@ -46,15 +46,15 @@ and acceptance criteria after the fact, per review feedback.
 
 ## Impact
 
-- Code: `.opencode/lib/instruction-lint.ts` (958 lines),
+- Code: `.opencode/lib/instruction-lint.ts` (983 lines),
   `.uf/scripts/instruction-lint` (42 lines), Makefile,
   `.uf/preflight.yaml`, `.uf/reviewer-capabilities.yaml`.
-- Tests: `.opencode/test/instruction-lint.test.ts` (514 lines),
-  `.opencode/test/instruction-lint-preflight.test.ts` (203
+- Tests: `.opencode/test/instruction-lint.test.ts` (529 lines),
+  `.opencode/test/instruction-lint-preflight.test.ts` (235
   lines); `internal/scaffold/scaffold_test.go` extends-canonical
   checks.
-- Instruction delta (DE-004): `divisor-linguist.md` is new, 261
-  lines (~4.2k self tokens, ~13.5k loaded); `AGENTS.md` grows
+- Instruction delta (DE-004): `divisor-linguist.md` is new, 262
+  lines (~4.2k self tokens, ~13.6k loaded); `AGENTS.md` grows
   by 9 lines net (+13/-4: lint-instructions command,
   `.uf/scripts/` structure entry, agent count, yaml
   devDependency note, zod pin, npm security overrides).

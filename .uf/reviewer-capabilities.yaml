@@ -39,6 +39,7 @@ reviewers:
     capability: review
     scopes:
       - documentation
+      - cli-ux
   - agent: divisor-envoy
     capability: content
     scopes: []

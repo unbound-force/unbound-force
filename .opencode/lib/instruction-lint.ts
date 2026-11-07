@@ -815,18 +815,67 @@ export function findRoot(start: string): string | null {
 }
 
 /**
- * CLI entry: parse `argv`, resolve the root, load the optional config,
- * lint, and print findings (or JSON / the token report). Returns the
- * process exit code: 0 clean, 1 findings (errors, or warnings with
- * --strict), 2 usage errors and could-not-run failures.
+ * Escape C0 and C1 control characters, keeping tab and newline. Without
+ * this an ANSI or OSC sequence committed in a lint input reaches the
+ * terminal and quoted pre-flight output.
+ *
+ * @param text - Text carrying file-derived content.
+ * @returns The text with each control character written as `\\xNN`.
  */
-// C0 and C1 control characters, keeping tab and newline. Without this an
-// ANSI or OSC sequence committed in an instruction file reaches the
-// terminal and quoted pre-flight output.
 export function escapeControlChars(text: string): string {
   return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`)
 }
 
+/** Read and validate the config at `path`; null after reporting a failure on `io`. */
+function loadOptions(path: string, io: CliIO): Partial<LintOptions> | null {
+  // JSON.parse errors quote the source and schema issues quote its keys,
+  // so both messages carry file-derived text.
+  const fail = (message: string): null => {
+    io.err(escapeControlChars(message))
+    return null
+  }
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"))
+  } catch (e) {
+    return fail(`cannot read config ${path}: ${(e as Error).message}`)
+  }
+  const parsed = LintOptionsSchema.safeParse(raw)
+  if (parsed.success) return parsed.data
+  const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")
+  return fail(`invalid config ${path}: ${issues}`)
+}
+
+/** Print findings, the optional token report, and the summary line as text. */
+function printText(result: ReturnType<typeof lint>, summary: { files: number; errors: number; warnings: number; info: number }, flags: Set<string>, io: CliIO): void {
+  // Messages and paths carry file-derived text; JSON mode escapes it
+  // through JSON.stringify, text mode through this print site.
+  const print = (s: string): void => io.out(escapeControlChars(s))
+  for (const f of result.findings) {
+    if (f.severity === "info" && !flags.has("--all")) continue
+    print(`${f.file}:${f.line}  ${f.severity.padEnd(7)}  ${f.rule}  ${f.message}`)
+  }
+  if (flags.has("--report")) {
+    print("\ntokens  load    file")
+    const rows = [...result.artifacts].sort((x, y) => y.tokens - x.tokens)
+    for (const a of rows) {
+      const load = result.loadTokens.get(a.file)
+      print(`${String(a.tokens).padStart(6)}  ${(load === undefined ? "-" : String(load)).padStart(6)}  ${a.file}`)
+    }
+  }
+  const hidden = flags.has("--all") ? "" : " (use --all to show info)"
+  print(`\n${summary.files} files: ${summary.errors} errors, ${summary.warnings} warnings, ${summary.info} info${summary.info ? hidden : ""}`)
+}
+
+/**
+ * CLI entry: parse `argv`, resolve the root, load the optional config,
+ * lint, and print findings (or JSON / the token report).
+ *
+ * @param argv - Arguments after the script path.
+ * @param io - Working directory and output sinks.
+ * @returns The process exit code: 0 clean, 1 findings (errors, or
+ * warnings with --strict), 2 usage errors and could-not-run failures.
+ */
 export function main(argv: string[], io: CliIO): number {
   const flags = new Set<string>()
   let root: string | null = null
@@ -871,20 +920,9 @@ export function main(argv: string[], io: CliIO): number {
   let options: Partial<LintOptions> = {}
   const cfg = config ?? join(root, ".opencode", "instruction-lint.json")
   if (config || existsSync(cfg)) {
-    let raw: unknown
-    try {
-      raw = JSON.parse(readFileSync(cfg, "utf8"))
-    } catch (e) {
-      io.err(`cannot read config ${cfg}: ${(e as Error).message}`)
-      return 2
-    }
-    const parsed = LintOptionsSchema.safeParse(raw)
-    if (!parsed.success) {
-      const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")
-      io.err(`invalid config ${cfg}: ${issues}`)
-      return 2
-    }
-    options = parsed.data
+    const loaded = loadOptions(cfg, io)
+    if (loaded === null) return 2
+    options = loaded
   }
 
   const artifacts = discoverArtifacts(root)
@@ -915,25 +953,12 @@ export function main(argv: string[], io: CliIO): number {
   if (flags.has("--json")) {
     const loadTokens = Object.fromEntries(result.loadTokens)
     const tokens = Object.fromEntries(result.artifacts.map((a) => [a.file, a.tokens]))
-    io.out(JSON.stringify({ summary, findings: result.findings, tokens, loadTokens }, null, 2))
+    // root names the linted tree: the wrapper lints a merge-base worktree
+    // with the primary checkout's toolchain, so a baseline run and a
+    // primary run differ only here.
+    io.out(JSON.stringify({ root, summary, findings: result.findings, tokens, loadTokens }, null, 2))
   } else {
-    // Messages and paths carry file-derived text; JSON mode escapes it
-    // through JSON.stringify, text mode through this print site.
-    const print = (s: string): void => io.out(escapeControlChars(s))
-    for (const f of result.findings) {
-      if (f.severity === "info" && !flags.has("--all")) continue
-      print(`${f.file}:${f.line}  ${f.severity.padEnd(7)}  ${f.rule}  ${f.message}`)
-    }
-    if (flags.has("--report")) {
-      print("\ntokens  load    file")
-      const rows = [...result.artifacts].sort((x, y) => y.tokens - x.tokens)
-      for (const a of rows) {
-        const load = result.loadTokens.get(a.file)
-        print(`${String(a.tokens).padStart(6)}  ${(load === undefined ? "-" : String(load)).padStart(6)}  ${a.file}`)
-      }
-    }
-    const hidden = flags.has("--all") ? "" : " (use --all to show info)"
-    print(`\n${summary.files} files: ${summary.errors} errors, ${summary.warnings} warnings, ${summary.info} info${summary.info ? hidden : ""}`)
+    printText(result, summary, flags, io)
   }
   return summary.errors > 0 || (flags.has("--strict") && summary.warnings > 0) ? 1 : 0
 }

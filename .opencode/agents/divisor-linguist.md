@@ -119,6 +119,7 @@ Exit code 1 means the linter found errors — that is evidence, not a tool failu
 
 ```json
 {
+  "root": "/path/to/linted/tree",
   "summary": { "files": 88, "errors": 1, "warnings": 2, "info": 1 },
   "findings": [
     { "rule": "IL-010", "severity": "error", "reviewSeverity": "HIGH",

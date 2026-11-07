@@ -67,7 +67,7 @@ Non-Goals:
 - The IL-050 posting-list cap trades recall for bounded runtime
   at scale; the cliff is narrow (near- but not byte-identical
   text replicated beyond 64 files) and pinned by test.
-- The persona's token load (~13.5k) consumes most of the 20k
+- The persona's token load (~13.6k) consumes most of the 20k
   budget; further persona growth needs pruning, not budget
   raises.
 - Advisory gating: instruction-lint findings do not fail
