@@ -47,7 +47,16 @@ describe("instruction-lint pre-flight check", () => {
   it("is declared as an advisory, instruction-scoped check with an executable wrapper", async () => {
     const check = await declaredCheck()
     expect(check).toMatchObject({ run: ".uf/scripts/instruction-lint", requires: ["node"], gate: "advisory" })
-    expect(check.paths).toEqual(expect.arrayContaining([".opencode/agents/", ".opencode/commands/", "AGENTS.md"]))
+    expect(check.paths).toEqual(
+      expect.arrayContaining([
+        ".opencode/agents/",
+        ".opencode/commands/",
+        "AGENTS.md",
+        check.run,
+        ".opencode/package.json",
+        ".opencode/package-lock.json",
+      ]),
+    )
     await expect(access(repo(check.run), constants.X_OK)).resolves.toBeUndefined()
   })
 
@@ -136,6 +145,29 @@ describe("instruction-lint pre-flight check", () => {
     const bash = Object.entries((parse(frontmatter) as { permission: { bash: Record<string, string> } }).permission.bash)
     const terminal = ["*>*", "*<*", "*|*", "*;*", "*&*", "*$(*", "*`*"]
     expect(bash.slice(-terminal.length)).toEqual(terminal.map((pattern) => [pattern, "deny"]))
+
+    const decide = (command: string): string | undefined =>
+      bash.findLast(([pattern]) => {
+        const source = pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")
+        return new RegExp(`^${source}$`, "s").test(command)
+      })?.[1]
+    expect(decide("git diff --stat")).toBe("allow")
+    expect(decide("git status --short")).toBe("allow")
+    expect(decide(".uf/scripts/instruction-lint --json")).toBe("allow")
+    expect(decide("git diff --output=/tmp/x")).toBe("deny")
+    expect(decide("git difftool --extcmd=sh")).toBe("deny")
+    expect(decide("git status > file")).toBe("deny")
+    expect(decide("git diff | sh")).toBe("deny")
+  })
+
+  it("checks every package the linter imports before starting it", async () => {
+    const source = await readFile(repo(".opencode/lib/instruction-lint.ts"), "utf8")
+    const imported = [...source.matchAll(/^import .* from "([^"]+)"$/gm)]
+      .map((match) => match[1] as string)
+      .filter((specifier) => !specifier.startsWith("node:") && !specifier.startsWith("."))
+    const wrapper = await readFile(repo(".uf/scripts/instruction-lint"), "utf8")
+    const checked = /^for pkg in (.+); do$/m.exec(wrapper)?.[1]?.split(" ")
+    expect(checked?.sort()).toEqual(imported.sort())
   })
 
   it("exits 2 when the linter entry is missing or a dependency package is incomplete", async () => {
