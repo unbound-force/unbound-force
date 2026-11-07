@@ -71,7 +71,10 @@ with a non-retryable `BRANCH_MISMATCH` envelope naming what
 the checkout is actually on, without running any push. The
 `remote` value MUST be a git config remote nickname: it MUST
 NOT contain `/` (a slash-bearing push target would be resolved
-by git as a local repository path, not a remote name), while
+by git as a local repository path, not a remote name), and it
+MUST NOT be `.` or `..` (git resolves those as the working
+directory and its parent, so a push would target a different
+local repository and execute its hooks), while
 `branch` continues to allow `/` for names such as `feat/x`.
 A malformed, option-like, or empty `branch`, or a
 malformed `remote`, MUST fail input validation before any git

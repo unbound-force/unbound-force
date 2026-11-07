@@ -1333,7 +1333,9 @@ Each entry follows the format: `- <change-name>: <summary>`.
   detecting the branch reports that it could not be determined
   rather than misdiagnosing a detached HEAD. `remote` must be a
   git config nickname: it also rejects `/`, which git would
-  resolve as a local repository path, while `branch` keeps
+  resolve as a local repository path, and `.`/`..`, which git
+  would resolve as the working directory and its parent (a
+  different local repository), while `branch` keeps
   allowing `/` for names such as `feat/x`. Both push the
   verified HEAD commit to `refs/heads/<branch>` with an
   explicit refspec. The force tool leases on

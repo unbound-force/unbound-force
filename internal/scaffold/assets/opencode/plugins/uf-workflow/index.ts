@@ -640,11 +640,17 @@ const PushRefNameSchema = z
  * Remote-name argument guard for the push tools: a remote is a git
  * config nickname, and git's remote-name validation rejects `/`, so a
  * slash-bearing push target would be treated as a local repository
- * path instead of a configured remote.
+ * path instead of a configured remote. `.` and `..` are rejected for
+ * the same reason: git resolves them as local repository paths (the
+ * working directory and its parent), so a push with such a "remote"
+ * would target a different local repository and execute its hooks.
  */
-const RemoteNameSchema = PushRefNameSchema.refine((value) => !value.includes("/"), {
-  message: "must not contain '/'",
-})
+const RemoteNameSchema = PushRefNameSchema.refine(
+  (value) => !value.includes("/") && value !== "." && value !== "..",
+  {
+    message: "must not be '.', '..', or contain '/'",
+  },
+)
 
 const GitPushInputSchema = z.object({
   branch: PushRefNameSchema,
