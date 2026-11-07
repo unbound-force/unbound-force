@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   buildArtifact,
   discoverArtifacts,
+  escapeControlChars,
   estimateTokens,
   findRoot,
   lint,
@@ -381,7 +382,14 @@ describe("cli", () => {
     const parsed = JSON.parse(j.out)
     expect(parsed.summary).toEqual({ files: 2, errors: 1, warnings: 0, info: 0 })
     expect(Object.keys(parsed.loadTokens).sort()).toEqual([".opencode/agents/a.md", ".opencode/commands/c.md"])
-    expect(parsed.findings[0]).toMatchObject({ rule: "IL-001", severity: "error", reviewSeverity: "HIGH" })
+    expect(parsed.findings[0]).toMatchObject({
+      rule: "IL-001",
+      severity: "error",
+      reviewSeverity: "HIGH",
+      file: ".opencode/agents/a.md",
+      line: 1,
+      message: expect.stringContaining("no YAML frontmatter"),
+    })
     const rep = cli(["--report"], root).out
     expect(rep).toMatch(/tokens\s+load\s+file/)
     expect(rep).toContain(".opencode/commands/c.md")
@@ -390,9 +398,14 @@ describe("cli", () => {
   it("restricts reported findings with --only while analyzing the whole repo", () => {
     const root = repo({
       ".opencode/agents/a.md": "# no frontmatter",
-      ".opencode/agents/b.md": AGENT("Use the `missing` skill."),
+      ".opencode/agents/b.md": AGENT("Use the `missing` skill and the `real` skill."),
       ".opencode/commands/c.md": "# no frontmatter",
+      ".opencode/skills/real/SKILL.md": SKILL("real"),
     })
+    // `real` resolves only if discovery still sees files outside --only.
+    const scoped = JSON.parse(cli(["--json", "--only", ".opencode/agents/b.md"], root).out).findings as Finding[]
+    expect(scoped).toHaveLength(1)
+    expect(scoped[0]?.message).toContain("missing")
     const files = (args: string[]) => JSON.parse(cli(["--json", ...args], root).out).findings.map((f: Finding) => f.file)
     expect(files(["--only", "./.opencode/agents/b.md"])).toEqual([".opencode/agents/b.md"])
     expect(files(["--only", ".opencode/agents/a.md, .opencode/commands/c.md,"]).sort()).toEqual([
@@ -412,6 +425,24 @@ describe("cli", () => {
     expect(ghost.code).toBe(2)
     expect(ghost.err).toContain("--only .opencode/agents/ghost.md matches no lintable file")
     expect(cli(["--only", ".opencode/agents/b.md", "--only", ".opencode/agents/ghost.md"], root).code).toBe(2)
+  })
+
+  it("exits 2 when the root holds no lintable files", () => {
+    const root = repo({})
+    const r = cli([], root)
+    expect(r.code).toBe(2)
+    expect(r.err).toContain("no lintable instruction files")
+  })
+
+  it("escapes control characters from file content in text output only", () => {
+    expect(escapeControlChars("a\u001b[31mb\u009b\rc\td\ne")).toBe("a\\x1b[31mb\\x9b\\x0dc\td\ne")
+    const root = repo({
+      ".opencode/skills/real/SKILL.md": '---\nname: "bad\\e[31m"\ndescription: "Use when doing real work in this repository."\n---\n\nBody.\n',
+    })
+    const text = cli([], root).out
+    expect(text).toContain("\\x1b[31m")
+    expect(text).not.toContain("\u001b")
+    expect(JSON.parse(cli(["--json"], root).out).findings[0].message).toContain("\u001b")
   })
 
   it("reads options from the default and explicit config files", () => {

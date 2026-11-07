@@ -8,14 +8,15 @@
 // belong in a review pack, not in this tool.
 //
 // Run from the repository root:
-//   node .opencode/lib/instruction-lint.ts [--json] [--strict] [--all] [--report]
+//   .uf/scripts/instruction-lint [--json] [--strict] [--all] [--report]
 //
 // Suppress a finding with an HTML comment in the instruction file:
 //   <!-- instruction-lint-disable-next-line IL-023 -->
 //   <!-- instruction-lint-disable IL-041 -->   (whole file)
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { join, relative, resolve, sep } from "node:path"
+import { fileURLToPath } from "node:url"
 // `yaml` and `zod` are declared in .opencode/package.json (zod as a
 // runtime dependency, yaml as a development dependency: the linter only
 // runs where devDependencies are installed). Both resolve from
@@ -819,6 +820,13 @@ export function findRoot(start: string): string | null {
  * process exit code: 0 clean, 1 findings (errors, or warnings with
  * --strict), 2 usage errors and could-not-run failures.
  */
+// C0 and C1 control characters, keeping tab and newline. Without this an
+// ANSI or OSC sequence committed in an instruction file reaches the
+// terminal and quoted pre-flight output.
+export function escapeControlChars(text: string): string {
+  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`)
+}
+
 export function main(argv: string[], io: CliIO): number {
   const flags = new Set<string>()
   let root: string | null = null
@@ -880,6 +888,12 @@ export function main(argv: string[], io: CliIO): number {
   }
 
   const artifacts = discoverArtifacts(root)
+  // Nothing to lint is a usage error, not a clean run: a wrong root
+  // would otherwise report success without checking anything.
+  if (artifacts.length === 0) {
+    io.err(`no lintable instruction files under ${root}`)
+    return 2
+  }
   // A --only path matching no lintable file is a usage error, not a
   // clean run: a typo would otherwise filter every finding away.
   if (only.size > 0) {
@@ -903,25 +917,32 @@ export function main(argv: string[], io: CliIO): number {
     const tokens = Object.fromEntries(result.artifacts.map((a) => [a.file, a.tokens]))
     io.out(JSON.stringify({ summary, findings: result.findings, tokens, loadTokens }, null, 2))
   } else {
+    // Messages and paths carry file-derived text; JSON mode escapes it
+    // through JSON.stringify, text mode through this print site.
+    const print = (s: string): void => io.out(escapeControlChars(s))
     for (const f of result.findings) {
       if (f.severity === "info" && !flags.has("--all")) continue
-      io.out(`${f.file}:${f.line}  ${f.severity.padEnd(7)}  ${f.rule}  ${f.message}`)
+      print(`${f.file}:${f.line}  ${f.severity.padEnd(7)}  ${f.rule}  ${f.message}`)
     }
     if (flags.has("--report")) {
-      io.out("\ntokens  load    file")
+      print("\ntokens  load    file")
       const rows = [...result.artifacts].sort((x, y) => y.tokens - x.tokens)
       for (const a of rows) {
         const load = result.loadTokens.get(a.file)
-        io.out(`${String(a.tokens).padStart(6)}  ${(load === undefined ? "-" : String(load)).padStart(6)}  ${a.file}`)
+        print(`${String(a.tokens).padStart(6)}  ${(load === undefined ? "-" : String(load)).padStart(6)}  ${a.file}`)
       }
     }
     const hidden = flags.has("--all") ? "" : " (use --all to show info)"
-    io.out(`\n${summary.files} files: ${summary.errors} errors, ${summary.warnings} warnings, ${summary.info} info${summary.info ? hidden : ""}`)
+    print(`\n${summary.files} files: ${summary.errors} errors, ${summary.warnings} warnings, ${summary.info} info${summary.info ? hidden : ""}`)
   }
   return summary.errors > 0 || (flags.has("--strict") && summary.warnings > 0) ? 1 : 0
 }
 
-if (import.meta.main) {
+// Compared by path rather than import.meta.main, which is undefined on
+// runtimes older than Node 24.2: the linter would load, do nothing, and
+// exit 0 there.
+const entry = process.argv[1]
+if (entry !== undefined && existsSync(entry) && realpathSync(entry) === fileURLToPath(import.meta.url)) {
   try {
     process.exitCode = main(process.argv.slice(2), {
       cwd: process.cwd(),
