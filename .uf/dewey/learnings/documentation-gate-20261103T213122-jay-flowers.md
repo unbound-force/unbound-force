@@ -7,4 +7,4 @@ identity: documentation-gate-20261103T213122-jay-flowers
 tier: draft
 ---
 
-In unbound-force/unbound-force, user-facing changes must satisfy two documentation-issue gates that name different targets: repo AGENTS.md's Documentation gate requires an issue against the current repo before PR merge, while the org constitution's Cross-Repo Documentation rule — operationalized in the website repo's own AGENTS.md Website Documentation Gate — requires an issue in unbound-force/website before merge (explicitly covering breaking changes to any user-facing workflow). Established practice files
+In unbound-force/unbound-force, user-facing changes must satisfy two documentation-issue gates that name different targets: repo AGENTS.md's Documentation gate requires an issue against the current repo before PR merge, while the org constitution's Cross-Repo Documentation rule — operationalized in the website repo's own AGENTS.md Website Documentation Gate — requires an issue in unbound-force/website before merge (explicitly covering breaking changes to any user-facing workflow). Established practice files  [… truncated at capture; final clause unrecoverable — recorded 2026-11-07].
