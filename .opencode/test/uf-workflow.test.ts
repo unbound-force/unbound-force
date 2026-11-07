@@ -1670,6 +1670,8 @@ describe("git_push", () => {
       { branch: "feat x" },
       { branch: "x", remote: "-r" },
       { branch: "x", remote: "/tmp/repo" },
+      { branch: "x", remote: "." },
+      { branch: "x", remote: ".." },
     ]) {
       const result = await invokeTool(createGitPushTool(exec, "/fake"), args)
       expect(result.status === "error" && result.code).toBe("INVALID_INPUT")
@@ -1799,6 +1801,8 @@ describe("git_push_force_with_lease", () => {
     for (const args of [
       { branch: "feat/x", expected_sha: "not-a-sha" },
       { branch: "feat/x", remote: "/tmp/repo" },
+      { branch: "feat/x", remote: "." },
+      { branch: "feat/x", remote: ".." },
       { branch: "x y" },
     ]) {
       const result = await invokeTool(createGitPushForceWithLeaseTool(exec, "/fake"), args)
