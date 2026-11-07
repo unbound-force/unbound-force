@@ -81,8 +81,7 @@ unbound-force/
 │   ├── plugins/                      # Plugins registered in opencode.json (invoke-agent, review-dispatch, uf-workflow, uf-finale)
 │   ├── lib/                          # Shared TypeScript plugin library (incl. model-matrix.ts)
 │   ├── test/                         # TypeScript plugin unit/integration/smoke tests
-│   ├── skill/                        # Swarm skills packages
-│   ├── skills/                       # Additional skills packages
+│   ├── skills/                       # Skills packages (uf init migrates legacy skill/)
 │   ├── package.json                  # Plugin npm manifest (locked by package-lock.json)
 │   └── uf/packs/                     # Convention packs
 ├── council-review-action/             # AI code review composite GitHub Action
@@ -169,7 +168,7 @@ imported externally.
 - **TypeScript plugins**: `.opencode/plugins/` review plugins
   (registered via the `opencode.json` `plugin` array) and the
   `.opencode/lib/` shared library use
-  `@opencode-ai/plugin` 1.19.0 and `zod` 4.1.8 (runtime), and
+  `@opencode-ai/plugin` 1.19.0 and `zod` 4.6.6 (runtime), and
   `vitest` 5.0.3 + `@vitest/coverage-v8` 5.0.3 (dev), managed
   by `.opencode/package.json` / `package-lock.json`.
 - **Node runtime floor** (plugin suite): transitive `ini@7.0.0`

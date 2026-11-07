@@ -379,6 +379,86 @@ func TestCommandContracts_CorrelationIdForwarding(t *testing.T) {
 	}
 }
 
+// TestCommandContracts_PushToolInvocationPins census-pins every
+// push-tool call site in the three push-carrying commands after the
+// structured push-tool migration (#947): uf.finale.md passes only
+// `branch` (plus `setUpstream: true` on the first-push call sites)
+// and never passes an `expected_sha` argument; uf.fix-ci.md passes
+// `{branch: <HEAD_REF>, remote: <HEAD_REMOTE>}` on both tools with
+// `expected_sha` sequencing on the force tool; uf.rebase-pr.md pins
+// the full `{branch, remote, expected_sha}` triple. The deleted raw
+// `git push --force-with-lease <HEAD_REMOTE> <HEAD_BRANCH>` shell
+// forms must not return: every push routes through the plugin
+// tools, which refuse a switched checkout (BRANCH_MISMATCH) and
+// lease on an explicit expectation.
+func TestCommandContracts_PushToolInvocationPins(t *testing.T) {
+	commands := []struct {
+		name    string
+		clauses []commandClause
+	}{
+		{
+			name: "uf.finale.md",
+			clauses: []commandClause{
+				{name: "branch-only lease after step-4 rebase", all: []string{"`git_push_force_with_lease` with `{branch}` after a step-4", "remote\" MUST call `git_push_force_with_lease` with", "`{branch}`. The gate"}},
+				{name: "first push sets upstream", all: []string{"`git_push` with `{setUpstream: true, branch}` (safe whether or", "push): call `git_push` with `{setUpstream: true, branch}`"}},
+				{name: "no-rebase plain push is branch-only", all: []string{"No rebase occurred: call `git_push` with `{branch}` (add", "conflict: `git_push` with `{branch}`, then"}},
+				{name: "conflict-option push call sites", all: []string{"`git_push_force_with_lease` with `{branch}` (if fails,", "`git_commit_no_edit` → `git_push` with `{branch}` → `uf_finale_ci_poll`"}},
+				{name: "every call passes the feature branch", all: []string{"Every push call in this command passes `branch` (the feature branch)", "Both push tools refuse with `BRANCH_MISMATCH`", "never switch branches to retry"}},
+				{name: "lease-on-tracking without expected_sha", all: []string{"Without `expected_sha`, `git_push_force_with_lease` leases on", "never retry with `--force`"}},
+				{name: "guardrail routes force through the tool", all: []string{"NEVER `git push --force`** — use `git_push_force_with_lease`"}},
+			},
+		},
+		{
+			name: "uf.fix-ci.md",
+			clauses: []commandClause{
+				{name: "push-mode selection reads the rebase checkpoint", all: []string{"`REBASED` false — plain `git_push`", "`REBASED` true — `git_push_force_with_lease`", "push-mode selection reads Phase 3's `rebase` checkpoint"}},
+				{name: "structured argument shape", all: []string{"Either tool takes `{branch: <HEAD_REF>, remote: <HEAD_REMOTE>}`", "pushes the HEAD commit to `refs/heads/<HEAD_REF>` with an explicit refspec"}},
+				{name: "expected_sha sequencing", all: []string{"`git_push_force_with_lease` also takes `expected_sha`", "pass `<HEAD_SHA>` on the first force-push of the invocation, then the `new_sha` the previous push returned"}},
+				{name: "lease never relies on the tracking ref", all: []string{"a fork PR has no tracking ref, so the lease MUST NOT rely on it"}},
+				{name: "mismatch and rejection stop", all: []string{"A `BRANCH_MISMATCH` refusal means the checkout left `<HEAD_REF>`", "A lease rejection means the remote head moved", "never refresh the lease to retry"}},
+				{name: "push-mode gate wording", all: []string{"`git_push_force_with_lease` when Phase 3", "rebased (history was rewritten), plain `git_push` otherwise"}},
+				{name: "after rebase force-only", all: []string{"A successful rebase rewrites the branch history", "afterwards MUST use `git_push_force_with_lease`", "pushes use `git_push_force_with_lease` only"}},
+			},
+		},
+		{
+			name: "uf.rebase-pr.md",
+			clauses: []commandClause{
+				{name: "full pinned triple", all: []string{"Call the `git_push_force_with_lease` plugin tool with", "`{branch: <HEAD_BRANCH>, remote: <HEAD_REMOTE>, expected_sha: <HEAD_SHA>}`"}},
+				{name: "explicit refspec independent of upstream", all: []string{"pushes `HEAD:refs/heads/<HEAD_BRANCH>` to `<HEAD_REMOTE>` with an explicit refspec", "independent of any configured upstream"}},
+				{name: "lease on the reported head", all: []string{"leases on `<HEAD_SHA>`, the head the PR reported before the rebase"}},
+				{name: "failure handling", all: []string{"`BRANCH_MISMATCH`: the checkout is not on a local branch named `<HEAD_BRANCH>`", "never retry with a refreshed lease or `--force`", "`EXPECTED_SHA_UNKNOWN`: `<HEAD_SHA>` is not a local commit"}},
+			},
+		},
+	}
+
+	for _, command := range commands {
+		command := command
+		t.Run(command.name, func(t *testing.T) {
+			assertCommandCopies(t, command.name, true, command.clauses)
+		})
+	}
+
+	// Forbidden-form pins: the migration deleted the raw shell
+	// force-push invocations (for example
+	// `git push --force-with-lease <HEAD_REMOTE> <HEAD_BRANCH>`)
+	// in favor of the structured plugin tools, so the raw form must
+	// not return in any of the three commands. uf.finale.md's
+	// guardrail prose still names `git push --force` (without
+	// `--with-lease`) to forbid it; that shorter string is not
+	// matched by this pin.
+	for _, name := range []string{"uf.finale.md", "uf.fix-ci.md", "uf.rebase-pr.md"} {
+		name := name
+		t.Run(name+" forbids raw force-push", func(t *testing.T) {
+			for _, copy := range loadCommandCopies(t, name, true) {
+				normalized := normalizeCommandText(copy.text)
+				if strings.Contains(normalized, "git push --force-with-lease") {
+					t.Errorf("%s: raw shell force-push form %q must not return; pushes route through git_push_force_with_lease", copy.name, "git push --force-with-lease")
+				}
+			}
+		})
+	}
+}
+
 // TestCommandContracts_ArtifactSourcedLessons pins RD-FR-056 (issues #941
 // and #945): every lesson-storing command stores from the persisted
 // artifact's payload.proposals, never from a capped preview, and no command

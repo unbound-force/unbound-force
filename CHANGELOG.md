@@ -1231,6 +1231,84 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- plugin-suite-osv-bump: the plugin suite's npm tree moves to
+  patched versions, clearing the 11 known vulnerabilities (6 High,
+  4 Medium, 1 Low) OSV-Scanner reported against the newly tracked
+  `.opencode/package-lock.json` (the scan step runs
+  `--fail-on-vuln=true`): `zod` 4.1.8 -> 4.6.6 (GHSA-mrhx-c7xc-m3w5)
+  as a direct dependency plus a matching `overrides` pin -- without
+  the pin a nested vulnerable `zod@4.1.8` survives under
+  `@opencode-ai/plugin`, which declares it exactly; the `toml`
+  override 4.2.0 -> 5.0.1 (GHSA-4qx8-w7c3-pj3p, GHSA-9j65-hcg3-gc64,
+  GHSA-9qmh-m7c6-f92p, GHSA-h895-cgqg-jf52); and transitive dev
+  `vite` 8.3.2 -> 8.3.6 (7 GHSAs) via lockfile refresh. Pinned-
+  dependency update under the documented security-fix exception:
+  patched versions verified published on npm, every existing gate
+  unchanged (94% statements floor, `--fail-on-vuln`), rollback is
+  reverting this commit. The scaffold mirrors under
+  `internal/scaffold/assets/opencode/` are updated byte-identically
+  and the AGENTS.md tech-stack line follows the new `zod` version.
+- skill-dir-migration (#933): `uf init` now migrates the legacy
+  `.opencode/skill/` directory into `.opencode/skills/`, so
+  opencode stops warning about duplicate skills such as
+  `speckit-workflow`. When only the legacy directory exists it is
+  renamed; when both exist, legacy-only files move, byte-identical
+  copies and stale copies of scaffolded skills are removed (a
+  failed removal warns and keeps the file on disk instead of
+  counting it as removed), and a
+  differing copy of any other skill is kept in place with a
+  conflict warning, never overwritten. `uf_delegate_command` no
+  longer searches `.opencode/skill`, so a stale legacy copy can't
+  be what a skill reference resolves to. This repo's
+  `unbound-force-heroes` skill moves to `.opencode/skills/`.
+  Stealth mode skips this migration and the `command/` one,
+  since both run after the stealth restore. (Fixes: #933)
+  (Docs: #963, unbound-force/website#379)
+- skill-root-file (#934): `uf_delegate_command` now resolves a
+  bare `skill` value as a repo skill name first and, when no skill
+  root holds it, as a repo-root file, so `Makefile` or
+  `build-all.sh` no longer fail `SKILL_NOT_FOUND` (`./Makefile`
+  also works as an explicit path). A directory never resolves as
+  a reference. A value with whitespace, such
+  as `make plugin-test`, fails `SKILL_NOT_FOUND` with a message
+  that commands and make targets are not skill references and
+  points to `skill_absent_reason`. `/uf.unleash` states the rule.
+  (Fixes: #934)
+  (Docs: #963, unbound-force/website#379)
+- push-tool-target (#947): `git_push` and
+  `git_push_force_with_lease` now require `branch` (optional
+  `remote`, default `origin`; `HEAD` is rejected) and refuse with
+  `BRANCH_MISMATCH` unless `symbolic-ref HEAD` is
+  `refs/heads/<branch>` (a detached HEAD or another branch),
+  instead of pushing whatever happened to be checked out.
+  BREAKING: callers omitting `branch` fail `INVALID_INPUT`;
+  repos with scaffolded command copies must re-run `uf init`
+  after upgrading to refresh the migrated call sites, and hero
+  repos' hand-written commands using the old no-argument shape
+  must pass `branch` too. A git execution failure while
+  detecting the branch reports that it could not be determined
+  rather than misdiagnosing a detached HEAD. `remote` must be a
+  git config nickname: it also rejects `/`, which git would
+  resolve as a local repository path, while `branch` keeps
+  allowing `/` for names such as `feat/x`. Both push the
+  verified HEAD commit to `refs/heads/<branch>` with an
+  explicit refspec. The force tool leases on
+  `refs/heads/<branch>:<expected_sha>`; without `expected_sha`
+  it leases on the remote-tracking ref with
+  `--force-if-includes`, so a fetch that pulled in a
+  collaborator's commit cannot be overwritten, or on "must not
+  exist" when there is no tracking ref. An `expected_sha` that
+  isn't a local commit fails `EXPECTED_SHA_UNKNOWN` without
+  pushing. Both return `{remote, ref, old_sha, new_sha,
+  updated}`, with `updated: false` for an up-to-date no-op and
+  an optional `warning` when the push landed but the
+  `setUpstream` tracking configuration failed (the message
+  carries the remediation command). `/uf.finale`, `/uf.fix-ci`
+  and `/uf.rebase-pr` pass `branch`; `/uf.fix-ci` and
+  `/uf.rebase-pr` lease on the PR's pre-fetch head SHA, and
+  `/uf.rebase-pr` drops its upstream check and bash fallback.
+  (Fixes: #947)
+  (Docs: #963, unbound-force/website#379)
 - review-dispatch-consumer-bounds (#941): lesson proposals are now
   stored with their full text. `consolidate_dispatch` persists the
   proposals in the dispatch artifact as an optional

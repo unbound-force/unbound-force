@@ -120,6 +120,12 @@ A `skill` value without `/` resolves as a skill name:
 `.opencode/skill/<name>/SKILL.md` (both roots exist in this
 repo; a name present in both resolves to the first root). A value containing `/` resolves as a repo-relative path
 through the existing traversal guard (`resolveRepoRelative`).
+(Superseded by `retroactive-push-skill-contracts`,
+openspec/changes/retroactive-push-skill-contracts/: the legacy
+`.opencode/skill/` root is retired and migrated by `uf init`;
+a `/`-free name that misses the skill directory falls back to
+a repo-root file reference, and an existing directory is not a
+file reference. That change MUST archive after this change.)
 Existence is checked with the tool's already-injected
 `fileExists` dependency -- no new dependency surface, no real
 filesystem in tests.

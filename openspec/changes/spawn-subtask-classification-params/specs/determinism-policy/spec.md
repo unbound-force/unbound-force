@@ -194,3 +194,11 @@ flagged
 - **WHEN** the Guard audits the delegation
 - **THEN** no deterministic-delegation finding is raised for
   the recorded reason
+  (The illustrative example's `.opencode/skill/` root is
+  retired — superseded by `retroactive-push-skill-contracts`,
+  openspec/changes/retroactive-push-skill-contracts/: the
+  resolver searches `.opencode/skills/<name>/SKILL.md` and
+  repo-root files only; the legacy root is migrated away by
+  `uf init`. The scenario's intent — a substantive absence
+  reason passes — is unchanged. That change MUST archive after
+  this change.)
