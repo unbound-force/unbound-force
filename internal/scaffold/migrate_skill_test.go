@@ -72,6 +72,32 @@ func TestMigrateSkillDir_RenameOnly(t *testing.T) {
 	assertAbsent(t, dir, ".opencode/skill")
 }
 
+func TestMigrateSkillDir_RenameFailureKeepsLegacyDir(t *testing.T) {
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/skill/a/SKILL.md", "a")
+	// A read-only .opencode parent makes the atomic rename of the
+	// whole legacy directory fail, exercising the rename-only
+	// branch's failure path (merge-branch failures are covered by
+	// the Move/Remove failure tests below).
+	opencodeDir := filepath.Join(dir, ".opencode")
+	if err := os.Chmod(opencodeDir, 0o555); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(opencodeDir, 0o755) })
+	opts, _ := newSkillMigrationOpts(dir)
+
+	result := migrateSkillDir(opts)
+
+	if result == nil || result.action != "failed" {
+		t.Fatalf("expected failed result, got %+v", result)
+	}
+	if !strings.HasPrefix(result.detail, "rename: ") {
+		t.Errorf("detail = %q, want prefix %q", result.detail, "rename: ")
+	}
+	assertFileContent(t, dir, ".opencode/skill/a/SKILL.md", "a")
+	assertAbsent(t, dir, ".opencode/skills")
+}
+
 func TestMigrateSkillDir_MergeMovesDropsAndKeepsConflicts(t *testing.T) {
 	dir := t.TempDir()
 	scaffoldSkill, err := assetContent("opencode/skills/speckit-workflow/SKILL.md")
@@ -330,15 +356,16 @@ func TestMigrateSkillDir_RerunWithKeptConflictReportsSkipped(t *testing.T) {
 	assertFileContent(t, dir, ".opencode/skill/custom/SKILL.md", "edited")
 }
 
-// TestRun_MigratesLegacySkillDirExceptStealth runs the full init and
-// checks the legacy skill directory is migrated in normal mode and left
-// untouched in stealth mode, which runs after the stealth restore and
-// must not reshape the tree.
-func TestRun_MigratesLegacySkillDirExceptStealth(t *testing.T) {
+// TestRun_MigratesLegacyDirsExceptStealth runs the full init and
+// checks the legacy command and skill directories are migrated in
+// normal mode and left untouched in stealth mode, which runs after
+// the stealth restore and must not reshape the tree.
+func TestRun_MigratesLegacyDirsExceptStealth(t *testing.T) {
 	for _, stealth := range []bool{false, true} {
 		t.Run(map[bool]string{false: "normal", true: "stealth"}[stealth], func(t *testing.T) {
 			dir := t.TempDir()
 			initGitDir(t, dir)
+			createFile(t, dir, ".opencode/command/legacy.md", "legacy command")
 			createFile(t, dir, ".opencode/skill/legacy-only/SKILL.md", "legacy")
 			createFile(t, dir, ".opencode/skill/speckit-workflow/SKILL.md", "old scaffold version")
 
@@ -354,14 +381,25 @@ func TestRun_MigratesLegacySkillDirExceptStealth(t *testing.T) {
 			}
 
 			if stealth {
+				assertFileContent(t, dir, ".opencode/command/legacy.md", "legacy command")
 				assertFileContent(t, dir, ".opencode/skill/legacy-only/SKILL.md", "legacy")
 				assertFileContent(t, dir, ".opencode/skill/speckit-workflow/SKILL.md", "old scaffold version")
 				return
 			}
+			// The scaffold writes .opencode/commands/ before the
+			// migration runs, so the legacy command file merges into
+			// the scaffolded directory.
+			assertFileContent(t, dir, ".opencode/commands/legacy.md", "legacy command")
+			assertAbsent(t, dir, ".opencode/command")
 			assertFileContent(t, dir, ".opencode/skills/legacy-only/SKILL.md", "legacy")
 			assertAbsent(t, dir, ".opencode/skill")
-			if !strings.Contains(buf.String(), ".opencode/skill/ → skills/") {
-				t.Errorf("expected migration summary line, got:\n%s", buf.String())
+			for _, line := range []string{
+				".opencode/command/ → commands/",
+				".opencode/skill/ → skills/",
+			} {
+				if !strings.Contains(buf.String(), line) {
+					t.Errorf("expected migration summary line %q, got:\n%s", line, buf.String())
+				}
 			}
 		})
 	}
