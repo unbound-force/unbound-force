@@ -1071,9 +1071,17 @@ Map the council verdict to the GitHub API event type:
 |-----------------|-------------|
 | APPROVE | `APPROVE` |
 | REQUEST CHANGES | `REQUEST_CHANGES` |
-| APPROVE WITH ADVISORIES | `COMMENT` |
+| APPROVE WITH ADVISORIES, no CRITICAL or HIGH finding | `APPROVE` |
+| APPROVE WITH ADVISORIES, any CRITICAL or HIGH finding | `COMMENT` |
 | INCONCLUSIVE | Do not post |
 | UNAVAILABLE | Do not post |
+
+For `APPROVE WITH ADVISORIES`, check the severity of every finding
+in the review. A finding with no recognized severity counts as HIGH.
+When the verdict maps to `COMMENT`, end the review body with
+`Council approved with advisories: unresolved CRITICAL or HIGH
+findings require human judgment before merge.` Advisories stay in
+the review as inline comments whichever event is used.
 
 **Self-authored PR.** GitHub rejects `APPROVE` and `REQUEST_CHANGES`
 on the viewer's own pull request with HTTP 422. When the Step 3.10-iii
@@ -1082,6 +1090,7 @@ compared exactly, map APPROVE and REQUEST CHANGES to `COMMENT` before
 the gate and start the review body with the verdict note
 `**Council verdict: <verdict>** (posted as COMMENT: GitHub does not
 allow approving or requesting changes on your own pull request).`
+This includes an advisory verdict that maps to `APPROVE`.
 The gate prints the mapped event and uses the COMMENT option set. If
 either login is unavailable, keep the table mapping; the Step 8d
 fallback still covers the 422.
@@ -1121,11 +1130,11 @@ Present the posting decision as follows:
    the same options, the recommended option FIRST and
    labeled "(Recommended)":
 
-For APPROVE verdicts, use options:
+For the `APPROVE` event, use options:
 `["Approve -- post review", "No -- skip posting",
 "Edit comments first", "Change verdict"]`.
 
-For REQUEST CHANGES or COMMENT verdicts, use options:
+For the `REQUEST_CHANGES` or `COMMENT` event, use options:
 `["Yes -- post review", "No -- skip posting",
 "Edit comments first", "Change verdict"]`.
 
