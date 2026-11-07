@@ -47,7 +47,7 @@ topic: change-management
 - When a maintainer adopts pre-existing working-tree drift (e.g. a governance-gated
   pinned-dependency bump) into an in-flight spec change, the proposal must task commit sequencing
   explicitly: the spec-artifact commit excludes the adopted files (preserving the spec/implement
-  phase boundary), and the gate-coupled lockstep set (manifest, lockfile, scaffold mirrors,
+  phase boundary), and the gate-coupled lockstep set (manifest, scaffold mirrors,
   enforcement-test expectations, provenance testdata, AGENTS.md/README lines) lands as one atomic
   commit so no pushed commit leaves the pin-enforcement gate inconsistent (a manifest-vs-test-
   expectation mismatch fails `make check`).

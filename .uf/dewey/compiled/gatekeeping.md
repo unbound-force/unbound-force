@@ -41,9 +41,11 @@ Compiled 2026-10-25 from 16 learnings (2026-10-14 to 2026-10-22); source: AGENTS
 ### Lockstep Records
 
 - A protected value is a record set, not a number. A pin bump must move every record together: manifests
-  (package.json / package-lock.json), scaffold mirrors, exact-version test constants (scaffold_test.go), testdata
-  rollback baseline hashes, AGENTS.md Technology Stack (plus Node engine floor), and mandating spec MUSTs (e.g.,
-  SC-FR-003 "Reproducible Plugin Dependencies" pinning the plugin version and rollback lock SHA).
+  (package.json), scaffold mirrors, exact-version test constants (scaffold_test.go), AGENTS.md Technology
+  Stack (plus Node engine floor), and mandating spec MUSTs (e.g., SC-FR-003 "Reproducible Plugin
+  Dependencies"). The lockfile and its rollback baseline hashes left the record set when
+  stop-shipping-plugin-lock stopped shipping the lock; provenance now rides the manifest pins and
+  plugin-package-provenance.json.
 - Spec mandates are reconciled via a MODIFIED requirement anchored to the unarchived predecessor's text
   (supersession reconciliation on archive). Moving only test constants and AGENTS.md leaves the spec MUST contradicted
   by manifests and testdata; the stale pin flows into baseline specs when the change archives.

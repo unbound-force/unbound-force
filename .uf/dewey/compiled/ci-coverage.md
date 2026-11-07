@@ -73,8 +73,8 @@ topic: ci-coverage
   Bash, Gitleaks; markdownlint is DISABLED in `.mega-linter.yml` — CI does not lint Markdown here, so a local 
   markdownlint pass is deliberately beyond-CI style consistency, not CI parity.
 - Derive parity checklists from the changed-file list mapped to workflows, not the change's primary language: 
-  manifest touches (`package.json`, `package-lock.json`, `go.mod`) must cover `ci_security.yml` (OSV-Scanner via 
-  `reusable_vuln_scan`) and `ci_dependencies.yml` (dependency review); only `.go` changes need build/coverage-gate; PR 
+  manifest touches (`package.json`, `go.mod`) must cover `ci_security.yml` (OSV-Scanner via
+  `reusable_vuln_scan` plus the plugin transitive throwaway-lock job) and `ci_dependencies.yml` (dependency review); only `.go` changes need build/coverage-gate; PR 
   titles face commitlint. Every CI surface appears in the parity note as covered by a local task or explicitly excluded 
   with rationale, verified against `.mega-linter.yml` and the workflow files first.
 - Operational: file documentation issues via `gh issue create --body-file <tmpfile>` — `--body "$(cat <<'EOF' ...)"` 

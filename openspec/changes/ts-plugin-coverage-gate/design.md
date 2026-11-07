@@ -16,8 +16,11 @@ already exists end to end:
 
 - The thresholds live in `.opencode/vitest.config.ts` (v8 provider,
   suite-global).
-- `make plugin-test` runs `cd .opencode && npm ci && npx vitest run
-  --coverage`; a threshold breach exits non-zero.
+- `make plugin-test` runs `cd .opencode && npx -y npm@11.6.2
+  install --ignore-scripts --no-package-lock --no-audit
+  --no-fund && npx vitest run --coverage` (the lockless install
+  reconciled by `stop-shipping-plugin-lock`); a threshold
+  breach exits non-zero.
 - `make check` and the Local CI `plugin-tests` job (ci_local.yml)
   both invoke that target, so local and CI enforcement are the same
   command.

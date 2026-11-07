@@ -51,7 +51,9 @@ the issue's scope requires.
   while preserving the fanout D14 attribution for the branches
   floor.
 - No new CI wiring: the existing native enforcement chain
-  (`make plugin-test` → `npm ci` + `npx vitest run --coverage`
+  (`make plugin-test` → lockless install through the pinned
+  `PLUGIN_TEST_NPM` runner with lifecycle scripts disabled +
+  `npx vitest run --coverage`
   → vitest threshold failure exits non-zero; the `plugin-tests`
   job in `ci_local.yml` and `make check` both invoke that
   target) already fails on breach. Verification tasks prove both
@@ -166,9 +168,11 @@ the expected error. Both are executable commands in tasks.md.
 **Assessment**: PASS
 
 No new inputs, secrets, network access, or permissions are
-introduced. The locked `npm ci` install discipline is unchanged,
-and the threshold raises (never lowers) a quality bar, adding no
-attack surface.
+introduced. The install discipline is the lockless install
+reconciled by `stop-shipping-plugin-lock` (pinned
+`PLUGIN_TEST_NPM` runner, lifecycle scripts disabled, no lock
+read or written), and the threshold raises (never lowers) a
+quality bar, adding no attack surface.
 
 ### VI. Deterministic Execution
 

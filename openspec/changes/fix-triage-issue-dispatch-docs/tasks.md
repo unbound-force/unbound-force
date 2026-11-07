@@ -120,13 +120,27 @@
   following the org precedent
   (`review-council-multi-model-fanout` task 1.5); record the
   verification evidence
+> Reconciled by `stop-shipping-plugin-lock`: tasks 3.4, 3.5, 3.7,
+> 4.3, and 4.4 and the locks in 4.5 record work done while the lock
+> was tracked. Both package-lock.json files and
+> `plugin-package-rollback.json` are deleted,
+> `TestPluginPackageInputs_ExactVersionsAndLockIntegrity` is now
+> `TestPluginPackageInputs_ExactVersions`, and no lockfile
+> regeneration applies. The tasks stay as a historical record.
+
 - [x] 3.4 Update `internal/scaffold/assets/opencode/package.json`
   and `internal/scaffold/assets/opencode/package-lock.json` to
   mirror the approved `@opencode-ai/plugin` 1.19.0 pin (matching
   `.opencode/package.json` / `.opencode/package-lock.json`)
+  (Reconciliation: stop-shipping-plugin-lock later removed the
+  lockfile mirror; the manifest mirror above remains the shipped
+  artifact.)
 - [x] 3.5 Update `TestPluginPackageInputs_ExactVersionsAndLockIntegrity`
   in `internal/scaffold/scaffold_test.go`: expectedRuntime
   `@opencode-ai/plugin` 1.4.10 → 1.19.0
+  (Reconciliation: stop-shipping-plugin-lock later renamed the
+  test to `TestPluginPackageInputs_ExactVersions`, dropping the
+  lock-integrity half with the lockfile.)
 - [x] 3.6 Update `internal/scaffold/testdata/plugin-package-provenance.json`:
   plugin 1.19.0, fresh `verified_at`, registry-maintainer and HTTPS
   provenance, and the task 3.3 verification evidence (consumed by
@@ -135,6 +149,8 @@
   re-verify the baseline-lock SHA256 against the 1.4.10 rollback
   baseline lockfile so verified rollback remains executable
   (consumed by `TestPluginPackageInputs_RollbackPrerequisites`)
+  (Reconciliation: stop-shipping-plugin-lock later removed the
+  rollback testdata and its test with the lockfile.)
 - [x] 3.8 Run `make check` (lint, test, build, coverage gate, plugin
   tests) and confirm the scaffold drift and pin-governance tests
   pass

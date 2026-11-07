@@ -296,6 +296,9 @@ func Run(opts Options) (*Result, error) {
 		// Check if file already exists
 		existing, readErr := os.ReadFile(outPath)
 		fileExists := readErr == nil
+		if fileExists && relPath == pluginManifestAsset {
+			out = preservePluginDevDependencies(out, existing)
+		}
 
 		if !fileExists {
 			// New file -- create it
@@ -412,7 +415,7 @@ func Run(opts Options) (*Result, error) {
 		// ungated by DivisorOnly: --divisor deploys .opencode/
 		// (package.json, plugin sources) and runs plugin activation
 		// inside it too. Independent of the pluginResult computed
-		// above — npm ci may fail or be skipped while node_modules/
+		// above — npm install may fail or be skipped while node_modules/
 		// can still appear.
 		opencodeGiResult = ensureOpencodeGitignore(&opts)
 		warnStaleStealthExclusion(&opts)
@@ -712,7 +715,7 @@ func isToolOwned(relPath string) bool {
 	if strings.HasPrefix(relPath, "opencode/skills/") {
 		return true
 	}
-	if relPath == "opencode/package.json" || relPath == "opencode/package-lock.json" {
+	if relPath == pluginManifestAsset {
 		return true
 	}
 	if isActivationGatedAsset(relPath) {
@@ -810,7 +813,7 @@ func isDivisorAsset(relPath string) bool {
 	if isActivationGatedAsset(relPath) {
 		return true
 	}
-	if relPath == "opencode/package.json" || relPath == "opencode/package-lock.json" {
+	if relPath == pluginManifestAsset {
 		return true
 	}
 	if relPath == "opencode/lib/agent-executor.ts" ||
@@ -1587,9 +1590,11 @@ const reviewMatrixOverrideStub = `# .uf/review-matrix.override.yaml
 // opencodeGitignore is the canonical content deployed as
 // .opencode/.gitignore by ensureOpencodeGitignore (SC-FR-015, design
 // D9): the plugin-dependency and test-output noise that lands inside
-// .opencode/ when plugin activation runs npm ci there (node_modules,
-// bun.lock) and when the TypeScript plugin suite runs (.vitest/
-// cache, coverage/ output). It is a Go string constant rather than an
+// .opencode/ when plugin activation installs there (node_modules,
+// bun.lock, and the package-lock.json npm or opencode may write;
+// the scaffold no longer ships or tracks a lock) and when the
+// TypeScript plugin suite runs (.vitest/ cache, coverage/ output).
+// It is a Go string constant rather than an
 // embedded asset because Go's //go:embed excludes dotfiles from
 // directory matches, so the embedded assets tree cannot carry the
 // file; like the override stubs it carries no version marker and no
@@ -1597,6 +1602,7 @@ const reviewMatrixOverrideStub = `# .uf/review-matrix.override.yaml
 // reset — only canonical lines missing from it are appended.
 const opencodeGitignore = `node_modules
 bun.lock
+package-lock.json
 .vitest/
 coverage/
 `
@@ -1844,7 +1850,7 @@ func ensureOverrideStub(opts *Options, name, content string) subToolResult {
 // canonical opencodeGitignore lines (SC-FR-015, design D9), so that
 // plugin-dependency and test-output noise inside .opencode/ is
 // ignored in fresh targets. The writer is a sub-tool independent of
-// the plugin-activation result: npm ci may fail or be skipped while
+// the plugin-activation result: npm install may fail or be skipped while
 // node_modules/ can still appear. Merge semantics, never a reset:
 //
 //   - file absent: create the parent directory as needed and write
