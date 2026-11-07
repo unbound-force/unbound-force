@@ -1148,6 +1148,10 @@ describe("uf_delegate_command skill resolution", () => {
       modelMatrix: matrixFreeDeps,
       readText: reads.readText,
       fileExists: artifact.fileExists,
+      // Same host-independence concern as the bare `..` test: the
+      // fileExists fake claims FAKE_CWD/Makefile exists, so isDirectory
+      // is pinned rather than left to a real statSync against the host.
+      isDirectory: () => false,
     }
 
     const result = await invokeDelegate(recordingExec().exec, deps, {
@@ -1268,6 +1272,12 @@ describe("uf_delegate_command skill resolution", () => {
       modelMatrix: matrixFreeDeps,
       readText: fakeReadText({}).readText,
       fileExists: (path: string) => path === resolve(FAKE_CWD, "..") || artifact.fileExists(path),
+      // isDirectory must be injected, not left at the statSync-backed
+      // production default: the fileExists fake claims the parent of
+      // FAKE_CWD exists, and a host that really has that directory
+      // would let the directory filter mask a traversal-guard
+      // regression (the guard, not the filter, must trip here).
+      isDirectory: () => false,
     }
 
     const result = await invokeDelegate(recordingExec().exec, deps, {
