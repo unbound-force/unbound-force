@@ -1583,6 +1583,7 @@ describe("git_push", () => {
     )
     expect(commands).toContain(`push --porcelain upstream ${NEW_SHA}:refs/heads/feat/x`)
     expect(commands).toContain("branch --set-upstream-to=upstream/feat/x feat/x")
+    expect(result.status).toBe("ok")
     if (result.status === "ok") {
       expect(result.data).toMatchObject({ remote: "upstream", old_sha: null, updated: true })
     }
@@ -1615,6 +1616,7 @@ describe("git_push", () => {
       createGitPushTool(exec, "/fake"),
       { branch: "feat/x" },
     )
+    expect(result.status).toBe("ok")
     if (result.status === "ok") {
       expect(result.data).toMatchObject({ old_sha: NEW_SHA, new_sha: NEW_SHA, updated: false })
     }
@@ -1628,13 +1630,15 @@ describe("git_push", () => {
       createGitPushTool(exec, "/fake"),
       { branch: "feat/x" },
     )
-    expect(unparsed.status === "ok" && unparsed.data?.old_sha).toBeNull()
+    expect(unparsed.status).toBe("ok")
+    expect(unparsed.data?.old_sha).toBeNull()
     const { exec: noLine } = pushExec({ pushOutput: "Done" })
     const missing = await invokeTool<Record<string, unknown>>(
       createGitPushTool(noLine, "/fake"),
       { branch: "feat/x" },
     )
-    expect(missing.status === "ok" && missing.data?.old_sha).toBeNull()
+    expect(missing.status).toBe("ok")
+    expect(missing.data?.old_sha).toBeNull()
   })
 
   it("refuses when the checkout is on a different branch", async () => {
@@ -1702,6 +1706,7 @@ describe("git_push_force_with_lease", () => {
     expect(commands).toContain(
       `push --porcelain --force-with-lease=refs/heads/feat/x --force-if-includes origin ${NEW_SHA}:refs/heads/feat/x`,
     )
+    expect(result.status).toBe("ok")
     if (result.status === "ok") {
       expect(result.data).toEqual({
         remote: "origin",
@@ -1740,6 +1745,7 @@ describe("git_push_force_with_lease", () => {
     expect(commands).toContain(
       `push --porcelain --force-with-lease=refs/heads/feat/x: origin ${NEW_SHA}:refs/heads/feat/x`,
     )
+    expect(result.status).toBe("ok")
     if (result.status === "ok") {
       expect(result.data).toMatchObject({ old_sha: null, updated: true })
     }
@@ -1753,6 +1759,7 @@ describe("git_push_force_with_lease", () => {
       createGitPushForceWithLeaseTool(exec, "/fake"),
       { branch: "feat/x" },
     )
+    expect(result.status).toBe("ok")
     if (result.status === "ok") {
       expect(result.data).toMatchObject({ old_sha: NEW_SHA, updated: false })
     }
@@ -1868,11 +1875,13 @@ describe("push tools against a real repository", () => {
     expect(defaultGitExec(["rev-parse", "refs/heads/feat"], remoteDir)).toBe(rewritten)
 
     const noop = await invokeTool<GitPushData>(forceTool, { branch: "feat" })
-    expect(noop.status === "ok" && noop.data?.updated).toBe(false)
+    expect(noop.status).toBe("ok")
+    expect(noop.data?.updated).toBe(false)
 
     git("commit", "-q", "--allow-empty", "-m", "two")
     const ff = await invokeTool<GitPushData>(createGitPushTool(defaultGitExec, work), { branch: "feat" })
-    expect(ff.status === "ok" && ff.data?.old_sha).toBe(rewritten)
+    expect(ff.status).toBe("ok")
+    expect(ff.data?.old_sha).toBe(rewritten)
 
     // A stale lease is rejected rather than overwriting the remote.
     git("commit", "-q", "--amend", "--allow-empty", "-m", "two (rebased)")
