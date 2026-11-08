@@ -566,9 +566,13 @@ ingest, assess, triage, and respond to every piece of
 feedback.
 
 **Four-phase workflow**:
-1. **Ingest** -- Fetch all unresolved review threads
-   from GitHub, filtering out resolved and outdated
-   items.
+1. **Ingest** -- Check out the PR head (`gh pr checkout`)
+   before reading saved progress, then fetch all unresolved
+   review threads from GitHub, filtering out resolved and
+   outdated items. Identity is keyed on `HEAD`, and the
+   push later goes to the remote and merge ref the checkout
+   configured (see
+   [Checking out the PR head](usage.md#checking-out-the-pr-head)).
 2. **Assess** -- Classify each item as data-driven or
    subjective using convention packs and constitution
    principles as evidence.
@@ -578,17 +582,25 @@ feedback.
    MEDIUM and LOW items the author chooses file issue,
    reply, or ask: they never change code in the same run.
 4. **Execute** -- Commit code fixes, run the pre-flight
-   checks in hard-gate mode, push, file issues, post reply
-   comments, and resolve the addressed threads.
+   checks in hard-gate mode (at most 3 attempts; a check
+   that still fails stops the command before the push),
+   push, file issues, post reply comments, and resolve the
+   addressed threads. Dewey learnings stay untracked and
+   reach `main` through a separate `chore/dewey-learnings-*`
+   PR.
 
 **One council per round**: the command does not run
 `/uf.review-council`. The re-review after the push is the
 council for the round. `/uf.review-pr` calls
-`resolve_review_mode`, which picks a light check when the
-reviewer already reviewed an earlier commit and the push is
-at most 200 lines, adds or removes no file, touches no
-workflow, instruction, pack, or auth/secret path, follows a
-review with no CRITICAL finding, and has no failing check.
+`resolve_review_mode`, which picks a light check only when
+the current user already reviewed an earlier commit that is
+still an ancestor of the head, the prior review raised no
+CRITICAL finding, and the push since then changes at most
+200 lines, adds, removes, renames, or copies no file, touches
+nothing under `.github/`, no `AGENTS.md`, constitution, or
+convention pack, and no path naming auth, tokens, secrets, or
+credentials, and no check is failing. Any input the tool
+cannot read selects the full council.
 The light check verifies the earlier CRITICAL and HIGH
 findings and reads only the new commits; a new CRITICAL or
 HIGH problem goes to the full council.

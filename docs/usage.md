@@ -83,15 +83,76 @@ The command runs four phases:
    For a MEDIUM or LOW item you choose: File issue, Reply, or
    Ask; those never change code in this run
 4. **Execute** — Implements code fixes, runs the pre-flight
-   checks, pushes, files issues, posts reply comments, and
-   resolves the addressed threads
+   checks in hard-gate mode, pushes, files issues, posts reply
+   comments, and resolves the addressed threads. A failing
+   check gets a fix commit and a re-run, at most 3 attempts in
+   all; if it still fails, the command stops and does not push
+
+#### Checking out the PR head
+
+Before it reads any saved progress, the command puts the
+working tree on the PR head, so it can run from any branch:
+
+- **Identity is keyed on `HEAD`, not the branch name.** When
+  `HEAD` equals the PR's head commit, or descends from it
+  (unpushed commits from an earlier run, such as a failed
+  push), the command continues and never resets or discards
+  local commits. A cross-repo PR may check out under a name
+  such as `<owner>/<branch>`; that is accepted.
+- **Otherwise it runs `gh pr checkout <N>`**, which resolves
+  the head repository (fork or same-repo) and records the
+  branch's push remote and merge ref.
+
+The command stops before reading progress, committing, or
+pushing when:
+
+- a checkout is needed but the tree has uncommitted changes
+  to tracked files (commit or stash them, then rerun)
+- `gh pr checkout` fails; the command reports the error. The
+  usual cause is an untracked file that collides with a
+  tracked file on the PR branch: remove, rename, or stash it
+  (`git stash -u` includes untracked files), then rerun
+- `HEAD` is still unrelated to the PR head after the checkout
+- the branch has no configured push remote or merge ref
+- the merge ref is the read-only `refs/pull/<N>/head` (a fork
+  PR with maintainer edits disabled), which cannot be pushed
+- the merge ref is not `refs/heads/<head branch>`, for
+  example a local `main` that already contains the merged PR,
+  so the PR's commits are never pushed to another branch
+- a branch name or push remote contains characters outside a
+  conservative set, before any of them reaches a shell command
+
+**Push target.** The push goes to the remote and merge ref
+that `gh pr checkout` configured, not to a hard-coded
+`origin`, which in a fork-and-upstream clone is usually the
+fork. Before pushing, the command fetches that target and
+counts divergence with
+`git rev-list --left-right --count HEAD...FETCH_HEAD`; a
+remote given as a URL updates only `FETCH_HEAD`, so
+`git status` cannot see it. When someone else pushed to the
+branch, the command asks whether to rebase onto the remote
+or stop with your local commits kept. A failed fetch stops
+the push.
+
+**Resume.** Progress is saved per checked-out branch and is
+read only after the tree is on the PR head. An interrupted
+run therefore resumes on the PR branch, including with
+unpushed local commits, whatever branch you started from.
+
+This behavior shipped in PR #955 (issue #954). Issue #965
+tracks moving the checkout into a tested tool; the behavior
+above stays the same.
+
+#### One council per round
 
 The command does not run `/uf.review-council`. The re-review
 that follows (`/uf.review-pr`) is the one council for the
 round, and when the push is small and touches only code a
 council already reviewed, `/uf.review-pr` runs a light check
 instead: it confirms the earlier CRITICAL and HIGH findings
-are fixed and can approve.
+are fixed and can approve. `/uf.review-pr` makes that choice
+with the `resolve_review_mode` tool, and any input it cannot
+read selects the full council.
 
 Dewey learnings the command stores stay untracked. They reach
 `main` through a separate `chore/dewey-learnings-*` PR, never
