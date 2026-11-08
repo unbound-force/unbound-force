@@ -1,6 +1,6 @@
 import type { PluginInput, PluginModule } from "@opencode-ai/plugin"
 import { execFileSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -9,6 +9,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest"
 import {
   classifyTest,
   collectClis,
+  genericRegistrationPlugins,
   inventory,
   locateFactory,
   main,
@@ -99,6 +100,22 @@ describe("inventory matches the runtime registry", () => {
     expect(files).toContain(".opencode/lib/instruction-lint.ts")
     expect(files).toContain(".opencode/lib/tool-inventory.ts")
     expect(files).toContain(".uf/scripts/instruction-lint")
+    // The shared helper module defines runMain/isMainModule but has no
+    // entry guard of its own: it must never be listed as a CLI.
+    expect(files).not.toContain(".opencode/lib/cli-common.ts")
+  })
+
+  it("pins registration credit against the real registration-surface suite", () => {
+    // DE-007 discoverability: the seam report credits generic
+    // registration by extracting `{ id: "..." }` entries from the live
+    // registration-surface suite. Pin that extraction to the real file
+    // (not self-authored fixtures) and to the installed plugin dirs.
+    const surface = readFileSync(join(REPO, ".opencode/test/registration-surface.test.ts"), "utf8")
+    const credited = genericRegistrationPlugins(surface)
+    expect(credited.size).toBeGreaterThan(0)
+    for (const id of credited) {
+      expect(existsSync(join(REPO, ".opencode/plugins", id, "index.ts")), id).toBe(true)
+    }
   })
 })
 
@@ -228,18 +245,22 @@ describe("parsing", () => {
     expect(classifyTest(".opencode/test/x.test.ts", 'it("round-trips through my$tool")', "my$tool")).toBe("round-trip")
   })
 
-  it("collects lib CLIs and .uf scripts with their first comment line", () => {
+  it("collects lib CLIs by entry guard and .uf scripts with their first comment line", () => {
     const root = repo({
-      ".opencode/lib/cli.ts": "// Does the thing.\nif (import.meta.main) {}\n",
+      ".opencode/lib/cli.ts": "// Does the thing.\nif (import.meta.main) runMain(main)\n",
+      ".opencode/lib/guard.ts": "// New idiom.\nif (isMainModule(import.meta.url)) runMain(main)\n",
+      // A bare import.meta.main check with no runMain call is not an entry block.
       ".opencode/lib/bare.ts": "if (import.meta.main) {}\n",
+      // The idiom mentioned only in a comment does not count.
+      ".opencode/lib/decoy.ts": "// if (import.meta.main) runMain(main)\nexport const x = 1\n",
       ".opencode/lib/lib.ts": "// Library only.\nexport const x = 1\n",
       ".opencode/lib/notes.md": "x",
       ".uf/scripts/run": "#!/bin/sh\n#\n# Runs it.\nexit 0\n",
       ".uf/scripts/plain": "exit 0\n",
     })
     expect(collectClis(root)).toEqual([
-      { name: "bare", file: ".opencode/lib/bare.ts", summary: "" },
       { name: "cli", file: ".opencode/lib/cli.ts", summary: "Does the thing." },
+      { name: "guard", file: ".opencode/lib/guard.ts", summary: "New idiom." },
       { name: "plain", file: ".uf/scripts/plain", summary: "" },
       { name: "run", file: ".uf/scripts/run", summary: "Runs it." },
     ])
@@ -395,5 +416,35 @@ describe("cli", () => {
     const j = JSON.parse(cli(["--json", "--match", "resolve"], root).out) as Inventory
     expect(j.tools.map((t) => t.name)).toEqual(["a_tool"])
     expect(j.clis).toEqual([])
+  })
+
+  it("stamps --json output with producer provenance", () => {
+    const root = repo({})
+    const j = JSON.parse(cli(["--json"], root).out) as { provenance: { tool: string; version: string | null; generatedAt: string } }
+    expect(j.provenance.tool).toBe("tool-inventory")
+    expect(j.provenance.version === null || typeof j.provenance.version === "string").toBe(true)
+    expect(new Date(j.provenance.generatedAt).toString()).not.toBe("Invalid Date")
+  })
+
+  it("escapes control characters in text output only", () => {
+    const esc = String.fromCharCode(27)
+    const root = repo({
+      ".opencode/plugins/p/index.ts":
+        'export default { server() { return { tool: { a_tool: createA() } } } }\n' +
+        `export function createA() {\n  return tool({ description: "esc${esc}[31m marker" })\n}\n`,
+    })
+    const text = cli([], root).out
+    expect(text).toContain("esc\\x1b[31m marker")
+    expect(text).not.toContain(`esc${esc}[31m`)
+    const j = JSON.parse(cli(["--json"], root).out) as Inventory
+    expect(j.tools[0].description).toContain(`esc${esc}[31m`)
+  })
+
+  it("runs as a plain-node CLI with a real entry point", { timeout: 30000 }, () => {
+    // Regression for the silent no-op: import.meta.main is undefined
+    // before Node 24.2, which used to skip runMain and exit 0 with no
+    // output. The entry must run on the engine floor the repo pins.
+    const out = execFileSync(process.execPath, [join(REPO, ".opencode/lib/tool-inventory.ts"), "--help"], { encoding: "utf8" })
+    expect(out).toMatch(/usage: tool-inventory/)
   })
 })

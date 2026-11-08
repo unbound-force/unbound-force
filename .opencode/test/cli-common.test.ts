@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { findRoot, git, runMain, spawnDetail } from "../lib/cli-common.js"
+import { escapeControlChars, findRoot, git, isMainModule, runMain, spawnDetail } from "../lib/cli-common.js"
 
 const roots: string[] = []
 afterEach(() => {
@@ -40,6 +40,10 @@ describe("cli-common", () => {
     const e = Object.assign(new Error("boom"), { stderr: Buffer.from("  git said no  \n") })
     expect(spawnDetail(e)).toBe("git said no")
     expect(spawnDetail(new Error("only message"))).toBe("only message")
+    // Null/undefined errors and plain-string stderr must not throw.
+    expect(spawnDetail(null)).toBe("null")
+    expect(spawnDetail(undefined)).toBe("undefined")
+    expect(spawnDetail(Object.assign(new Error("x"), { stderr: "  plain  " }))).toBe("plain")
   })
 
   it("runMain wires process writers and records the exit code", () => {
@@ -53,7 +57,7 @@ describe("cli-common", () => {
         io.out("wrote out")
         io.err("wrote err")
         return 3
-      })
+      }, "test-cli")
       expect(cwd).toBe(process.cwd())
       expect(out).toHaveBeenCalledWith("wrote out\n")
       expect(err).toHaveBeenCalledWith("wrote err\n")
@@ -62,6 +66,39 @@ describe("cli-common", () => {
       out.mockRestore()
       err.mockRestore()
       process.exitCode = prior
+    }
+  })
+
+  it("runMain converts a crash to exit 2 with a stderr message", () => {
+    const prior = process.exitCode
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
+    try {
+      runMain(() => {
+        throw new Error("kaboom")
+      }, "test-cli")
+      expect(process.exitCode).toBe(2)
+      expect(err).toHaveBeenCalledWith("test-cli: could not run: kaboom\n")
+    } finally {
+      err.mockRestore()
+      process.exitCode = prior
+    }
+  })
+
+  it("escapeControlChars escapes C0 and C1 controls, keeping tab and newline", () => {
+    expect(escapeControlChars("a\u001b[31mb\u009b\rc\td\ne")).toBe("a\\x1b[31mb\\x9b\\x0dc\td\ne")
+  })
+
+  it("isMainModule is false outside the real entry path", () => {
+    const prior = process.argv[1]
+    try {
+      // Under vitest the entry is the runner binary, never this module.
+      expect(isMainModule(import.meta.url)).toBe(false)
+      process.argv[1] = undefined as unknown as string
+      expect(isMainModule(import.meta.url)).toBe(false)
+      process.argv[1] = join(tmpdir(), "definitely-not-a-real-entry.js")
+      expect(isMainModule(import.meta.url)).toBe(false)
+    } finally {
+      process.argv[1] = prior
     }
   })
 })
