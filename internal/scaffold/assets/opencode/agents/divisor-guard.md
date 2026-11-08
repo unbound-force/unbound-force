@@ -109,7 +109,7 @@ Delegated mechanical work is bound to repo tooling through the delegation tools'
 
 `uf_delegate_command` records the classification, the resolved skill reference, and any recorded reason in its checkpoint data and success envelope -- that record, not prompt reconstruction, is the audit source for delegated work.
 
-These checklist items enforce determinism-pack rule DE-008. When the deployment enrolls a determinism reviewer persona -- this repository adds `divisor-determinism` -- that persona owns DE-008: cross-reference its finding instead of reporting a duplicate. Your angle stays the constitution and gatekeeping question -- whether delegated mechanical work is bound to repo tooling at all.
+These checklist items enforce determinism-pack rule DE-008. When the deployment's reviewer capabilities enroll a determinism reviewer persona, that persona owns DE-008: cross-reference its finding instead of reporting a duplicate. When none is enrolled, these items are the DE-008 review. Your angle stays the constitution and gatekeeping question -- whether delegated mechanical work is bound to repo tooling at all.
 
 - Does any new or modified delegation instruction (in commands, agents, or skills) bind mechanical work to a skill or script through prose only, instead of through the parameter contract? Flag prose-only binding -- it has no enforcement behind it.
 - Does a delegation classified `deterministic` carry neither a `skill` reference nor a `skill_absent_reason` -- in `uf_delegate_command` call sites in the diff, or in delegations audited through their checkpoint data? Flag it; the tool rejects deterministic calls that supply neither, before any child session spawns.
