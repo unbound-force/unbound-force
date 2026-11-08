@@ -950,6 +950,12 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/remove-mutimind-mxf-orchestration/, Fixes: #565, Fixes: #566)
 
 ### Changed
+- advisory-approval-event: `/uf.review-pr` posts an `APPROVE WITH
+  ADVISORIES` verdict as `APPROVE` when no finding is CRITICAL or
+  HIGH. A verdict with a CRITICAL or HIGH finding, or a finding of
+  unknown severity, still posts as `COMMENT`, now with a note that
+  those findings need human judgment before merge. The confirmation
+  gate picks its options from the mapped event.
 - stop-shipping-plugin-lock: `uf init` no longer ships or tracks
   `.opencode/package-lock.json`. opencode and users also install into
   `.opencode/`, so a tool-owned lock was overwritten on every

@@ -599,6 +599,20 @@ func TestCommandContracts_ReviewPrSelfAuthoredMapping(t *testing.T) {
 	})
 }
 
+// TestCommandContracts_ReviewPrAdvisorySeverityMapping pins the
+// advisory-approval-event mapping: APPROVE WITH ADVISORIES posts as
+// APPROVE only when no finding is CRITICAL or HIGH, an unknown
+// severity counts as HIGH, and the gate options follow the mapped
+// event rather than the verdict.
+func TestCommandContracts_ReviewPrAdvisorySeverityMapping(t *testing.T) {
+	assertCommandCopies(t, "uf.review-pr.md", true, []commandClause{
+		{name: "low-severity advisories approve", all: []string{"| approve with advisories, no critical or high finding | `approve` |"}},
+		{name: "high-severity advisories comment", all: []string{"| approve with advisories, any critical or high finding | `comment` |", "council approved with advisories: unresolved critical or high findings require human judgment before merge."}},
+		{name: "unknown severity fails closed", all: []string{"a finding with no recognized severity counts as high."}},
+		{name: "options follow the mapped event", all: []string{"for the `approve` event, use options:", "for the `request_changes` or `comment` event, use options:"}},
+	})
+}
+
 func TestCommandContracts_CanonicalScaffoldParity(t *testing.T) {
 	root := findProjectRoot(t)
 	if root == "" {

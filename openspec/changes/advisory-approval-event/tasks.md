@@ -13,3 +13,6 @@
 
 - [x] 2.1 Run the scaffold drift tests.
 - [x] 2.2 Run `openspec validate advisory-approval-event --strict`.
+- [x] 2.3 Pin the mapping in
+  `TestCommandContracts_ReviewPrAdvisorySeverityMapping`.
+- [x] 2.4 Add the CHANGELOG entry.
