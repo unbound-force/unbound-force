@@ -23,7 +23,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 // Plain-node CLI (type stripping): import the shared module by its real
 // .ts extension; node does not remap .js specifiers to .ts files.
-import { findRoot, git, runMain, spawnDetail, type CliIO } from "./cli-common.ts"
+import { escapeControlChars, findRoot, git, isMainModule, runMain, spawnDetail, type CliIO } from "./cli-common.ts"
 
 export interface ToolEntry {
   name: string
@@ -89,6 +89,40 @@ function skipNonCode(text: string, i: number): number {
   }
   return i
 }
+
+/** Comment-free text: comment spans blanked with spaces (offsets and
+ * line breaks preserved) so entry-point detection never matches
+ * explanatory prose. String literals stay as code: regex literals
+ * with embedded quotes would derail string-skipping, and a `//` inside
+ * a string can only hide an entry guard on its own line, never fake
+ * one. */
+function stripComments(text: string): string {
+  let out = ""
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "/" && text[i + 1] === "/") {
+      const nl = text.indexOf("\n", i)
+      const end = nl === -1 ? text.length : nl
+      out += " ".repeat(end - i)
+      i = end - 1
+    } else if (text[i] === "/" && text[i + 1] === "*") {
+      const close = text.indexOf("*/", i + 2)
+      const end = close === -1 ? text.length : close + 2
+      out += " ".repeat(end - i)
+      i = end - 1
+    } else {
+      out += text[i]
+    }
+  }
+  return out
+}
+
+// A lib module counts as a CLI when an entry guard calls runMain:
+// either the import.meta.main idiom or the shared isMainModule helper,
+// which also works where import.meta.main is undefined (Node < 24.2).
+// The guard shape -- an if statement wrapping the runMain call -- keeps
+// the shared definitions in cli-common.ts from matching, and matching
+// code only keeps explanatory comments from listing libraries.
+const ENTRY_BLOCK = /\bif\s*\(\s*(?:import\.meta\.main\b|isMainModule\s*\([^)]*\))\s*\)\s*runMain\s*\(/
 
 /** Index of the registry's opening brace, or -1 when absent. Only code
  * positions count: `tool: {` inside a comment or string must not hijack
@@ -297,8 +331,8 @@ export function collectTools(plugins: string[], read: Reader): ToolEntry[] {
   return out.sort((x, y) => x.name.localeCompare(y.name))
 }
 
-/** Collect the repo-local runnable CLIs: lib modules with an
- * `import.meta.main` entry point and `.uf/scripts/` members.
+/** Collect the repo-local runnable CLIs: lib modules with a runMain
+ * entry guard and `.uf/scripts/` members.
  * @param root Repository root.
  * @returns CLI entries with file and first-comment summary. */
 export function collectClis(root: string): CliEntry[] {
@@ -306,7 +340,7 @@ export function collectClis(root: string): CliEntry[] {
   for (const f of listDir(root, ".opencode/lib")) {
     if (!f.endsWith(".ts")) continue
     const text = readFileSync(join(root, ".opencode/lib", f), "utf8")
-    if (!/\bimport\.meta\.main\b/.test(text)) continue
+    if (!ENTRY_BLOCK.test(stripComments(text))) continue
     const first = /^\/\/\s?(.*)$/m.exec(text)
     out.push({ name: f.slice(0, -3), file: `.opencode/lib/${f}`, summary: first ? first[1].trim() : "" })
   }
@@ -381,7 +415,16 @@ type Git = (args: string[]) => string
 
 const realGit = (root: string): Git => (args) => git(root, args).toString("utf8")
 
-/** Parse `git diff -U0` output into head-side changed lines per file. */
+/** Plugin ids credited by the generic registration-surface suite: the
+ * `{ id: "..." }` entries of its PLUGINS array. Exported so a
+ * real-repo discoverability test can pin this extraction against the
+ * live test file instead of self-authored fixtures (DE-007).
+ * @param surface Source text of registration-surface.test.ts.
+ * @returns The plugin ids the suite registers. */
+export function genericRegistrationPlugins(surface: string): Set<string> {
+  return new Set([...surface.matchAll(/\{\s*id:\s*"([^"]+)"/g)].map((m) => m[1]))
+}
+
 /** Map a unified diff to its per-file changed head-revision lines.
  * @param diff Unified diff text (`git diff -U0` output).
  * @returns File path to the set of changed line numbers. */
@@ -471,8 +514,7 @@ export function seamReport(root: string, ref: string, git: Git = realGit(root)):
     .map((f) => `.opencode/test/${f}`)
   const testText = new Map(testFiles.map((f) => [f, readFileSync(join(root, f), "utf8")]))
   const changedTests = new Set([...changed.keys(), ...untracked].filter((f) => f.startsWith(".opencode/test/")))
-  const surface = testText.get(".opencode/test/registration-surface.test.ts") ?? ""
-  const genericPlugins = new Set([...surface.matchAll(/\{\s*id:\s*"([^"]+)"/g)].map((m) => m[1]))
+  const genericPlugins = genericRegistrationPlugins(testText.get(".opencode/test/registration-surface.test.ts") ?? "")
 
   const entry = (tool: string, plugin: string, factory: string | null, status: SeamEntry["status"]): SeamEntry => {
     const names = [tool, ...(factory ? [factory] : [])]
@@ -516,6 +558,15 @@ const USAGE = `usage: tool-inventory [--root DIR] [--json] [--match WORDS]
   --base REF     base ref for --seams
   --json         machine-readable output`
 
+const TOOL_VERSION: string | null = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: string }
+    return pkg.version ?? null
+  } catch {
+    return null
+  }
+})()
+
 const one = (s: string | null): string => (s ?? "").replace(/\s+/g, " ").trim()
 
 /** CLI entry point.
@@ -556,6 +607,11 @@ export function main(argv: string[], io: CliIO, git?: Git): number {
     return 2
   }
   const json = flags.has("--json")
+  // Text-mode output carries file-derived content: escape control
+  // characters at the print sites; JSON branches stay raw (Constitution
+  // III provenance on --json, V input handling on text paths).
+  const print = (s: string): void => io.out(escapeControlChars(s))
+  const provenance = { tool: "tool-inventory", version: TOOL_VERSION, generatedAt: new Date().toISOString() }
 
   if (flags.has("--seams")) {
     if (!base) {
@@ -571,15 +627,15 @@ export function main(argv: string[], io: CliIO, git?: Git): number {
       return 2
     }
     if (json) {
-      io.out(JSON.stringify(report, null, 2))
+      io.out(JSON.stringify({ provenance, ...report }, null, 2))
       return 0
     }
-    io.out(`seams since ${report.base} (merge-base ${report.mergeBase.slice(0, 12)}): ${report.seams.length} tool(s)`)
+    print(`seams since ${report.base} (merge-base ${report.mergeBase.slice(0, 12)}): ${report.seams.length} tool(s)`)
     for (const s of report.seams) {
-      io.out(`\n${s.tool}  [${s.plugin}, ${s.status}]`)
-      if (s.genericRegistration) io.out("  registration  generic: .opencode/test/registration-surface.test.ts")
-      for (const t of s.tests) io.out(`  ${t.layer.padEnd(12)}  ${t.file}${t.changed ? "  (changed)" : ""}`)
-      if (s.missing.length > 0) io.out(`  missing: ${s.missing.join(", ")}`)
+      print(`\n${s.tool}  [${s.plugin}, ${s.status}]`)
+      if (s.genericRegistration) print("  registration  generic: .opencode/test/registration-surface.test.ts")
+      for (const t of s.tests) print(`  ${t.layer.padEnd(12)}  ${t.file}${t.changed ? "  (changed)" : ""}`)
+      if (s.missing.length > 0) print(`  missing: ${s.missing.join(", ")}`)
     }
     return 0
   }
@@ -587,16 +643,16 @@ export function main(argv: string[], io: CliIO, git?: Git): number {
   let inv = inventory(root)
   if (words.length > 0) inv = match(inv, words)
   if (json) {
-    io.out(JSON.stringify(inv, null, 2))
+    io.out(JSON.stringify({ provenance, ...inv }, null, 2))
     return 0
   }
   for (const t of inv.tools) {
     const where = t.file ? `${t.file}:${t.line}` : "(factory not found)"
-    io.out(`${t.name}  [${t.plugin}]  ${where}\n  ${one(t.description)}`)
+    print(`${t.name}  [${t.plugin}]  ${where}\n  ${one(t.description)}`)
   }
-  for (const c of inv.clis) io.out(`${c.file}  [cli]\n  ${one(c.summary)}`)
-  io.out(`\n${inv.tools.length} tools, ${inv.clis.length} scripts`)
+  for (const c of inv.clis) print(`${c.file}  [cli]\n  ${one(c.summary)}`)
+  print(`\n${inv.tools.length} tools, ${inv.clis.length} scripts`)
   return 0
 }
 
-if (import.meta.main) runMain(main)
+if (isMainModule(import.meta.url)) runMain(main, "tool-inventory")

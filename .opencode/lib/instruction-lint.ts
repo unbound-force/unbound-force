@@ -14,9 +14,8 @@
 //   <!-- instruction-lint-disable-next-line IL-023 -->
 //   <!-- instruction-lint-disable IL-041 -->   (whole file)
 
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, resolve, sep } from "node:path"
-import { fileURLToPath } from "node:url"
 // `yaml` and `zod` are declared in .opencode/package.json (zod as a
 // runtime dependency, yaml as a development dependency: the linter only
 // runs where devDependencies are installed). Both resolve from
@@ -26,12 +25,12 @@ import { z } from "zod"
 // The cli-common import uses the explicit .ts specifier: this module
 // runs under plain node (type stripping), which does not remap .js
 // specifiers to .ts files the way the vite/vitest resolver does.
-// runMain is deliberately not imported: the entry block below compares
-// realpath(process.argv[1]) against this module because import.meta.main
-// is undefined on runtimes older than Node 24.2.
-import { findRoot, git, spawnDetail, type CliIO } from "./cli-common.ts"
+// Entry detection and crash conversion live in cli-common: isMainModule
+// compares by path because import.meta.main is undefined on runtimes
+// older than Node 24.2, and runMain converts crashes to exit 2.
+import { escapeControlChars, findRoot, git, isMainModule, runMain, spawnDetail, type CliIO } from "./cli-common.ts"
 
-export { findRoot } from "./cli-common.ts"
+export { escapeControlChars, findRoot } from "./cli-common.ts"
 export type { CliIO } from "./cli-common.ts"
 
 /** Linter finding severity: errors fail the run, warnings only with --strict. */
@@ -67,6 +66,7 @@ export const RULES: Record<string, RuleInfo> = {
   "IL-040": { severity: "info", summary: "Prescribed-output phrasing; render it from a tool instead (DE-003)" },
   "IL-041": { severity: "info", summary: "Multi-command shell procedure in prose; candidate for a tested tool (DE-001)" },
   "IL-042": { severity: "warning", summary: "Delegation call block omits task_classification or the skill contract (DE-008)" },
+  "IL-043": { severity: "error", summary: "Fenced code block opened but never closed, so later prose is skipped as code" },
   "IL-050": { severity: "info", summary: "Near-duplicate paragraphs across files (instruction drift risk)" },
 }
 
@@ -150,6 +150,9 @@ export interface Artifact {
   bodyStart: number
   // per 0-based line: true when the line is a fenced-code delimiter or content
   fenced: boolean[]
+  // 1-based line of a fence still open at EOF, else null: every rule
+  // from that line on is skipped as fenced code (IL-043)
+  unclosedFenceLine: number | null
   tokens: number
   fileSuppression: LineSuppression
   lineSuppression: Map<number, LineSuppression>
@@ -213,14 +216,19 @@ export function buildArtifact(file: string, rawText: string, kind: ArtifactKind,
 
   const fenced = new Array<boolean>(lines.length).fill(false)
   let open: { ch: string; len: number } | null = null
+  let unclosedFenceLine: number | null = null
   for (let i = bodyStart; i < lines.length; i++) {
     const m = /^\s{0,3}(`{3,}|~{3,})/.exec(lines[i])
     if (open) {
       fenced[i] = true
-      if (m && m[1][0] === open.ch && m[1].length >= open.len && lines[i].trim() === m[1]) open = null
+      if (m && m[1][0] === open.ch && m[1].length >= open.len && lines[i].trim() === m[1]) {
+        open = null
+        unclosedFenceLine = null
+      }
     } else if (m) {
       fenced[i] = true
       open = { ch: m[1][0], len: m[1].length }
+      unclosedFenceLine = i + 1
     }
   }
 
@@ -242,7 +250,7 @@ export function buildArtifact(file: string, rawText: string, kind: ArtifactKind,
 
   return {
     kind, name, file, lines, hasFrontmatter, frontmatter, frontmatterError,
-    bodyStart, fenced, tokens: estimateTokens(text), fileSuppression, lineSuppression,
+    bodyStart, fenced, unclosedFenceLine, tokens: estimateTokens(text), fileSuppression, lineSuppression,
   }
 }
 
@@ -872,6 +880,9 @@ export function lint(
     checkFrontmatter(a, emit)
     checkProse(a, unitsByFile.get(a.file) ?? [], emit)
     checkDelegations(a, emit)
+    if (a.unclosedFenceLine !== null) {
+      emit("IL-043", a, a.unclosedFenceLine, "fenced code block opened here is never closed; every rule after it is skipped as code")
+    }
     if (a.tokens > opts.maxFileTokens) {
       emit("IL-030", a, 1, `~${a.tokens} tokens exceeds the ${opts.maxFileTokens}-token file budget`)
     }
@@ -1034,18 +1045,6 @@ const USAGE = `usage: instruction-lint [--root DIR] [--config FILE] [--only PATH
   --changed      scope findings and deltas to the files changed since
                  merge-base(--base REF, HEAD); requires --base
   --rules        list rule IDs and exit`
-
-/**
- * Escape C0 and C1 control characters, keeping tab and newline. Without
- * this an ANSI or OSC sequence committed in a lint input reaches the
- * terminal and quoted pre-flight output.
- *
- * @param text - Text carrying file-derived content.
- * @returns The text with each control character written as `\\xNN`.
- */
-export function escapeControlChars(text: string): string {
-  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`)
-}
 
 /** Read and validate the config at `path`; null after reporting a failure on `io`. */
 function loadOptions(path: string, io: CliIO): Partial<LintOptions> | null {
@@ -1262,21 +1261,4 @@ export function main(argv: string[], io: CliIO): number {
   return summary.errors > 0 || (flags.has("--strict") && summary.warnings > 0) ? 1 : 0
 }
 
-// Compared by path rather than import.meta.main, which is undefined on
-// runtimes older than Node 24.2: the linter would load, do nothing, and
-// exit 0 there.
-const entry = process.argv[1]
-if (entry !== undefined && existsSync(entry) && realpathSync(entry) === fileURLToPath(import.meta.url)) {
-  try {
-    process.exitCode = main(process.argv.slice(2), {
-      cwd: process.cwd(),
-      out: (s) => process.stdout.write(s + "\n"),
-      err: (s) => process.stderr.write(s + "\n"),
-    })
-  } catch (e) {
-    // Crash paths (EACCES, EISDIR, ENOTDIR, ...) must not masquerade as
-    // lint errors: exit 2 is the could-not-run code.
-    process.stderr.write(`instruction-lint: could not run: ${(e as Error).message}\n`)
-    process.exitCode = 2
-  }
-}
+if (isMainModule(import.meta.url)) runMain(main, "instruction-lint")

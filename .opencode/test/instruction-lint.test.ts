@@ -71,6 +71,22 @@ describe("parsing", () => {
     expect(a.fenced).toEqual([true, true, true, true, false])
   })
 
+  it("records the reopening fence of a doubled close as never closed", () => {
+    // Shape of the divisor-linguist.md regression: a doubled bare
+    // closing fence re-opens a block that swallows the rest of the
+    // file as code, silently skipping every rule after it.
+    const a = buildArtifact("x.md", "```\ncode\n```\n```\nprose swallowed as code", "context", "x")
+    expect(a.unclosedFenceLine).toBe(4)
+    expect(buildArtifact("x.md", "```\ncode\n```\nprose", "context", "x").unclosedFenceLine).toBeNull()
+  })
+
+  it("emits IL-043 for a fence left open at end of file", () => {
+    const findings = run({ ".opencode/agents/a.md": AGENT("```js\nsome code\n```\n```\nswallowed prose") })
+    const f = findings.find((x) => x.rule === "IL-043")
+    expect(f?.line).toBe(9)
+    expect(f?.severity).toBe("error")
+  })
+
   it("reports unterminated, invalid, and non-mapping frontmatter", () => {
     expect(buildArtifact("a", "---\nname: x\n", "skill", "a").frontmatterError).toMatch(/closing/)
     expect(buildArtifact("a", "---\nname: [x\n---\n", "skill", "a").frontmatterError).toMatch(/invalid YAML/)
@@ -755,17 +771,18 @@ describe("cli config validation and provenance", () => {
 
 describe("runtime dependencies", () => {
   it("resolves the yaml import the instruction linter depends on", () => {
-    // Resolution guard: `yaml` is not a declared dependency in
-    // .opencode/package.json (the scaffold pins exactly two runtime
-    // dependencies). The import resolves through transitive hoisting
-    // today; when that graph changes, this failure names the package
-    // instead of leaving instruction-lint crashing downstream.
+    // Resolution guard: `yaml` is a declared development dependency of
+    // .opencode/package.json (the scaffolded mirror deliberately ships
+    // no devDependencies). The linter runs where devDependencies are
+    // installed (make plugin-test); when that install path breaks,
+    // this failure names the package instead of leaving the linter
+    // crashing downstream.
     const require = createRequire(new URL("../lib/instruction-lint.ts", import.meta.url))
     let resolved: string
     try {
       resolved = require.resolve("yaml")
     } catch (e) {
-      throw new Error(`yaml is not resolvable from .opencode/lib (transitive hoisting changed): ${(e as Error).message}`)
+      throw new Error(`yaml is not resolvable from .opencode/lib (declared devDependency not installed): ${(e as Error).message}`)
     }
     expect(resolved).toContain("yaml")
   })
