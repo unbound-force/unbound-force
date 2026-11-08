@@ -64,6 +64,7 @@ Each entry follows the format: `- <change-name>: <summary>`.
   scope, and divisor-guard defers DE-008 to The Determinist when
   a determinism persona is enrolled. Instruction size round 2:
   divisor-determinism 246 lines; divisor-linguist 202 lines.
+  (Spec: openspec/changes/divisor-determinism-persona/)
 - preflight-declared-output: `uf_preflight_declared_checks` now
   returns `rendered_output`, one tool-rendered block per declared
   check that ran with output, whatever its status, so advisory
