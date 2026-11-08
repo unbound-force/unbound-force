@@ -24,10 +24,9 @@ Each entry follows the format: `- <change-name>: <summary>`.
   an exact-pinned devDependency (previously a phantom
   transitive import). Linter: 983 lines; tests: 529 + 235
   lines. Instruction delta (DE-004): divisor-linguist.md +262
-  lines (~4.2k self tokens, ~13.6k loaded); AGENTS.md +8/-3
-  lines here (lint-instructions command, `.uf/scripts/`
-  structure entry, agent count, yaml devDependency note), +13/-4
-  with the +5/-1 in the instruction-lint-deps entry;
+  lines (~4.2k self tokens, ~13.6k loaded); AGENTS.md +10/-5
+  lines (lint-instructions command, `.uf/scripts/` structure
+  entry, agent count, yaml devDependency note);
   baseline findings unchanged
   (1 error / 31 warnings / 23 info). (Spec:
   openspec/changes/instruction-lint/)
