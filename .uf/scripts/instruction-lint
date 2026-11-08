@@ -22,13 +22,13 @@ if [ ! -f "$root/.opencode/lib/instruction-lint.ts" ]; then
 fi
 
 if [ ! -d "$root/.opencode/node_modules" ]; then
-  echo "instruction-lint: dependencies not installed - run: (cd .opencode && npm install)" >&2
+  echo "instruction-lint: dependencies not installed - run: (cd .opencode && npm install --no-package-lock)" >&2
   exit 2
 fi
 
 for pkg in yaml zod; do
   if [ ! -f "$root/.opencode/node_modules/$pkg/package.json" ]; then
-    echo "instruction-lint: dependencies not installed - run: (cd .opencode && npm install)" >&2
+    echo "instruction-lint: dependencies not installed - run: (cd .opencode && npm install --no-package-lock)" >&2
     echo "instruction-lint: missing or incomplete package: .opencode/node_modules/$pkg" >&2
     exit 2
   fi

@@ -55,9 +55,9 @@ and acceptance criteria after the fact, per review feedback.
   checks.
 - Instruction delta (DE-004): `divisor-linguist.md` is new, 262
   lines (~4.2k self tokens, ~13.6k loaded); `AGENTS.md` grows
-  by 9 lines net (+13/-4: lint-instructions command,
+  by 5 lines net (+10/-5: lint-instructions command,
   `.uf/scripts/` structure entry, agent count, yaml
-  devDependency note, zod pin, npm security overrides).
+  devDependency note).
   Baseline lint findings are unchanged: 1 error, 31
   warnings, 23 info before and after.
 - Docs: CHANGELOG entry; AGENTS.md build-command and structure

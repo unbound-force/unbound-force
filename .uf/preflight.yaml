@@ -37,7 +37,6 @@ checks:
       - .opencode/uf/packs/
       - .opencode/lib/instruction-lint.ts
       - .opencode/package.json
-      - .opencode/package-lock.json
       - .uf/scripts/instruction-lint
       - AGENTS.md
     gate: advisory

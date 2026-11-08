@@ -54,7 +54,6 @@ describe("instruction-lint pre-flight check", () => {
         "AGENTS.md",
         check.run,
         ".opencode/package.json",
-        ".opencode/package-lock.json",
       ]),
     )
     await expect(access(repo(check.run), constants.X_OK)).resolves.toBeUndefined()
