@@ -953,14 +953,17 @@ Each entry follows the format: `- <change-name>: <summary>`.
 - feedback-loop-scope: `/uf.address-feedback` changes code only for
   CRITICAL and HIGH findings (unlabelled findings count as HIGH);
   MEDIUM and LOW findings are filed as issues or answered, and their
-  threads resolved. It runs build, test, and lint before pushing
-  instead of `/uf.review-council`. `/uf.review-pr` gains a re-review
-  evaluator: a small, contained push after the current user's earlier
-  review gets a light check that verifies the earlier CRITICAL and
-  HIGH findings and can approve, and anything else gets the full
-  council. Dewey learnings stay off feature and PR branches:
-  `uf_finale_stage` no longer stages `.uf/dewey/learnings/`, and they
-  reach `main` through a separate `chore/dewey-learnings-*` PR.
+  threads resolved. It runs the pre-flight skill in hard-gate mode
+  before pushing instead of `/uf.review-council`. `/uf.review-pr`
+  gains a re-review evaluator, the `resolve_review_mode` plugin tool:
+  a small, contained push after the current user's earlier review
+  gets a light check that verifies the earlier CRITICAL and HIGH
+  findings and can approve, and anything else gets the full council.
+  Dewey learnings stay off feature and PR branches: `uf_finale_stage`
+  no longer stages `.uf/dewey/learnings/`, and they reach `main`
+  through a separate `chore/dewey-learnings-*` PR. The superseded
+  `dewey-learning-pr-policy` and `finale-dewey-commit` changes move
+  to the archive. (Spec: openspec/changes/feedback-loop-scope/)
 - advisory-approval-event: `/uf.review-pr` posts an `APPROVE WITH
   ADVISORIES` verdict as `APPROVE` when no finding is CRITICAL or
   HIGH. A verdict with a CRITICAL or HIGH finding, or a finding of

@@ -34,6 +34,21 @@ author decisions, and execution outcomes.
 | `items[].decision_reasoning` | string or null | Author's reasoning for reject/modify/ask decisions |
 | `items[].commit_sha` | string or null | Commit SHA for accepted/modified code changes |
 
+## FILE and REPLY Items
+
+`/uf.address-feedback` files or answers MEDIUM and LOW findings
+without changing code (feedback-loop-scope). Version 1.0.0 has no
+`file` or `reply` decision, so those items are recorded as:
+
+- `recommendation: "author-decides"` and `decision: "reject"`
+  (no code change in this PR), with a null `commit_sha`
+- `decision_reasoning` starting with `filed: <issue URL>` for a filed
+  finding, or `reply:` for an answered one
+
+A consumer tells them apart from a genuine reject by that prefix,
+and the summary counts them under `rejected`. A later minor version
+can add the two decisions as enum values.
+
 ## Schema Evolution
 
 Minor versions add optional fields and may relax

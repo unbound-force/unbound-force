@@ -552,7 +552,7 @@ enforce. Rules are tagged by severity:
 | Command | When | What Happens |
 |---------|------|--------------|
 | `/uf.review-council` | Pre-PR (local) | Discovers available personas, runs them in parallel, produces APPROVE or REQUEST CHANGES |
-| `/uf.review-pr [N]` | Post-PR (GitHub) | Single agent reviews a specific PR, analyzes CI results |
+| `/uf.review-pr [N]` | Post-PR (GitHub) | Reviews a specific PR and analyzes CI results; a re-review after a small fix push runs a light check instead of the council |
 | `/uf.fix-ci [N]` | Post-PR (GitHub) | Diagnose and fix failing CI checks with a gated fix loop (rebase only, never merge) |
 | `/uf.address-feedback [N]` | Post-PR (GitHub) | Triage + address reviewer feedback |
 | `/uf.rebase-pr [N]` | Post-PR (GitHub) | Rebases a conflicted PR's head branch onto its base and force-pushes with lease |
@@ -573,11 +573,25 @@ feedback.
    subjective using convention packs and constitution
    principles as evidence.
 3. **Triage** -- Present each item to the author with a
-   recommendation. The author chooses one of four
-   decisions: accept, modify, reject, or ask.
-4. **Execute** -- Commit code fixes (one per item), run
-   `/uf.review-council` on the changes, push, and post
-   reply comments to each thread.
+   recommendation. For CRITICAL, HIGH, and unlabelled items
+   the author chooses accept, modify, reject, or ask. For
+   MEDIUM and LOW items the author chooses file issue,
+   reply, or ask: they never change code in the same run.
+4. **Execute** -- Commit code fixes, run the pre-flight
+   checks in hard-gate mode, push, file issues, post reply
+   comments, and resolve the addressed threads.
+
+**One council per round**: the command does not run
+`/uf.review-council`. The re-review after the push is the
+council for the round. `/uf.review-pr` calls
+`resolve_review_mode`, which picks a light check when the
+reviewer already reviewed an earlier commit and the push is
+at most 200 lines, adds or removes no file, touches no
+workflow, instruction, pack, or auth/secret path, follows a
+review with no CRITICAL finding, and has no failing check.
+The light check verifies the earlier CRITICAL and HIGH
+findings and reads only the new commits; a new CRITICAL or
+HIGH problem goes to the full council.
 
 **Tiered assessment architecture**:
 

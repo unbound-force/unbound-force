@@ -44,7 +44,8 @@ feedback run.
 The feedback-triage schema has no FILE or REPLY decision. Rather than
 bump the schema, those items are recorded as `reject` (no code change
 in this PR) with a `decision_reasoning` prefix of `filed:` or
-`reply:`.
+`reply:`, documented in `schemas/feedback-triage/README.md`. Adding
+the two decisions to the enum is tracked in #999.
 
 ### Drop the inner council, keep the outer one
 
@@ -54,6 +55,15 @@ where the approval is decided, and the evaluator makes it cheaper
 when the push is small. The feedback run keeps a build, test, and
 lint gate before pushing, capped at 3 attempts.
 
+### The evaluator is a tool
+
+The mode decision is deterministic, so it lives in the review-dispatch
+plugin as `resolve_review_mode`, with a pure `decideReviewMode`
+function holding the thresholds as constants (Determinism gate).
+`/uf.review-pr` Step 3.11 only calls the tool and acts on its `mode`.
+Judging whether a prior finding is resolved, and reading the delta
+for new problems, stays in Step 3.12 prose: that is review judgment.
+
 ### Light check conditions are conservative
 
 The light check runs only when every condition holds: the reviewed
@@ -61,7 +71,10 @@ commit is still in the branch, the delta is at most 200 changed
 lines, no file was added, removed, or renamed, no workflow,
 `AGENTS.md`, constitution, convention pack, or auth/secret path
 changed, the prior review raised no CRITICAL finding, and CI shows
-no PR-caused failure. Anything else gets the council. A rebase
+no failing check (any `fail` bucket, which is stricter than
+PR-caused). A compare response of 300 files may be truncated, so it
+also gets the council. Anything else gets the council, and so does
+any input the tool cannot read. A rebase
 always gets the council, since the compare status is no longer
 `ahead`.
 
@@ -84,8 +97,16 @@ learnings PR only collects `learnings/`.
 - [The light check misses a problem a council would find] -> It
   only runs on small, contained pushes to code a council already
   reviewed, and a rebase or sensitive path always gets the council.
-- [The 200-line threshold and path list are judgment calls written
-  as prose] -> A deterministic tool for the evaluator is a natural
-  follow-up under the Determinism gate.
+- [The 200-line threshold and path list are judgment calls] -> They
+  are constants in `decideReviewMode`, pinned by unit tests, so a
+  change to them is a reviewed code change.
+- [Issue filing in `/uf.address-feedback` is shell in prose] -> It
+  uses temporary files and `gh issue create`, with a stated failure
+  path. Moving it into a plugin tool is tracked in #998.
 - [Without gh-hud, learnings stay untracked until someone opens a
   learnings PR] -> `AGENTS.md` says to open one by hand.
+- [Untracked learnings are lost to `git clean -fdx`, worktree
+  removal, or a re-clone before the learnings PR collects them] ->
+  gh-hud collects them after each clean agent run, so the window is
+  one run, at most a day per checkout. Learnings also live in the
+  Dewey store, which those operations do not touch.

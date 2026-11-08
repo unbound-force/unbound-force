@@ -20,7 +20,8 @@ findings. Four things kept the loop going:
   findings. MEDIUM and LOW findings are filed as issues or answered
   with a reply, and their threads are resolved. A finding with no
   severity label, such as most human comments, counts as HIGH.
-- `/uf.review-pr` gains a re-review evaluator. When the current user
+- `/uf.review-pr` gains a re-review evaluator, the new
+  `resolve_review_mode` plugin tool. When the current user
   already reviewed an earlier commit and the push since then is
   small, contained, and touches no sensitive path, it runs a light
   check instead of the council: it confirms the earlier CRITICAL and
@@ -45,14 +46,18 @@ findings. Four things kept the loop going:
 ### Modified Capabilities
 
 None in `openspec/specs`. `learnings-pr-scope` reverses the rule set
-by the unarchived `dewey-learning-pr-policy` and `finale-dewey-commit`
-changes.
+by `dewey-learning-pr-policy` and `finale-dewey-commit`, which this
+change moves to the archive without merging their specs.
 
 ## Impact
 
 - `.opencode/commands/uf.address-feedback.md`, `uf.review-pr.md`,
   `uf.finale.md`, `uf.unleash.md`, and their scaffold copies.
-- `.opencode/plugins/uf-finale/index.ts` and its scaffold copy.
+- `.opencode/plugins/uf-finale/index.ts`,
+  `.opencode/plugins/review-dispatch/index.ts`, and their scaffold
+  copies.
+- `docs/usage.md`, `docs/architecture.md`, and
+  `schemas/feedback-triage/README.md`.
 - `AGENTS.md` Commit scope and Documentation gate rules.
 - Option-label pins in `internal/scaffold/scaffold_test.go` and the
   `uf_finale_stage` tests.

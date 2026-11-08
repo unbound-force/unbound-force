@@ -78,9 +78,24 @@ The command runs four phases:
    assessed directly (Tier 1); complex items are escalated
    to Divisor agents (Tier 2)
 3. **Triage** — Presents each item one-by-one with the
-   assessment. You choose: Accept, Modify, Reject, or Ask
-4. **Execute** — Implements code fixes, runs review-council,
-   pushes changes, and posts reply comments
+   assessment. For a CRITICAL or HIGH item, or one with no
+   severity label, you choose: Accept, Modify, Reject, or Ask.
+   For a MEDIUM or LOW item you choose: File issue, Reply, or
+   Ask; those never change code in this run
+4. **Execute** — Implements code fixes, runs the pre-flight
+   checks, pushes, files issues, posts reply comments, and
+   resolves the addressed threads
+
+The command does not run `/uf.review-council`. The re-review
+that follows (`/uf.review-pr`) is the one council for the
+round, and when the push is small and touches only code a
+council already reviewed, `/uf.review-pr` runs a light check
+instead: it confirms the earlier CRITICAL and HIGH findings
+are fixed and can approve.
+
+Dewey learnings the command stores stay untracked. They reach
+`main` through a separate `chore/dewey-learnings-*` PR, never
+on the PR branch.
 
 The command is re-entrant: run it multiple times as
 reviewers respond. It only shows unresolved threads and

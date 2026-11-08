@@ -96,12 +96,9 @@ changes. Use `$ARGUMENTS` as hint if non-empty. Append:
   stages everything except `.uf/dewey/learnings/`. Learnings
   stay untracked and reach `main` through a separate
   `chore/dewey-learnings-*` PR (see the Commit scope rule in
-  `AGENTS.md`). Compiled articles produced during this change
-  still belong in the feature PR:
-
-  ```bash
-  git add .uf/dewey/compiled/ 2>/dev/null
-  ```
+  `AGENTS.md`). Compiled articles under `.uf/dewey/compiled/`
+  still belong in the feature PR, and `uf_finale_stage` stages
+  them.
 
 **Session-resume guard**: Re-present and re-confirm if
 resumed.

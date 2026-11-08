@@ -80,6 +80,8 @@ export type GhSpawnRoute =
   | "run view"
   | "api reviews"
   | "api comments"
+  | "api user"
+  | "api compare"
 
 /** Per-route mock responses; suites supply fixtures, tests override. */
 export type MockSpawnResponses = Partial<Record<GhSpawnRoute, MockResponse>>
@@ -169,6 +171,8 @@ export function createMockSpawn(suiteDefaults: MockSpawnResponses = {}, override
       const endpoint = args[2] ?? ""
       if (endpoint.endsWith("/reviews")) return respond(responses["api reviews"])
       if (endpoint.endsWith("/comments")) return respond(responses["api comments"])
+      if (endpoint === "user") return respond(responses["api user"])
+      if (endpoint.includes("/compare/")) return respond(responses["api compare"])
     }
 
     // Fallback — unknown command
