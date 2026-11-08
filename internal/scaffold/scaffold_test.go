@@ -460,6 +460,8 @@ func TestQuestionToolPresentationContractGates(t *testing.T) {
 		`"Modify"`,
 		`"Reject"`,
 		`"Ask"`,
+		`"File issue"`,
+		`"Reply"`,
 		`"Confirm -- proceed with execution"`,
 		`"Revise -- change decisions"`,
 		`"Proceed with Phase 4 execution"`,
@@ -469,7 +471,7 @@ func TestQuestionToolPresentationContractGates(t *testing.T) {
 		`"Abort -- preserve local commits"`,
 		`"Yes -- post reply comments"`,
 		`"No -- skip posting"`,
-		`"Yes -- resolve accepted threads"`,
+		`"Yes -- resolve addressed threads"`,
 		`"No -- leave threads open"`,
 	}
 
@@ -519,7 +521,9 @@ func TestQuestionToolPresentationContractGates(t *testing.T) {
 		`"Accept"`:                            3,
 		`"Modify"`:                            2,
 		`"Reject"`:                            2,
-		`"Ask"`:                               2,
+		`"Ask"`:                               4,
+		`"File issue"`:                        2,
+		`"Reply"`:                             2,
 		`"Confirm -- proceed with execution"`: 2,
 		`"Revise -- change decisions"`:        2,
 		`"Proceed with Phase 4 execution"`:    3,
@@ -529,7 +533,7 @@ func TestQuestionToolPresentationContractGates(t *testing.T) {
 		`"Abort -- preserve local commits"`:   2,
 		`"Yes -- post reply comments"`:        2,
 		`"No -- skip posting"`:                2,
-		`"Yes -- resolve accepted threads"`:   2,
+		`"Yes -- resolve addressed threads"`:  2,
 		`"No -- leave threads open"`:          2,
 	}
 
@@ -596,14 +600,16 @@ func TestQuestionToolPresentationContractGates(t *testing.T) {
 		// The backtick-bracket opener counts one per house-style
 		// option array; embedded JSON examples (no backtick) are
 		// excluded. review-pr records 9, not 8, because Step 8c
-		// carries two verdict-specific option sets.
+		// carries two verdict-specific option sets; address-feedback
+		// records 7, not 6, because Section 3.2 carries a second set
+		// for MEDIUM and LOW items.
 		for _, tc := range []struct {
 			assetName string
 			asset     string
 			want      int
 		}{
 			{"uf.triage-issue", triage, 8},
-			{"uf.address-feedback", feedback, 6},
+			{"uf.address-feedback", feedback, 7},
 			{"uf.review-pr", review, 9},
 		} {
 			if got := strings.Count(tc.asset, "`[\""); got != tc.want {

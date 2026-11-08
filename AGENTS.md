@@ -245,7 +245,8 @@ These rules are non-negotiable. Violations are CRITICAL severity.
   entries, `AGENTS.md` for structural updates (project
   structure, conventions, build commands), `README.md` for
   description changes. Retrospective learnings
-  (`.uf/dewey/learnings/*.md`, `.uf/dewey/compiled/*.md`)
+  (`.uf/dewey/learnings/*.md`, stored untracked per Commit
+  scope) and compiled articles (`.uf/dewey/compiled/*.md`)
   satisfy this gate as intentional knowledge-capture
   artifacts.
 - **Documentation gate**: MUST file a documentation issue
@@ -256,10 +257,13 @@ These rules are non-negotiable. Violations are CRITICAL severity.
   aspirational documents that do not map to actionable work.
 - **Commit scope**: Only commit files directly related to the
   active spec or change. Dewey learnings
-  (`.uf/dewey/learnings/*.md` and `.uf/dewey/compiled/*.md`)
-  produced during the change's workflow are directly related
-  to the active change and MUST be included in the feature
-  PR. Tooling scaffolds (`uf init`, convention pack updates,
+  (`.uf/dewey/learnings/*.md`) MUST NOT be committed on a
+  feature or PR branch: they stay untracked and reach `main`
+  through a separate `chore/dewey-learnings-*` PR, which
+  gh-hud opens once a day per checkout (open one by hand
+  without it). Compiled articles (`.uf/dewey/compiled/*.md`)
+  produced during the change still ride the feature PR.
+  Tooling scaffolds (`uf init`, convention pack updates,
   command directory renames, schema template updates) MUST be
   committed on a separate branch (e.g., `chore/uf.init-sync`),
   not mixed into feature branches. Scaffold assets and tests

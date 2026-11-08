@@ -6,7 +6,7 @@ description: "Triage and address PR review feedback with structured assessment"
 
 # Address Feedback
 
-You are a token-efficient feedback analyst. The user will provide a PR number or you will auto-detect it from the current branch. Fetch all unresolved review feedback from GitHub, classify each item with evidence from project standards, present to the author for triage, then execute decisions as a batch: group related fixes into logical commits, review-council gate, push, reply comments, and artifact production.
+You are a token-efficient feedback analyst. The user will provide a PR number or you will auto-detect it from the current branch. Fetch all unresolved review feedback from GitHub, classify each item with evidence from project standards, present to the author for triage, then execute decisions as a batch: group related fixes into logical commits, verify locally, push, file issues, reply comments, and artifact production. Code changes are limited to CRITICAL and HIGH findings; MEDIUM and LOW findings get a reply or a filed issue.
 
 The command follows four sequential phases (Ingest → Assess → Triage → Execute). Phases are not independently invocable — run all four in sequence every invocation.
 
@@ -64,7 +64,7 @@ Progress steps in order:
 - `triage` — Phase 3 complete
 - `code-changes` — Phase 4.1 complete
 - `commits` — Phase 4.2 complete
-- `review-council` — Phase 4.3 complete
+- `verify` — Phase 4.3 complete
 - `push` — Phase 4.4 complete
 - `reply-comments` — Phase 4.5 complete (then clear)
 
@@ -384,7 +384,11 @@ Load context for evidence-based classification (D10, FR-010):
 
 ### 2.2 Tiered Assessment
 
-For each feedback item, determine the assessment tier:
+For each feedback item, determine the assessment tier.
+
+**MEDIUM and LOW items are always Tier 1.** They never change code in
+this run (Section 2.5 severity scope), so a Divisor dispatch for them
+buys nothing. Read the severity before applying the conditions below.
 
 **Tier 1 (direct)** — assess using loaded context when ALL conditions are met:
 - Single file affected
@@ -783,10 +787,11 @@ For each item, produce:
 
 | Field | Value |
 |---|---|
+| **Severity** | `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, or `none` (the label the reviewer gave the finding) |
 | **Classification** | `DATA-DRIVEN` or `SUBJECTIVE` |
 | **Evidence** | Specific convention pack section, constitution principle, or coding standard reference |
 | **Reviewer authority** | maintainer / collaborator / contributor / external / bot |
-| **Recommendation** | `ACCEPT` or `AUTHOR-DECIDES` (from authority matrix below) |
+| **Recommendation** | `ACCEPT` or `AUTHOR-DECIDES` (from authority matrix below), or `FILE` or `REPLY` (severity scope, Section 2.5) |
 | **Suggested approach** | Concrete implementation description (if recommendation is ACCEPT) |
 | **Conflict flag** | True if another item provides contradictory guidance on overlapping file/line range |
 
@@ -805,6 +810,23 @@ For each item, produce:
 | Bot | ACCEPT if validated | AUTHOR-DECIDES (informational) |
 
 **Bot/external validation**: cross-reference the finding against project convention packs. If the pack confirms the rule → ACCEPT. If no matching rule → AUTHOR-DECIDES with note that the rule is not backed by project standards.
+
+**Severity scope**: this command changes code only for CRITICAL and
+HIGH findings. Take each item's severity from the label the reviewer
+gave it; `/uf.review-pr` inline comments and Divisor findings carry
+one. An item with no severity label, such as most human comments,
+counts as HIGH and keeps the matrix above. A MEDIUM or LOW item never
+becomes a code change in this run, whatever the matrix says:
+
+| Severity | Recommendation |
+|---|---|
+| CRITICAL, HIGH, or none | From the authority matrix above |
+| MEDIUM or LOW, naming a defect or follow-up work worth tracking | `FILE` |
+| MEDIUM or LOW, otherwise | `REPLY` |
+
+Fixing every LOW finding is what kept review and feedback feeding
+each other: each fix earned another review, which found more LOW
+items. Filing or answering them ends the round instead.
 
 ### 2.6 Conflict Detection
 
@@ -840,9 +862,10 @@ For each feedback item, display:
 ─── Item N of M ──────────────────────────
 Reviewer: @<login> (<authority>)
 File: <file>:<line> (or "General PR comment")
+Severity: <CRITICAL|HIGH|MEDIUM|LOW|none>
 Classification: <DATA-DRIVEN|SUBJECTIVE>
 Evidence: <pack/rule references or "none">
-Recommendation: <ACCEPT|AUTHOR-DECIDES|INCONCLUSIVE|UNAVAILABLE>
+Recommendation: <ACCEPT|AUTHOR-DECIDES|FILE|REPLY|INCONCLUSIVE|UNAVAILABLE>
 Conflict: <yes — conflicts with item X|no>
 Tier: <1|2> <(Divisor agents: ...)>
 Tier 2 outcome: <native / generic / canonical, or "n/a">
@@ -901,6 +924,18 @@ For each item, present the decision as follows:
    directive governs presentation order and "(Recommended)"
    labeling at runtime.
 
+**MEDIUM and LOW items** (Section 2.5 severity scope) use a
+different option set, since they never change code in this run.
+The per-option reasoning for them is:
+- **"File issue"** files a GitHub issue for the finding and
+  queues a reply linking it; fits a `FILE` recommendation
+- **"Reply"** queues a reply that acknowledges the finding and
+  says why it is not changed here; fits a `REPLY` recommendation
+- **"Ask"** queues a clarification question, as above
+
+Present them the same way, the recommended one first:
+`["File issue", "Reply", "Ask"]`.
+
 The author chooses exactly one:
 
 | Decision | Follow-up | Queued action |
@@ -909,6 +944,8 @@ The author chooses exactly one:
 | **Modify** | Use **question tool** (open-ended, no preset options) to collect the alternative approach | Code change using author's approach |
 | **Reject** | Use **question tool** (open-ended, no preset options) to collect evidence-based reasoning | Reply comment with reasoning |
 | **Ask** | Use **question tool** (open-ended, no preset options) to collect the clarification question | Reply comment with question |
+| **File issue** | (none) | GitHub issue for the finding, then a reply comment linking it |
+| **Reply** | (none) | Reply comment acknowledging the finding |
 
 
 **No item may be skipped or deferred.** Every item MUST receive a decision before the triage phase completes.
@@ -928,6 +965,8 @@ ACCEPT:  N items (code changes queued)
 MODIFY:  N items (code changes queued)
 REJECT:  N items (reply comments queued)
 ASK:     N items (reply comments queued)
+FILE:    N items (issues and reply comments queued)
+REPLY:   N items (reply comments queued)
 Total:   N items
 ─────────────────────────────────────────
 ```
@@ -991,7 +1030,8 @@ Present the execution summary to the user:
 >
 > - Code changes: N files to modify (ACCEPT: N, MODIFY: N)
 > - Commits: grouped by scope
-> - Push: to remote after review-council passes
+> - Push: to remote after local verification passes
+> - Issues to file: N (FILE)
 > - Reply comments: N comments to post on PR
 > - Thread resolutions: N threads to resolve
 >
@@ -1050,6 +1090,8 @@ For each ACCEPT and MODIFY item, implement the code change:
 - MODIFY: apply the author's alternative approach
 - GitHub suggestion blocks: apply the exact suggestion diff
 
+FILE and REPLY items never change code.
+
 **If a code change cannot be applied cleanly** (e.g., referenced code has changed since the review): skip that item with a clear report, note the failure for the reply comment, and continue with remaining items.
 
 ### 4.2 Commit Changes
@@ -1075,26 +1117,38 @@ attribution").
 
 The `<scope>` is the package or directory of the changed files. The description summarizes the logical group of fixes.
 
+Stage files explicitly. Never stage `.uf/dewey/learnings/`: the
+lessons Section 2.3.7 stores stay untracked and reach the default
+branch through a separate learnings PR (see the Commit scope rule in
+`AGENTS.md`). A learnings commit on the PR branch is one more push
+for the next review to cover.
+
 > **CHECKPOINT**: Call `checkpoint` with
 > `command: "uf.address-feedback"`, `step: "commits"`,
 > `data: {"commit_count": N}`.
 
-### 4.3 Review-Council Gate
+### 4.3 Local Verification
 
-After all code changes are committed locally, run `/uf.review-council` on the cumulative changes.
+After all code changes are committed locally, run the project's
+build, test, and lint commands, derived from `.github/workflows/`
+as `AGENTS.md` describes.
 
-- **If passes**: continue to push
-- **If fails**: enter fix loop (same behavior as `/uf.unleash`). Fix findings and re-run council.
-- **If fix loop exhausts iterations**: **STOP** and report persistent findings. Do NOT push until council passes.
+- **If they pass**: continue to push
+- **If they fail**: fix the failure in a new commit and run them
+  again, at most 3 times
+- **If they still fail**: **STOP** and report the failures. Do NOT
+  push.
 
-After each council run, call `checkpoint` to record
-progress. Record the final passing iteration only.
+This command does not run `/uf.review-council`. The re-review after
+the push (`/uf.review-pr`, whose re-review evaluator picks a full
+council or a light check) is the one council for the cycle. Running
+a council here as well reviewed every fix twice.
 
 > **CHECKPOINT**: Call `checkpoint` with
 > `command: "uf.address-feedback"`,
-> `step: "review-council"`,
-> `data: {"iteration": N, "result": "PASS|FAIL"}`.
-> Record only when the council passes.
+> `step: "verify"`,
+> `data: {"attempt": N, "result": "PASS"}`.
+> Record only when verification passes.
 
 ### 4.4 Push Changes
 
@@ -1199,7 +1253,7 @@ post reply comments to the PR.
 call `get_progress` with `command: "uf.address-feedback"`
 and verify:
 1. `triage` step is complete (all items decided)
-2. `commits`, `review-council`, and `push` steps are
+2. `commits`, `verify`, and `push` steps are
    complete
 
 If progress is missing or incomplete, you MUST re-read
@@ -1215,12 +1269,14 @@ session text and present the decision as follows:
    and the question tool MUST present the
    same details and options):
    - The full composed reply for every item, verified
-     against the reply-content table below
+     against the reply-content table below, and the title
+     and body of every issue to file
    - Per-option reasoning: what each choice does and
      when it fits:
-     - **"Yes -- post reply comments"** posts each reply to
-       its review thread; fits replies that verify against
-       the reply-content table
+     - **"Yes -- post reply comments"** files each FILE
+       item's issue, then posts each reply to its review
+       thread; fits replies that verify against the
+       reply-content table
      - **"No -- skip posting"** posts nothing; fits replies
        that still need correction
    - A recommendation with its justification (advisory only —
@@ -1242,6 +1298,24 @@ For each item, compose the reply:
 | MODIFY | "Addressed in \`<commit_sha>\` (modified approach): <brief description>" |
 | REJECT | Evidence-based reasoning referencing convention pack rules or constitution principles |
 | ASK | Author's clarification question |
+| FILE | "Filed as #<issue_number>: <what it tracks>. Not changed in this PR (<SEVERITY>)." |
+| REPLY | Acknowledges the finding in a sentence or two and says why it is not changed in this PR (<SEVERITY>) |
+
+File each FILE item's issue before posting its reply, so the reply can
+link it. Write the issue as JSON to a temporary file, for the same
+shell-injection reason as replies:
+
+```bash
+ISSUE_FILE=$(mktemp)
+cat > "$ISSUE_FILE" << 'ISSUE_EOF'
+{"title": "<finding summary>", "body": "<finding, severity, file:line, and a link to the review comment on PR #<PR_NUMBER>>"}
+ISSUE_EOF
+gh api repos/{owner}/{repo}/issues --method POST --input "$ISSUE_FILE" --jq '.number'
+rm -f "$ISSUE_FILE"
+```
+
+Record each filed issue number in the cache so a retry does not file
+it twice.
 
 Post replies to the correct review thread. Always write the comment body to a temporary file and use `--input` to prevent shell injection from AI-generated or reviewer-authored text:
 
@@ -1279,7 +1353,7 @@ Record progress in `.uf/feedback/pr-<PR_NUMBER>/state.json` for idempotent retry
 
 ### 4.6 Resolve Threads
 
-After posting reply comments for accepted items, offer to resolve those threads:
+After posting reply comments, offer to resolve the threads of ACCEPT, MODIFY, FILE, and REPLY items. Each of those is addressed: left open, it reads as unresolved feedback and starts another feedback run.
 
 ```bash
 # GraphQL mutation to resolve a thread
@@ -1292,17 +1366,18 @@ Present the decision as follows:
    the question tool (visibility directive — the printed text
    and the question tool MUST present the
    same details and options):
-   - The accepted threads with their posted replies, and
+   - The addressed threads with their posted replies, and
      the note that REJECT and ASK threads stay open
    - Per-option reasoning: what each choice does and
      when it fits:
-     - **"Yes -- resolve accepted threads"** resolves the
-       threads of accepted items that have posted
-       replies; fits accepted threads with posted replies
+     - **"Yes -- resolve addressed threads"** resolves the
+       threads of ACCEPT, MODIFY, FILE, and REPLY items that
+       have posted replies; fits addressed threads with
+       posted replies
      - **"No -- leave threads open"** leaves every thread
        open; fits threads that need further discussion
    - A recommendation with its justification (advisory only —
-     the human decides): "Yes -- resolve" for accepted
+     the human decides): "Yes -- resolve" for addressed
      threads with posted replies.
      If the assessment data does not ground any option, the
      gate MUST say so, present the trade-off, and still ask
@@ -1310,7 +1385,7 @@ Present the decision as follows:
 2. Present the **question tool** below the printed text with
    the same options, the recommended option FIRST and
    labeled "(Recommended)":
-   `["Yes -- resolve accepted threads", "No -- leave
+   `["Yes -- resolve addressed threads", "No -- leave
    threads open"]`.
 
 The question MUST be answered before resolving.
@@ -1387,6 +1462,12 @@ authoritative and MUST NOT be interpreted as approval.
 
 Fields `file`, `line`, `decision_reasoning`, and `commit_sha` may be `null` (general PR comments have null file/line; REJECT/ASK items have null commit_sha).
 
+The schema has no FILE or REPLY values. Record those items with
+`recommendation: "author-decides"`, `decision: "reject"` (no code
+change in this PR), a null `commit_sha`, and a `decision_reasoning`
+that starts with `filed: <issue URL>` or `reply:`. Count them under
+`rejected` in the summary.
+
 ---
 
 
@@ -1394,11 +1475,11 @@ Fields `file`, `line`, `decision_reasoning`, and `commit_sha` may be `null` (gen
 
 1. **No auto-merge**: This command addresses feedback. It NEVER merges the PR, approves the PR, or dismisses reviews.
 
-2. **No code changes without triage**: Code is only modified after the author explicitly decides ACCEPT or MODIFY for each item. No autonomous fixes.
+2. **No code changes without triage**: Code is only modified after the author explicitly decides ACCEPT or MODIFY for each item. No autonomous fixes. MEDIUM and LOW items never change code: they are filed or answered.
 
 3. **No comments without confirmation**: Every PR comment is shown to the author before posting. No autonomous PR communication.
 
-4. **No push without review-council**: Code changes MUST pass `/uf.review-council` before pushing. No bypass.
+4. **No push without local verification**: Code changes MUST pass the build, test, and lint commands (Section 4.3) before pushing. No bypass. The council runs once per cycle, in the re-review after the push.
 
 5. **No partial data processing**: If GitHub API fails during ingestion, STOP. Do not assess or triage based on incomplete feedback.
 
@@ -1410,7 +1491,7 @@ Fields `file`, `line`, `decision_reasoning`, and `commit_sha` may be `null` (gen
 
 9. **File permissions**: Cache files `600`, cache directories `700`. The `.uf/feedback/` directory MUST be in `.gitignore`.
 
-10. **Commit scope**: Only commit files directly related to addressing the specific feedback item. Do not bundle unrelated changes into feedback fix commits.
+10. **Commit scope**: Only commit files directly related to addressing the specific feedback item. Do not bundle unrelated changes into feedback fix commits. Never commit `.uf/dewey/learnings/` on the PR branch.
 
 11. **No direct Tier 2 Task dispatch**: Tier 2 assessment runs MUST come only
 from `plan_review_dispatch` and MUST execute only through `dispatch_agent_run`.

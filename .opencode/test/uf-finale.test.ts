@@ -462,7 +462,7 @@ describe("uf_finale_stage", () => {
     const mockExec: GitExec = (args: string[]) => {
       const cmd = args.join(" ")
       commands.push(cmd)
-      if (cmd === "add .") return ""
+      if (cmd.startsWith("add ")) return ""
       if (cmd.includes("--cached --name-only"))
         return "file1.ts\nfile2.ts\nfile3.ts"
       return ""
@@ -481,8 +481,22 @@ describe("uf_finale_stage", () => {
         "file3.ts",
       ])
     }
-    expect(commands).toContain("add .")
+    expect(commands).toContain("add -- . :(exclude).uf/dewey/learnings")
+    expect(commands).toContain("reset -q -- .uf/dewey/learnings")
     expect(commands).toContain("diff --cached --name-only")
+  })
+
+  it("leaves Dewey learnings unstaged for the separate learnings PR", async () => {
+    const commands: string[] = []
+    const mockExec: GitExec = (args: string[]) => {
+      commands.push(args.join(" "))
+      return ""
+    }
+    await invokeTool(createUfFinaleStageTool(mockExec, "/fake"), {})
+    expect(commands).not.toContain("add .")
+    const reset = commands.indexOf("reset -q -- .uf/dewey/learnings")
+    expect(reset).toBeGreaterThan(commands.indexOf("add -- . :(exclude).uf/dewey/learnings"))
+    expect(reset).toBeLessThan(commands.indexOf("diff --cached --name-only"))
   })
 
   it("returns zero count when no files staged", async () => {

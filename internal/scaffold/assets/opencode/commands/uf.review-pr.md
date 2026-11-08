@@ -340,7 +340,7 @@ gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/reviews \
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments \
-  --jq '[.[] | {path: .path, line: .line, body: .body, user: .user.login, created_at: .created_at}]'
+  --jq '[.[] | {path: .path, line: .line, body: .body, user: .user.login, created_at: .created_at, review_id: .pull_request_review_id}]'
 ```
 
 #### Step 3.10-iii. Identify Current User
@@ -363,6 +363,77 @@ If any `gh api` call returns 403, 404, 429, or times out:
 log the error, skip the sub-step, proceed. All review state
 data is additive context — its absence reduces only
 deduplication accuracy.
+
+### 3.11. Re-review Evaluator
+
+Decide whether this run needs the full council or a light check.
+A full council on every push kept review and feedback feeding each
+other: each round found new MEDIUM and LOW items in code an earlier
+round had already passed.
+
+**Prior review**: the latest review in Step 3.10-i by the current
+user (Step 3.10-iii) whose `commit_id` is not the PR head SHA. If
+there is none, or Step 3.10 could not fetch reviews, set
+`REVIEW_MODE = full` and continue.
+
+Fetch what changed since the prior review:
+
+```bash
+gh api repos/{owner}/{repo}/compare/<PRIOR_COMMIT>...<HEAD_SHA> \
+  --jq '{status: .status, files: [.files[] | {filename, status, changes}]}'
+```
+
+Set `REVIEW_MODE = light` only when all of these hold:
+
+1. The compare `status` is `ahead`: the reviewed commit is still in
+   the branch, so no rebase or force-push rewrote what was reviewed.
+2. The delta changes at most 200 lines (sum of `changes`).
+3. No file was added, removed, or renamed since the prior review.
+4. No changed file is a workflow (`.github/`), `AGENTS.md`, the
+   constitution, a convention pack (`.opencode/uf/packs/`), or a
+   path naming auth, tokens, secrets, or credentials.
+5. The prior review raised no CRITICAL finding.
+6. Step 3 found no PR-caused CI failure.
+
+Otherwise set `REVIEW_MODE = full`. Print the mode and the reason,
+for example `Re-review: light (3 files, 48 lines since abc1234)` or
+`Re-review: full (rebased since the prior review)`.
+
+When `REVIEW_MODE = light`, skip Discover Divisor Agents through
+Step 5 and run Step 3.12 instead, then continue at Step 6.
+
+### 3.12. Light Check
+
+Runs only when `REVIEW_MODE = light`. It dispatches no child agents
+and calls no dispatch tools.
+
+1. **Prior findings**: list every CRITICAL and HIGH finding from the
+   prior review: its body and its inline comments (Step 3.10-ii
+   comments whose `review_id` is the prior review's `id`). Read the
+   head code each one points to and record it as RESOLVED or OPEN,
+   with the file and line that shows it.
+2. **Delta**: read the changes since the prior review:
+
+   ```bash
+   gh api -H "Accept: application/vnd.github.diff" \
+     repos/{owner}/{repo}/compare/<PRIOR_COMMIT>...<HEAD_SHA>
+   ```
+
+   Look for CRITICAL or HIGH problems the new commits introduce. Do
+   not raise MEDIUM or LOW findings on code a prior round passed.
+3. **Verdict**:
+   - Any prior CRITICAL or HIGH finding OPEN, or a Step 3.7 local
+     tool failing: **REQUEST CHANGES**, listing them.
+   - A new CRITICAL or HIGH problem in the delta: set
+     `REVIEW_MODE = full` and go to Discover Divisor Agents. The
+     council confirms it before anything is posted.
+   - Otherwise: **APPROVE**.
+
+The light check writes no dispatch artifact and stores no lessons.
+In Step 6, replace the Dispatch Provenance table with one line:
+`Light check since <PRIOR_SHORT_SHA>: <N> prior CRITICAL/HIGH
+findings resolved, <F> files and <L> lines reviewed.` Step 8 posts
+the verdict as usual.
 
 ---
 

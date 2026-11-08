@@ -889,7 +889,8 @@ describe("golden output shapes -- uf-finale registry (9 documented sites)", () =
     const directory = await makeScratch()
     const registry = await loadRegistry(UfFinalePlugin, directory)
     mockGit({
-      "git add .": "",
+      "git add -- . :(exclude).uf/dewey/learnings": "",
+      "git reset -q -- .uf/dewey/learnings": "",
       "git diff --cached --name-only": "a.ts\nb.ts\n",
     })
 
