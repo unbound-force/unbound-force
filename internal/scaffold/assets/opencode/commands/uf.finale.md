@@ -92,20 +92,16 @@ changes. Use `$ARGUMENTS` as hint if non-empty. Append:
 
 >>> MANDATORY GATE <<<
 
-- **Stage Dewey knowledge artifacts**: Dewey learnings and
-  compiled articles produced during this change are knowledge
-  artifacts that belong in the feature PR. They capture
-  patterns, decisions, and gotchas discovered during the
-  workflow and are essential for team knowledge continuity.
+- **Keep Dewey learnings off the branch**: `uf_finale_stage`
+  stages everything except `.uf/dewey/learnings/`. Learnings
+  stay untracked and reach `main` through a separate
+  `chore/dewey-learnings-*` PR (see the Commit scope rule in
+  `AGENTS.md`). Compiled articles produced during this change
+  still belong in the feature PR:
 
   ```bash
-  git add .uf/dewey/learnings/ .uf/dewey/compiled/ 2>/dev/null
+  git add .uf/dewey/compiled/ 2>/dev/null
   ```
-
-  Do NOT skip this step. Even though `git add .` may have
-  already staged these files, this explicit step ensures
-  Dewey artifacts are never accidentally excluded from the
-  commit.
 
 **Session-resume guard**: Re-present and re-confirm if
 resumed.

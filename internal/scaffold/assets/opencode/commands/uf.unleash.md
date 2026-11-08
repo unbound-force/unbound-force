@@ -1851,10 +1851,11 @@ memory.
    lost.
 
 > POLICY NOTE: Learnings stored via `dewey_store_learning`
-> produce files (`.uf/dewey/learnings/*.md`,
-> `.uf/dewey/compiled/*.md`) that are part of the feature
-> PR scope and MUST be committed on the feature branch.
-> See the Commit scope rule in `AGENTS.md`.
+> produce files under `.uf/dewey/learnings/` that MUST NOT
+> be committed on the feature branch. They stay untracked
+> and reach `main` through a separate
+> `chore/dewey-learnings-*` PR. See the Commit scope rule in
+> `AGENTS.md`.
 
 Proceed immediately to Step 8 (Demo). Do NOT ask for
 confirmation.
