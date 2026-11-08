@@ -162,6 +162,7 @@ describe("plugin integration with a fake OpenCode client", () => {
         "read_diff_chunk",
         "read_dispatch_artifact",
         "redispatch_failed_runs",
+        "resolve_review_mode",
         "submit_lesson_proposal",
         "submit_review_findings",
       ])

@@ -295,7 +295,9 @@ posting (APPROVE/REQUEST_CHANGES/COMMENT), path-based
 focus heuristics, and review state awareness (fetches
 existing reviews to prevent duplicate findings, warns
 about stale review dismissal, detects CODEOWNER
-requirements).
+requirements), and a re-review evaluator
+(`resolve_review_mode`) that runs a light check instead of
+the council after a small fix push.
 
 #### GitHub Review Lifecycle
 

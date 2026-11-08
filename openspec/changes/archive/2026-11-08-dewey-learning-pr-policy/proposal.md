@@ -65,3 +65,9 @@ This change directly supports traceability — a core tenet of Observable Qualit
 
 This is a documentation-only change with no code components. No testable side effects.
 <!-- scaffolded by uf vdev -->
+
+## Superseded
+
+Superseded by `feedback-loop-scope` (2026-11-08): Dewey learnings no longer
+ride the feature PR. Moved to the archive without merging its specs,
+so this change's requirements never reach `openspec/specs`.

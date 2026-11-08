@@ -1129,15 +1129,15 @@ for the next review to cover.
 
 ### 4.3 Local Verification
 
-After all code changes are committed locally, run the project's
-build, test, and lint commands, derived from `.github/workflows/`
-as `AGENTS.md` describes.
+After all code changes are committed locally, invoke the `skill`
+tool with name `pre-flight` and run its phases in `hard-gate` mode,
+the same checks `/uf.unleash` gates on.
 
 - **If they pass**: continue to push
-- **If they fail**: fix the failure in a new commit and run them
-  again, at most 3 times
-- **If they still fail**: **STOP** and report the failures. Do NOT
-  push.
+- **If a check fails**: fix the failure in a new commit and run the
+  pre-flight checks again, at most 3 attempts in all
+- **If a check still fails after 3 attempts**: **STOP** and report
+  the failures. Do NOT push.
 
 This command does not run `/uf.review-council`. The re-review after
 the push (`/uf.review-pr`, whose re-review evaluator picks a full
@@ -1302,20 +1302,30 @@ For each item, compose the reply:
 | REPLY | Acknowledges the finding in a sentence or two and says why it is not changed in this PR (<SEVERITY>) |
 
 File each FILE item's issue before posting its reply, so the reply can
-link it. Write the issue as JSON to a temporary file, for the same
-shell-injection reason as replies:
+link it. Write the title and body to temporary files, so quotes,
+newlines, and backslashes in finding text never reach the shell as
+code (a quoted `$(cat ...)` is not re-parsed):
 
 ```bash
-ISSUE_FILE=$(mktemp)
-cat > "$ISSUE_FILE" << 'ISSUE_EOF'
-{"title": "<finding summary>", "body": "<finding, severity, file:line, and a link to the review comment on PR #<PR_NUMBER>>"}
-ISSUE_EOF
-gh api repos/{owner}/{repo}/issues --method POST --input "$ISSUE_FILE" --jq '.number'
-rm -f "$ISSUE_FILE"
+TITLE_FILE=$(mktemp); BODY_FILE=$(mktemp)
+cat > "$TITLE_FILE" << 'TITLE_EOF'
+<finding summary>
+TITLE_EOF
+cat > "$BODY_FILE" << 'BODY_EOF'
+<finding, severity, file:line, and a link to the review comment on PR #<PR_NUMBER>>
+BODY_EOF
+gh issue create --repo {owner}/{repo} --title "$(cat "$TITLE_FILE")" --body-file "$BODY_FILE"
+rm -f "$TITLE_FILE" "$BODY_FILE"
 ```
 
+`gh issue create` prints the new issue's URL; its last path segment
+is the issue number.
+
 Record each filed issue number in the cache so a retry does not file
-it twice.
+it twice. If `gh issue create` fails, retry it once. If it fails again, do not
+post that item's reply or resolve its thread: report the error with
+the item, continue with the other items, and leave the item for the
+next run.
 
 Post replies to the correct review thread. Always write the comment body to a temporary file and use `--input` to prevent shell injection from AI-generated or reviewer-authored text:
 

@@ -1,12 +1,19 @@
+<!-- capability: address-feedback-scope
+     change: feedback-loop-scope
+     requirement ids: AFS-FR-001 to AFS-FR-003 allocated here -->
+
 ## ADDED Requirements
 
 ### Requirement: Severity Scope for Code Changes
+
+**ID: AFS-FR-001** This requirement MUST be satisfied.
 
 `/uf.address-feedback` MUST change code only for CRITICAL and HIGH
 findings. A finding with no severity label MUST count as HIGH. A
 MEDIUM or LOW finding MUST be filed as an issue, answered with a
 reply, or answered with a question, and MUST NOT produce a code
-change in the same run.
+change in the same run. MEDIUM and LOW items MUST be assessed at
+Tier 1.
 
 #### Scenario: LOW finding
 
@@ -21,22 +28,51 @@ change in the same run.
 - **WHEN** it is triaged
 - **THEN** it MUST follow the authority matrix as a HIGH item
 
+### Requirement: Filing and Answering Findings
+
+**ID: AFS-FR-002** This requirement MUST be satisfied.
+
+A FILE item's issue MUST be created before its reply, from title and
+body text written to temporary files. If issue creation fails twice,
+the item's reply MUST NOT be posted and its thread MUST stay open.
+The threads of ACCEPT, MODIFY, FILE, and REPLY items MUST be offered
+for resolution. FILE and REPLY items MUST be recorded in the
+feedback-triage artifact as `reject` with a `decision_reasoning`
+prefix of `filed: <issue URL>` or `reply:`.
+
 #### Scenario: Filed finding
 
 - **GIVEN** the author chooses `File issue`
 - **WHEN** replies are posted
-- **THEN** an issue MUST be created before the reply
+- **THEN** an issue MUST exist before the reply
 - **AND** the reply MUST link the issue
-- **AND** the thread MAY be resolved with the accepted threads
+
+#### Scenario: Issue creation fails
+
+- **GIVEN** `gh issue create` fails on the first try and the retry
+- **WHEN** replies are posted
+- **THEN** that item's reply MUST NOT be posted
+- **AND** the other items MUST still be posted
 
 ### Requirement: One Council per Cycle
 
-`/uf.address-feedback` MUST NOT run `/uf.review-council` before
-pushing. It MUST run the project's build, test, and lint commands
-and MUST NOT push while they fail.
+**ID: AFS-FR-003** This requirement MUST be satisfied.
 
-#### Scenario: Verification fails three times
+`/uf.address-feedback` MUST NOT run `/uf.review-council` before
+pushing. It MUST run the `pre-flight` skill in `hard-gate` mode and
+MUST NOT push while a check fails. It MUST stop without pushing
+after 3 failed attempts.
+
+#### Scenario: Verification keeps failing
 
 - **GIVEN** committed fixes whose tests fail
-- **WHEN** three fix attempts do not make them pass
+- **WHEN** three attempts do not make the checks pass
 - **THEN** the command MUST stop without pushing
+
+## MODIFIED Requirements
+
+None.
+
+## REMOVED Requirements
+
+None.

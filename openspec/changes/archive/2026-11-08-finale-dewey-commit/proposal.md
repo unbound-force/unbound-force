@@ -76,3 +76,9 @@ The change is to a command template (Markdown), not to
 executable code. Existing scaffold drift-detection tests
 will catch file-count changes. No new testable component
 is introduced.
+
+## Superseded
+
+Superseded by `feedback-loop-scope` (2026-11-08): Dewey learnings no longer
+ride the feature PR. Moved to the archive without merging its specs,
+so this change's requirements never reach `openspec/specs`.

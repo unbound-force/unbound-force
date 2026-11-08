@@ -9325,6 +9325,335 @@ function createFetchPrChecksTool(): ReturnType<typeof tool> {
   })
 }
 
+// ── resolve_review_mode ──────────────────────────────────────
+
+/**
+ * Re-review evaluator limits (feedback-loop-scope, RPR-FR-002). A light
+ * check replaces the council only for a push this small and contained.
+ */
+export const LIGHT_CHECK_MAX_CHANGED_LINES = 200
+
+/**
+ * The compare API lists at most 300 files. A response at that size may
+ * be truncated, so it can never qualify for a light check.
+ */
+export const COMPARE_FILE_LIMIT = 300
+
+/**
+ * Paths whose changes always get the full council: workflows and
+ * repository settings, the agent instructions, the constitution, the
+ * convention packs, and anything naming auth, tokens, secrets, or
+ * credentials.
+ */
+export const SENSITIVE_PATH_PATTERNS: readonly RegExp[] = [
+  /^\.github\//,
+  /(^|\/)AGENTS\.md$/,
+  /(^|\/)constitution\.md$/,
+  /^\.opencode\/uf\/packs\//,
+  /auth|token|secret|credential/i,
+]
+
+/** File statuses in a compare response that rule out a light check. */
+const STRUCTURAL_FILE_STATUSES = new Set(["added", "removed", "renamed", "copied"])
+
+/** Severity marker at the start of a finding (`**HIGH — ...`). */
+const FINDING_SEVERITY_PATTERN = /^\s*\*\*(CRITICAL|HIGH|MEDIUM|LOW)\b/
+
+/** Any bold CRITICAL marker in a review body or comment. */
+const CRITICAL_MARKER_PATTERN = /\*\*CRITICAL\b/
+
+/** A review as `GET /pulls/{n}/reviews` returns it (fields used here). */
+export interface ReviewModeReview {
+  readonly id: number
+  readonly user: string
+  readonly state: string
+  readonly commit_id: string
+  readonly submitted_at: string
+  readonly body: string
+}
+
+/** An inline comment as `GET /pulls/{n}/comments` returns it (fields used here). */
+export interface ReviewModeComment {
+  readonly id: number
+  readonly review_id: number | null
+  readonly path: string
+  readonly line: number | null
+  readonly body: string
+}
+
+/** The fields of `GET /compare/{base}...{head}` the evaluator reads. */
+export interface ReviewModeCompare {
+  readonly status: string
+  readonly files: readonly { readonly filename: string; readonly status: string; readonly changes: number }[]
+}
+
+export interface ReviewModeInput {
+  readonly headSha: string
+  readonly viewer: string
+  readonly reviews: readonly ReviewModeReview[]
+  readonly comments: readonly ReviewModeComment[]
+  /** Null when the compare call failed. */
+  readonly compare: ReviewModeCompare | null
+  /** Check buckets from `gh pr checks`, or null when they could not be read. */
+  readonly checkBuckets: readonly string[] | null
+}
+
+/** A CRITICAL or HIGH finding of the prior review, for the light check to verify. */
+export interface PriorFinding {
+  readonly comment_id: number
+  readonly path: string
+  readonly line: number | null
+  /** `UNKNOWN` when the comment carries no severity marker; it counts as HIGH. */
+  readonly severity: "CRITICAL" | "HIGH" | "UNKNOWN"
+}
+
+export interface ReviewModeDecision {
+  readonly mode: "full" | "light"
+  readonly reason: string
+  readonly prior_review: { readonly id: number; readonly commit_id: string; readonly state: string } | null
+  readonly delta: { readonly files: number; readonly changed_lines: number } | null
+  readonly prior_findings: readonly PriorFinding[]
+}
+
+/**
+ * Decide between the full council and a light check (feedback-loop-scope
+ * RPR-FR-001, RPR-FR-002). Every failure to read an input decides `full`: the light
+ * check is an optimisation, so missing data never earns it.
+ *
+ * The prior review is the viewer's latest submitted review (dismissed
+ * included: branch rules dismiss stale approvals on push) whose commit
+ * is not the head. Review and comment text is untrusted; it is only
+ * matched against severity markers, never interpreted.
+ */
+export function decideReviewMode(input: ReviewModeInput): ReviewModeDecision {
+  const viewer = input.viewer.toLowerCase()
+  const prior = [...input.reviews]
+    .filter((review) => review.user.toLowerCase() === viewer && review.state !== "PENDING")
+    .filter((review) => review.commit_id !== input.headSha)
+    .sort((a, b) => a.submitted_at.localeCompare(b.submitted_at))
+    .at(-1)
+
+  const full = (reason: string, delta: ReviewModeDecision["delta"] = null): ReviewModeDecision => ({
+    mode: "full",
+    reason,
+    prior_review: prior === undefined ? null : { id: prior.id, commit_id: prior.commit_id, state: prior.state },
+    delta,
+    prior_findings: [],
+  })
+
+  if (input.viewer === "") return full("the current user could not be read")
+  if (prior === undefined) return full(`no earlier review by ${input.viewer} on another commit`)
+
+  const priorComments = input.comments.filter((comment) => comment.review_id === prior.id)
+  if (CRITICAL_MARKER_PATTERN.test(prior.body) || priorComments.some((c) => CRITICAL_MARKER_PATTERN.test(c.body))) {
+    return full("the prior review raised a CRITICAL finding")
+  }
+
+  if (input.compare === null) return full("the changes since the prior review could not be read")
+  if (input.compare.status !== "ahead") {
+    return full(`the reviewed commit is no longer an ancestor of the head (compare status ${input.compare.status})`)
+  }
+  const files = input.compare.files
+  const changedLines = files.reduce((sum, file) => sum + file.changes, 0)
+  const delta = { files: files.length, changed_lines: changedLines }
+  if (files.length >= COMPARE_FILE_LIMIT) return full("the compare response may be truncated", delta)
+  if (changedLines > LIGHT_CHECK_MAX_CHANGED_LINES) {
+    return full(`${changedLines} changed lines exceed ${LIGHT_CHECK_MAX_CHANGED_LINES}`, delta)
+  }
+  const structural = files.find((file) => STRUCTURAL_FILE_STATUSES.has(file.status))
+  if (structural !== undefined) return full(`${structural.filename} was ${structural.status}`, delta)
+  const sensitive = files.find((file) => SENSITIVE_PATH_PATTERNS.some((pattern) => pattern.test(file.filename)))
+  if (sensitive !== undefined) return full(`${sensitive.filename} is a sensitive path`, delta)
+
+  if (input.checkBuckets === null) return full("the PR checks could not be read", delta)
+  if (input.checkBuckets.includes("fail")) return full("a check is failing", delta)
+
+  const priorFindings: PriorFinding[] = []
+  for (const comment of priorComments) {
+    const severity = FINDING_SEVERITY_PATTERN.exec(comment.body)?.[1]
+    if (severity === "MEDIUM" || severity === "LOW") continue
+    priorFindings.push({
+      comment_id: comment.id,
+      path: comment.path,
+      line: comment.line,
+      severity: severity === "HIGH" || severity === "CRITICAL" ? severity : "UNKNOWN",
+    })
+  }
+
+  return {
+    mode: "light",
+    reason: `${files.length} files, ${changedLines} lines since ${prior.commit_id.slice(0, 7)}`,
+    prior_review: { id: prior.id, commit_id: prior.commit_id, state: prior.state },
+    delta,
+    prior_findings: priorFindings,
+  }
+}
+
+const ResolveReviewModeInputSchema = z
+  .object({
+    pr_number: z.number().int().min(1).max(999_999),
+  })
+  .strict()
+
+/** Flatten `gh api --paginate --slurp` output (an array of pages). */
+function flattenPages(text: string): unknown[] | null {
+  const pages = tryParseJsonArray(text.trim())
+  if (pages === null) return null
+  return pages.flatMap((page) => (Array.isArray(page) ? page : [page]))
+}
+
+/**
+ * Gather the evaluator's inputs with gh and decide. Each gh call that
+ * fails leaves its input empty, which decides `full`; only a missing
+ * PR or gh itself is an error.
+ */
+async function resolveReviewMode(
+  prNumber: number,
+): Promise<(ReviewModeDecision & { readonly pr_number: number; readonly head_sha: string; readonly viewer: string }) | FetchContextError> {
+  try {
+    await runGhCommand(["auth", "status"])
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "gh auth status failed"
+    return { error: true, code: "gh_auth_failed", message, retryable: false }
+  }
+
+  let headSha: string
+  let repository: string
+  try {
+    const meta = JSON.parse(await runGhCommand(["pr", "view", String(prNumber), "--json", "headRefOid,url"])) as {
+      headRefOid?: string
+      url?: string
+    }
+    headSha = meta.headRefOid ?? ""
+    repository = deriveBaseRepository(meta.url ?? "") ?? ""
+  } catch (error: unknown) {
+    return classifyError(error, "pr_not_found", `Failed to read PR #${prNumber}`)
+  }
+  if (!/^[0-9a-f]{40}$/.test(headSha) || repository === "") {
+    return { error: true, code: "api_error", message: `PR #${prNumber} returned no head SHA or repository`, retryable: false }
+  }
+
+  const read = async (args: readonly string[]): Promise<string | null> => {
+    try {
+      return await runGhCommand(args)
+    } catch {
+      return null
+    }
+  }
+
+  const viewer = ((await read(["api", "user", "--jq", ".login"])) ?? "").trim()
+  const reviewPages = flattenPages((await read(["api", `repos/${repository}/pulls/${prNumber}/reviews`, "--paginate", "--slurp"])) ?? "")
+  const commentPages = flattenPages((await read(["api", `repos/${repository}/pulls/${prNumber}/comments`, "--paginate", "--slurp"])) ?? "")
+
+  const reviews: ReviewModeReview[] = (reviewPages ?? []).map((entry) => {
+    const review = (entry ?? {}) as Partial<{ id: number; user: { login?: string }; state: string; commit_id: string; submitted_at: string; body: string }>
+    return {
+      id: review.id ?? 0,
+      user: review.user?.login ?? "",
+      state: review.state ?? "",
+      commit_id: review.commit_id ?? "",
+      submitted_at: review.submitted_at ?? "",
+      body: review.body ?? "",
+    }
+  })
+  const comments: ReviewModeComment[] = (commentPages ?? []).map((entry) => {
+    const comment = (entry ?? {}) as Partial<{ id: number; pull_request_review_id: number | null; path: string; line: number | null; original_line: number | null; body: string }>
+    return {
+      id: comment.id ?? 0,
+      review_id: comment.pull_request_review_id ?? null,
+      path: comment.path ?? "",
+      line: comment.line ?? comment.original_line ?? null,
+      body: comment.body ?? "",
+    }
+  })
+
+  if (reviewPages === null || commentPages === null) {
+    return {
+      pr_number: prNumber,
+      head_sha: headSha,
+      viewer,
+      mode: "full",
+      reason: "the existing reviews could not be read",
+      prior_review: null,
+      delta: null,
+      prior_findings: [],
+    }
+  }
+  // A first pass finds the prior review, whose commit the compare needs.
+  const first = decideReviewMode({ headSha, viewer, reviews, comments, compare: null, checkBuckets: [] })
+  if (first.prior_review === null) {
+    return { pr_number: prNumber, head_sha: headSha, viewer, ...first }
+  }
+
+  let compare: ReviewModeCompare | null = null
+  const compareText = await read(["api", `repos/${repository}/compare/${first.prior_review.commit_id}...${headSha}`])
+  if (compareText !== null) {
+    try {
+      const parsed = JSON.parse(compareText) as Partial<{ status: string; files: { filename?: string; status?: string; changes?: number }[] }>
+      compare = {
+        status: parsed.status ?? "",
+        files: (parsed.files ?? []).map((file) => ({
+          filename: file.filename ?? "",
+          status: file.status ?? "",
+          changes: file.changes ?? 0,
+        })),
+      }
+    } catch {
+      compare = null
+    }
+  }
+
+  let checkBuckets: string[] | null = null
+  try {
+    const result = await runGhCommandTolerant(["pr", "checks", String(prNumber), "--json", "bucket"])
+    const stdout = result.stdout.trim()
+    if (stdout === "" && NO_CHECKS_REPORTED_PATTERN.test(result.stderr)) {
+      checkBuckets = []
+    } else {
+      const parsed = tryParseJsonArray(stdout)
+      checkBuckets = parsed === null ? null : parsed.map((entry) => String((entry as { bucket?: unknown } | null)?.bucket ?? ""))
+    }
+  } catch {
+    checkBuckets = null
+  }
+
+  const decision = decideReviewMode({ headSha, viewer, reviews, comments, compare, checkBuckets })
+  return { pr_number: prNumber, head_sha: headSha, viewer, ...decision }
+}
+
+/**
+ * Creates the resolve_review_mode OpenCode tool: the `/uf.review-pr`
+ * Step 3.11 re-review evaluator.
+ */
+function createResolveReviewModeTool(): ReturnType<typeof tool> {
+  return tool({
+    description:
+      "Decide whether a /uf.review-pr re-review needs the full council or a light check. Finds the " +
+      "current user's latest review on an earlier commit and returns mode `light` only when the " +
+      "reviewed commit is an ancestor of the head, the delta is at most 200 changed lines with no " +
+      "added, removed, or renamed file and no sensitive path, the prior review raised no CRITICAL " +
+      "finding, and no check is failing. Any input that cannot be read decides `full`. Also returns " +
+      "the prior review's CRITICAL, HIGH, and unlabelled inline findings for the light check.",
+    args: {
+      pr_number: ResolveReviewModeInputSchema.shape.pr_number,
+    },
+    async execute(args): Promise<{ readonly output: string }> {
+      const parsed = ResolveReviewModeInputSchema.safeParse(args)
+      if (!parsed.success) {
+        const result: FetchContextError = {
+          error: true,
+          code: "api_error",
+          message: `Invalid input: ${formatValidationError(parsed.error)}`,
+          retryable: false,
+        }
+        return { output: JSON.stringify(result, null, 2) }
+      }
+      const result = await resolveReviewMode(parsed.data.pr_number)
+      return { output: JSON.stringify(result, null, 2) }
+    },
+  })
+}
+
 // ── fetch_failed_run_logs ────────────────────────────────────
 
 /**
@@ -9597,6 +9926,7 @@ export const ReviewDispatchPlugin = {
         }),
         fetch_pr_review_context: createFetchPrReviewContextTool(),
         fetch_pr_checks: createFetchPrChecksTool(),
+        resolve_review_mode: createResolveReviewModeTool(),
         fetch_failed_run_logs: createFetchFailedRunLogsTool(),
         capture_review_diff: createCaptureReviewDiffTool(createReviewDiffDependencies(projectRoot)),
       },
