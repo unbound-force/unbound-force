@@ -1,7 +1,7 @@
 import type { PluginInput, ToolContext } from "@opencode-ai/plugin"
 import { spawnSync } from "node:child_process"
 import { constants } from "node:fs"
-import { access, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
+import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -130,23 +130,40 @@ describe("instruction-lint pre-flight check", () => {
     }
   })
 
-  it("routes the make target and the persona through the wrapper", async () => {
+  it("routes the make target and the personas through the wrapper", async () => {
     const makefile = await readFile(repo("Makefile"), "utf8")
     expect(makefile).toMatch(/^lint-instructions:.*\n\t\.uf\/scripts\/instruction-lint \$\(ARGS\)$/m)
-    const persona = await readFile(repo(".opencode/agents/divisor-linguist.md"), "utf8")
-    expect(persona).toContain(".uf/scripts/instruction-lint --json --base BASE --changed")
-    expect(makefile + persona).not.toMatch(/node\s+\S*instruction-lint\.ts/)
+    const names = [".opencode/agents/divisor-linguist.md", ".opencode/agents/divisor-determinism.md"]
+    const personas = await Promise.all(names.map(async (name) => readFile(repo(name), "utf8")))
+    for (const [i, name] of names.entries()) {
+      expect(personas[i], name).toContain(".uf/scripts/instruction-lint --json --base BASE --changed")
+    }
+    expect(makefile + personas.join("")).not.toMatch(/node\s+\S*instruction-lint\.ts/)
   })
 
-  it("keeps the persona's metacharacter denies after every bash allow", async () => {
+  it("keeps every persona's metacharacter denies after every bash allow", async () => {
     // The permission engine is last-match-wins: an allow after these
     // denies would reopen redirection and chaining on its prefix.
-    const persona = await readFile(repo(".opencode/agents/divisor-linguist.md"), "utf8")
-    const frontmatter = persona.split(/^---$/m)[1] ?? ""
-    const bash = Object.entries((parse(frontmatter) as { permission: { bash: Record<string, string> } }).permission.bash)
+    // Every persona whose bash permission is a map of entries -- not
+    // a scalar (bash: true / deny / false) and not absent -- must end
+    // with the terminal denies, so no persona can ship allows that
+    // reopen chaining or redirection on any prefix.
     const terminal = ["*>*", "*<*", "*|*", "*;*", "*&*", "*$(*", "*`*"]
-    expect(bash.slice(-terminal.length)).toEqual(terminal.map((pattern) => [pattern, "deny"]))
+    const names = (await readdir(repo(".opencode/agents"))).filter((f) => f.endsWith(".md")).sort()
+    let checked = 0
+    for (const name of names) {
+      const persona = await readFile(repo(`.opencode/agents/${name}`), "utf8")
+      const frontmatter = parse(persona.split(/^---$/m)[1] ?? "") as { permission?: { bash?: unknown } }
+      const bash = frontmatter.permission?.bash
+      if (bash === undefined || bash === null || typeof bash !== "object" || Object.keys(bash).length === 0) continue
+      checked += 1
+      const entries = Object.entries(bash as Record<string, string>)
+      expect(entries.slice(-terminal.length), name).toEqual(terminal.map((pattern) => [pattern, "deny"]))
+    }
+    expect(checked).toBeGreaterThan(0)
 
+    const persona = await readFile(repo(".opencode/agents/divisor-linguist.md"), "utf8")
+    const bash = Object.entries((parse(persona.split(/^---$/m)[1] ?? "") as { permission: { bash: Record<string, string> } }).permission.bash)
     const decide = (command: string): string | undefined =>
       bash.findLast(([pattern]) => {
         const source = pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")
