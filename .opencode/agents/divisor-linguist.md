@@ -107,7 +107,6 @@ Run the instruction linter once, scoped to the files changed since BASE. Skip th
 ```bash
 .uf/scripts/instruction-lint --json --base BASE --changed
 ```
-```
 
 The wrapper checks dependencies before node starts and pins `--root` to the working directory; invoke the linter only through it, never by running `node` on the library directly.
 

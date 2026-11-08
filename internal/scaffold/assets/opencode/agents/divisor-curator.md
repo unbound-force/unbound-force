@@ -11,6 +11,17 @@ permission:
     "gh issue list*": "allow"
     "gh issue view*": "allow"
     "gh issue create*": "ask"
+    # Terminal catch-all denies, placed last so they win over every
+    # allow on any prefix: each shell metacharacter is a chaining,
+    # redirection, or substitution vector (gh repo view > file,
+    # gh issue view | sh, gh issue list; cmd, $(cmd), `cmd`).
+    "*>*": "deny"
+    "*<*": "deny"
+    "*|*": "deny"
+    "*;*": "deny"
+    "*&*": "deny"
+    "*$(*": "deny"
+    "*`*": "deny"
 ---
 
 # Role: The Curator
