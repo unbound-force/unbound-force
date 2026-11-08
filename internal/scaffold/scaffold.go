@@ -296,6 +296,9 @@ func Run(opts Options) (*Result, error) {
 		// Check if file already exists
 		existing, readErr := os.ReadFile(outPath)
 		fileExists := readErr == nil
+		if fileExists && relPath == pluginManifestAsset {
+			out = preservePluginDevDependencies(out, existing)
+		}
 
 		if !fileExists {
 			// New file -- create it
@@ -412,7 +415,7 @@ func Run(opts Options) (*Result, error) {
 		// ungated by DivisorOnly: --divisor deploys .opencode/
 		// (package.json, plugin sources) and runs plugin activation
 		// inside it too. Independent of the pluginResult computed
-		// above — npm ci may fail or be skipped while node_modules/
+		// above — npm install may fail or be skipped while node_modules/
 		// can still appear.
 		opencodeGiResult = ensureOpencodeGitignore(&opts)
 		warnStaleStealthExclusion(&opts)
@@ -458,8 +461,18 @@ func Run(opts Options) (*Result, error) {
 	// Migrate legacy .opencode/command/ to .opencode/commands/.
 	// Runs after initSubTools() so files created by specify init,
 	// gaze init, etc. in the old directory are caught and moved.
-	if migResult := migrateCommandDir(&opts); migResult != nil {
-		subResults = append(subResults, *migResult)
+	// Then migrate legacy .opencode/skill/ to .opencode/skills/
+	// (#933): opencode loads both, so a stale legacy copy shadows
+	// or duplicates the scaffolded skill. Both run after the
+	// stealth restore, so stealth mode skips them: moving tracked
+	// legacy files would leave the tree modified.
+	if !opts.Stealth {
+		if migResult := migrateCommandDir(&opts); migResult != nil {
+			subResults = append(subResults, *migResult)
+		}
+		if migResult := migrateSkillDir(&opts); migResult != nil {
+			subResults = append(subResults, *migResult)
+		}
 	}
 
 	// Remove orphaned old-name command files left behind
@@ -712,7 +725,7 @@ func isToolOwned(relPath string) bool {
 	if strings.HasPrefix(relPath, "opencode/skills/") {
 		return true
 	}
-	if relPath == "opencode/package.json" || relPath == "opencode/package-lock.json" {
+	if relPath == pluginManifestAsset {
 		return true
 	}
 	if isActivationGatedAsset(relPath) {
@@ -720,6 +733,7 @@ func isToolOwned(relPath string) bool {
 	}
 	if relPath == "opencode/lib/agent-executor.ts" ||
 		relPath == "opencode/lib/branch-classification.ts" ||
+		relPath == "opencode/lib/delegation-budget.ts" ||
 		relPath == "opencode/lib/model-matrix.ts" ||
 		relPath == "opencode/lib/preflight-declared.ts" ||
 		relPath == "opencode/lib/review-dispatch-artifact.ts" ||
@@ -810,11 +824,12 @@ func isDivisorAsset(relPath string) bool {
 	if isActivationGatedAsset(relPath) {
 		return true
 	}
-	if relPath == "opencode/package.json" || relPath == "opencode/package-lock.json" {
+	if relPath == pluginManifestAsset {
 		return true
 	}
 	if relPath == "opencode/lib/agent-executor.ts" ||
 		relPath == "opencode/lib/branch-classification.ts" ||
+		relPath == "opencode/lib/delegation-budget.ts" ||
 		relPath == "opencode/lib/model-matrix.ts" ||
 		relPath == "opencode/lib/preflight-declared.ts" ||
 		relPath == "opencode/lib/review-dispatch-artifact.ts" ||
@@ -1587,9 +1602,11 @@ const reviewMatrixOverrideStub = `# .uf/review-matrix.override.yaml
 // opencodeGitignore is the canonical content deployed as
 // .opencode/.gitignore by ensureOpencodeGitignore (SC-FR-015, design
 // D9): the plugin-dependency and test-output noise that lands inside
-// .opencode/ when plugin activation runs npm ci there (node_modules,
-// bun.lock) and when the TypeScript plugin suite runs (.vitest/
-// cache, coverage/ output). It is a Go string constant rather than an
+// .opencode/ when plugin activation installs there (node_modules,
+// bun.lock, and the package-lock.json npm or opencode may write;
+// the scaffold no longer ships or tracks a lock) and when the
+// TypeScript plugin suite runs (.vitest/ cache, coverage/ output).
+// It is a Go string constant rather than an
 // embedded asset because Go's //go:embed excludes dotfiles from
 // directory matches, so the embedded assets tree cannot carry the
 // file; like the override stubs it carries no version marker and no
@@ -1597,6 +1614,7 @@ const reviewMatrixOverrideStub = `# .uf/review-matrix.override.yaml
 // reset — only canonical lines missing from it are appended.
 const opencodeGitignore = `node_modules
 bun.lock
+package-lock.json
 .vitest/
 coverage/
 `
@@ -1844,7 +1862,7 @@ func ensureOverrideStub(opts *Options, name, content string) subToolResult {
 // canonical opencodeGitignore lines (SC-FR-015, design D9), so that
 // plugin-dependency and test-output noise inside .opencode/ is
 // ignored in fresh targets. The writer is a sub-tool independent of
-// the plugin-activation result: npm ci may fail or be skipped while
+// the plugin-activation result: npm install may fail or be skipped while
 // node_modules/ can still appear. Merge semantics, never a reset:
 //
 //   - file absent: create the parent directory as needed and write
@@ -2071,6 +2089,196 @@ func migrateCommandDir(opts *Options) *subToolResult {
 		detail: fmt.Sprintf("moved %d, skipped %d duplicates, %d warnings",
 			moved, skipped, warned),
 	}
+}
+
+// migrateSkillDir moves skills from the legacy .opencode/skill/
+// directory to the canonical .opencode/skills/ directory, so opencode
+// stops loading two copies of the same skill (#933). Handles three
+// cases: atomic rename (only old exists), per-file merge (both
+// exist), and no-op (old does not exist). In a merge, a legacy file
+// with no counterpart is moved; a byte-identical copy is removed; a
+// differing copy of a tool-owned scaffold skill file is removed as
+// stale (uf init has just written the current version under
+// skills/); any other differing copy is kept in place with a
+// conflict warning, never overwritten or deleted. Empty legacy
+// directories are removed. Idempotent and re-runnable; a rerun
+// that changes nothing reports "skipped". Returns nil when there
+// is nothing to migrate (silent no-op). Skipped in DivisorOnly
+// mode, like migrateCommandDir; Run skips it in stealth mode.
+func migrateSkillDir(opts *Options) *subToolResult {
+	if opts.DivisorOnly {
+		return nil
+	}
+
+	const label = ".opencode/skill/ → skills/"
+	oldDir := filepath.Join(opts.TargetDir, ".opencode", "skill")
+	newDir := filepath.Join(opts.TargetDir, ".opencode", "skills")
+
+	oldInfo, err := os.Lstat(oldDir)
+	if err != nil {
+		return nil
+	}
+	if oldInfo.Mode()&os.ModeSymlink != 0 {
+		return &subToolResult{
+			name:   ".opencode/skill/",
+			action: "skipped",
+			detail: "symlink detected; manual migration required",
+		}
+	}
+
+	// Case: only old dir exists — atomic rename.
+	if _, statErr := os.Stat(newDir); os.IsNotExist(statErr) {
+		if renameErr := os.Rename(oldDir, newDir); renameErr != nil {
+			return &subToolResult{
+				name:   label,
+				action: "failed",
+				detail: fmt.Sprintf("rename: %v", renameErr),
+			}
+		}
+		return &subToolResult{
+			name:   label,
+			action: "migrated",
+			detail: fmt.Sprintf("%d skills renamed", countSubdirs(newDir)),
+		}
+	}
+
+	// Case: both dirs exist — per-file merge.
+	var files, dirs []string
+	walkErr := filepath.WalkDir(oldDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(oldDir, path)
+		if relErr != nil {
+			return relErr
+		}
+		switch {
+		case d.IsDir():
+			dirs = append(dirs, rel)
+		case d.Type()&os.ModeSymlink != 0:
+			// Symlinks stay for manual migration; the legacy
+			// directory then survives the cleanup below.
+			_, _ = fmt.Fprintf(opts.Stdout,
+				"  ⚠ skill/%s: symlink — manual migration required\n", filepath.ToSlash(rel))
+		default:
+			files = append(files, rel)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return &subToolResult{
+			name:   label,
+			action: "failed",
+			detail: fmt.Sprintf("read old dir: %v", walkErr),
+		}
+	}
+
+	var moved, duplicates, stale, conflicts, warned int
+	for _, rel := range files {
+		slashRel := filepath.ToSlash(rel)
+		oldPath := filepath.Join(oldDir, rel)
+		newPath := filepath.Join(newDir, rel)
+
+		if _, statErr := os.Stat(newPath); statErr != nil {
+			// File only in old dir — move it.
+			if mkErr := os.MkdirAll(filepath.Dir(newPath), 0o755); mkErr != nil {
+				_, _ = fmt.Fprintf(opts.Stdout,
+					"  ⚠ skill/%s: move failed: %v\n", slashRel, mkErr)
+				warned++
+				continue
+			}
+			if moveErr := moveFile(oldPath, newPath, opts); moveErr != nil {
+				_, _ = fmt.Fprintf(opts.Stdout,
+					"  ⚠ skill/%s: move failed: %v\n", slashRel, moveErr)
+				warned++
+				continue
+			}
+			moved++
+			continue
+		}
+
+		oldContent, rErr := opts.ReadFile(oldPath)
+		if rErr != nil {
+			_, _ = fmt.Fprintf(opts.Stdout,
+				"  ⚠ skill/%s: read failed: %v\n", slashRel, rErr)
+			warned++
+			continue
+		}
+		newContent, rErr := opts.ReadFile(newPath)
+		if rErr != nil {
+			_, _ = fmt.Fprintf(opts.Stdout,
+				"  ⚠ skill/%s: read failed: %v\n", slashRel, rErr)
+			warned++
+			continue
+		}
+		switch {
+		case bytes.Equal(oldContent, newContent):
+			if rmErr := os.Remove(oldPath); rmErr != nil {
+				_, _ = fmt.Fprintf(opts.Stdout,
+					"  ⚠ skill/%s: remove failed: %v\n", slashRel, rmErr)
+				warned++
+				continue
+			}
+			duplicates++
+		case isScaffoldSkillFile(slashRel):
+			// Tool-owned scaffold skill: skills/ holds the
+			// current version, so the legacy copy is stale.
+			if rmErr := os.Remove(oldPath); rmErr != nil {
+				_, _ = fmt.Fprintf(opts.Stdout,
+					"  ⚠ skill/%s: remove failed: %v\n", slashRel, rmErr)
+				warned++
+				continue
+			}
+			stale++
+		default:
+			_, _ = fmt.Fprintf(opts.Stdout,
+				"  ⚠ skill/%s: conflict — kept both copies; reconcile and remove"+
+					" .opencode/skill/%s\n",
+				slashRel, slashRel)
+			conflicts++
+		}
+	}
+
+	// Remove emptied directories deepest-first; non-empty ones
+	// (conflicts, symlinks) fail to remove and stay.
+	for i := len(dirs) - 1; i >= 0; i-- {
+		_ = os.Remove(filepath.Join(oldDir, dirs[i]))
+	}
+
+	// A rerun that only finds kept conflicts changed nothing.
+	action := "migrated"
+	if moved+duplicates+stale == 0 {
+		action = "skipped"
+	}
+	return &subToolResult{
+		name:   label,
+		action: action,
+		detail: fmt.Sprintf("moved %d, removed %d duplicates and %d stale scaffold copies, %d conflicts kept, %d warnings",
+			moved, duplicates, stale, conflicts, warned),
+	}
+}
+
+// isScaffoldSkillFile reports whether a path relative to the skills
+// directory names a file uf init scaffolds (a tool-owned embedded
+// asset under opencode/skills/).
+func isScaffoldSkillFile(slashRel string) bool {
+	_, err := fs.Stat(assets, "assets/opencode/skills/"+slashRel)
+	return err == nil
+}
+
+// countSubdirs counts the immediate subdirectories of dir.
+func countSubdirs(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			count++
+		}
+	}
+	return count
 }
 
 // moveFile moves a file from src to dst. Uses os.Rename first

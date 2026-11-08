@@ -83,6 +83,15 @@ failure envelope with the error message.
 - **WHEN** `git_push` is called
 - **THEN** the tool executes
   `git push --set-upstream origin feat/x`
+  (Superseded by `retroactive-push-skill-contracts`,
+  openspec/changes/retroactive-push-skill-contracts/: `branch`
+  is required and MUST be the currently checked-out branch;
+  the push uses an explicit refspec
+  `HEAD:refs/heads/<branch>`, `remote` is an optional git
+  config nickname, and the result is structured `GitPushData`
+  with an optional `warning` when tracking configuration
+  fails after a landed push. That change MUST archive after
+  this change.)
 
 #### git_push_force_with_lease
 
@@ -94,6 +103,12 @@ return `{success: true}` or a failure envelope.
 - **GIVEN** a branch with diverged history
 - **WHEN** `git_push_force_with_lease` is called
 - **THEN** the tool executes `git push --force-with-lease`
+  (Superseded by `retroactive-push-skill-contracts`,
+  openspec/changes/retroactive-push-skill-contracts/: `branch`
+  is required, `remote` and `expected_sha` are optional, the
+  lease binds to the expected SHA (else the remote-tracking
+  ref, else absence), and the result is structured
+  `GitPushData`. That change MUST archive after this change.)
 
 #### git_merge
 

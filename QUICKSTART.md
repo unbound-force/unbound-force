@@ -3,10 +3,10 @@
 Unbound Force adds AI-powered development workflows to
 your project:
 
-- **Code review council** -- 9 AI reviewer personas
+- **Code review council** -- 11 AI reviewer personas
   audit your code for security, architecture, testing,
-  operations, intent drift, documentation, content,
-  and communications
+  operations, intent drift, documentation, determinism,
+  instruction quality, content, and communications
 - **Specification-driven development** -- structured
   workflows from idea to implementation
 - **Quality analysis** -- CRAP scores, coverage metrics,
@@ -157,7 +157,8 @@ uf init --divisor
 - **12 commands** (`.opencode/commands/`) -- review
   council, finale, unleash, and more
 - **11 agents** (`.opencode/agents/`) -- developer,
-  reviewer council (9 personas), constitution checker
+  reviewer council (9 canonical personas), constitution
+  checker
 - **15 convention packs** (`.opencode/uf/packs/`) --
   coding standards for Go, Python, TypeScript, CI,
   content, and review voice

@@ -3505,8 +3505,22 @@ export async function executeDispatchRun(
     // non-reclassified run — populated only at the RD-FR-026 hook above.
     post_submission_abort: postSubmissionAbort,
     // Timeout provenance (RD-FR-030, design D5 of derive-per-run-timeout):
-    // key absent when the calling tool did not resolve a timeout.
-    timeout: options.timeoutProvenance,
+    // key absent when the calling tool did not resolve a timeout. When the
+    // run reached the executor and produced timeout details, the executor
+    // outcome is recorded alongside the derived provenance: the derived
+    // effective_ms can overstate the applied limit after the delegation
+    // budget clamp, so executor_effective_ms / executor_budget_clamped are
+    // the authoritative applied values (run-file audit only — the
+    // consolidate_dispatch dispatchRuns mapping deliberately omits them;
+    // readers such as dispatch_status prefer them).
+    timeout:
+      options.timeoutProvenance !== undefined && result.timeout !== undefined
+        ? {
+            ...options.timeoutProvenance,
+            executor_effective_ms: result.timeout.effective_ms,
+            executor_budget_clamped: result.timeout.budget_clamped,
+          }
+        : options.timeoutProvenance,
     // Delivery-mode work signal (RD-FR-036): false for inline-mode runs
     // dispatched through the aggregate tools (the signal is a resolved
     // boolean from build_review_prompts), absent for direct
@@ -7013,10 +7027,17 @@ function createDispatchStatusTool(): ReturnType<typeof tool> {
           // Effective per-run timeout (RD-FR-030, design D5 of
           // derive-per-run-timeout): surfaced when the run file carries
           // timeout provenance; null for older run files and unreadable
-          // entries. Strictly observational — never feeds status or
-          // verdict computation.
+          // entries. executor_effective_ms (the post-clamp applied value
+          // copied from the executor result) is preferred over the derived
+          // effective_ms, which can overstate the applied limit after the
+          // delegation budget clamp. Strictly observational — never feeds
+          // status or verdict computation.
           timeout_effective_ms:
-            typeof result.run.timeout?.effective_ms === "number" ? result.run.timeout.effective_ms : null,
+            typeof result.run.timeout?.executor_effective_ms === "number"
+              ? result.run.timeout.executor_effective_ms
+              : typeof result.run.timeout?.effective_ms === "number"
+                ? result.run.timeout.effective_ms
+                : null,
         })
       }
 

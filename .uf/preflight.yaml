@@ -23,4 +23,21 @@
 # Project checks never map to a CI check, so ci-aware mode always runs
 # them locally. This file is project-owned: plain `uf init` re-runs keep it.
 version: 1
-checks: []
+checks:
+  # Deterministic lint of agent/command/skill/pack prose. Advisory until
+  # the open IL-010 error and the warning backlog are cleared.
+  - name: instruction-lint
+    run: .uf/scripts/instruction-lint
+    requires: [node]
+    paths:
+      - .opencode/agents/
+      - .opencode/commands/
+      - .opencode/skills/
+      - .opencode/skill/
+      - .opencode/uf/packs/
+      - .opencode/lib/instruction-lint.ts
+      - .opencode/package.json
+      - .uf/scripts/instruction-lint
+      - AGENTS.md
+    gate: advisory
+    timeout_seconds: 120

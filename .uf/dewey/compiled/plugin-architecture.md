@@ -72,7 +72,9 @@ topic: plugin-architecture
 
 ### Dependency Pins
 
-- `.opencode/package.json` pins @opencode-ai/plugin 1.19.0, zod 4.1.8, vitest 5.0.3.
+- `.opencode/package.json` pins @opencode-ai/plugin 1.19.0, zod 4.6.6 (with a zod
+  override at 4.6.6 forcing nested copies); vitest 5.0.3 stays in this repo's
+  devDependencies only — the scaffolded mirror ships none (lockless install, D2a).
 - Four plugins are registered in `opencode.json` (invoke-agent, review-dispatch, uf-workflow,
   uf-finale); registration is by directory, so `index.ts` must remain the barrel entry point.
 

@@ -65,6 +65,28 @@ func TestCommandContracts_TriageIssue(t *testing.T) {
 	assertCommandCopies(t, "uf.triage-issue.md", true, clauses)
 }
 
+// TestCommandContracts_RunPipelinePlanTimeoutRecovery pins the
+// delegation-timeout-budgets recovery protocol (issue #930): the
+// /uf.unleash delegation runs at the command-path ceiling, and timeout
+// envelopes are resumed by kind instead of re-delegated into the cap.
+func TestCommandContracts_RunPipelinePlanTimeoutRecovery(t *testing.T) {
+	clauses := []commandClause{
+		{name: "command-path ceiling", all: []string{"set `timeout: 14400000`", "omit `idle_timeout`", "nested delegations inside the child are clamped to its remaining budget"}},
+		{name: "timeout envelope fields", all: []string{"**delegation timeout recovery**", "`timeout` object (`kind`, `child_active`, `pending_question`)", "`resume` (`last_checkpoint_step`, `completed_steps`)"}},
+		{name: "branch on timeout kind", all: []string{"`timeout.pending_question: true`", "apply gate-timeout recovery", "`timeout.kind: \"idle\"` without a pending question", "re-delegate the same command once as a resume", "the re-run is effectively a fresh start", "a second idle timeout on the same item routes through the blocked-item protocol", "`timeout.kind: \"wall_clock\"`", "`timeout.kind: \"budget\"`"}},
+		{name: "finale idle window", all: []string{"set `timeout: 600000` (10 minutes) and `idle_timeout: 300000` (5 minutes)"}},
+		{name: "no fresh restart", all: []string{"when `resume.last_checkpoint_step` is non-null, never restart the item fresh on `main`"}},
+	}
+
+	assertCommandCopies(t, "uf.run-pipeline-plan.md", true, clauses)
+
+	for _, copy := range loadCommandCopies(t, "uf.run-pipeline-plan.md", true) {
+		if strings.Contains(normalizeCommandText(copy.text), "set `timeout: 1800000`") {
+			t.Errorf("%s: stale 30-minute /uf.unleash delegation timeout remains", copy.name)
+		}
+	}
+}
+
 func TestCommandContracts_FixCiCommandStructure(t *testing.T) {
 	clauses := []commandClause{
 		{name: "never-merge rule", all: []string{"MUST NEVER merge", "no option offers it", "rebase only"}},
@@ -182,9 +204,63 @@ func TestCommandContracts_AddressFeedback(t *testing.T) {
 		{name: "planned no-success", all: []string{"availability-only causes produce native, generic, and canonical `unavailable`", "policy, plan, budget, limit, persistence, calculation, or mixed cause", "native, generic, and canonical `inconclusive`", "retain the item for explicit human handling", "must not be converted to `author-decides`"}},
 		{name: "tier two finalization", all: []string{"finalize every tier 2 item, including plan or no-success failures, with a single `consolidate_dispatch` call", "\"workflow_id\": \"uf.address-feedback\"", "never call `finalize_review_dispatch` yourself", "the scalar review verdict (`review_verdict`)"}},
 		{name: "feedback triage artifact", all: []string{".uf/artifacts/feedback-triage/pr-<pr_number>-round-<m>.json", "existing feedback-triage artifact", "emitted in addition to each tier 2 `review-dispatch` artifact"}},
+		{name: "pr head checkout", all: []string{"### 1.2.1 Check Out the PR Head", "MUST be on the PR head before the first `get_progress` or `checkpoint` call", "gh pr checkout <PR_NUMBER>", "Never fetch the head branch by guessing a remote name", "never reset or discard local commits", "Never call `get_progress` or `checkpoint` from another branch."}},
+		{name: "pr head identity keyed on head sha", all: []string{"Identity is keyed on `HEAD`, not on the local branch name", "`git merge-base --is-ancestor <head_sha> HEAD`", "carries unpushed commits from a prior run", "Record the actual checked-out branch name as `HEAD_BRANCH`", `git config "branch.<HEAD_BRANCH>.remote"`, `git config "branch.<HEAD_BRANCH>.merge"`}},
+		{name: "read-only merge ref stops early", all: []string{"If `HEAD_MERGE_REF` starts with `refs/pull/`, **STOP**", "read-only merge ref (a fork PR with maintainer edits disabled)", "the Section 4.4 push would always be rejected"}},
+		{name: "checkout failure stop", all: []string{"If the checkout fails, **STOP** and report the specific error", "untracked working tree files would be overwritten", "`git stash -u` includes untracked files; plain `git stash` skips them"}},
+		{name: "push to configured head remote", all: []string{`git fetch "<HEAD_REMOTE>" "<HEAD_MERGE_REF>"`, `git push "<HEAD_REMOTE>" "HEAD:<HEAD_MERGE_REF>"`, "git rev-list --left-right --count HEAD...FETCH_HEAD", "no remote-tracking ref is written, so `git status` cannot observe divergence"}},
+		{name: "resume guard confirms branch first", all: []string{"Confirm the working tree is on the PR head per Section 1.2.1", "the re-check is unconditional on resume"}},
+		{name: "progress tracking intro keyed to 1.2.1", all: []string{"As soon as Section 1.2.1 has put the working tree on the PR head, call `get_progress`"}},
+		{name: "todowrite resume confirms branch first", all: []string{"On resume from compressed context, first confirm the working tree is on the PR head per Section 1.2.1", "never read it from another branch"}},
+		{name: "dirty tree stop", all: []string{"git status --porcelain --untracked-files=no", "Working tree has uncommitted changes. Commit or stash them"}},
+		{name: "unrelated branch stop", all: []string{"the branch is unrelated to the PR head", "**STOP** and report both SHAs"}},
+		{name: "unset push target stop", all: []string{"If either is unset, **STOP** and report", "no configured push target"}},
+		{name: "merge ref cross-check stops wrong branch", all: []string{"`HEAD_MERGE_REF` MUST equal `refs/heads/<head_ref>`", "never push this PR's commits to a different branch", "any branch that merely contains `head_sha`"}},
+		{name: "fetch failure stop", all: []string{"If the fetch fails", "do not run the divergence comparison", "silently run against stale state"}},
+		{name: "refname charset gate", all: []string{"Before interpolating `HEAD_BRANCH` into the config keys below", "**STOP** if it contains any character outside", "`A-Za-z0-9._/-`", "defense-in-depth, not neutralization", "remain active inside double quotes", "#965 tracks the argument-array tool"}},
+		{name: "pr number digits only", all: []string{"`PR_NUMBER` MUST be a positive integer (digits only)", "any other form is an argument error"}},
 	}
 
 	assertCommandCopies(t, "uf.address-feedback.md", true, clauses)
+
+	// Ordering pin: the PR-head checkout gate must precede the
+	// first **CHECKPOINT** marker — progress state is keyed by
+	// the checked-out branch (#954), so a checkpoint instruction
+	// moved above Section 1.2.1 regresses the branch keying while
+	// every pinned phrase stays present. The anchor is the bold
+	// **CHECKPOINT** marker, not a get_progress mention: the
+	// session-resume guard legitimately references get_progress
+	// before Section 1.2.1 while ordering it after the branch
+	// confirmation.
+	for _, copy := range loadCommandCopies(t, "uf.address-feedback.md", true) {
+		normalized := normalizeCommandText(copy.text)
+		sectionIdx := strings.Index(normalized, "### 1.2.1 check out the pr head")
+		checkpointIdx := strings.Index(normalized, "**checkpoint**")
+		if sectionIdx < 0 {
+			t.Fatalf("%s: Section 1.2.1 heading not found; ordering pin cannot run", copy.name)
+		}
+		if checkpointIdx < 0 {
+			t.Fatalf("%s: no **CHECKPOINT** marker found; ordering pin cannot run", copy.name)
+		}
+		if sectionIdx > checkpointIdx {
+			t.Errorf("%s: Section 1.2.1 (index %d) must precede the first **CHECKPOINT** marker (index %d) so progress state is keyed to the PR head branch", copy.name, sectionIdx, checkpointIdx)
+		}
+
+		// The origin-hardcoded push choreography that Section 4.4
+		// replaced must not return alongside the pinned HEAD_REMOTE
+		// forms. The fragments match the exact removed invocation
+		// forms because "origin" legitimately survives in prose (the
+		// Section 1.2.1 warning against guessing a remote name).
+		for _, forbidden := range []string{
+			"git fetch origin <branch>",
+			"git push origin <branch>",
+			"Retry with `git push origin <branch>`",
+		} {
+			if strings.Contains(normalized, normalizeCommandText(forbidden)) {
+				t.Errorf("%s: origin-hardcoded push choreography must not return: %q", copy.name, forbidden)
+			}
+		}
+	}
 }
 
 func TestCommandContracts_SpeckitTestReview(t *testing.T) {
@@ -375,6 +451,86 @@ func TestCommandContracts_CorrelationIdForwarding(t *testing.T) {
 		command := command
 		t.Run(command.name, func(t *testing.T) {
 			assertCommandCopies(t, command.name, true, command.clauses)
+		})
+	}
+}
+
+// TestCommandContracts_PushToolInvocationPins census-pins every
+// push-tool call site in the three push-carrying commands after the
+// structured push-tool migration (#947): uf.finale.md passes only
+// `branch` (plus `setUpstream: true` on the first-push call sites)
+// and never passes an `expected_sha` argument; uf.fix-ci.md passes
+// `{branch: <HEAD_REF>, remote: <HEAD_REMOTE>}` on both tools with
+// `expected_sha` sequencing on the force tool; uf.rebase-pr.md pins
+// the full `{branch, remote, expected_sha}` triple. The deleted raw
+// `git push --force-with-lease <HEAD_REMOTE> <HEAD_BRANCH>` shell
+// forms must not return: every push routes through the plugin
+// tools, which refuse a switched checkout (BRANCH_MISMATCH) and
+// lease on an explicit expectation.
+func TestCommandContracts_PushToolInvocationPins(t *testing.T) {
+	commands := []struct {
+		name    string
+		clauses []commandClause
+	}{
+		{
+			name: "uf.finale.md",
+			clauses: []commandClause{
+				{name: "branch-only lease after step-4 rebase", all: []string{"`git_push_force_with_lease` with `{branch}` after a step-4", "remote\" MUST call `git_push_force_with_lease` with", "`{branch}`. The gate"}},
+				{name: "first push sets upstream", all: []string{"`git_push` with `{setUpstream: true, branch}` (safe whether or", "push): call `git_push` with `{setUpstream: true, branch}`"}},
+				{name: "no-rebase plain push is branch-only", all: []string{"No rebase occurred: call `git_push` with `{branch}` (add", "conflict: `git_push` with `{branch}`, then"}},
+				{name: "conflict-option push call sites", all: []string{"`git_push_force_with_lease` with `{branch}` (if fails,", "`git_commit_no_edit` → `git_push` with `{branch}` → `uf_finale_ci_poll`"}},
+				{name: "every call passes the feature branch", all: []string{"Every push call in this command passes `branch` (the feature branch)", "Both push tools refuse with `BRANCH_MISMATCH`", "never switch branches to retry"}},
+				{name: "lease-on-tracking without expected_sha", all: []string{"Without `expected_sha`, `git_push_force_with_lease` leases on", "never retry with `--force`"}},
+				{name: "guardrail routes force through the tool", all: []string{"NEVER `git push --force`** — use `git_push_force_with_lease`"}},
+			},
+		},
+		{
+			name: "uf.fix-ci.md",
+			clauses: []commandClause{
+				{name: "push-mode selection reads the rebase checkpoint", all: []string{"`REBASED` false — plain `git_push`", "`REBASED` true — `git_push_force_with_lease`", "push-mode selection reads Phase 3's `rebase` checkpoint"}},
+				{name: "structured argument shape", all: []string{"Either tool takes `{branch: <HEAD_REF>, remote: <HEAD_REMOTE>}`", "pushes the HEAD commit to `refs/heads/<HEAD_REF>` with an explicit refspec"}},
+				{name: "expected_sha sequencing", all: []string{"`git_push_force_with_lease` also takes `expected_sha`", "pass `<HEAD_SHA>` on the first force-push of the invocation, then the `new_sha` the previous push returned"}},
+				{name: "lease never relies on the tracking ref", all: []string{"a fork PR has no tracking ref, so the lease MUST NOT rely on it"}},
+				{name: "mismatch and rejection stop", all: []string{"A `BRANCH_MISMATCH` refusal means the checkout left `<HEAD_REF>`", "A lease rejection means the remote head moved", "never refresh the lease to retry"}},
+				{name: "push-mode gate wording", all: []string{"`git_push_force_with_lease` when Phase 3", "rebased (history was rewritten), plain `git_push` otherwise"}},
+				{name: "after rebase force-only", all: []string{"A successful rebase rewrites the branch history", "afterwards MUST use `git_push_force_with_lease`", "pushes use `git_push_force_with_lease` only"}},
+			},
+		},
+		{
+			name: "uf.rebase-pr.md",
+			clauses: []commandClause{
+				{name: "full pinned triple", all: []string{"Call the `git_push_force_with_lease` plugin tool with", "`{branch: <HEAD_BRANCH>, remote: <HEAD_REMOTE>, expected_sha: <HEAD_SHA>}`"}},
+				{name: "explicit refspec independent of upstream", all: []string{"pushes `HEAD:refs/heads/<HEAD_BRANCH>` to `<HEAD_REMOTE>` with an explicit refspec", "independent of any configured upstream"}},
+				{name: "lease on the reported head", all: []string{"leases on `<HEAD_SHA>`, the head the PR reported before the rebase"}},
+				{name: "failure handling", all: []string{"`BRANCH_MISMATCH`: the checkout is not on a local branch named `<HEAD_BRANCH>`", "never retry with a refreshed lease or `--force`", "`EXPECTED_SHA_UNKNOWN`: `<HEAD_SHA>` is not a local commit"}},
+			},
+		},
+	}
+
+	for _, command := range commands {
+		command := command
+		t.Run(command.name, func(t *testing.T) {
+			assertCommandCopies(t, command.name, true, command.clauses)
+		})
+	}
+
+	// Forbidden-form pins: the migration deleted the raw shell
+	// force-push invocations (for example
+	// `git push --force-with-lease <HEAD_REMOTE> <HEAD_BRANCH>`)
+	// in favor of the structured plugin tools, so the raw form must
+	// not return in any of the three commands. uf.finale.md's
+	// guardrail prose still names `git push --force` (without
+	// `--with-lease`) to forbid it; that shorter string is not
+	// matched by this pin.
+	for _, name := range []string{"uf.finale.md", "uf.fix-ci.md", "uf.rebase-pr.md"} {
+		name := name
+		t.Run(name+" forbids raw force-push", func(t *testing.T) {
+			for _, copy := range loadCommandCopies(t, name, true) {
+				normalized := normalizeCommandText(copy.text)
+				if strings.Contains(normalized, "git push --force-with-lease") {
+					t.Errorf("%s: raw shell force-push form %q must not return; pushes route through git_push_force_with_lease", copy.name, "git push --force-with-lease")
+				}
+			}
 		})
 	}
 }

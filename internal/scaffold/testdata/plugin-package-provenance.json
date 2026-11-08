@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-10-19",
+  "verified_at": "2026-11-06",
   "packages": {
     "@opencode-ai/plugin": {
       "version": "1.19.0",
@@ -9,7 +9,7 @@
       "registry_maintainers": ["adamelmore", "thdxr"]
     },
     "zod": {
-      "version": "4.1.8",
+      "version": "4.6.6",
       "license": "MIT",
       "maintained_by": "Zod",
       "project_url": "https://github.com/colinhacks/zod",
@@ -28,14 +28,21 @@
       "maintained_by": "Vitest",
       "project_url": "https://github.com/vitest-dev/vitest",
       "registry_maintainers": ["antfu", "ariperkkio", "hiogawa", "oreanno", "yyx990803"]
+    },
+    "yaml": {
+      "version": "2.9.1",
+      "license": "ISC",
+      "maintained_by": "yaml",
+      "project_url": "https://github.com/eemeli/yaml",
+      "registry_maintainers": ["eemeli"]
     }
   },
   "security_overrides": {
     "toml": {
-      "version": "4.2.0",
+      "version": "5.0.1",
       "license": "MIT",
-      "git_head": "6d42b7e4fa693f8e6fb025d419b10b38107e83e2",
-      "integrity": "sha512-TvAJjbHZlYmI323+srtqHQFyJsoWy6mI09ppkuj9+iRsqsVKG9fvTcOP7FHF2UCb0QSYtjEavffrKzdd0XgClg==",
+      "git_head": "9ebfa698682500bbd30ce28e612ecc0208d9f70e",
+      "integrity": "sha512-EqYNA/YvUNndrA2B3O2ojzLQoTQrBxeZ9UIjQwk8t10oe6n7dwclBwd9IdZQTOKwe6vWX+AXtl6IntXRbepdxQ==",
       "maintained_by": "toml-node",
       "project_url": "https://github.com/BinaryMuse/toml-node"
     },
@@ -46,6 +53,14 @@
       "integrity": "sha512-9ezox2roIft6ExBVTVqibSd5dc5/47Sw/uY6b4SjQUT2TzQ0tltNquWA46y4xPQmdZYqvnio22SgWd41M86+jw==",
       "maintained_by": "uuidjs",
       "project_url": "https://github.com/uuidjs/uuid"
+    },
+    "zod": {
+      "version": "4.6.6",
+      "license": "MIT",
+      "git_head": "9c219833c3a3764fa1f1ea9c5ecec8254a63c0b1",
+      "integrity": "sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==",
+      "maintained_by": "Zod",
+      "project_url": "https://github.com/colinhacks/zod"
     }
   }
 }

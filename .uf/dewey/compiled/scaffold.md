@@ -61,7 +61,7 @@ topic: scaffold
 ### Tool-owned vs custom assets
 
 - `isToolOwned` (scaffold.go:638-689) gates auto-update on content diff. Tool-owned: `openspec/schemas/`, `uf/schemas/`, `opencode/commands/`, `opencode/skills/`,
-  `opencode/package.json` + lockfile, activation-gated assets, specific `lib/*.ts` files, `uf/reviewer-capabilities.yaml`, canonical convention packs.
+  `opencode/package.json`, activation-gated assets, specific `lib/*.ts` files, `uf/reviewer-capabilities.yaml`, canonical convention packs.
 - User-owned: agent files (including Divisor personas), `uf/review-matrix.yaml`, `uf/sibling-repos.yaml`, and `*-custom.md` packs — exempt initial deployment templates; `uf init`
   seeds the embedded copy once and never overwrites the canonical file thereafter.
 - Orthogonal predicate `isNeverOverwrite` (constitution-class artifacts): user-owned AND survives `--force`; its guard clause sits before the `opts.Force` block to intercept all

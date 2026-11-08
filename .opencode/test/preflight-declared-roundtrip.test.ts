@@ -248,8 +248,27 @@ const BUN = (() => {
 
 describe("uf_preflight_declared_checks real YAML", () => {
   it("parses the shipped .uf/preflight.yaml template to an empty v1 config", async () => {
-    const text = await readFile(fileURLToPath(new URL("../../.uf/preflight.yaml", import.meta.url)), "utf8")
+    // The shipped template is the embedded scaffold asset. This repository's
+    // own .uf/preflight.yaml is a project extension point that declares
+    // checks (see instruction-lint-preflight.test.ts).
+    const text = await readFile(
+      fileURLToPath(new URL("../../internal/scaffold/assets/uf/preflight.yaml", import.meta.url)),
+      "utf8",
+    )
     expect(parsePreflightConfig(parseYamlSubset(text))).toEqual({ version: 1, checks: [] })
+  })
+
+  it.skipIf(BUN === null)("parses this repository's .uf/preflight.yaml through Bun.YAML", async () => {
+    const text = await readFile(fileURLToPath(new URL("../../.uf/preflight.yaml", import.meta.url)), "utf8")
+    const json = execFileSync(BUN as string, ["-e", "process.stdout.write(JSON.stringify(Bun.YAML.parse(await Bun.stdin.text())))"], {
+      input: text,
+      encoding: "utf8",
+    })
+    const config = parsePreflightConfig(JSON.parse(json))
+    expect(config.checks.find((c) => c.name === "instruction-lint")).toMatchObject({
+      run: ".uf/scripts/instruction-lint",
+      gate: "advisory",
+    })
   })
 
   it.skipIf(BUN === null)("parses commented block-list YAML through Bun.YAML into the documented defaults", () => {

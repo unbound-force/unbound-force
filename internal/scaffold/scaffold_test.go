@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"slices"
@@ -81,20 +82,58 @@ func assertStringMap(t *testing.T, label string, got, want map[string]string) {
 	}
 }
 
-type packageLockEntry struct {
-	Version         string            `json:"version"`
-	Resolved        string            `json:"resolved"`
-	Integrity       string            `json:"integrity"`
-	License         string            `json:"license"`
-	Dev             bool              `json:"dev"`
-	Dependencies    map[string]string `json:"dependencies"`
-	DevDependencies map[string]string `json:"devDependencies"`
-}
-
 // TestEmbeddedAssetsMatchSource verifies that every file under
 // internal/scaffold/assets/ is byte-identical to the canonical
 // source file at the repo root. This prevents drift between the
 // embedded copies and the files developers actually use.
+// shippedPluginManifest derives the scaffolded .opencode/package.json from
+// this repository's manifest: the same bytes without the devDependencies
+// block. Generated projects never run the plugin suite, and a lockless
+// install still resolves devDependencies even under --omit=dev, which
+// crashes npm 10.9.9's Arborist on the vitest 5 peer graph.
+func shippedPluginManifest(source []byte) []byte {
+	lines := strings.SplitAfter(string(source), "\n")
+	var out strings.Builder
+	skipping := false
+	for _, line := range lines {
+		switch {
+		case !skipping && line == "  \"devDependencies\": {\n":
+			skipping = true
+		case skipping:
+			if line == "  },\n" || line == "  }\n" {
+				skipping = false
+			}
+		default:
+			out.WriteString(line)
+		}
+	}
+	return []byte(out.String())
+}
+
+// expectedEmbedded returns the embedded bytes a canonical source maps to.
+func expectedEmbedded(relPath string, source []byte) []byte {
+	if relPath == "opencode/package.json" {
+		return shippedPluginManifest(source)
+	}
+	return source
+}
+
+// projectOwnedPolicyMirrors are uf/ policy assets whose embedded copy is
+// the canonical default shipped to generated projects. They are project
+// extension points (uf init never overwrites them), so an exemption is
+// earned only by actual divergence and must carry a replacement check
+// that pins the repository copy to the canonical content:
+// uf/reviewer-capabilities.yaml (repo-local divisor-linguist) is covered
+// by TestReviewerCapabilities_RepositoryManifestExtendsCanonical, and
+// uf/preflight.yaml (instruction-lint check) by
+// TestPreflightYaml_RepositoryManifestExtendsCanonical. Any mirror not
+// listed here — including uf/review-matrix.yaml, which has not diverged
+// — stays under byte-identity enforcement below.
+var projectOwnedPolicyMirrors = map[string]bool{
+	"uf/preflight.yaml":             true,
+	"uf/reviewer-capabilities.yaml": true,
+}
+
 func TestEmbeddedAssets_MatchSource(t *testing.T) {
 	root := findProjectRoot(t)
 	if root == "" {
@@ -136,6 +175,9 @@ func TestEmbeddedAssets_MatchSource(t *testing.T) {
 			strings.HasSuffix(relPath, "-custom.md") {
 			continue
 		}
+		if projectOwnedPolicyMirrors[relPath] {
+			continue
+		}
 
 		// Map asset path to canonical source path
 		srcRel := mapAssetToSource(relPath)
@@ -153,7 +195,18 @@ func TestEmbeddedAssets_MatchSource(t *testing.T) {
 			continue
 		}
 
-		if !bytes.Equal(embedded, source) {
+		if !bytes.Equal(embedded, expectedEmbedded(relPath, source)) {
+			if relPath == "opencode/package.json" {
+				// The embedded manifest is the canonical manifest
+				// WITHOUT its devDependencies block (D2a: the
+				// lockless scaffold ships runtime pins only). A
+				// plain cp would embed devDependencies and
+				// regress the shipped manifest.
+				t.Errorf("drift detected: internal/scaffold/assets/%s differs from %s without its devDependencies block\n"+
+					"Refresh the embedded copy by copying %s and removing the devDependencies block (the shippedPluginManifest transformation); a plain cp would regress the lockless scaffold",
+					relPath, srcRel, srcRel)
+				continue
+			}
 			t.Errorf("drift detected: internal/scaffold/assets/%s differs from %s\n"+
 				"Run: cp %s internal/scaffold/assets/%s",
 				relPath, srcRel, srcRel, relPath)
@@ -1534,7 +1587,7 @@ func TestUnleashCommand_ToolRoutingContracts(t *testing.T) {
 	})
 }
 
-func TestPluginPackageInputs_ExactVersionsAndLockIntegrity(t *testing.T) {
+func TestPluginPackageInputs_ExactVersions(t *testing.T) {
 	root := findProjectRoot(t)
 	if root == "" {
 		t.Fatal("project root not found")
@@ -1542,15 +1595,17 @@ func TestPluginPackageInputs_ExactVersionsAndLockIntegrity(t *testing.T) {
 
 	expectedRuntime := map[string]string{
 		"@opencode-ai/plugin": "1.19.0",
-		"zod":                 "4.1.8",
+		"zod":                 "4.6.6",
 	}
 	expectedDevelopment := map[string]string{
 		"@vitest/coverage-v8": "5.0.3",
 		"vitest":              "5.0.3",
+		"yaml":                "2.9.1",
 	}
 	expectedOverrides := map[string]string{
-		"toml": "4.2.0",
+		"toml": "5.0.1",
 		"uuid": "13.0.1",
+		"zod":  "4.6.6",
 	}
 	expectedEngines := map[string]string{
 		"node": "^22.22.2 || ^24.15.0 || >=26.0.0",
@@ -1583,101 +1638,6 @@ func TestPluginPackageInputs_ExactVersionsAndLockIntegrity(t *testing.T) {
 	assertStringMap(t, "development dependencies", manifest.DevDependencies, expectedDevelopment)
 	assertStringMap(t, "security overrides", manifest.Overrides, expectedOverrides)
 	assertStringMap(t, "node engines", manifest.Engines, expectedEngines)
-
-	var lock struct {
-		Name            string                      `json:"name"`
-		LockfileVersion int                         `json:"lockfileVersion"`
-		Requires        bool                        `json:"requires"`
-		Packages        map[string]packageLockEntry `json:"packages"`
-	}
-	readJSONFile(t, filepath.Join(root, ".opencode", "package-lock.json"), &lock)
-	if lock.Name != manifest.Name {
-		t.Errorf("lock name = %q, want manifest name %q", lock.Name, manifest.Name)
-	}
-	if lock.LockfileVersion != 3 {
-		t.Errorf("lockfileVersion = %d, want 3", lock.LockfileVersion)
-	}
-	if !lock.Requires {
-		t.Error("lock requires must be true")
-	}
-	lockRoot, ok := lock.Packages[""]
-	if !ok {
-		t.Fatal("lock is missing the root package entry")
-	}
-	assertStringMap(t, "locked runtime dependencies", lockRoot.Dependencies, expectedRuntime)
-	assertStringMap(t, "locked development dependencies", lockRoot.DevDependencies, expectedDevelopment)
-
-	for name, version := range expectedRuntime {
-		assertLockedDirectPackage(t, lock.Packages, name, version, false)
-	}
-	for name, version := range expectedDevelopment {
-		assertLockedDirectPackage(t, lock.Packages, name, version, true)
-	}
-	for path, entry := range lock.Packages {
-		if path == "" || entry.Resolved == "" {
-			continue
-		}
-		if !strings.HasPrefix(entry.Integrity, "sha512-") {
-			t.Errorf("locked package %s integrity = %q, want sha512 integrity", path, entry.Integrity)
-		}
-	}
-	assertLockedSecurityOverride(t, lock.Packages, "toml", "4.2.0",
-		"sha512-TvAJjbHZlYmI323+srtqHQFyJsoWy6mI09ppkuj9+iRsqsVKG9fvTcOP7FHF2UCb0QSYtjEavffrKzdd0XgClg==")
-	assertLockedSecurityOverride(t, lock.Packages, "uuid", "13.0.1",
-		"sha512-9ezox2roIft6ExBVTVqibSd5dc5/47Sw/uY6b4SjQUT2TzQ0tltNquWA46y4xPQmdZYqvnio22SgWd41M86+jw==")
-}
-
-func assertLockedDirectPackage(
-	t *testing.T,
-	packages map[string]packageLockEntry,
-	name, version string,
-	wantDevelopment bool,
-) {
-	t.Helper()
-
-	locked, ok := packages["node_modules/"+name]
-	if !ok {
-		t.Errorf("lock is missing direct package %s", name)
-		return
-	}
-	if locked.Version != version {
-		t.Errorf("locked %s version = %q, want %q", name, locked.Version, version)
-	}
-	if locked.License != "MIT" {
-		t.Errorf("locked %s license = %q, want MIT", name, locked.License)
-	}
-	if locked.Dev != wantDevelopment {
-		t.Errorf("locked %s dev = %t, want %t", name, locked.Dev, wantDevelopment)
-	}
-	if !strings.HasPrefix(locked.Resolved, "https://registry.npmjs.org/") {
-		t.Errorf("locked %s resolved URL = %q, want npm registry URL", name, locked.Resolved)
-	}
-	if !strings.HasPrefix(locked.Integrity, "sha512-") {
-		t.Errorf("locked %s integrity = %q, want sha512 integrity", name, locked.Integrity)
-	}
-}
-
-func assertLockedSecurityOverride(
-	t *testing.T,
-	packages map[string]packageLockEntry,
-	name, version, integrity string,
-) {
-	t.Helper()
-
-	locked, ok := packages["node_modules/"+name]
-	if !ok {
-		t.Errorf("lock is missing security override %s", name)
-		return
-	}
-	if locked.Version != version {
-		t.Errorf("locked override %s version = %q, want %q", name, locked.Version, version)
-	}
-	if locked.Integrity != integrity {
-		t.Errorf("locked override %s integrity = %q, want %q", name, locked.Integrity, integrity)
-	}
-	if locked.License != "MIT" {
-		t.Errorf("locked override %s license = %q, want MIT", name, locked.License)
-	}
 }
 
 func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
@@ -1708,17 +1668,30 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 	}
 	readJSONFile(t, filepath.Join(root, "internal", "scaffold", "testdata", "plugin-package-provenance.json"), &provenance)
 
+	var manifest struct {
+		Dependencies map[string]string `json:"dependencies"`
+	}
+	readJSONFile(t, filepath.Join(root, "internal", "scaffold", "assets", "opencode", "package.json"), &manifest)
+	// The scaffolded manifest ships without devDependencies (design
+	// D2a); the repository dev manifest keeps the test-tool pins.
+	var repoManifest struct {
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	readJSONFile(t, filepath.Join(root, ".opencode", "package.json"), &repoManifest)
+
 	expectedPackages := map[string]struct {
 		version string
 		project string
+		license string
 	}{
-		"@opencode-ai/plugin": {version: "1.19.0", project: "OpenCode"},
-		"zod":                 {version: "4.1.8", project: "Zod"},
-		"vitest":              {version: "5.0.3", project: "Vitest"},
-		"@vitest/coverage-v8": {version: "5.0.3", project: "Vitest"},
+		"@opencode-ai/plugin": {version: "1.19.0", project: "OpenCode", license: "MIT"},
+		"zod":                 {version: "4.6.6", project: "Zod", license: "MIT"},
+		"vitest":              {version: "5.0.3", project: "Vitest", license: "MIT"},
+		"@vitest/coverage-v8": {version: "5.0.3", project: "Vitest", license: "MIT"},
+		"yaml":                {version: "2.9.1", project: "yaml", license: "ISC"},
 	}
-	if provenance.VerifiedAt != "2026-10-19" {
-		t.Errorf("provenance verification date = %q, want 2026-10-19", provenance.VerifiedAt)
+	if provenance.VerifiedAt != "2026-11-06" {
+		t.Errorf("provenance verification date = %q, want 2026-11-06", provenance.VerifiedAt)
 	}
 	if len(provenance.Packages) != len(expectedPackages) {
 		t.Errorf("provenance has %d packages, want %d", len(provenance.Packages), len(expectedPackages))
@@ -1729,8 +1702,8 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 			t.Errorf("provenance is missing %s", name)
 			continue
 		}
-		if entry.License != "MIT" {
-			t.Errorf("%s provenance license = %q, want MIT", name, entry.License)
+		if entry.License != expected.license {
+			t.Errorf("%s provenance license = %q, want %s", name, entry.License, expected.license)
 		}
 		if entry.MaintainedBy != expected.project {
 			t.Errorf("%s maintained_by = %q, want %q", name, entry.MaintainedBy, expected.project)
@@ -1745,14 +1718,23 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 		if len(entry.RegistryMaintainers) == 0 {
 			t.Errorf("%s registry maintainers are empty", name)
 		}
+		declared, ok := manifest.Dependencies[name]
+		if !ok {
+			declared, ok = repoManifest.DevDependencies[name]
+		}
+		if !ok {
+			t.Errorf("%s is not declared by the scaffolded or repository manifest", name)
+		} else if entry.Version != declared {
+			t.Errorf("%s provenance version %q does not match manifest pin %q", name, entry.Version, declared)
+		}
 	}
 
 	expectedOverrides := map[string]overrideProvenance{
 		"toml": {
-			Version:      "4.2.0",
+			Version:      "5.0.1",
 			License:      "MIT",
-			GitHead:      "6d42b7e4fa693f8e6fb025d419b10b38107e83e2",
-			Integrity:    "sha512-TvAJjbHZlYmI323+srtqHQFyJsoWy6mI09ppkuj9+iRsqsVKG9fvTcOP7FHF2UCb0QSYtjEavffrKzdd0XgClg==",
+			GitHead:      "9ebfa698682500bbd30ce28e612ecc0208d9f70e",
+			Integrity:    "sha512-EqYNA/YvUNndrA2B3O2ojzLQoTQrBxeZ9UIjQwk8t10oe6n7dwclBwd9IdZQTOKwe6vWX+AXtl6IntXRbepdxQ==",
 			MaintainedBy: "toml-node",
 			ProjectURL:   "https://github.com/BinaryMuse/toml-node",
 		},
@@ -1763,6 +1745,14 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 			Integrity:    "sha512-9ezox2roIft6ExBVTVqibSd5dc5/47Sw/uY6b4SjQUT2TzQ0tltNquWA46y4xPQmdZYqvnio22SgWd41M86+jw==",
 			MaintainedBy: "uuidjs",
 			ProjectURL:   "https://github.com/uuidjs/uuid",
+		},
+		"zod": {
+			Version:      "4.6.6",
+			License:      "MIT",
+			GitHead:      "9c219833c3a3764fa1f1ea9c5ecec8254a63c0b1",
+			Integrity:    "sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==",
+			MaintainedBy: "Zod",
+			ProjectURL:   "https://github.com/colinhacks/zod",
 		},
 	}
 	if len(provenance.SecurityOverrides) != len(expectedOverrides) {
@@ -1799,9 +1789,148 @@ func TestPluginPackageInputs_GitignoreTracksCanonicalInputs(t *testing.T) {
 	if string(content) != want {
 		t.Errorf(".opencode/.gitignore = %q, want %q", string(content), want)
 	}
-	for _, trackedInput := range []string{"package.json", "package-lock.json"} {
-		if strings.Contains(string(content), trackedInput) {
-			t.Errorf(".opencode/.gitignore must not ignore %s", trackedInput)
+	if strings.Contains(string(content), "package.json\n") {
+		t.Error(".opencode/.gitignore must not ignore package.json")
+	}
+	if !strings.Contains(string(content), "\npackage-lock.json\n") {
+		t.Error(".opencode/.gitignore must ignore package-lock.json (no lock is shipped or tracked)")
+	}
+}
+
+// TestPluginTestNpmPin_TwinsCISecurityPin pins the twin npm CLI pins:
+// the Makefile PLUGIN_TEST_NPM runner and every npx -y npm@ invocation
+// in .github/workflows/ci_security.yml must resolve the same npm
+// version. The pins exist because node 22's bundled npm 10.9.9 crashes
+// in Arborist on the lockless vitest 5 peer graph; drifting one surface
+// silently reintroduces the crash for the other.
+func TestPluginTestNpmPin_TwinsCISecurityPin(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+
+	makefile, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	makefileRe := regexp.MustCompile(`(?m)^PLUGIN_TEST_NPM \?= npx -y npm@(\S+)$`)
+	match := makefileRe.FindStringSubmatch(string(makefile))
+	if match == nil {
+		t.Fatal("Makefile does not declare PLUGIN_TEST_NPM as an npx -y npm@ pin")
+	}
+	makefilePin := match[1]
+
+	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci_security.yml"))
+	if err != nil {
+		t.Fatalf("read ci_security.yml: %v", err)
+	}
+	workflowRe := regexp.MustCompile(`npx -y npm@(\S+)`)
+	matches := workflowRe.FindAllStringSubmatch(string(workflow), -1)
+	if len(matches) == 0 {
+		t.Fatal("ci_security.yml declares no npx -y npm@ pin; the throwaway-lock scan lost its runner pin")
+	}
+	for _, m := range matches {
+		if m[1] != makefilePin {
+			t.Errorf("ci_security.yml pins npm@%s, want the PLUGIN_TEST_NPM twin npm@%s; keep the two in sync",
+				m[1], makefilePin)
+		}
+	}
+}
+
+// TestRemediationConstants_CarryNpm11EscapeHatch pins the npm 11 escape
+// hatch in both scaffold remediation constants and their doctor twins
+// (D2 twin commitment). The constants are what scaffold consumers see
+// when activation fails; if they revert to npm 10 crash advice, the
+// printed remedy re-runs the same crashing command (PR #957 feedback).
+func TestRemediationConstants_CarryNpm11EscapeHatch(t *testing.T) {
+	// Both remediations must offer the pinned npm 11 runner.
+	if !strings.Contains(pluginRuntimeRemediation, "npx -y npm@11.6.2") {
+		t.Errorf("pluginRuntimeRemediation %q does not carry the npx -y npm@11.6.2 escape hatch",
+			pluginRuntimeRemediation)
+	}
+	if !strings.Contains(pluginInstallRemediation, "npx -y npm@11.6.2") {
+		t.Errorf("pluginInstallRemediation %q does not carry the npx -y npm@11.6.2 escape hatch",
+			pluginInstallRemediation)
+	}
+
+	// The doctor remediations must be byte-identical to the scaffold
+	// ones so both surfaces teach the same remedy.
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+	doctorSrc, err := os.ReadFile(filepath.Join(root, "internal", "doctor", "checks.go"))
+	if err != nil {
+		t.Fatalf("read internal/doctor/checks.go: %v", err)
+	}
+	want := map[string]string{
+		"reviewPluginRuntimeRemediation": pluginRuntimeRemediation,
+		"reviewPluginInstallRemediation": pluginInstallRemediation,
+	}
+	constRe := regexp.MustCompile(`(?m)^const (reviewPlugin(?:Runtime|Install)Remediation) = "(.*)"$`)
+	constMatches := constRe.FindAllStringSubmatch(string(doctorSrc), -1)
+	if len(constMatches) != len(want) {
+		t.Fatalf("internal/doctor/checks.go declares %d reviewPlugin*Remediation constants, want %d",
+			len(constMatches), len(want))
+	}
+	for _, m := range constMatches {
+		if m[2] != want[m[1]] {
+			t.Errorf("%s diverges from its scaffold twin; keep the two in sync (D2 twin commitment):\n doctor: %q\nscaffold: %q",
+				m[1], m[2], want[m[1]])
+		}
+	}
+}
+
+// TestOsvRecipeDoc_PinsMatchCanonicalJob keeps the copyable recipe in
+// docs/osv-transitive-scan.md pinned to the canonical job in
+// ci_security.yml. Hero repos copy the recipe verbatim, so a drifted
+// pin there ships a different scan than the one this repository tested
+// (PR #957 feedback). The Makefile twin of the npm pin is enforced by
+// TestPluginTestNpmPin_TwinsCISecurityPin.
+func TestOsvRecipeDoc_PinsMatchCanonicalJob(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+
+	doc, err := os.ReadFile(filepath.Join(root, "docs", "osv-transitive-scan.md"))
+	if err != nil {
+		t.Fatalf("read docs/osv-transitive-scan.md: %v", err)
+	}
+	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci_security.yml"))
+	if err != nil {
+		t.Fatalf("read ci_security.yml: %v", err)
+	}
+
+	// The doc npm pin appears inside backticks, so its sweep must stop
+	// at the version; the workflow pin ends at a space.
+	pins := []struct {
+		name       string
+		workflowRe *regexp.Regexp
+		docRe      *regexp.Regexp
+	}{
+		{"npm runner", regexp.MustCompile(`npx -y npm@(\S+)`), regexp.MustCompile(`npx -y npm@([0-9.]+)`)},
+		{"GOTOOLCHAIN", regexp.MustCompile(`GOTOOLCHAIN=go([0-9.]+)`), regexp.MustCompile(`GOTOOLCHAIN=go([0-9.]+)`)},
+		{"osv-scanner", regexp.MustCompile(`osv-scanner[@ ]v([0-9.]+)`), regexp.MustCompile(`osv-scanner[@ ]v([0-9.]+)`)},
+	}
+	for _, pin := range pins {
+		workflowMatches := pin.workflowRe.FindAllStringSubmatch(string(workflow), -1)
+		if len(workflowMatches) == 0 {
+			t.Errorf("ci_security.yml declares no %s pin; the recipe doc lost its canonical source", pin.name)
+			continue
+		}
+		canonical := workflowMatches[0][1]
+		for _, m := range workflowMatches {
+			if m[1] != canonical {
+				t.Errorf("ci_security.yml pins %s %s and %s in the same file; keep them consistent",
+					pin.name, canonical, m[1])
+			}
+		}
+		for _, m := range pin.docRe.FindAllStringSubmatch(string(doc), -1) {
+			if m[1] != canonical {
+				t.Errorf("recipe doc pins %s %s, want the workflow pin %s; the recipe is what hero repos copy",
+					pin.name, m[1], canonical)
+			}
 		}
 	}
 }
@@ -1812,7 +1941,7 @@ func TestPluginPackageInputs_MirrorsMatchCanonical(t *testing.T) {
 		t.Fatal("project root not found")
 	}
 
-	for _, name := range []string{"package.json", "package-lock.json"} {
+	for _, name := range []string{"package.json"} {
 		canonical, err := os.ReadFile(filepath.Join(root, ".opencode", name))
 		if err != nil {
 			t.Fatalf("read canonical %s: %v", name, err)
@@ -1821,8 +1950,11 @@ func TestPluginPackageInputs_MirrorsMatchCanonical(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read scaffold mirror %s: %v", name, err)
 		}
-		if !bytes.Equal(canonical, mirror) {
-			t.Errorf("scaffold mirror %s differs from canonical input", name)
+		if !bytes.Equal(shippedPluginManifest(canonical), mirror) {
+			t.Errorf("scaffold mirror %s differs from canonical input minus devDependencies", name)
+		}
+		if bytes.Contains(mirror, []byte("devDependencies")) {
+			t.Errorf("scaffold mirror %s must not ship devDependencies", name)
 		}
 	}
 }
@@ -1849,7 +1981,13 @@ func TestSCFR003_FreshTargetInputsDoNotActivatePlugins(t *testing.T) {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	for _, name := range []string{"package.json", "package-lock.json"} {
+	if _, err := assetContent("opencode/package-lock.json"); err == nil {
+		t.Error("scaffold must not embed opencode/package-lock.json")
+	}
+	if _, err := os.Stat(filepath.Join(target, ".opencode", "package-lock.json")); !os.IsNotExist(err) {
+		t.Errorf("fresh target must not receive .opencode/package-lock.json: %v", err)
+	}
+	for _, name := range []string{"package.json"} {
 		canonical, err := os.ReadFile(filepath.Join(root, ".opencode", name))
 		if err != nil {
 			t.Fatalf("read canonical %s: %v", name, err)
@@ -1859,7 +1997,7 @@ func TestSCFR003_FreshTargetInputsDoNotActivatePlugins(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read fresh-target %s: %v", name, err)
 		}
-		if !bytes.Equal(generated, canonical) {
+		if !bytes.Equal(generated, shippedPluginManifest(canonical)) {
 			t.Errorf("fresh-target %s differs from canonical reproducible input", name)
 		}
 		if !containsPath(result.Created, filepath.ToSlash(filepath.Join(".opencode", name))) {
@@ -1918,40 +2056,6 @@ func containsPath(paths []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func TestPluginPackageInputs_RollbackPrerequisites(t *testing.T) {
-	root := findProjectRoot(t)
-	if root == "" {
-		t.Fatal("project root not found")
-	}
-
-	var rollback struct {
-		BaselineLockSHA256 string `json:"baseline_lock_sha256"`
-		PriorGitignore     string `json:"prior_gitignore"`
-		SecurityOverride   struct {
-			LockSHA256         string            `json:"lock_sha256"`
-			TransitiveVersions map[string]string `json:"transitive_versions"`
-		} `json:"security_override_rollback"`
-	}
-	readJSONFile(t, filepath.Join(root, "internal", "scaffold", "testdata", "plugin-package-rollback.json"), &rollback)
-
-	const baselineLockSHA256 = "1ac9cdf171a743c69b18498e15711d628280a4748defd6334cd4276e194d32dc"
-	if rollback.BaselineLockSHA256 != baselineLockSHA256 {
-		t.Errorf("baseline lock SHA256 = %q, want %q", rollback.BaselineLockSHA256, baselineLockSHA256)
-	}
-	const priorGitignore = "node_modules\npackage.json\nbun.lock\n.gitignore\n"
-	if rollback.PriorGitignore != priorGitignore {
-		t.Errorf("prior .opencode/.gitignore = %q, want %q", rollback.PriorGitignore, priorGitignore)
-	}
-	const preHardeningLockSHA256 = "fef6f7f145d9dc8398233566934ff7a4e36d9505dbcb662660c773c03c1cdcba"
-	if rollback.SecurityOverride.LockSHA256 != preHardeningLockSHA256 {
-		t.Errorf("pre-hardening lock SHA256 = %q, want %q",
-			rollback.SecurityOverride.LockSHA256, preHardeningLockSHA256)
-	}
-	assertStringMap(t, "pre-hardening transitive versions",
-		rollback.SecurityOverride.TransitiveVersions,
-		map[string]string{"toml": "4.1.1", "uuid": "13.0.0"})
 }
 
 func TestDispatchRuntime_TaskScopedPluginSources(t *testing.T) {
@@ -2094,9 +2198,10 @@ var expectedAssetPaths = []string{
 	"opencode/lib/uf-workflow-types.ts",
 	// UF finale plugin (1)
 	"opencode/plugins/uf-finale/index.ts",
-	// Shared lib modules (12)
+	// Shared lib modules (13)
 	"opencode/lib/agent-executor.ts",
 	"opencode/lib/branch-classification.ts",
+	"opencode/lib/delegation-budget.ts",
 	"opencode/lib/model-matrix.ts",
 	"opencode/lib/preflight-declared.ts",
 	"opencode/lib/review-dispatch-artifact.ts",
@@ -2107,8 +2212,7 @@ var expectedAssetPaths = []string{
 	"opencode/lib/reviewer-manifest.ts",
 	"opencode/lib/run-timeout.ts",
 	"opencode/lib/unleash-templates.ts",
-	// Reproducible plugin package inputs (2)
-	"opencode/package-lock.json",
+	// Plugin package manifest (1); no lock is shipped
 	"opencode/package.json",
 	// Review policy, model-matrix template, project-owned sibling
 	// template, and project-declared pre-flight checks (5)
@@ -2149,6 +2253,7 @@ var task42CanonicalAssets = []struct {
 	{asset: "opencode/lib/uf-workflow-types.ts", source: ".opencode/lib/uf-workflow-types.ts"},
 	{asset: "opencode/lib/agent-executor.ts", source: ".opencode/lib/agent-executor.ts"},
 	{asset: "opencode/lib/branch-classification.ts", source: ".opencode/lib/branch-classification.ts"},
+	{asset: "opencode/lib/delegation-budget.ts", source: ".opencode/lib/delegation-budget.ts"},
 	{asset: "opencode/lib/model-matrix.ts", source: ".opencode/lib/model-matrix.ts"},
 	{asset: "opencode/lib/preflight-declared.ts", source: ".opencode/lib/preflight-declared.ts"},
 	{asset: "opencode/lib/review-dispatch-artifact.ts", source: ".opencode/lib/review-dispatch-artifact.ts"},
@@ -2159,7 +2264,6 @@ var task42CanonicalAssets = []struct {
 	{asset: "opencode/lib/reviewer-manifest.ts", source: ".opencode/lib/reviewer-manifest.ts"},
 	{asset: "opencode/lib/run-timeout.ts", source: ".opencode/lib/run-timeout.ts"},
 	{asset: "opencode/lib/unleash-templates.ts", source: ".opencode/lib/unleash-templates.ts"},
-	{asset: "opencode/package-lock.json", source: ".opencode/package-lock.json"},
 	{asset: "opencode/package.json", source: ".opencode/package.json"},
 	{asset: "uf/model-matrix.yaml", source: ".uf/model-matrix.yaml"},
 	{asset: "uf/preflight.yaml", source: ".uf/preflight.yaml"},
@@ -2198,6 +2302,9 @@ func TestSCFR001_CanonicalAssetSurfaceMatchesMirrors(t *testing.T) {
 			if got := mapAssetToSource(asset.asset); got != asset.source {
 				t.Fatalf("mapAssetToSource(%q) = %q, want %q", asset.asset, got, asset.source)
 			}
+			if projectOwnedPolicyMirrors[asset.asset] {
+				return // repository copy may extend the canonical default
+			}
 			mirror, err := assetContent(asset.asset)
 			if err != nil {
 				t.Fatalf("read embedded asset: %v", err)
@@ -2206,10 +2313,105 @@ func TestSCFR001_CanonicalAssetSurfaceMatchesMirrors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read canonical source: %v", err)
 			}
-			if !bytes.Equal(mirror, canonical) {
+			if !bytes.Equal(mirror, expectedEmbedded(asset.asset, canonical)) {
 				t.Errorf("embedded asset %q drifted from %q", asset.asset, asset.source)
 			}
 		})
+	}
+}
+
+// TestPreflightYaml_RepositoryManifestExtendsCanonical verifies that the
+// repository's .uf/preflight.yaml — a project-owned policy mirror —
+// extends the canonical embedded template: every canonical check is
+// preserved verbatim (name, run, args, requires, paths, gate, timeout)
+// and in canonical order, and every repository-added check has an
+// executable run target and a valid gate. It replaces the byte-identity
+// exemption for uf/preflight.yaml, which legitimately diverges from the
+// embedded asset to declare the instruction-lint check.
+func TestPreflightYaml_RepositoryManifestExtendsCanonical(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Skip("project root not found; skipping preflight extends-canonical check")
+	}
+
+	type preflightCheck struct {
+		Name           string   `yaml:"name"`
+		Run            string   `yaml:"run"`
+		Args           []string `yaml:"args"`
+		Requires       []string `yaml:"requires"`
+		Paths          []string `yaml:"paths"`
+		Gate           string   `yaml:"gate"`
+		TimeoutSeconds int      `yaml:"timeout_seconds"`
+	}
+	type preflightDoc struct {
+		Version int              `yaml:"version"`
+		Checks  []preflightCheck `yaml:"checks"`
+	}
+
+	canonicalContent, err := assetContent("uf/preflight.yaml")
+	if err != nil {
+		t.Fatalf("read canonical preflight asset: %v", err)
+	}
+	repositoryContent, err := os.ReadFile(filepath.Join(root, ".uf", "preflight.yaml"))
+	if err != nil {
+		t.Fatalf("read repository preflight policy: %v", err)
+	}
+
+	var canonical, repository preflightDoc
+	if err := yaml.Unmarshal(canonicalContent, &canonical); err != nil {
+		t.Fatalf("parse canonical preflight asset: %v", err)
+	}
+	if err := yaml.Unmarshal(repositoryContent, &repository); err != nil {
+		t.Fatalf("parse repository preflight policy: %v", err)
+	}
+
+	canonicalNames := make(map[string]bool, len(canonical.Checks))
+	for _, check := range canonical.Checks {
+		canonicalNames[check.Name] = true
+	}
+	byName := make(map[string]preflightCheck, len(repository.Checks))
+	positions := make(map[string]int, len(repository.Checks))
+	for i, check := range repository.Checks {
+		byName[check.Name] = check
+		positions[check.Name] = i
+	}
+
+	// Every canonical check is preserved verbatim and in order.
+	lastPosition := -1
+	for _, want := range canonical.Checks {
+		got, ok := byName[want.Name]
+		if !ok {
+			t.Errorf("repository preflight drops canonical check %q", want.Name)
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("repository preflight modifies canonical check %q: got %+v, want %+v", want.Name, got, want)
+		}
+		if positions[want.Name] <= lastPosition {
+			t.Errorf("canonical check %q is out of order in the repository policy", want.Name)
+			continue
+		}
+		lastPosition = positions[want.Name]
+	}
+
+	// Repository-added checks must have an executable run target and a
+	// valid gate.
+	for _, check := range repository.Checks {
+		if canonicalNames[check.Name] {
+			continue
+		}
+		run := filepath.Join(root, filepath.FromSlash(check.Run))
+		info, err := os.Stat(run)
+		if err != nil {
+			t.Errorf("repository check %q run target %q: %v", check.Name, check.Run, err)
+			continue
+		}
+		if info.Mode()&0o111 == 0 {
+			t.Errorf("repository check %q run target %q is not executable", check.Name, check.Run)
+		}
+		if check.Gate != "" && check.Gate != "required" && check.Gate != "advisory" {
+			t.Errorf("repository check %q gate = %q, want required or advisory", check.Name, check.Gate)
+		}
 	}
 }
 
@@ -3569,12 +3771,12 @@ func TestRun_OpencodeGitignore_MergesMissingLinesKeepsUserLines(t *testing.T) {
 	}
 
 	// The user comment and foo.log line survive in place; only the
-	// missing canonical lines (bun.lock, .vitest/, coverage/) append.
+	// missing canonical lines (bun.lock, package-lock.json, .vitest/, coverage/) append.
 	got, err := os.ReadFile(filepath.Join(dir, ".opencode", ".gitignore"))
 	if err != nil {
 		t.Fatalf("read .opencode/.gitignore: %v", err)
 	}
-	want := preExisting + "bun.lock\n.vitest/\ncoverage/\n"
+	want := preExisting + "bun.lock\npackage-lock.json\n.vitest/\ncoverage/\n"
 	if string(got) != want {
 		t.Errorf(".opencode/.gitignore merge mismatch:\n got %q\nwant %q", got, want)
 	}
@@ -3583,17 +3785,17 @@ func TestRun_OpencodeGitignore_MergesMissingLinesKeepsUserLines(t *testing.T) {
 		t.Errorf("expected summary to report .opencode/.gitignore as upgraded, got:\n%s",
 			output)
 	}
-	if !strings.Contains(output, "appended missing lines: bun.lock, .vitest/, coverage/") {
+	if !strings.Contains(output, "appended missing lines: bun.lock, package-lock.json, .vitest/, coverage/") {
 		t.Errorf("expected the upgraded detail to name the appended lines, got:\n%s", output)
 	}
 }
 
 // TestRun_OpencodeGitignore_WrittenDespiteActivationFailure pins the
 // SC-FR-015 independence requirement: the .opencode/.gitignore writer is
-// a sub-tool independent of the review-plugin activation result — npm ci
-// may fail or be skipped while node_modules/ can still appear. The run
-// reuses the reviewPluginRunOpts seam with failInstall=true so activation
-// genuinely fails at the npm ci step (same wiring as
+// a sub-tool independent of the review-plugin activation result — npm
+// install may fail or be skipped while node_modules/ can still appear.
+// The run reuses the reviewPluginRunOpts seam with failInstall=true so
+// activation genuinely fails at the npm install step (same wiring as
 // TestRun_IndependentSubtoolsContinueOnPluginFailure), and the failed
 // activation is asserted first so the test cannot silently stop testing
 // the failure path.
@@ -3717,7 +3919,7 @@ func TestRun_OpencodeGitignore_StealthSkipsIt(t *testing.T) {
 				return []byte("v22.15.0\n"), nil
 			case "npm --version":
 				return []byte("10.9.2\n"), nil
-			case "npm ci --ignore-scripts --omit=dev":
+			case "npm install --ignore-scripts --omit=dev --no-package-lock --no-audit --no-fund":
 				return nil, nil
 			default:
 				t.Fatalf("unexpected in-dir command %q", command)
@@ -4173,9 +4375,9 @@ func TestIsToolOwned(t *testing.T) {
 		// Tool-owned: OpenSpec schema
 		{"openspec/schemas/unbound-force/schema.yaml", true},
 		{"openspec/schemas/unbound-force/templates/proposal.md", true},
-		// Tool-owned: reproducible plugin package inputs
+		// Tool-owned: plugin package manifest; the lock is not shipped
 		{"opencode/package.json", true},
-		{"opencode/package-lock.json", true},
+		{"opencode/package-lock.json", false},
 		// Tool-owned: activation-gated plugin sources
 		{invokeAgentPluginAsset, true},
 		{reviewDispatchPluginAsset, true},
@@ -4183,6 +4385,7 @@ func TestIsToolOwned(t *testing.T) {
 		// Tool-owned: shared agent executor library
 		{"opencode/lib/agent-executor.ts", true},
 		{"opencode/lib/branch-classification.ts", true},
+		{"opencode/lib/delegation-budget.ts", true},
 		{"opencode/lib/review-dispatch-artifact.ts", true},
 		// Tool-owned: review-dispatch acquisition module
 		{"opencode/lib/review-dispatch-lesson-proposal.ts", true},
@@ -4702,7 +4905,7 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".opencode/commands/opsx-explore.md": true,
 	".opencode/commands/opsx-propose.md": true,
 	// Swarm skills — Spec 008, local-only
-	".opencode/skill/unbound-force-heroes/SKILL.md": true,
+	".opencode/skills/unbound-force-heroes/SKILL.md": true,
 	// Replicator-scaffolded agents and commands — created by replicator init,
 	// not part of the uf binary's scaffold assets
 	".opencode/agents/background-worker.md": true,
@@ -4737,6 +4940,12 @@ var knownNonEmbeddedFiles = map[string]bool{
 	// and are registered in expectedAssetPaths)
 	".opencode/uf/packs/determinism.md":           true,
 	".opencode/skills/determinism-first/SKILL.md": true,
+	// Meta-prompt reviewer — repo-local persona that depends on the
+	// repo-local instruction linter and determinism pack
+	".opencode/agents/divisor-linguist.md": true,
+	// Determinism reviewer — repo-local persona that depends on the
+	// repo-local determinism pack, instruction linter, and tool inventory
+	".opencode/agents/divisor-determinism.md": true,
 }
 
 func TestCanonicalSources_AreEmbedded(t *testing.T) {
@@ -4863,10 +5072,11 @@ func TestIsDivisorAsset(t *testing.T) {
 		{reviewDispatchPluginAsset, true},
 		{ufWorkflowPluginAsset, true},
 		{"opencode/package.json", true},
-		{"opencode/package-lock.json", true},
+		{"opencode/package-lock.json", false},
 		// Shared agent executor library
 		{"opencode/lib/agent-executor.ts", true},
 		{"opencode/lib/branch-classification.ts", true},
+		{"opencode/lib/delegation-budget.ts", true},
 		{"opencode/lib/review-dispatch-artifact.ts", true},
 		// Divisor acquisition implementation
 		{"opencode/lib/review-dispatch-lesson-proposal.ts", true},
@@ -5687,6 +5897,33 @@ func TestDivisorAgents_NoBareFRReferences(t *testing.T) {
 				idx = absPos + 3
 			}
 		}
+	}
+}
+
+// TestUnleashCommand_SkillReferenceRule pins the uf_delegate_command
+// `skill` resolution rule in uf.unleash.md (#934): a bare value is a
+// skill name first and a repo-root file second, and make targets or
+// commands are not valid references (they point to
+// skill_absent_reason). Both the embedded mirror and the canonical
+// command file are checked. Phrase pins are whitespace-normalized
+// (runs collapsed to single spaces, case-folded) so the assertion
+// survives re-wrapping of the command prose and never depends on the
+// exact line breaks or indentation between words.
+func TestUnleashCommand_SkillReferenceRule(t *testing.T) {
+	for _, copy := range loadCommandCopies(t, "uf.unleash.md", true) {
+		copy := copy
+		t.Run(copy.name, func(t *testing.T) {
+			normalized := normalizeCommandText(copy.text)
+			for _, phrase := range []string{
+				"repo skill name first, then as a repo-root file",
+				"(`Makefile`, `build-all.sh`)",
+				"`./Makefile` names a root file",
+				"`make plugin-test` are not valid `skill` values",
+				"record the command in `skill_absent_reason`",
+			} {
+				assertNormalizedContains(t, copy.name, normalized, "skill reference rule", phrase)
+			}
+		})
 	}
 }
 
@@ -10026,19 +10263,19 @@ func TestEnsureOpencodeGitignore_MergeSemantics(t *testing.T) {
 			name:        "empty file receives exactly the canonical lines",
 			existing:    "",
 			wantContent: opencodeGitignore,
-			wantDetail:  "appended missing lines: node_modules, bun.lock, .vitest/, coverage/",
+			wantDetail:  "appended missing lines: node_modules, bun.lock, package-lock.json, .vitest/, coverage/",
 		},
 		{
 			name:        "missing trailing newline is synthesized before appending",
 			existing:    "user.log\nnode_modules",
-			wantContent: "user.log\nnode_modules\nbun.lock\n.vitest/\ncoverage/\n",
-			wantDetail:  "appended missing lines: bun.lock, .vitest/, coverage/",
+			wantContent: "user.log\nnode_modules\nbun.lock\npackage-lock.json\n.vitest/\ncoverage/\n",
+			wantDetail:  "appended missing lines: bun.lock, package-lock.json, .vitest/, coverage/",
 		},
 		{
 			name:        "only missing canonical lines append, user lines retained in place",
 			existing:    "foo.log\nnode_modules\n",
-			wantContent: "foo.log\nnode_modules\nbun.lock\n.vitest/\ncoverage/\n",
-			wantDetail:  "appended missing lines: bun.lock, .vitest/, coverage/",
+			wantContent: "foo.log\nnode_modules\nbun.lock\npackage-lock.json\n.vitest/\ncoverage/\n",
+			wantDetail:  "appended missing lines: bun.lock, package-lock.json, .vitest/, coverage/",
 		},
 	}
 	for _, tt := range tests {

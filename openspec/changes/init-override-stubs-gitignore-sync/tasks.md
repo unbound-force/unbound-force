@@ -209,7 +209,9 @@ Tasks 5.1–5.3 are dependency-ordered — run sequentially, no
 - [x] 5.1 Add the `opencodeGitignore` constant and its
   ensure-style writer to `internal/scaffold/scaffold.go`
   (design D9, SC-FR-015): content exactly `node_modules`,
-  `bun.lock`, `.vitest/`, `coverage/` (one per line); merge
+  `bun.lock`, `package-lock.json`, `.vitest/`, `coverage/`
+  (one per line; `package-lock.json` joined the set through
+  the stop-shipping-plugin-lock reconciliation); merge
   semantics — file absent → write the canonical lines; file
   present → append only canonical lines missing from it,
   retaining every existing user line; wire it into `Run()`
@@ -218,7 +220,7 @@ Tasks 5.1–5.3 are dependency-ordered — run sequentially, no
   under `--stealth` and in `--overrides` mode.
 
 - [x] 5.2 Update the canonical `.opencode/.gitignore` to the
-  four canonical lines and the
+  five canonical lines and the
   `TestPluginPackageInputs_GitignoreTracksCanonicalInputs`
   want-string (`internal/scaffold/scaffold_test.go:1626`);
   drop the now-redundant root `.opencode/.vitest/`

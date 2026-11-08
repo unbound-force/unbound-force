@@ -6,6 +6,65 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- instruction-lint: a deterministic linter for the instruction
+  prose that drives the agent ecosystem (agents, commands,
+  skills, convention packs, AGENTS.md): frontmatter shape,
+  slash-command / agent / skill / path references, pack rule
+  markers and RFC 2119 force, vague qualifiers in normative
+  sentences, file and load-set token budgets, and near-duplicate
+  paragraphs (IL-001..IL-050), every finding carrying its
+  Divisor review severity. Runs through the
+  `.uf/scripts/instruction-lint` wrapper (dependency checks
+  before node, exit 0/1/2 contract — 2 is could-not-run), the
+  `make lint-instructions` target, an advisory
+  `.uf/preflight.yaml` check, and the `divisor-linguist`
+  persona (linter evidence first, then DE and IQ tables), whose
+  bash allows only the wrapper, `git diff`, and `git status`
+  behind terminal metacharacter denies. `yaml` is declared as
+  an exact-pinned devDependency (previously a phantom
+  transitive import). Linter: 983 lines; tests: 529 + 235
+  lines. Instruction delta (DE-004): divisor-linguist.md +262
+  lines (~4.2k self tokens, ~13.6k loaded); AGENTS.md +10/-5
+  lines (lint-instructions command, `.uf/scripts/` structure
+  entry, agent count, yaml devDependency note);
+  baseline findings unchanged
+  (1 error / 31 warnings / 23 info). (Spec:
+  openspec/changes/instruction-lint/)
+- divisor-determinism: new repo-local Divisor persona, The
+  Determinist (`.opencode/agents/divisor-determinism.md`), which
+  owns determinism pack rules DE-001 through DE-008 and is
+  registered in this repository's `.uf/reviewer-capabilities.yaml`
+  with scopes `documentation` and `standard`. `divisor-linguist`
+  no longer runs a DE review: it defers DE findings and the
+  IL-040 to IL-042 hints to the new persona, and keeps lint
+  evidence and instruction clarity. New deterministic evidence
+  for the persona: `instruction-lint` rule IL-042 flags
+  `uf_delegate_command` and `replicator_forge_spawn_subtask` call
+  blocks that omit `task_classification` or the skill contract
+  (DE-008); `instruction-lint --base REF` reports per-file line,
+  token and load-set deltas since merge-base(REF, HEAD) (DE-004);
+  and the new `.opencode/lib/tool-inventory.ts` lists registered
+  plugin tools and repo scripts (`--match WORDS` for owner lookup,
+  pinned to the runtime registry by test) and, with
+  `--seams --base REF`, maps added, modified or removed tools to
+  their tests by seam layer (DE-007). Instruction size:
+  divisor-determinism +246 lines (~3842 tokens); divisor-linguist
+  236 -> 203 lines (-836 tokens, load set -3880 tokens). Round 2
+  (PR #959 feedback): `instruction-lint --changed` (requires
+  `--base`) scopes findings and deltas to the files changed since
+  the merge base -- working-tree aware, matching the delta
+  semantics -- and anchors IL-050 duplicate clusters at a scoped
+  member so the finding survives scoping; `--json` output stamps
+  producer provenance (tool, version, generatedAt); `--config`
+  values are validated with zod; base-tree reads validate the
+  git cat-file header. The Determinist and Linguist personas now
+  derive their review scope from the linter's changed-file set
+  (frontmatter git allowances dropped, lint commands run
+  unconditionally), error-handling prose collapsed to tool-sourced
+  scope, and divisor-guard defers DE-008 to The Determinist when
+  a determinism persona is enrolled. Instruction size round 2:
+  divisor-determinism 246 lines; divisor-linguist 202 lines.
+  (Spec: openspec/changes/divisor-determinism-persona/)
 - preflight-declared-output: `uf_preflight_declared_checks` now
   returns `rendered_output`, one tool-rendered block per declared
   check that ran with output, whatever its status, so advisory
@@ -891,6 +950,55 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/remove-mutimind-mxf-orchestration/, Fixes: #565, Fixes: #566)
 
 ### Changed
+- stop-shipping-plugin-lock: `uf init` no longer ships or tracks
+  `.opencode/package-lock.json`. opencode and users also install into
+  `.opencode/`, so a tool-owned lock was overwritten on every
+  `uf init` or broke `npm ci`. Plugin activation now runs
+  `npm install --ignore-scripts --omit=dev --no-package-lock
+  --no-audit --no-fund`, which neither reads nor writes a lock.
+  `.opencode/.gitignore` gains `package-lock.json` through the
+  existing merge-only writer. `uf doctor` replaces its manifest-lock
+  check with `manifest-install`, which compares each `package.json`
+  pin with the installed version. `package.json` keeps its exact
+  direct pins and the `toml`/`uuid`/`zod` overrides; other
+  transitive versions now resolve at install time. This repository
+  also stops tracking the lock, and `make plugin-test` installs with
+  `--no-package-lock` through an exact-pinned npm 11
+  (`npx -y npm@11.6.2`), because node 22's bundled npm 10.9.9
+  crashes in Arborist building the lockless vitest 5 peer graph.
+  The scaffolded `package.json` ships no `devDependencies`, since a
+  lockless install resolves them even under `--omit=dev` and the
+  same crash would break activation on npm 10; `uf init` keeps any
+  `devDependencies` a target already declares, and `uf doctor`
+  checks only the runtime packages. `manifest-install` fails, rather
+  than passes, when an installed `package.json` exists but cannot be
+  read. OSV-Scanner and Dependabot lose lock-based transitive
+  scanning; the Security Checks workflow compensates with a
+  throwaway-lock scan (a pinned npm builds an ephemeral lock,
+  osv-scanner reads it, and the lock is discarded) — repeated daily
+  by the Scheduled Jobs workflow so newly-disclosed transitive
+  advisories surface without a push — and the direct
+  `package.json` pins remain scannable. The throwaway-lock scan
+  already caught vulnerable pins (zod 4.1.8, toml 4.2.0); they now
+  ship as zod 4.6.6 and toml 5.0.1, with a `zod` override forcing
+  the nested copy `@opencode-ai/plugin` pins onto the fixed
+  version. Rollout: existing hero
+  repositories can drop their committed lock with
+  `git rm --cached .opencode/package-lock.json`; review the
+  scanner-loss posture first and copy the compensating
+  throwaway-lock scan from `docs/osv-transitive-scan.md`.
+  Repositories whose `.opencode/package.json` declares
+  `devDependencies` MUST move to npm 11 before rerunning
+  `uf init`: `uf init` keeps those `devDependencies`, and
+  activation crashes on npm 10.9.9, the npm bundled with
+  node 22 — run the install through `npx -y npm@11.6.2`
+  (the same escape hatch the `uf init` and `uf doctor`
+  remediations carry). `uf doctor` warns on that
+  combination, and warns when the lock is still
+  git-tracked, pointing at `git rm --cached` as the
+  remediation. (Spec:
+  openspec/changes/stop-shipping-plugin-lock/,
+  Docs: #964, unbound-force/website#382)
 - split-host-resolution-failure-classes: Host-resolution
   failures in the review-dispatch plugin's `executeDispatchRun`
   now split by cause instead of collapsing into one retryable
@@ -1231,6 +1339,116 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- stop-shipping-plugin-lock: bump the review-plugin pins for CVE
+  remediation after the CI throwaway-lock OSV scan surfaced five
+  HIGH advisories: zod 4.1.8 → 4.6.6 (GHSA-mrhx-c7xc-m3w5) and
+  toml 4.2.0 → 5.0.1 (GHSA-4qx8-w7c3-pj3p, GHSA-9j65-hcg3-gc64,
+  GHSA-9qmh-m7c6-f92p, GHSA-h895-cgqg-jf52). zod also gains a
+  matching `overrides` entry because `@opencode-ai/plugin`
+  1.19.0 declares its own exact zod 4.1.8 dependency, so a root
+  pin bump alone would leave a nested vulnerable copy in place.
+  The provenance record carries the new upstream git heads and
+  integrity hashes, verified 2026-11-06. Rollback: revert this
+  commit to restore zod 4.1.8 and toml 4.2.0.
+  (Spec: openspec/changes/stop-shipping-plugin-lock/)
+- skill-dir-migration (#933): `uf init` now migrates the legacy
+  `.opencode/skill/` directory into `.opencode/skills/`, so
+  opencode stops warning about duplicate skills such as
+  `speckit-workflow`. When only the legacy directory exists it is
+  renamed; when both exist, legacy-only files move, byte-identical
+  copies and stale copies of scaffolded skills are removed (a
+  failed removal warns and keeps the file on disk instead of
+  counting it as removed), and a
+  differing copy of any other skill is kept in place with a
+  conflict warning, never overwritten. `uf_delegate_command` no
+  longer searches `.opencode/skill`, so a stale legacy copy can't
+  be what a skill reference resolves to. This repo's
+  `unbound-force-heroes` skill moves to `.opencode/skills/`.
+  Stealth mode skips this migration and the `command/` one,
+  since both run after the stealth restore. (Fixes: #933)
+  (Docs: #963, unbound-force/website#379)
+- skill-root-file (#934): `uf_delegate_command` now resolves a
+  bare `skill` value as a repo skill name first and, when no skill
+  root holds it, as a repo-root file, so `Makefile` or
+  `build-all.sh` no longer fail `SKILL_NOT_FOUND` (`./Makefile`
+  also works as an explicit path). A directory never resolves as
+  a reference. A value with whitespace, such
+  as `make plugin-test`, fails `SKILL_NOT_FOUND` with a message
+  that commands and make targets are not skill references and
+  points to `skill_absent_reason`. `/uf.unleash` states the rule.
+  (Fixes: #934)
+  (Docs: #963, unbound-force/website#379)
+- push-tool-target (#947): `git_push` and
+  `git_push_force_with_lease` now require `branch` (optional
+  `remote`, default `origin`; `HEAD` is rejected) and refuse with
+  `BRANCH_MISMATCH` unless `symbolic-ref HEAD` is
+  `refs/heads/<branch>` (a detached HEAD or another branch),
+  instead of pushing whatever happened to be checked out.
+  BREAKING: callers omitting `branch` fail `INVALID_INPUT`;
+  repos with scaffolded command copies must re-run `uf init`
+  after upgrading to refresh the migrated call sites, and hero
+  repos' hand-written commands using the old no-argument shape
+  must pass `branch` too. A git execution failure while
+  detecting the branch reports that it could not be determined
+  rather than misdiagnosing a detached HEAD. `remote` must be a
+  git config nickname: it also rejects `/`, which git would
+  resolve as a local repository path, and `.`/`..`, which git
+  would resolve as the working directory and its parent (a
+  different local repository), while `branch` keeps
+  allowing `/` for names such as `feat/x`. Both push the
+  verified HEAD commit to `refs/heads/<branch>` with an
+  explicit refspec. The force tool leases on
+  `refs/heads/<branch>:<expected_sha>`; without `expected_sha`
+  it leases on the remote-tracking ref with
+  `--force-if-includes`, so a fetch that pulled in a
+  collaborator's commit cannot be overwritten, or on "must not
+  exist" when there is no tracking ref. An `expected_sha` that
+  isn't a local commit fails `EXPECTED_SHA_UNKNOWN` without
+  pushing. Both return `{remote, ref, old_sha, new_sha,
+  updated}`, with `updated: false` for an up-to-date no-op and
+  an optional `warning` when the push landed but the
+  `setUpstream` tracking configuration failed (the message
+  carries the remediation command). `/uf.finale`, `/uf.fix-ci`
+  and `/uf.rebase-pr` pass `branch`; `/uf.fix-ci` and
+  `/uf.rebase-pr` lease on the PR's pre-fetch head SHA, and
+  `/uf.rebase-pr` drops its upstream check and bash fallback.
+  (Fixes: #947)
+  (Docs: #963, unbound-force/website#379)
+- address-feedback-pr-checkout (#954): `/uf.address-feedback` now
+  checks out the PR head (`gh pr checkout`) in new Section 1.2.1
+  before its first `get_progress` or `checkpoint` call, and stops
+  when a checkout is required but the tree is dirty (a dirty tree
+  already on the PR head still continues, so an interrupted run
+  can resume with uncommitted mid-run edits), or when `HEAD` is
+  neither the frozen `head_sha` nor a descendant of it afterwards
+  — identity is keyed on `HEAD`, not the local branch name, so a
+  failed-push retry with unpushed commits resumes instead of
+  stopping, and a fork PR whose local branch is named
+  `<owner>/<branch>` no longer stops falsely. A failed
+  `gh pr checkout` stops with the specific error and remediation,
+  and a read-only `refs/pull/` merge ref stops at 1.2.1 instead of
+  failing the push at 4.4; the recorded push target must match
+  `refs/heads/<head_ref>`, so a branch that merely contains the
+  merged PR (such as upstream `main`) stops instead of pushing the
+  PR's commits elsewhere. PR-derived values (`HEAD_BRANCH`,
+  `HEAD_MERGE_REF`, `HEAD_REMOTE`) are charset-validated before
+  any shell-template interpolation — quoting alone is
+  insufficient (`$`, backtick, and `"` are legal git refname
+  characters that stay active inside double quotes) — and
+  `PR_NUMBER` must be a positive integer. Progress is therefore
+  keyed to the PR
+  branch, not whatever branch the run started on — including on
+  compressed-context resume (the session-resume guard confirms the
+  branch before reading progress). Section 4.4 fetches and pushes
+  through the push target recorded in 1.2.1 (`gh pr checkout`
+  configures it on checkout; on resume paths that skip the
+  checkout it is read from the existing local branch config),
+  instead of a hard-coded `origin`, which in a fork-and-upstream
+  clone is the fork, and detects divergence via
+  `git rev-list --left-right --count HEAD...FETCH_HEAD` (a URL
+  remote's fetch updates only `FETCH_HEAD`, which `git status`
+  cannot see); a failed fetch stops before the divergence check
+  (a failed fetch leaves `FETCH_HEAD` stale). (Fixes: #954)
 - review-dispatch-consumer-bounds (#941): lesson proposals are now
   stored with their full text. `consolidate_dispatch` persists the
   proposals in the dispatch artifact as an optional
@@ -1294,6 +1512,25 @@ Each entry follows the format: `- <change-name>: <summary>`.
   payload. The 403/404/422 `COMMENT` fallback stays for other
   causes. (Spec:
   openspec/changes/review-dispatch-consumer-bounds/, Fixes: #942)
+- delegation-timeout-budgets: nested delegations no longer get
+  aborted by their parent's 30-minute cap. The shared executor
+  records each child session's deadline in a process-wide budget
+  registry, and nested `uf_delegate_command`, `invoke_agent`, and
+  `dispatch_review_runs` runs clamp their wall clock to the
+  parent's remaining budget (60 s reserve). When less than 30 s
+  remains, the run fails fast with `budget_exhausted`.
+  `uf_delegate_command` gains `idle_timeout` (default 10 min): it
+  probes the child's session subtree (depth-first, newest child
+  first, counting a running tool's streamed metadata output) and
+  aborts only when nothing has changed for that window.
+  Command-path delegations accept `timeout` up to 4 h. Limit-ended `DELEGATE_FAILED` envelopes
+  carry `timeout` (`kind`, `child_active`, `pending_question`)
+  and, for command-path calls, `resume` (last checkpoint step).
+  `/uf.run-pipeline-plan` now delegates `/uf.unleash` at
+  `timeout: 14400000`, gives `/uf.finale` a 5-minute idle
+  window so its commit-gate wedge surfaces as a pending
+  question, and resumes instead of restarting. (Spec:
+  openspec/changes/delegation-timeout-budgets/, Fixes: #930)
 - fix-uf-finale-ci-poll-gh-schema: `uf_finale_ci_poll` now works
   against gh 2.91.0. The poll requests the verified
   `name,state,bucket,link` field list through an argument-array

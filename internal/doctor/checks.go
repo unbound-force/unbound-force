@@ -2,7 +2,9 @@ package doctor
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -2172,22 +2174,27 @@ func checkAnyTool(tc pythonToolCheck, opts *Options) CheckResult {
 
 // reviewPluginRuntimeRemediation mirrors the scaffold activation
 // remediation for an unsupported or missing Node.js/npm runtime. Doctor
-// must present the same Node 22 / npm 10 guidance without network access.
-const reviewPluginRuntimeRemediation = "install Node.js 22 and npm 10, then rerun uf init"
+// must present the same Node 22 / npm 11 guidance without network access.
+const reviewPluginRuntimeRemediation = "install Node.js 22 and npm 11 (or run the install through npx -y npm@11.6.2), then rerun uf init"
 
 // reviewPluginInstallRemediation is the doctor remediation for a missing or
-// inconsistent plugin dependency install.
-const reviewPluginInstallRemediation = "run npm ci --ignore-scripts --omit=dev in .opencode, then rerun uf init"
+// inconsistent plugin dependency install. It mirrors the scaffold install
+// remediation, including the npm 11 escape hatch: node 22's bundled npm
+// 10.9.9 crashes in Arborist resolving the lockless peer graph when a
+// target keeps devDependencies, so the retry command names the pinned
+// npm 11 runner that avoids the crash.
+const reviewPluginInstallRemediation = "run npm install --ignore-scripts --omit=dev --no-package-lock in .opencode (through npm 11, e.g. npx -y npm@11.6.2, when npm 10 crashes resolving devDependencies), then rerun uf init"
 
-// reviewPluginPackages lists the four direct npm packages declared by the
-// scaffolded review plugin manifest (design D13). Order is significant: it
-// is the deterministic iteration order for manifest-lock consistency and
+// reviewPluginPackages lists the direct runtime npm packages declared by the
+// scaffolded review plugin manifest (design D13). The scaffold ships no
+// devDependencies (activation installs with --omit=dev, and generated
+// projects never run the plugin suite), so only runtime packages are
+// expected under node_modules. Order is significant: it
+// is the deterministic iteration order for the manifest-install and
 // dependency presence checks.
 var reviewPluginPackages = []string{
 	"@opencode-ai/plugin",
 	"zod",
-	"vitest",
-	"@vitest/coverage-v8",
 }
 
 // reviewPluginTools maps each review plugin directory to the tool names its
@@ -2215,19 +2222,18 @@ var reviewPluginConfigEntries = []string{
 	"./.opencode/plugins/review-dispatch/index.ts",
 }
 
-// npmPackageManifest is the subset of package.json and the package-lock.json
-// root entry that the review plugin doctor checks care about: the declared
-// dependency and devDependency name→version maps.
+// npmPackageManifest is the subset of package.json that the review plugin
+// doctor checks care about: the declared dependency and devDependency
+// name→version maps.
 type npmPackageManifest struct {
 	Dependencies    map[string]string `json:"dependencies"`
 	DevDependencies map[string]string `json:"devDependencies"`
 }
 
-// npmLockfile is the subset of package-lock.json needed to verify manifest-lock
-// consistency: the lockfile version and the root package's declared versions.
-type npmLockfile struct {
-	LockfileVersion int                           `json:"lockfileVersion"`
-	Packages        map[string]npmPackageManifest `json:"packages"`
+// installedPackage is the subset of an installed package's package.json
+// needed to compare its version with the declared pin.
+type installedPackage struct {
+	Version string `json:"version"`
 }
 
 // mergedDependencies returns the union of dependencies and devDependencies.
@@ -2245,7 +2251,7 @@ func mergedDependencies(m npmPackageManifest) map[string]string {
 }
 
 // checkReviewPlugins verifies the scaffolded review plugin activation state
-// per SC-FR-005 and design D12: manifest-lock consistency, dependency
+// per SC-FR-005 and design D12: declared pins against installed versions, dependency
 // presence, exact Node/npm versions, registration state, and plugin tool
 // registration. Returns nil when the plugin scaffold is absent so existing
 // projects without the review plugins are unaffected.
@@ -2259,7 +2265,8 @@ func checkReviewPlugins(opts *Options) *CheckGroup {
 		Name:    "Review Plugins",
 		Results: []CheckResult{},
 	}
-	group.Results = append(group.Results, checkManifestLockConsistency(opts))
+	group.Results = append(group.Results, checkManifestInstallConsistency(opts))
+	group.Results = append(group.Results, checkTrackedPluginLock(opts))
 	group.Results = append(group.Results, checkReviewPluginDependencies(opts))
 	group.Results = append(group.Results, checkReviewPluginRuntime(opts, "node", true))
 	group.Results = append(group.Results, checkReviewPluginRuntime(opts, "npm", false))
@@ -2268,11 +2275,15 @@ func checkReviewPlugins(opts *Options) *CheckGroup {
 	return group
 }
 
-// checkManifestLockConsistency compares package.json dependency versions
-// against the package-lock.json root entry. Returns Pass when the four
-// declared packages agree, Warn for a repairable missing/malformed lock, and
-// Fail for a hard version mismatch (broken activation state).
-func checkManifestLockConsistency(opts *Options) CheckResult {
+// checkManifestInstallConsistency compares the package.json pins with the
+// versions installed under .opencode/node_modules/. No lock file is shipped
+// (stop-shipping-plugin-lock), so the exact pins in package.json are the
+// reproducibility contract. Returns Pass when every installed declared
+// package matches its pin, Warn for a repairable missing or malformed
+// manifest, and Fail for an undeclared package or an installed version
+// that differs from its pin (broken activation state). Packages that are not
+// installed are reported by checkReviewPluginDependencies.
+func checkManifestInstallConsistency(opts *Options) CheckResult {
 	readFile := opts.ReadFile
 	if readFile == nil {
 		readFile = os.ReadFile
@@ -2282,7 +2293,7 @@ func checkManifestLockConsistency(opts *Options) CheckResult {
 	manifestData, err := readFile(manifestPath)
 	if err != nil {
 		return CheckResult{
-			Name:        "manifest-lock",
+			Name:        "manifest-install",
 			Severity:    Warn,
 			Message:     "package.json missing",
 			InstallHint: reviewPluginInstallRemediation,
@@ -2291,42 +2302,13 @@ func checkManifestLockConsistency(opts *Options) CheckResult {
 	var manifest npmPackageManifest
 	if err := json.Unmarshal(manifestData, &manifest); err != nil {
 		return CheckResult{
-			Name:        "manifest-lock",
+			Name:        "manifest-install",
 			Severity:    Warn,
 			Message:     "package.json malformed",
 			InstallHint: reviewPluginInstallRemediation,
 		}
 	}
 	declared := mergedDependencies(manifest)
-
-	lockPath := filepath.Join(opts.TargetDir, ".opencode", "package-lock.json")
-	lockData, err := readFile(lockPath)
-	if err != nil {
-		return CheckResult{
-			Name:        "manifest-lock",
-			Severity:    Warn,
-			Message:     "package-lock.json missing",
-			InstallHint: reviewPluginInstallRemediation,
-		}
-	}
-	var lock npmLockfile
-	if err := json.Unmarshal(lockData, &lock); err != nil {
-		return CheckResult{
-			Name:        "manifest-lock",
-			Severity:    Warn,
-			Message:     "package-lock.json malformed",
-			InstallHint: reviewPluginInstallRemediation,
-		}
-	}
-	if lock.LockfileVersion != 3 {
-		return CheckResult{
-			Name:        "manifest-lock",
-			Severity:    Warn,
-			Message:     fmt.Sprintf("lockfileVersion %d (want 3)", lock.LockfileVersion),
-			InstallHint: reviewPluginInstallRemediation,
-		}
-	}
-	locked := mergedDependencies(lock.Packages[""])
 
 	var mismatches []string
 	for _, name := range reviewPluginPackages {
@@ -2335,31 +2317,87 @@ func checkManifestLockConsistency(opts *Options) CheckResult {
 			mismatches = append(mismatches, fmt.Sprintf("%s not declared in package.json", name))
 			continue
 		}
-		got := locked[name]
-		if got == "" {
-			mismatches = append(mismatches, fmt.Sprintf("%s@%s not in package-lock.json", name, want))
+		installedPath := filepath.Join(opts.TargetDir, ".opencode", "node_modules", filepath.FromSlash(name), "package.json")
+		installedData, err := readFile(installedPath)
+		if errors.Is(err, fs.ErrNotExist) {
+			// Absence is the dependencies check's concern.
 			continue
 		}
-		if got != want {
-			mismatches = append(mismatches, fmt.Sprintf("%s: package.json %s != lock %s", name, want, got))
+		if err != nil {
+			mismatches = append(mismatches, fmt.Sprintf("%s: installed package.json unreadable", name))
+			continue
+		}
+		var installed installedPackage
+		if err := json.Unmarshal(installedData, &installed); err != nil || installed.Version == "" {
+			mismatches = append(mismatches, fmt.Sprintf("%s: installed package.json unreadable", name))
+			continue
+		}
+		if installed.Version != want {
+			mismatches = append(mismatches, fmt.Sprintf("%s: package.json %s != installed %s", name, want, installed.Version))
 		}
 	}
 	if len(mismatches) > 0 {
 		return CheckResult{
-			Name:        "manifest-lock",
+			Name:        "manifest-install",
 			Severity:    Fail,
 			Message:     strings.Join(mismatches, "; "),
 			InstallHint: reviewPluginInstallRemediation,
 		}
 	}
 	return CheckResult{
-		Name:     "manifest-lock",
+		Name:     "manifest-install",
 		Severity: Pass,
-		Message:  "package.json and package-lock.json consistent",
+		Message:  "installed packages match package.json pins",
 	}
 }
 
-// checkReviewPluginDependencies verifies the four declared packages are
+// checkTrackedPluginLock warns when .opencode/package-lock.json is still
+// git-tracked. The merged .gitignore line (stop-shipping-plugin-lock D3)
+// does not untrack an already-committed lock, so hero repositories that
+// adopted the lock keep committing rewrites after the migration. The check
+// is advisory: Pass outside a git repository or when the lock is not
+// tracked, Warn with the untrack command when it is, and Warn with the
+// underlying error when git itself fails — a command failure must not
+// masquerade as the outside-a-repository skip.
+func checkTrackedPluginLock(opts *Options) CheckResult {
+	if opts.ExecCmd == nil {
+		return CheckResult{Name: "tracked lock", Severity: Pass, Message: "not checked"}
+	}
+	lockPath := filepath.Join(".opencode", "package-lock.json")
+	output, err := opts.ExecCmd("git", "-C", opts.TargetDir, "ls-files", "--", lockPath)
+	if err != nil {
+		// git exits 128 with "fatal: not a git repository" when the
+		// target sits outside any repository; ExecCmd returns combined
+		// output, so the signature is visible here. Matching the full
+		// "fatal:" prefix keeps a TargetDir path that happens to
+		// contain the phrase from masquerading as the skip. Anything
+		// else is a real git failure and gets its own message, with
+		// the command output appended so the cause is observable.
+		if strings.Contains(string(output), "fatal: not a git repository") {
+			return CheckResult{Name: "tracked lock", Severity: Pass, Message: "not a git repository"}
+		}
+		message := fmt.Sprintf("git ls-files failed: %v", err)
+		if detail := strings.TrimSpace(string(output)); detail != "" {
+			message += ": " + detail
+		}
+		return CheckResult{
+			Name:     "tracked lock",
+			Severity: Warn,
+			Message:  message,
+		}
+	}
+	if strings.TrimSpace(string(output)) == "" {
+		return CheckResult{Name: "tracked lock", Severity: Pass, Message: "no tracked plugin lock"}
+	}
+	return CheckResult{
+		Name:        "tracked lock",
+		Severity:    Warn,
+		Message:     "package-lock.json is gitignored but still tracked",
+		InstallHint: "git rm --cached .opencode/package-lock.json, then commit",
+	}
+}
+
+// checkReviewPluginDependencies verifies the declared runtime packages are
 // present under .opencode/node_modules/. Returns Pass when all are present,
 // Warn (repairable) when one or more are missing.
 func checkReviewPluginDependencies(opts *Options) CheckResult {
@@ -2387,7 +2425,10 @@ func checkReviewPluginDependencies(opts *Options) CheckResult {
 
 // checkReviewPluginRuntime resolves and parses the exact Node.js or npm
 // version, then verifies it falls in the supported range (Node 20-24,
-// npm 10-11) per design D12. Reports the precise detected version.
+// npm 10-11) per design D12. Reports the precise detected version. A
+// supported npm 10 still warns when the target's manifest declares
+// devDependencies: a lockless install resolves them even under --omit=dev,
+// and the vitest 5 peer graph crashes npm 10.9.9's Arborist (design D2a).
 func checkReviewPluginRuntime(opts *Options, name string, allowVPrefix bool) CheckResult {
 	if opts.ExecCmd == nil {
 		return CheckResult{Name: name + " version", Severity: Warn, Message: "not checked", InstallHint: reviewPluginRuntimeRemediation}
@@ -2431,12 +2472,38 @@ func checkReviewPluginRuntime(opts *Options, name string, allowVPrefix bool) Che
 			InstallHint: reviewPluginRuntimeRemediation,
 		}
 	}
+	if name == "npm" && parsed.Major == 10 && pluginManifestHasDevDependencies(opts) {
+		return CheckResult{
+			Name:        name + " version",
+			Severity:    Warn,
+			Message:     fmt.Sprintf("npm %s can crash resolving .opencode devDependencies", version),
+			Detail:      path,
+			InstallHint: reviewPluginRuntimeRemediation,
+		}
+	}
 	return CheckResult{
 		Name:     name + " version",
 		Severity: Pass,
 		Message:  version,
 		Detail:   path,
 	}
+}
+
+// pluginManifestHasDevDependencies reports whether the target's
+// .opencode/package.json declares devDependencies. Reads through the
+// Options.ReadFile seam like its sibling checks. An unreadable or
+// malformed manifest reports false: the manifest checks own that failure.
+func pluginManifestHasDevDependencies(opts *Options) bool {
+	readFile := opts.ReadFile
+	data, err := readFile(filepath.Join(opts.TargetDir, ".opencode", "package.json"))
+	if err != nil {
+		return false
+	}
+	var manifest npmPackageManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return false
+	}
+	return len(manifest.DevDependencies) > 0
 }
 
 // checkPluginRegistration reports the activation state of the two review

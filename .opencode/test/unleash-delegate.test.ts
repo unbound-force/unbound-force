@@ -1,5 +1,7 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { existsSync, lstatSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
 
 import type { PluginInput } from "@opencode-ai/plugin"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -91,6 +93,18 @@ interface FakeClientOptions {
   readonly hangPrompt?: boolean
   /** Hang session.message on its abort signal (host-resolution cancellation). */
   readonly hangMessage?: boolean
+  /** Expose the activity-probe endpoints with a never-changing child (idle paths). */
+  readonly stalledProbe?: boolean
+  /**
+   * Expose the activity-probe endpoints whose latest part is a running
+   * question tool call (question-gate wedge).
+   */
+  readonly questionProbe?: boolean
+  /**
+   * Expose the activity-probe endpoints with a growing text part
+   * (never idle-aborts; long wall-clock paths).
+   */
+  readonly activeProbe?: boolean
 }
 
 function fieldsResponse<T>(data: T): T {
@@ -145,6 +159,9 @@ function finishPart(cost: number, input: number, output: number): Record<string,
  */
 function fakeClient(options: FakeClientOptions = {}): { readonly client: Client; readonly calls: FakeCalls } {
   const calls: FakeCalls = { creates: [], messages: [], prompts: [], aborts: [] }
+  // Probe counter backing the activeProbe option: each probe reports a new
+  // text part so the activity fingerprint changes on every sample.
+  let probeCount = 0
   const session = {
     create: async (request: CreateOptions): Promise<CreateResponse> => {
       calls.creates.push(request)
@@ -199,6 +216,51 @@ function fakeClient(options: FakeClientOptions = {}): { readonly client: Client;
       calls.aborts.push(request)
       return fieldsResponse({ data: true, error: undefined } as unknown as AbortResponse)
     },
+    // Activity-probe endpoints (delegation-timeout-budgets D2), present only
+    // for idle-path tests: the child never changes and has no descendants.
+    ...(options.stalledProbe === true
+      ? {
+          children: async () => ({ data: [] }),
+          messages: async () => ({
+            data: [{ info: { id: "message-child" }, parts: [textPart("thinking")] }],
+          }),
+        }
+      : {}),
+    // Question-gate wedge: the latest part of the latest message is a
+    // running question tool call, so the idle path reports
+    // pending_question instead of a plain stall.
+    ...(options.questionProbe === true
+      ? {
+          children: async () => ({ data: [] }),
+          messages: async () => ({
+            data: [
+              {
+                info: { id: "message-child" },
+                parts: [
+                  {
+                    id: "tool-question",
+                    sessionID: "child-session",
+                    messageID: "message-child",
+                    type: "tool",
+                    tool: "question",
+                    state: { status: "running" },
+                  },
+                ],
+              },
+            ],
+          }),
+        }
+      : {}),
+    // Long wall-clock paths: the probed message grows every probe, so the
+    // fingerprint keeps changing and the idle clock keeps resetting.
+    ...(options.activeProbe === true
+      ? {
+          children: async () => ({ data: [] }),
+          messages: async () => ({
+            data: [{ info: { id: "message-child" }, parts: [textPart(`thinking-${++probeCount}`)] }],
+          }),
+        }
+      : {}),
   }
   return { client: { session } as unknown as Client, calls }
 }
@@ -331,14 +393,20 @@ function enoent(what: string): NodeJS.ErrnoException {
   return Object.assign(new Error(`ENOENT: no such file or directory, ${what}`), { code: "ENOENT" })
 }
 
-/** Invoke the delegate tool with a full parent-session context and parse its JSON output. */
+/**
+ * Invoke the delegate tool with a full parent-session context and parse its
+ * JSON output. cwd defaults to the fake repository root; tests exercising
+ * real-filesystem defaults (the statSync-backed isDirectory) pass a real
+ * scratch directory instead.
+ */
 async function invokeDelegate(
   exec: GitExec,
   deps: DelegateCommandDependencies,
   args: Record<string, unknown>,
   abort: AbortSignal = new AbortController().signal,
+  cwd: string = FAKE_CWD,
 ): Promise<ToolResult<DelegateCommandData>> {
-  const delegate = createDelegateCommandTool(exec, FAKE_CWD, deps)
+  const delegate = createDelegateCommandTool(exec, cwd, deps)
   const result = await (
     delegate as {
       execute: (
@@ -349,7 +417,7 @@ async function invokeDelegate(
   ).execute(args, {
     sessionID: "parent-session",
     messageID: "message-parent",
-    directory: FAKE_CWD,
+    directory: cwd,
     abort,
   })
   return JSON.parse(result.output) as ToolResult<DelegateCommandData>
@@ -1103,7 +1171,7 @@ describe("uf_delegate_command task classification and skill contract", () => {
 // ---------------------------------------------------------------------------
 
 describe("uf_delegate_command skill resolution", () => {
-  it("resolves a skill name present only under the second root (.opencode/skill/)", async () => {
+  it("does not resolve a skill present only under the legacy .opencode/skill/ root (#933)", async () => {
     const fake = fakeClient()
     const reads = fakeReadText({})
     const artifact = fakeFileExists([".opencode/skill/unbound-force-heroes/SKILL.md"])
@@ -1120,19 +1188,195 @@ describe("uf_delegate_command skill resolution", () => {
       skill: "unbound-force-heroes",
     })
 
-    // The name misses the first root, hits the second, and the run proceeds.
-    expect(result.status).toBe("ok")
-    expect(fake.calls.prompts).toHaveLength(1)
-    // Both roots are probed in order (D2: .opencode/skills/ then
-    // .opencode/skill/) through the injected FileExists only.
+    // uf init migrates the legacy root into .opencode/skills/, so the
+    // plugin never probes it: a legacy-only copy fails closed.
+    expect(result.status === "error" && result.code).toBe("SKILL_NOT_FOUND")
     expect(artifact.calls).toEqual([
       resolve(FAKE_CWD, ".opencode/skills/unbound-force-heroes/SKILL.md"),
-      resolve(FAKE_CWD, ".opencode/skill/unbound-force-heroes/SKILL.md"),
+      resolve(FAKE_CWD, "unbound-force-heroes"),
     ])
+    expect(fake.calls.creates).toHaveLength(0)
     expect(existsSync).not.toHaveBeenCalled()
   })
 
-  it("resolves a same-name collision across the roots to the first root", async () => {
+  it("resolves a bare repo-root file name when no skill root holds it (#934)", async () => {
+    const fake = fakeClient()
+    const reads = fakeReadText({})
+    const artifact = fakeFileExists(["Makefile"])
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: reads.readText,
+      fileExists: artifact.fileExists,
+      // Same host-independence concern as the bare `..` test: the
+      // fileExists fake claims FAKE_CWD/Makefile exists, so isDirectory
+      // is pinned rather than left to a real statSync against the host.
+      isDirectory: () => false,
+    }
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Run the plugin-test target.",
+      task_classification: "deterministic",
+      skill: "Makefile",
+    })
+
+    expect(result.status).toBe("ok")
+    // Skill roots are probed first; the root file is the fallback.
+    expect(artifact.calls).toEqual([
+      resolve(FAKE_CWD, ".opencode/skills/Makefile/SKILL.md"),
+      resolve(FAKE_CWD, "Makefile"),
+    ])
+    expect(deliveredPrompt(fake.calls)).toContain("Required skill: Makefile\n\n")
+    expect(deliveredPrompt(fake.calls)).toContain("run the script at Makefile")
+  })
+
+  it("does not resolve a directory as a root-file or path reference", async () => {
+    const artifact = fakeFileExists(["docs", "scripts/tools"])
+    const directories = new Set([resolve(FAKE_CWD, "docs"), resolve(FAKE_CWD, "scripts/tools")])
+    const deps: DelegateCommandDependencies = {
+      client: fakeClient().client,
+      modelMatrix: matrixFreeDeps,
+      readText: fakeReadText({}).readText,
+      fileExists: artifact.fileExists,
+      isDirectory: (path: string) => directories.has(path),
+    }
+
+    for (const skill of ["docs", "scripts/tools"]) {
+      const result = await invokeDelegate(recordingExec().exec, deps, {
+        prompt: "Run it.",
+        task_classification: "deterministic",
+        skill,
+      })
+      expect(result.status === "error" && result.code).toBe("SKILL_NOT_FOUND")
+    }
+  })
+
+  it("filters a real directory and accepts a real file through the default isDirectory (#948)", async () => {
+    // The default isDirectory (statSync-backed) has no positive-path coverage
+    // elsewhere: every other test injects a fake, so a regression returning
+    // isFile() -- or always false -- would pass the suite while letting a
+    // real directory resolve as a script reference. statSync, mkdtemp, and
+    // node:fs/promises stay real under the node:fs mock (only existsSync,
+    // lstatSync, readFileSync, mkdirSync, and writeFileSync are replaced),
+    // so this exercise runs against a real scratch tree.
+    const directory = await mkdtemp(join(tmpdir(), "uf-delegate-isdir-"))
+    try {
+      await mkdir(join(directory, "docs"))
+      await writeFile(join(directory, "run.sh"), "#!/bin/sh\n", { mode: 0o755 })
+      const realExists: FileExists = (path) => {
+        try {
+          statSync(path)
+          return true
+        } catch {
+          return false
+        }
+      }
+      const deps: DelegateCommandDependencies = {
+        client: fakeClient().client,
+        modelMatrix: matrixFreeDeps,
+        readText: fakeReadText({}).readText,
+        fileExists: realExists,
+        // isDirectory deliberately omitted: resolution must fall back to the
+        // production default rather than a test fake.
+      }
+
+      // A real directory is not a root-file reference.
+      const dirResult = await invokeDelegate(
+        recordingExec().exec,
+        deps,
+        { prompt: "Run it.", task_classification: "deterministic", skill: "docs" },
+        new AbortController().signal,
+        directory,
+      )
+      expect(dirResult.status === "error" && dirResult.code).toBe("SKILL_NOT_FOUND")
+
+      // A real file resolves through the same default.
+      const fileResult = await invokeDelegate(
+        recordingExec().exec,
+        deps,
+        { prompt: "Run it.", task_classification: "deterministic", skill: "run.sh" },
+        new AbortController().signal,
+        directory,
+      )
+      expect(fileResult.status).toBe("ok")
+      expect(fileResult.status === "ok" && fileResult.data.skill).toBe("run.sh")
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it("prefers a skill over a same-name repo-root file", async () => {
+    const fake = fakeClient()
+    const artifact = fakeFileExists([".opencode/skills/build/SKILL.md", "build"])
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: fakeReadText({}).readText,
+      fileExists: artifact.fileExists,
+    }
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Build it.",
+      task_classification: "deterministic",
+      skill: "build",
+    })
+
+    expect(result.status).toBe("ok")
+    expect(artifact.calls).toEqual([resolve(FAKE_CWD, ".opencode/skills/build/SKILL.md")])
+  })
+
+  it("does not resolve a bare `..` outside the repository root", async () => {
+    const artifact = fakeFileExists([])
+    const deps: DelegateCommandDependencies = {
+      client: fakeClient().client,
+      modelMatrix: matrixFreeDeps,
+      readText: fakeReadText({}).readText,
+      fileExists: (path: string) => path === resolve(FAKE_CWD, "..") || artifact.fileExists(path),
+      // isDirectory must be injected, not left at the statSync-backed
+      // production default: the fileExists fake claims the parent of
+      // FAKE_CWD exists, and a host that really has that directory
+      // would let the directory filter mask a traversal-guard
+      // regression (the guard, not the filter, must trip here).
+      isDirectory: () => false,
+    }
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Escape.",
+      task_classification: "deterministic",
+      skill: "..",
+    })
+
+    expect(result.status === "error" && result.code).toBe("SKILL_NOT_FOUND")
+  })
+
+  it("rejects a command or make target as SKILL_NOT_FOUND without probing", async () => {
+    const fake = fakeClient()
+    const artifact = fakeFileExists(["Makefile"])
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: fakeReadText({}).readText,
+      fileExists: artifact.fileExists,
+    }
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Run the plugin tests.",
+      task_classification: "deterministic",
+      skill: "make plugin-test",
+    })
+
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("SKILL_NOT_FOUND")
+      expect(result.retryable).toBe(false)
+      expect(result.message).toContain("commands and make targets are not skill references")
+      expect(result.message).toContain("skill_absent_reason")
+    }
+    expect(artifact.calls).toEqual([])
+    expect(fake.calls.creates).toHaveLength(0)
+  })
+
+  it("resolves the .opencode/skills/ copy when a stale legacy copy also exists", async () => {
     const fake = fakeClient()
     const reads = fakeReadText({})
     const artifact = fakeFileExists([
@@ -1152,8 +1396,8 @@ describe("uf_delegate_command skill resolution", () => {
       skill: "colliding-skill",
     })
 
-    // First root wins (spec scenario): probing stops at the
-    // .opencode/skills/ entry — the second root is never consulted...
+    // The .opencode/skills/ entry wins: probing stops there and the
+    // legacy .opencode/skill/ copy is never consulted...
     expect(result.status).toBe("ok")
     expect(artifact.calls).toEqual([
       resolve(FAKE_CWD, ".opencode/skills/colliding-skill/SKILL.md"),
@@ -1249,18 +1493,19 @@ describe("uf_delegate_command skill resolution", () => {
     if (result.status === "error") {
       expect(result.code).toBe("SKILL_NOT_FOUND")
       expect(result.retryable).toBe(false)
-      // The envelope names every searched location (both skill roots).
+      // The envelope names every searched location (the skill root
+      // and the repo-root file fallback).
       expect(result.message).toBe(
         'Skill reference "does-not-exist" does not resolve. ' +
-          "Searched: .opencode/skills/does-not-exist/SKILL.md, .opencode/skill/does-not-exist/SKILL.md. " +
+          "Searched: .opencode/skills/does-not-exist/SKILL.md, does-not-exist (repo-root file). " +
           "Remediation: pass an existing skill name or a repo-relative script path, " +
           "or record skill_absent_reason when no repo skill applies; retrying will not fix this.",
       )
     }
-    // Both roots were probed in order before failing closed.
+    // The skill root, then the root file, were probed before failing closed.
     expect(artifact.calls).toEqual([
       resolve(FAKE_CWD, ".opencode/skills/does-not-exist/SKILL.md"),
-      resolve(FAKE_CWD, ".opencode/skill/does-not-exist/SKILL.md"),
+      resolve(FAKE_CWD, "does-not-exist"),
     ])
     // Fail-closed before host-model resolution and the child spawn: no
     // parent introspection, no session activity, no aborts, no state I/O,
@@ -2206,7 +2451,7 @@ describe("uf_delegate_command audit trail", () => {
       fileExists: artifact.fileExists,
     }
     const reason =
-      'searched .opencode/skills/ and .opencode/skill/ for a "rename" skill; none exists for this one-off'
+      'searched .opencode/skills/ and the repo root for a "rename" skill or script; none exists for this one-off'
 
     const result = await invokeDelegate(recordingExec("opsx/delegation-skill-enforcement").exec, deps, {
       prompt: "Rename the variable across the module.",
@@ -2539,7 +2784,7 @@ describe("uf_delegate_command seam verification", () => {
       fileExists: artifact.fileExists,
     }
     const reason =
-      'searched .opencode/skills/ and .opencode/skill/ for a rename skill; none exists for this one-off'
+      'searched .opencode/skills/ and the repo root for a rename skill or script; none exists for this one-off'
 
     const result = await invokeDelegate(recordingExec().exec, deps, {
       prompt: "Rename the variable across the module.",
@@ -2909,5 +3154,262 @@ describe("uf_delegate_command path traversal", () => {
     expect(fake.calls.creates).toHaveLength(0)
     expect(fake.calls.prompts).toHaveLength(0)
     expect(artifact.calls).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// uf_delegate_command — timeout budgets (delegation-timeout-budgets)
+// ---------------------------------------------------------------------------
+
+describe("uf_delegate_command timeout budgets", () => {
+  const baseDeps = (client: Client, files: Record<string, string> = {}): DelegateCommandDependencies => ({
+    client,
+    modelMatrix: matrixFreeDeps,
+    readText: fakeReadText(files).readText,
+    fileExists: fakeFileExists([]).fileExists,
+  })
+
+  it("rejects a prompt-only timeout above the executor bound before spawning", async () => {
+    const fake = fakeClient()
+    const result = await invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+      prompt: "Run the delegation.",
+      task_classification: "judgment",
+      timeout: 1_800_001,
+    })
+
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("INVALID_INPUT")
+      expect(result.message).toContain("prompt-only delegation timeout must not exceed 1800000 ms")
+    }
+    expect(fake.calls.creates).toHaveLength(0)
+  })
+
+  it("rejects a command-path timeout above the 4-hour ceiling and an idle_timeout below 60 s", async () => {
+    const fake = fakeClient()
+    const tooLong = await invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+      command_path: "cmd.md",
+      timeout: 14_400_001,
+    })
+    const tooIdle = await invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+      command_path: "cmd.md",
+      idle_timeout: 59_999,
+    })
+
+    expect(tooLong.status === "error" && tooLong.code).toBe("INVALID_INPUT")
+    expect(tooIdle.status === "error" && tooIdle.code).toBe("INVALID_INPUT")
+    expect(fake.calls.creates).toHaveLength(0)
+  })
+
+  it("accepts a 4-hour command-path timeout", async () => {
+    const commandAbs = resolve(FAKE_CWD, "cmd.md")
+    const fake = fakeClient()
+    const result = await invokeDelegate(recordingExec().exec, baseDeps(fake.client, { [commandAbs]: "Run." }), {
+      command_path: "cmd.md",
+      timeout: 14_400_000,
+    })
+
+    expect(result.status).toBe("ok")
+  })
+
+  it("threads timeout details and durable resume state into a command-path timeout", async () => {
+    const commandAbs = resolve(FAKE_CWD, ".opencode/commands/uf.unleash.md")
+    const fake = fakeClient({ hangPrompt: true })
+    const state: ProgressState = {
+      command: "uf.unleash",
+      branch: "opsx-unleash-deterministic-tools",
+      key: "opsx-unleash-deterministic-tools",
+      current_step: "plan",
+      completed_steps: ["spec-review", "plan"],
+      data: {},
+      created_at: "2026-11-03T00:00:00.000Z",
+      updated_at: "2026-11-03T00:00:00.000Z",
+    }
+    vi.mocked(lstatSync).mockImplementation(
+      () => ({ isSymbolicLink: () => false }) as unknown as ReturnType<typeof lstatSync>,
+    )
+    vi.mocked(readFileSync).mockImplementation(() => JSON.stringify(state))
+
+    const result = (await invokeDelegate(
+      recordingExec().exec,
+      baseDeps(fake.client, { [commandAbs]: "Run the pipeline." }),
+      { command_path: ".opencode/commands/uf.unleash.md", timeout: 5 },
+    )) as unknown as Record<string, unknown>
+
+    expect(result.status).toBe("error")
+    expect(result.code).toBe("DELEGATE_FAILED")
+    expect(result.child_session_id).toBe("child-session")
+    expect(result.timeout).toMatchObject({ kind: "wall_clock", effective_ms: 5, idle_timeout_ms: 600_000 })
+    expect(result.resume).toEqual({
+      command: "uf.unleash",
+      key: "opsx-unleash-deterministic-tools",
+      last_checkpoint_step: "plan",
+      completed_steps: ["spec-review", "plan"],
+    })
+    // The resume read goes through the progress state store path.
+    expect(String(vi.mocked(readFileSync).mock.calls[0]?.[0])).toBe(
+      resolve(FAKE_CWD, ".uf/progress/opsx-unleash-deterministic-tools/uf.unleash.json"),
+    )
+  })
+
+  it("reports null resume state when no checkpoint exists or the key cannot be derived", async () => {
+    const commandAbs = resolve(FAKE_CWD, "cmd.md")
+    const fake = fakeClient({ hangPrompt: true })
+    const deps = baseDeps(fake.client, { [commandAbs]: "Run." })
+
+    const fresh = (await invokeDelegate(recordingExec().exec, deps, {
+      command_path: "cmd.md",
+      timeout: 5,
+    })) as unknown as Record<string, unknown>
+    expect(fresh.resume).toMatchObject({ command: "cmd", last_checkpoint_step: null, completed_steps: [] })
+
+    const detached = (await invokeDelegate(recordingExec("HEAD").exec, deps, {
+      command_path: "cmd.md",
+      timeout: 5,
+    })) as unknown as Record<string, unknown>
+    expect(detached.resume).toBeNull()
+  })
+
+  it("omits resume state for prompt-only timeouts", async () => {
+    const fake = fakeClient({ hangPrompt: true })
+    const result = (await invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+      prompt: "Run the delegation.",
+      task_classification: "judgment",
+      timeout: 5,
+    })) as unknown as Record<string, unknown>
+
+    expect(result.timeout).toMatchObject({ kind: "wall_clock" })
+    expect("resume" in result).toBe(false)
+  })
+
+  it("aborts a stalled child on the default 10-minute idle timeout long before the wall clock", async () => {
+    vi.useFakeTimers()
+    try {
+      const fake = fakeClient({ hangPrompt: true, stalledProbe: true })
+      const pending = invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+        prompt: "Run the delegation.",
+        task_classification: "judgment",
+        timeout: 1_800_000,
+      })
+      await vi.advanceTimersByTimeAsync(700_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.retryable).toBe(true)
+      expect(result.message).toBe("idle_timeout: invoke_agent run made no progress for 600000 ms")
+      expect(result.timeout).toMatchObject({
+        kind: "idle",
+        idle_timeout_ms: 600_000,
+        child_active: false,
+        pending_question: false,
+      })
+      expect(fake.calls.aborts).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("threads resume state into an idle-timeout failure on a checkpointed command", async () => {
+    vi.useFakeTimers()
+    try {
+      const commandAbs = resolve(FAKE_CWD, ".opencode/commands/uf.unleash.md")
+      const fake = fakeClient({ hangPrompt: true, stalledProbe: true })
+      const state: ProgressState = {
+        command: "uf.unleash",
+        branch: "opsx-unleash-deterministic-tools",
+        key: "opsx-unleash-deterministic-tools",
+        current_step: "plan",
+        completed_steps: ["spec-review", "plan"],
+        data: {},
+        created_at: "2026-11-03T00:00:00.000Z",
+        updated_at: "2026-11-03T00:00:00.000Z",
+      }
+      vi.mocked(lstatSync).mockImplementation(
+        () => ({ isSymbolicLink: () => false }) as unknown as ReturnType<typeof lstatSync>,
+      )
+      vi.mocked(readFileSync).mockImplementation(() => JSON.stringify(state))
+
+      const pending = invokeDelegate(
+        recordingExec().exec,
+        baseDeps(fake.client, { [commandAbs]: "Run the pipeline." }),
+        { command_path: ".opencode/commands/uf.unleash.md", timeout: 1_800_000 },
+      )
+      await vi.advanceTimersByTimeAsync(700_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.status).toBe("error")
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.retryable).toBe(true)
+      expect(result.child_session_id).toBe("child-session")
+      expect(result.timeout).toMatchObject({ kind: "idle", idle_timeout_ms: 600_000 })
+      expect(result.resume).toMatchObject({
+        command: "uf.unleash",
+        key: "opsx-unleash-deterministic-tools",
+        last_checkpoint_step: "plan",
+        completed_steps: ["spec-review", "plan"],
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("reports pending_question on the envelope when the stalled child holds a running question", async () => {
+    vi.useFakeTimers()
+    try {
+      const fake = fakeClient({ hangPrompt: true, questionProbe: true })
+      const pending = invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+        prompt: "Run the delegation.",
+        task_classification: "judgment",
+        timeout: 1_800_000,
+      })
+      await vi.advanceTimersByTimeAsync(700_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.timeout).toMatchObject({
+        kind: "idle",
+        idle_timeout_ms: 600_000,
+        pending_question: true,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("rejects an idle_timeout above the 1,800,000 ms bound", async () => {
+    const fake = fakeClient()
+    const tooIdle = await invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+      command_path: "cmd.md",
+      idle_timeout: 1_800_001,
+    })
+
+    expect(tooIdle.status === "error" && tooIdle.code).toBe("INVALID_INPUT")
+    expect(fake.calls.creates).toHaveLength(0)
+  })
+
+  it("threads a 4-hour command-path timeout through to the executor wall clock", async () => {
+    vi.useFakeTimers()
+    try {
+      const commandAbs = resolve(FAKE_CWD, "cmd.md")
+      const fake = fakeClient({ hangPrompt: true, activeProbe: true })
+      const pending = invokeDelegate(
+        recordingExec().exec,
+        baseDeps(fake.client, { [commandAbs]: "Run." }),
+        { command_path: "cmd.md", timeout: 14_400_000 },
+      )
+      await vi.advanceTimersByTimeAsync(14_400_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.status).toBe("error")
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.timeout).toMatchObject({
+        kind: "wall_clock",
+        effective_ms: 14_400_000,
+        requested_ms: 14_400_000,
+        budget_clamped: false,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

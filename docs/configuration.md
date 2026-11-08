@@ -546,6 +546,76 @@ becomes valid.
 
 ---
 
+## Delegation Timeout Budgets
+
+`uf_delegate_command` -- the delegation tool behind `/uf.unleash`
+and `/uf.run-pipeline-plan` -- enforces hierarchical timeout
+budgets so a nested delegation cannot outlive its parent's
+remaining time.
+
+### Hierarchical budgets
+
+Each child run records its absolute deadline in a process-wide
+registry for the duration of the run. Before creating a child,
+the executor resolves the inherited deadline of its parent
+session (registry entry, else the first registered ancestor up
+to 8 `parentID` levels). With an inherited deadline, the
+effective wall-clock timeout is the lesser of the requested
+timeout and the remaining budget minus a 60-second reserve. When
+less than 30 seconds remain after the reserve, the delegation
+fails before the child session is created, with the
+non-retryable error code `budget_exhausted`. A top-level run
+(no registered ancestor) uses its requested timeout unchanged.
+
+### `timeout` and `idle_timeout`
+
+| Parameter | Command-path delegation | Prompt-only delegation |
+|-----------|------------------------|------------------------|
+| `timeout` | positive integer, 14,400,000 ms max | positive integer, 1,800,000 ms max |
+| `idle_timeout` | 60,000 -- 1,800,000 ms (default 600,000) | 60,000 -- 1,800,000 ms (default 600,000) |
+
+When an `idle_timeout` is configured, the executor polls the
+child's session subtree for activity and aborts the child with
+the retryable error code `idle_timeout` only after no activity
+change has been observed for the idle window and at least one
+probe has succeeded since the last observed change. A failed
+probe neither resets nor advances the idle clock. Activity in
+any descendant session counts, including growth of a running
+tool's streamed output (`state.metadata`).
+
+### Timeout result envelope
+
+When a run ends by a limit, the `DELEGATE_FAILED` envelope
+carries a `timeout` object:
+
+| Field | Meaning |
+|-------|---------|
+| `kind` | `wall_clock`, `idle`, or `budget` |
+| `effective_ms` | Wall-clock timeout actually applied (post-clamp) |
+| `requested_ms` | Timeout the caller requested |
+| `budget_clamped` | `true` when an inherited budget reduced `effective_ms` |
+| `idle_timeout_ms` | Configured idle timeout, `null` when none |
+| `elapsed_ms` | Time from run start to termination |
+| `last_progress_ms_ago` | Time since the last observed subtree activity (after the first successful probe; else `null`) |
+| `child_active` | Whether the subtree showed activity within the last 120 seconds (`null` before the first successful probe) |
+| `pending_question` | `true` when the child's latest part is a running `question` tool call |
+
+Command-path delegations additionally carry `resume` -- the
+state `command`, `key`, `last_checkpoint_step`, and
+`completed_steps` read from the progress state store after the
+child stops -- so an orchestrator can re-delegate the same
+command from its last checkpoint. An unreadable state yields
+`resume: null`.
+
+The recovery protocol that `/uf.run-pipeline-plan` applies to
+this envelope (gate-timeout recovery on `pending_question`, a
+single resume re-delegation on an idle timeout, blocked-item
+handling on wall-clock and budget timeouts) is specified in the
+`run-plan-command` capability (requirement RPC-FR-001, change
+`delegation-timeout-budgets`).
+
+---
+
 ## Common Scenarios
 
 ### Using Vertex AI as LLM provider
