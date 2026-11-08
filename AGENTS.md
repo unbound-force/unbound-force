@@ -51,10 +51,6 @@ make lint-instructions
 # Lint (vet + golangci-lint)
 make lint
 # or: go vet ./... && golangci-lint run
-
-# Lint instruction prose (agents, commands, skills, packs)
-make lint-instructions
-# or: node .opencode/lib/instruction-lint.ts
 ```
 
 `make check` now depends on both `make coverage-gate` (scope-based Go
