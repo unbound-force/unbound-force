@@ -950,6 +950,23 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/remove-mutimind-mxf-orchestration/, Fixes: #565, Fixes: #566)
 
 ### Changed
+- docs-catchup-955-993: user docs now describe what PRs #955,
+  #957, #958, #959, and #993 shipped. `docs/usage.md` covers the
+  `/uf.address-feedback` PR-head checkout (HEAD-keyed identity,
+  stop conditions, push target, resume), the pre-flight hard
+  gate's 3-attempt limit, and the repo-local Linguist and
+  Determinist with their evidence commands (`make
+  lint-instructions` with `--base`/`--changed`, exit codes,
+  IL-042, `tool-inventory --match`/`--seams`, the advisory
+  pre-flight check). Persona counts now say 9 delivered by
+  `uf init` and 11 in this repository (usage, QUICKSTART);
+  `docs/architecture.md` lists both repo-local personas and the
+  exact `resolve_review_mode` light-check conditions;
+  `docs/heroes.md` links the divisor-determinism and
+  instruction-lint specs; `docs/osv-transitive-scan.md` documents
+  the zod 4.6.6 / toml 5.0.1 pins, their advisories, the zod
+  override, and the provenance record for hero-repo adopters.
+  (Docs: #967, #970, #977, #980, #995, #996)
 - feedback-loop-scope: `/uf.address-feedback` changes code only for
   CRITICAL and HIGH findings (unlabelled findings count as HIGH);
   MEDIUM and LOW findings are filed as issues or answered, and their
