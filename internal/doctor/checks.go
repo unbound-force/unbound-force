@@ -2282,7 +2282,9 @@ func checkReviewPlugins(opts *Options) *CheckGroup {
 // package matches its pin, Warn for a repairable missing or malformed
 // manifest, and Fail for an undeclared package or an installed version
 // that differs from its pin (broken activation state). Packages that are not
-// installed are reported by checkReviewPluginDependencies.
+// installed are reported by checkReviewPluginDependencies. Only the shipped
+// reviewPluginPackages are compared: uf init keeps runtime packages a user
+// adds to the manifest (merge-plugin-runtime-deps), and those are not drift.
 func checkManifestInstallConsistency(opts *Options) CheckResult {
 	readFile := opts.ReadFile
 	if readFile == nil {

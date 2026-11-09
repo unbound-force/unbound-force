@@ -297,7 +297,7 @@ func Run(opts Options) (*Result, error) {
 		existing, readErr := os.ReadFile(outPath)
 		fileExists := readErr == nil
 		if fileExists && relPath == pluginManifestAsset {
-			out = preservePluginDevDependencies(out, existing)
+			out = mergePluginManifest(out, existing)
 		}
 
 		if !fileExists {

@@ -355,6 +355,25 @@ asset, skipped on plain `uf init` re-runs (locally added
 byte-for-byte), and reset only by `--force` -- a destructive
 reset for both files that discards local entries.
 
+`.opencode/package.json` (the review plugin manifest) is
+tool-owned but merged rather than replaced. On every
+`uf init`, including `--force`, the shipped manifest is
+restored with the target's own entries kept:
+
+- **Runtime `dependencies`**: uf's shipped pins are added
+  when missing and bumped when they drift; packages uf does
+  not ship (your own plugin dependencies) keep the version
+  you declared. Keys are written in sorted order.
+- **`devDependencies`**: kept as declared (the scaffold ships
+  none).
+- **Everything else** (`overrides`, `engines`, `name`):
+  tool-owned and restored.
+
+A manifest that is not valid JSON is replaced with the
+shipped manifest. `uf doctor` compares only uf's shipped
+packages with the install, so a dependency you added is
+not reported as drift.
+
 Use `--force` to overwrite all files regardless of
 ownership (destructive -- resets your customizations).
 
