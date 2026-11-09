@@ -158,108 +158,50 @@ resolved, **STOP** rather than assess against mutable or partial context.
 Phase 4 commits to and pushes the PR head branch, and every
 checkpoint is keyed by the checked-out branch, so the working
 tree MUST be on the PR head before the first `get_progress` or
-`checkpoint` call. Compare the current state with the frozen
-context:
+`checkpoint` call. Call the `checkout_pr_head` plugin tool with
+the frozen context:
 
-```bash
-git branch --show-current
-git rev-parse HEAD
+`{pr_number: <PR_NUMBER>, head_ref: <head_ref>, head_sha: <head_sha>}`
+
+The tool keys identity on `HEAD` (equal to or descending from
+`head_sha`), gates on a dirty tree, runs `gh pr checkout` only
+when needed, re-verifies `HEAD`, and reads the push target of the
+actual checked-out branch through argument-array git calls. It
+never resets or discards local commits. On success it returns:
+
+```json
+{"status": "ok", "data": {"branch": "contrib/main",
+  "head_remote": "https://github.com/contrib/repo.git",
+  "merge_ref": "refs/heads/main", "ahead_of_head_sha": false,
+  "checked_out": true}}
 ```
 
-Identity is keyed on `HEAD`, not on the local branch name:
-`gh pr checkout` does not guarantee the local branch is named
-`head_ref` (a cross-repo PR whose head is the fork's default
-branch checks out as `<owner>/<branch>`, for example
-`contrib/main`). Record the actual checked-out branch name as
-`HEAD_BRANCH` for the push-target lookup below.
+Record `head_remote` as `HEAD_REMOTE` and `merge_ref` as
+`HEAD_MERGE_REF` for Section 4.4. `branch` may differ from
+`head_ref` (a fork's default branch checks out as
+`<owner>/<branch>`); `ahead_of_head_sha: true` means the branch
+carries unpushed commits from a prior run — continue.
 
-- **`HEAD` equals `head_sha`**: the tree is exactly at the PR
-  head — continue.
-- **`HEAD` is a descendant of `head_sha`** (`git merge-base
-  --is-ancestor <head_sha> HEAD` holds): the local branch
-  carries unpushed commits from a prior run (for example a
-  failed-push retry) — continue; never reset or discard local
-  commits.
-- **Otherwise**: if `git status --porcelain --untracked-files=no`
-  prints anything, **STOP** with error:
-  > "Working tree has uncommitted changes. Commit or stash them,
-  > then rerun `/uf.address-feedback <PR_NUMBER>`."
+On `status: "error"`, **STOP** and report the tool's `message`
+(it carries the specific git or gh error); act on `code`:
 
-  Then run:
-
-  ```bash
-  gh pr checkout <PR_NUMBER>
-  ```
-
-  If the checkout fails, **STOP** and report the specific error.
-  The common cause is untracked files that collide with tracked
-  files on the PR branch — the dirty check above passes them
-  because it excludes untracked files, so git aborts with
-  "untracked working tree files would be overwritten".
-  Remediate by removing, renaming, or stashing them
-  (`git stash -u` includes untracked files; plain `git stash`
-  skips them), then rerun `/uf.address-feedback <PR_NUMBER>`.
-
-  `gh pr checkout` resolves the PR's head repository (fork or
-  same-repo) and records the checked-out branch's remote and
-  merge ref (for a fork PR with maintainer edits disabled, the
-  merge ref is the read-only `refs/pull/<N>/head` — detected
-  below). Never fetch the head branch by guessing a remote
-  name — in a fork-and-upstream clone, `origin` is usually the
-  fork and does not carry the PR.
-
-After the checkout, re-run `git branch --show-current` and
-`git rev-parse HEAD`, and re-apply the identity checks above:
-accept `HEAD` equal to or descending from `head_sha`; otherwise
-(the branch is unrelated to the PR head), **STOP** and report
-both SHAs; never reset or discard local commits.
-
-Record the push target that `gh pr checkout` configured for the
-actual checked-out branch (`HEAD_BRANCH`), for Section 4.4.
-Before interpolating `HEAD_BRANCH` into the config keys below,
-validate it: **STOP** if it contains any character outside the
-conservative set `A-Za-z0-9._/-`:
-
-```bash
-git config "branch.<HEAD_BRANCH>.remote"
-git config "branch.<HEAD_BRANCH>.merge"
-```
-
-The same charset gate applies to every PR-derived value before
-it reaches any shell template in this command: **STOP** when
-`HEAD_BRANCH` or `HEAD_MERGE_REF` contains any character outside
-`A-Za-z0-9._/-`, or when `HEAD_REMOTE` is neither a plain remote
-name (`A-Za-z0-9._-`) nor an `https://` URL without userinfo
-(`https://[A-Za-z0-9._/-]+`). Quoting the interpolated values —
-as every template below does — is defense-in-depth, not
-neutralization: `$`, backtick, and `"` are legal git refname
-characters that remain active inside double quotes, and
-`HEAD_BRANCH` and `HEAD_MERGE_REF` derive from the PR author's
-branch name. The charset gate is the enforcement that makes the
-templates safe to render; #965 tracks the argument-array tool
-that removes string interpolation entirely.
-
-Record the first value as `HEAD_REMOTE` (a remote name or URL)
-and the second as `HEAD_MERGE_REF` (for example
-`refs/heads/<head_ref>`). If either is unset, **STOP** and report
-that the PR head has no configured push target. If
-`HEAD_MERGE_REF` starts with `refs/pull/`, **STOP**: it is a
-read-only merge ref (a fork PR with maintainer edits disabled),
-so the Section 4.4 push would always be rejected — report that
-the PR head cannot be pushed to from this clone. Finally,
-cross-check the push target against the frozen PR head context:
-`HEAD_MERGE_REF` MUST equal `refs/heads/<head_ref>` — the merge
-ref `gh pr checkout` writes for the PR's head branch. Any other
-value means the checked-out branch is not the PR head branch
-(for example `main` after the PR merged upstream carries
-`refs/heads/main`): **STOP** and report that the working tree is
-on a branch whose push target is `HEAD_MERGE_REF`, not the PR
-head branch `<head_ref>` — never push this PR's commits to a
-different branch. Ancestry alone cannot make this distinction —
-any branch that merely contains `head_sha` (such as a `main`
-that absorbed the merged PR) passes the descendant check above,
-so the merge-ref cross-check is what ties the push target to
-the frozen PR head.
+- `DIRTY_TREE`: tell the author to commit or stash tracked
+  changes, then rerun `/uf.address-feedback <PR_NUMBER>`.
+- `CHECKOUT_FAILED`: report the error. For untracked files that
+  collide with the PR branch, the message names the `git stash -u`
+  remediation; when `retryable` is true (a fetch or network
+  failure), the author may rerun once the cause is fixed.
+- `UNRELATED_BRANCH`: the branch is unrelated to the PR head, or
+  its merge ref is not `refs/heads/<head_ref>` — report it and
+  never push this PR's commits to a different branch.
+- `READ_ONLY_MERGE_REF`: the merge ref is `refs/pull/<N>/head`
+  (a fork PR with maintainer edits disabled) — report that the PR
+  head cannot be pushed to from this clone.
+- `NO_PUSH_TARGET`: detached `HEAD`, or the branch has no
+  configured remote or merge ref — report it.
+- `UNSAFE_PUSH_TARGET`: the branch, merge ref, or remote falls
+  outside the conservative charsets that make the Section 4.4
+  templates safe to render — report it.
 
 ### 1.3 Fetch Reviews and Comments
 

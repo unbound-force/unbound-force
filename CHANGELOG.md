@@ -6,6 +6,20 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- checkout-pr-head: new `checkout_pr_head` tool in the
+  `uf-workflow` plugin puts the working tree on a PR's head and
+  resolves its push target through argument-array git/gh calls
+  (identity keyed on HEAD equal to or descending from the frozen
+  head SHA, dirty gate, `gh pr checkout`, re-verify, push-target
+  config read for the actual branch, `refs/pull/` and
+  `refs/heads/<head_ref>` checks, refname charset gate). Failure
+  codes: `DIRTY_TREE`, `CHECKOUT_FAILED`, `UNRELATED_BRANCH`,
+  `READ_ONLY_MERGE_REF`, `NO_PUSH_TARGET`, `UNSAFE_PUSH_TARGET`.
+  `/uf.address-feedback` Section 1.2.1 now calls the tool
+  (canonical and scaffold mirror); STOP behavior is unchanged.
+  Instruction delta (DE-004): Section 1.2.1 108 → 50 lines
+  (733 → 336 words) per copy. (Spec:
+  openspec/changes/checkout-pr-head/) (Docs: #967)
 - instruction-lint: a deterministic linter for the instruction
   prose that drives the agent ecosystem (agents, commands,
   skills, convention packs, AGENTS.md): frontmatter shape,

@@ -204,20 +204,20 @@ func TestCommandContracts_AddressFeedback(t *testing.T) {
 		{name: "planned no-success", all: []string{"availability-only causes produce native, generic, and canonical `unavailable`", "policy, plan, budget, limit, persistence, calculation, or mixed cause", "native, generic, and canonical `inconclusive`", "retain the item for explicit human handling", "must not be converted to `author-decides`"}},
 		{name: "tier two finalization", all: []string{"finalize every tier 2 item, including plan or no-success failures, with a single `consolidate_dispatch` call", "\"workflow_id\": \"uf.address-feedback\"", "never call `finalize_review_dispatch` yourself", "the scalar review verdict (`review_verdict`)"}},
 		{name: "feedback triage artifact", all: []string{".uf/artifacts/feedback-triage/pr-<pr_number>-round-<m>.json", "existing feedback-triage artifact", "emitted in addition to each tier 2 `review-dispatch` artifact"}},
-		{name: "pr head checkout", all: []string{"### 1.2.1 Check Out the PR Head", "MUST be on the PR head before the first `get_progress` or `checkpoint` call", "gh pr checkout <PR_NUMBER>", "Never fetch the head branch by guessing a remote name", "never reset or discard local commits", "Never call `get_progress` or `checkpoint` from another branch."}},
-		{name: "pr head identity keyed on head sha", all: []string{"Identity is keyed on `HEAD`, not on the local branch name", "`git merge-base --is-ancestor <head_sha> HEAD`", "carries unpushed commits from a prior run", "Record the actual checked-out branch name as `HEAD_BRANCH`", `git config "branch.<HEAD_BRANCH>.remote"`, `git config "branch.<HEAD_BRANCH>.merge"`}},
-		{name: "read-only merge ref stops early", all: []string{"If `HEAD_MERGE_REF` starts with `refs/pull/`, **STOP**", "read-only merge ref (a fork PR with maintainer edits disabled)", "the Section 4.4 push would always be rejected"}},
-		{name: "checkout failure stop", all: []string{"If the checkout fails, **STOP** and report the specific error", "untracked working tree files would be overwritten", "`git stash -u` includes untracked files; plain `git stash` skips them"}},
+		{name: "pr head checkout", all: []string{"### 1.2.1 Check Out the PR Head", "MUST be on the PR head before the first `get_progress` or `checkpoint` call", "Call the `checkout_pr_head` plugin tool", "`{pr_number: <PR_NUMBER>, head_ref: <head_ref>, head_sha: <head_sha>}`", "never resets or discards local commits", "Never call `get_progress` or `checkpoint` from another branch."}},
+		{name: "pr head identity keyed on head sha", all: []string{"keys identity on `HEAD` (equal to or descending from `head_sha`)", "`ahead_of_head_sha: true`", "carries unpushed commits from a prior run", "`branch` may differ from `head_ref`", "Record `head_remote` as `HEAD_REMOTE` and `merge_ref` as `HEAD_MERGE_REF`"}},
+		{name: "tool error stops with specific message", all: []string{"On `status: \"error\"`, **STOP** and report the tool's `message`", "carries the specific git or gh error"}},
+		{name: "dirty tree stop", all: []string{"`DIRTY_TREE`", "commit or stash tracked changes"}},
+		{name: "checkout failure stop", all: []string{"`CHECKOUT_FAILED`", "the `git stash -u` remediation", "a fetch or network failure"}},
+		{name: "unrelated branch and merge ref cross-check stop", all: []string{"`UNRELATED_BRANCH`", "the branch is unrelated to the PR head", "its merge ref is not `refs/heads/<head_ref>`", "never push this PR's commits to a different branch"}},
+		{name: "read-only merge ref stops early", all: []string{"`READ_ONLY_MERGE_REF`", "`refs/pull/<N>/head`", "a fork PR with maintainer edits disabled", "cannot be pushed to from this clone"}},
+		{name: "unset push target stop", all: []string{"`NO_PUSH_TARGET`", "no configured remote or merge ref"}},
+		{name: "refname charset gate", all: []string{"`UNSAFE_PUSH_TARGET`", "conservative charsets that make the Section 4.4 templates safe to render"}},
 		{name: "push to configured head remote", all: []string{`git fetch "<HEAD_REMOTE>" "<HEAD_MERGE_REF>"`, `git push "<HEAD_REMOTE>" "HEAD:<HEAD_MERGE_REF>"`, "git rev-list --left-right --count HEAD...FETCH_HEAD", "no remote-tracking ref is written, so `git status` cannot observe divergence"}},
 		{name: "resume guard confirms branch first", all: []string{"Confirm the working tree is on the PR head per Section 1.2.1", "the re-check is unconditional on resume"}},
 		{name: "progress tracking intro keyed to 1.2.1", all: []string{"As soon as Section 1.2.1 has put the working tree on the PR head, call `get_progress`"}},
 		{name: "todowrite resume confirms branch first", all: []string{"On resume from compressed context, first confirm the working tree is on the PR head per Section 1.2.1", "never read it from another branch"}},
-		{name: "dirty tree stop", all: []string{"git status --porcelain --untracked-files=no", "Working tree has uncommitted changes. Commit or stash them"}},
-		{name: "unrelated branch stop", all: []string{"the branch is unrelated to the PR head", "**STOP** and report both SHAs"}},
-		{name: "unset push target stop", all: []string{"If either is unset, **STOP** and report", "no configured push target"}},
-		{name: "merge ref cross-check stops wrong branch", all: []string{"`HEAD_MERGE_REF` MUST equal `refs/heads/<head_ref>`", "never push this PR's commits to a different branch", "any branch that merely contains `head_sha`"}},
 		{name: "fetch failure stop", all: []string{"If the fetch fails", "do not run the divergence comparison", "silently run against stale state"}},
-		{name: "refname charset gate", all: []string{"Before interpolating `HEAD_BRANCH` into the config keys below", "**STOP** if it contains any character outside", "`A-Za-z0-9._/-`", "defense-in-depth, not neutralization", "remain active inside double quotes", "#965 tracks the argument-array tool"}},
 		{name: "pr number digits only", all: []string{"`PR_NUMBER` MUST be a positive integer (digits only)", "any other form is an argument error"}},
 	}
 
@@ -249,8 +249,7 @@ func TestCommandContracts_AddressFeedback(t *testing.T) {
 		// The origin-hardcoded push choreography that Section 4.4
 		// replaced must not return alongside the pinned HEAD_REMOTE
 		// forms. The fragments match the exact removed invocation
-		// forms because "origin" legitimately survives in prose (the
-		// Section 1.2.1 warning against guessing a remote name).
+		// forms because "origin" may legitimately survive in prose.
 		for _, forbidden := range []string{
 			"git fetch origin <branch>",
 			"git push origin <branch>",
@@ -258,6 +257,23 @@ func TestCommandContracts_AddressFeedback(t *testing.T) {
 		} {
 			if strings.Contains(normalized, normalizeCommandText(forbidden)) {
 				t.Errorf("%s: origin-hardcoded push choreography must not return: %q", copy.name, forbidden)
+			}
+		}
+
+		// The Section 1.2.1 git choreography that checkout_pr_head
+		// replaced (#965) must not return as prose: the tool owns
+		// the identity check, dirty gate, checkout, and push-target
+		// config reads through argument arrays, so a re-added shell
+		// template would reintroduce unquoted refname interpolation.
+		for _, forbidden := range []string{
+			`git config "branch.<HEAD_BRANCH>.remote"`,
+			`git config "branch.<HEAD_BRANCH>.merge"`,
+			"git merge-base --is-ancestor <head_sha> HEAD",
+			"git status --porcelain --untracked-files=no",
+			"Before interpolating `HEAD_BRANCH` into the config keys below",
+		} {
+			if strings.Contains(normalized, normalizeCommandText(forbidden)) {
+				t.Errorf("%s: tool-owned Section 1.2.1 choreography must not return as prose: %q", copy.name, forbidden)
 			}
 		}
 	}

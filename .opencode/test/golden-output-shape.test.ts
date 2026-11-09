@@ -847,6 +847,85 @@ describe("golden output shapes -- uf-workflow registry (22 documented sites)", (
 })
 
 // ---------------------------------------------------------------------------
+// checkout_pr_head -- uf.address-feedback.md Section 1.2.1 (checkout-pr-head
+// change, issue #965; added after the seam-verification site registry, so
+// it sits outside the 22 counted uf-workflow sites above)
+// ---------------------------------------------------------------------------
+
+describe("golden output shapes -- checkout_pr_head (uf.address-feedback.md Section 1.2.1)", () => {
+  const HEAD_SHA = "a".repeat(40)
+  const OTHER_SHA = "c".repeat(40)
+
+  it("returns branch, head_remote, merge_ref, ahead_of_head_sha, and checked_out after a gh pr checkout", async () => {
+    const directory = await makeScratch()
+    const registry = await loadRegistry(UfWorkflowPlugin, directory)
+
+    // Section 1.2.1 sequence through the production executors: HEAD is
+    // off the PR head, the tree is clean, gh pr checkout moves HEAD onto
+    // head_sha, and the push target is read for the actual branch.
+    let head = OTHER_SHA
+    const calls: string[] = []
+    vi.mocked(execFileSync).mockImplementation(((command: string, args: readonly string[]) => {
+      const key = `${command} ${args.join(" ")}`
+      calls.push(key)
+      const responses: Record<string, string> = {
+        "git status --porcelain --untracked-files=no": "",
+        "git branch --show-current": "contrib/main",
+        "git config --get branch.contrib/main.remote": "https://github.com/contrib/repo.git",
+        "git config --get branch.contrib/main.merge": "refs/heads/main",
+      }
+      if (key === "git rev-parse HEAD") return head
+      if (key === "gh pr checkout 42") {
+        head = HEAD_SHA
+        return ""
+      }
+      if (key === `git merge-base --is-ancestor ${HEAD_SHA} HEAD`) {
+        throw Object.assign(new Error("exit 1"), { status: 1 })
+      }
+      const output = responses[key]
+      if (output === undefined) throw new Error(`unexpected invocation: ${key}`)
+      return output
+    }) as unknown as typeof execFileSync)
+
+    const data = expectOk(
+      await callEnvelopeTool<{
+        branch: string
+        head_remote: string
+        merge_ref: string
+        ahead_of_head_sha: boolean
+        checked_out: boolean
+      }>(registry, "checkout_pr_head", { pr_number: 42, head_ref: "main", head_sha: HEAD_SHA }),
+    )
+    expect(data).toEqual({
+      branch: "contrib/main",
+      head_remote: "https://github.com/contrib/repo.git",
+      merge_ref: "refs/heads/main",
+      ahead_of_head_sha: false,
+      checked_out: true,
+    })
+    expect(calls).toContain("gh pr checkout 42")
+  })
+
+  it("carries the READ_ONLY_MERGE_REF failure code through the registry", async () => {
+    const directory = await makeScratch()
+    const registry = await loadRegistry(UfWorkflowPlugin, directory)
+    mockGit({
+      "git rev-parse HEAD": HEAD_SHA,
+      "git branch --show-current": "pr-42",
+      "git config --get branch.pr-42.remote": "https://github.com/contrib/repo.git",
+      "git config --get branch.pr-42.merge": "refs/pull/42/head",
+    })
+    const envelope = await callEnvelopeTool(registry, "checkout_pr_head", {
+      pr_number: 42,
+      head_ref: "main",
+      head_sha: HEAD_SHA,
+    })
+    expect(envelope.status).toBe("error")
+    expect(envelope.status === "error" ? envelope.code : undefined).toBe("READ_ONLY_MERGE_REF")
+  })
+})
+
+// ---------------------------------------------------------------------------
 // uf-finale registry -- 9 documented sites
 // ---------------------------------------------------------------------------
 
