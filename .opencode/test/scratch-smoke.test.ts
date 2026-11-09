@@ -142,6 +142,7 @@ describe("provider-free scratch-repository smoke test", () => {
       } as unknown as PluginInput)
 
       expect(Object.keys(hooks.tool).sort()).toEqual([
+        "checkout_pr_head",
         "checkpoint",
         "clear_progress",
         "format_unleash_demo",

@@ -141,6 +141,7 @@ describe("UfWorkflowPlugin", () => {
     expect(result).toBeDefined()
     expect(result.tool).toBeDefined()
     expect(Object.keys(result.tool).sort()).toEqual([
+      "checkout_pr_head",
       "checkpoint",
       "clear_progress",
       "format_unleash_demo",
