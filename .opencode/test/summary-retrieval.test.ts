@@ -270,9 +270,6 @@ describe("summary retrieval", () => {
       categoryChars: 128,
       descriptionChars: 512,
       fileChars: 256,
-      informationChars: 512,
-      tagChars: 128,
-      agentChars: 128,
       verdictReasonChars: 512,
       warningKindChars: 64,
       warningDetailChars: 256,
@@ -284,7 +281,9 @@ describe("summary retrieval", () => {
    * Every array at its cap and every bounded field at (or cut to) its
    * maximum. Warning kinds are always one of the five documented names, so
    * the 64-character kind cap is unreachable; the composed detail is pinned
-   * at 256 through an oversized agent name.
+   * at 256 through an oversized agent name. Proposals carry no per-field
+   * cap (RD-FR-058); they use the schema-maximum agent and tag (128) with a
+   * 512-character body, kept verbatim.
    */
   function worstCaseInput(text: (length: number) => string) {
     return summaryInput({
@@ -302,7 +301,7 @@ describe("summary retrieval", () => {
         makeAdvisory(index, { severity: text(20), description: text(600) }),
       ),
       proposals: Array.from({ length: 10 }, (_, index) =>
-        makeProposal(index, { agent: text(200), information: text(600), tag: text(200) }),
+        makeProposal(index, { agent: text(128), information: text(512), tag: text(128) }),
       ),
       warnings: Array.from({ length: 5 }, () => ({
         ...makeWarning("orphaned_submissions_excluded"),
@@ -336,6 +335,7 @@ describe("summary retrieval", () => {
       expect(proposal.agent.length).toBe(128)
       expect(proposal.information.length).toBe(512)
       expect(proposal.tag.length).toBe(128)
+      expect(proposal).not.toHaveProperty("truncated")
     }
     for (const warning of summary.warnings as Array<Record<string, string>>) {
       expect(warning.detail.length).toBe(256)
@@ -445,8 +445,87 @@ describe("summary retrieval", () => {
     const advisory = (summary.advisories as Array<Record<string, unknown>>)[0]
     expect(advisory.truncated).toBe(true)
     const proposal = (summary.proposals as Array<Record<string, unknown>>)[0]
-    expect(proposal.truncated).toBe(true)
+    // Proposals are never shortened (RD-FR-058, issue #969).
+    expect(proposal.information).toBe("i".repeat(600))
+    expect(proposal).not.toHaveProperty("truncated")
     expect(proposal).not.toHaveProperty("category")
+  })
+
+  describe("complete lesson proposals (RD-FR-058, issue #969)", () => {
+    // A lesson whose conclusion sits past the old 512-character cap.
+    const LONG_LESSON =
+      "When a review dispatch harvests lesson proposals, the parent stores them verbatim. ".repeat(30) +
+      "Conclusion: never shorten a proposal body in any retrieval mode."
+
+    it("returns a proposal past 512 characters verbatim and unflagged", () => {
+      expect(LONG_LESSON.length).toBeGreaterThan(2048)
+      const summary = buildSummaryRetrieval(
+        summaryInput({ proposals: [makeProposal(1, { information: LONG_LESSON })] }) as Parameters<
+          typeof buildSummaryRetrieval
+        >[0],
+      )
+      const proposals = summary.proposals as Array<Record<string, unknown>>
+      expect(proposals[0]).toEqual({
+        agent: "divisor-guard",
+        information: LONG_LESSON,
+        tag: "review-dispatch",
+        category: "pattern",
+      })
+      expect(summary.proposals_truncated).toBeUndefined()
+    })
+
+    it("drops over-budget proposals whole and flags the drop", () => {
+      // Ten schema-maximum (16,384-character) proposals cannot fit 40 KiB.
+      const maximal = (index: number) => `${index}`.padEnd(16_384, "x")
+      const summary = buildSummaryRetrieval(
+        summaryInput({
+          findings: [makeFinding(1)],
+          proposals: Array.from({ length: 10 }, (_, index) =>
+            makeProposal(index, { information: maximal(index) }),
+          ),
+        }) as Parameters<typeof buildSummaryRetrieval>[0],
+      )
+      expect(byteSize(summary)).toBeLessThan(BYTE_BUDGET)
+      expect(summary.proposals_truncated).toBe(true)
+      // Findings drop before proposals.
+      expect(summary.findings).toEqual([])
+      const kept = summary.proposals as Array<Record<string, unknown>>
+      expect(kept.length).toBeGreaterThan(0)
+      expect(kept.length).toBeLessThan(10)
+      kept.forEach((proposal, index) => {
+        expect(proposal.information).toBe(maximal(index))
+        expect(proposal).not.toHaveProperty("truncated")
+      })
+    })
+
+    it("keeps the compact finalization proposals verbatim and under budget", () => {
+      const result = {
+        status: "success",
+        operation_verdict: "APPROVE",
+        correlation_id: "11111111-1111-4111-8111-111111111111",
+        artifact_path: "/tmp/artifact.json",
+        review_verdict: { council_decision: "APPROVED" },
+        calculated_assessment: { authoritative: true },
+        errors: [],
+      } as unknown as Parameters<typeof buildCompactFinalization>[0]
+      const single = buildCompactFinalization(result, RUN_COUNTS, [makeProposal(1, { information: LONG_LESSON })], [])
+      expect((single.proposals as Array<Record<string, unknown>>)[0].information).toBe(LONG_LESSON)
+      expect(single.proposals_truncated).toBeUndefined()
+
+      const maximal = (index: number) => `${index}`.padEnd(16_384, "y")
+      const crowded = buildCompactFinalization(
+        result,
+        RUN_COUNTS,
+        Array.from({ length: 10 }, (_, index) => makeProposal(index, { information: maximal(index) })),
+        [],
+      )
+      expect(byteSize(crowded)).toBeLessThan(BYTE_BUDGET)
+      expect(crowded.proposals_truncated).toBe(true)
+      const kept = crowded.proposals as Array<Record<string, unknown>>
+      expect(kept.length).toBeGreaterThan(0)
+      kept.forEach((proposal, index) => expect(proposal.information).toBe(maximal(index)))
+      expect(Object.keys(crowded).slice(-2)).toEqual(["calculated_assessment", "errors"])
+    })
   })
 })
 

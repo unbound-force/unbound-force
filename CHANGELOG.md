@@ -1473,6 +1473,19 @@ Each entry follows the format: `- <change-name>: <summary>`.
   patch-staleness window and the recipe sweep's pins-only scope in
   `docs/osv-transitive-scan.md`.
   (Spec: openspec/changes/plugin-lock-advisories/)
+- full-lesson-proposals: `consolidate_dispatch` no longer cuts
+  lesson proposals to 512 characters in its summary retrieval or
+  compact finalization result (issue #969, RD-FR-058). PR #955
+  stored 12 council learnings from the summary preview, each cut
+  mid-word. Every proposal field is now copied verbatim; a
+  proposal that does not fit the 40,960-byte budget is dropped
+  whole and counted by `proposals_truncated`, and no proposal
+  entry carries `truncated`. The compact finalization result
+  gains the same byte budget. Findings, advisories, and warnings
+  keep their display caps. `uf.review-council.md` and
+  `uf.review-pr.md` describe the preview as complete entries;
+  lessons are still stored from the artifact. Adds an end-to-end
+  harvest regression test
 - stop-shipping-plugin-lock: bump the review-plugin pins for CVE
   remediation after the CI throwaway-lock OSV scan surfaced five
   HIGH advisories: zod 4.1.8 → 4.6.6 (GHSA-mrhx-c7xc-m3w5) and

@@ -2548,7 +2548,7 @@ describe("consolidate_dispatch durable and deduplicated proposals (RD-FR-054, RD
     "When improving error taxonomy in a fail-closed path validator, preserve the read invariant rather than just " +
     "the error codes: content is read only when realpath fully resolves the entire path inside the allowed roots."
 
-  it("persists full-length proposals after advisories while the compact result stays a preview", async () => {
+  it("persists full-length proposals after advisories and previews them unshortened", async () => {
     const projectRoot = await scratchRoot("proposals")
     const information = "Persist the whole lesson. ".repeat(120)
     await setupDispatchSession(
@@ -2560,8 +2560,9 @@ describe("consolidate_dispatch durable and deduplicated proposals (RD-FR-054, RD
     const compact = JSON.parse((await tool.execute({ provenance: provenance("opsx/review-dispatch-consumer-bounds") }, noopContext())).output)
 
     expect(compact.status).toBe("success")
-    expect(compact.proposals[0].information).toHaveLength(512)
-    expect(compact.proposals[0].truncated).toBe(true)
+    // RD-FR-058 (issue #969): the preview never shortens a proposal.
+    expect(compact.proposals[0].information).toBe(information)
+    expect(compact.proposals[0]).not.toHaveProperty("truncated")
     const artifact = await readPersistedArtifact(compact)
     expect(artifact.payload.proposals).toEqual([
       { agent: "divisor-guard", information, tag: "review-dispatch", category: "gotcha" },
@@ -2756,4 +2757,89 @@ describe("consolidate_dispatch durable and deduplicated proposals (RD-FR-054, RD
     expect((page.entries as Array<{ information: string }>)[0].information).toBe(information)
   })
 
+})
+
+describe("lesson harvest path keeps the full proposal text (RD-FR-058, issue #969)", () => {
+  // Shaped like the PR #955 council lessons: the conclusion sits past the
+  // old 512-character summary cap, so a cut body ends mid-word.
+  const LONG_LESSON =
+    (
+      "A force-with-lease push after a rebase must name the exact expected remote SHA; a bare lease reads the " +
+      "local tracking ref, which a background fetch can advance, so the push silently overwrites a concurrent " +
+      "commit. "
+    ).repeat(4) +
+    "Conclusion: capture the remote SHA before rebasing and pass it as --force-with-lease=<ref>:<sha>, then " +
+    "verify the pushed head equals the local head."
+
+  it("submits a long proposal, consolidates in summary mode, and harvests it intact", async () => {
+    expect(LONG_LESSON.length).toBeGreaterThan(512)
+    await withBun(async () => {
+      const { directory, diffPath } = await dispatchScratchProject()
+      let hooks: Awaited<ReturnType<typeof ReviewDispatchPlugin.server>> | undefined
+      // The fake child reviewer submits its lesson through the real
+      // submit_lesson_proposal tool before returning its final text.
+      const client = fakeClient({
+        promptHandler: async (request, index) => {
+          const childSession = `child-session-${index}`
+          const submitted = await hooks!.tool.submit_lesson_proposal.execute(
+            { information: LONG_LESSON, tag: "git-push", category: "gotcha" },
+            { ...dispatchParentContext(childSession), agent: "divisor-guard" },
+          )
+          expect(submitted.output).toContain("lesson proposal submitted")
+          const req = request as { body?: { model?: { providerID: string; modelID: string } } }
+          return {
+            data: {
+              info: {
+                role: "assistant",
+                providerID: req.body?.model?.providerID ?? "provider",
+                modelID: req.body?.model?.modelID ?? "standard",
+              },
+              parts: [{ id: "t", sessionID: childSession, messageID: "m", type: "text", text: "review output", ignored: false }],
+            },
+            error: undefined,
+          }
+        },
+      })
+      hooks = await ReviewDispatchPlugin.server({ client, directory, worktree: directory } as unknown as PluginInput)
+
+      const planEntry = makePlanEntry({ agent: "divisor-guard", sequence: 1, model: "provider/standard", variant: "high" })
+      const input = makeBaseInput(diffPath, [planEntry], "opsx/full-lesson-proposals")
+      // Persist the dispatched plan so finalization can match the run to it.
+      ;(input.session_metadata as Record<string, unknown>).plan = [planEntry]
+      const correlationId = await aggregateDispatch(hooks, input)
+
+      // The parent's summary retrieval (uf.review-council Section 4) is the
+      // payload PR #955 stored from: it must carry the complete text.
+      const tool = createConsolidateDispatchTool(createFinalizationDependencies(directory))
+      const summary = JSON.parse(
+        (await tool.execute({ detail: "summary", correlation_id: correlationId }, aggregateParentContext())).output,
+      )
+      expect(summary.correlation_id).toBe(correlationId)
+      expect(summary.proposals).toEqual([
+        { agent: "divisor-guard", information: LONG_LESSON, tag: "git-push", category: "gotcha" },
+      ])
+      expect(summary).not.toHaveProperty("proposals_truncated")
+
+      // Every retrieval mode agrees on the harvested text.
+      const full = JSON.parse((await tool.execute({ correlation_id: correlationId }, aggregateParentContext())).output)
+      expect(full.proposals).toEqual(summary.proposals)
+
+      // Finalization: the compact preview and the persisted artifact page
+      // the parent stores from both carry the same complete text.
+      const compact = JSON.parse(
+        (
+          await tool.execute(
+            { correlation_id: correlationId, provenance: provenance("opsx/full-lesson-proposals") },
+            aggregateParentContext(),
+          )
+        ).output,
+      )
+      expect(compact.errors).toEqual([])
+      expect(compact.status).toBe("success")
+      expect(compact.proposals).toEqual(summary.proposals)
+      const page = await readDispatchArtifact({ correlation_id: correlationId, section: "proposals" }, directory)
+      expect(page).toMatchObject({ status: "ok", total: 1, next_offset: null })
+      expect(page.entries).toEqual(summary.proposals)
+    })
+  })
 })

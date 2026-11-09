@@ -4083,6 +4083,12 @@ function buildAdvisories(
  * finalization. The byte budget is enforced by construction: the builder
  * serializes compactly, measures the UTF-8 length, and drops trailing entries
  * in a fixed order until the result is strictly under budget.
+ *
+ * Lesson proposals carry no per-field character cap (RD-FR-058): a proposal
+ * is either present with its complete submitted text or dropped whole and
+ * counted by proposals_truncated, so no retrieval mode can hand a parent a
+ * shortened lesson to persist (issue #969). Proposal fields are already
+ * bounded by PayloadLessonProposalSchema (information 16,384, tag 128).
  */
 export const SUMMARY_LIMITS = {
   findings: 15,
@@ -4093,9 +4099,6 @@ export const SUMMARY_LIMITS = {
   categoryChars: 128,
   descriptionChars: 512,
   fileChars: 256,
-  informationChars: 512,
-  tagChars: 128,
-  agentChars: 128,
   verdictReasonChars: 512,
   warningKindChars: 64,
   warningDetailChars: 256,
@@ -4174,29 +4177,27 @@ function projectSummaryAdvisory(
   return result
 }
 
+/**
+ * Project one lesson proposal for a bounded tool result (RD-FR-058). Every
+ * field is copied verbatim, never shortened: parents persist proposals with
+ * dewey_store_learning, and a cut body silently loses the lesson's
+ * conclusion (issue #969). An entry that does not fit a result's byte budget
+ * is dropped whole by the caller and flagged by proposals_truncated.
+ */
 function projectSummaryProposal(
   proposal: unknown,
 ): Record<string, unknown> {
   const record = asRecord(proposal)
-  const agent = truncateText(String(record.agent ?? ""), SUMMARY_LIMITS.agentChars)
-  const information = truncateText(
-    String(record.information ?? ""),
-    SUMMARY_LIMITS.informationChars,
-  )
-  const tag = truncateText(String(record.tag ?? ""), SUMMARY_LIMITS.tagChars)
   const result: Record<string, unknown> = {
-    agent: agent.text,
-    information: information.text,
-    tag: tag.text,
+    agent: String(record.agent ?? ""),
+    information: String(record.information ?? ""),
+    tag: String(record.tag ?? ""),
   }
   if (
     typeof record.category === "string" &&
     (LESSON_CATEGORY_VALUES as readonly string[]).includes(record.category)
   ) {
     result.category = record.category
-  }
-  if (agent.truncated || information.truncated || tag.truncated) {
-    result.truncated = true
   }
   return result
 }
@@ -4396,15 +4397,33 @@ export function buildCompactFinalization(
       null,
     run_counts: runCounts,
   }
-  if (projectedProposals.length > 0) compact.proposals = projectedProposals
-  if (projectedWarnings.length > 0) compact.warnings = projectedWarnings
-  if (proposals.length > SUMMARY_LIMITS.proposals) compact.proposals_truncated = true
-  if (warnings.length > SUMMARY_LIMITS.warnings) compact.warnings_truncated = true
-  compact.calculated_assessment = result.calculated_assessment === null
-    ? null
-    : { authoritative: result.calculated_assessment.authoritative }
-  compact.errors = result.errors
-  return compact
+  let proposalsTruncated = proposals.length > SUMMARY_LIMITS.proposals
+  const warningsTruncated = warnings.length > SUMMARY_LIMITS.warnings
+  const assemble = (): Record<string, unknown> => {
+    const assembled: Record<string, unknown> = { ...compact }
+    if (projectedProposals.length > 0) assembled.proposals = projectedProposals
+    if (projectedWarnings.length > 0) assembled.warnings = projectedWarnings
+    if (proposalsTruncated) assembled.proposals_truncated = true
+    if (warningsTruncated) assembled.warnings_truncated = true
+    assembled.calculated_assessment = result.calculated_assessment === null
+      ? null
+      : { authoritative: result.calculated_assessment.authoritative }
+    assembled.errors = result.errors
+    return assembled
+  }
+  // Full-length proposals (RD-FR-058) are the only entries here without a
+  // per-field cap: drop trailing proposals whole until the compact JSON is
+  // strictly under the RD-FR-049 byte budget, flagging every drop.
+  let assembled = assemble()
+  while (
+    projectedProposals.length > 0 &&
+    Buffer.byteLength(JSON.stringify(assembled), "utf8") >= SUMMARY_LIMITS.maxBytes
+  ) {
+    projectedProposals.pop()
+    proposalsTruncated = true
+    assembled = assemble()
+  }
+  return assembled
 }
 
 /**
@@ -4752,15 +4771,18 @@ export function createConsolidateDispatchTool(
       "advisories, and the findings_truncated / advisories_truncated / proposals_truncated / " +
       "warnings_truncated flags, capped at 15 findings ({severity, category, description, file, line}), " +
       "15 advisories ({severity, description}), 10 proposals ({agent, information, tag, category?}), and " +
-      "5 warnings ({kind, detail}); descriptions and proposal information are cut to 512 characters, files " +
-      "to 256, categories, tags, and agents to 128, warning kinds to 64 and details to 256, any shortened " +
-      "entry carries truncated: true, and trailing entries are dropped until the compact JSON is under " +
-      "40,960 bytes. detail: \"summary\" combined with provenance is rejected. " +
+      "5 warnings ({kind, detail}); descriptions are cut to 512 characters, files to 256, categories to " +
+      "128, warning kinds to 64 and details to 256, any shortened entry carries truncated: true, and " +
+      "trailing entries are dropped until the compact JSON is under 40,960 bytes. Proposal fields are " +
+      "never shortened: each proposal is complete or dropped whole and counted by proposals_truncated, in " +
+      "the summary and the compact finalization result alike. detail: \"summary\" combined with provenance " +
+      "is rejected. " +
       "Lesson proposals submitted by child agents are collected, near-identical proposals across personas are " +
       "merged (each merge reported as a duplicate_proposal_merged warning naming agent and kept_agent), and " +
       "the full-length proposals are persisted in the artifact's payload.proposals (after advisories, before " +
-      "plan and runs) on finalization. The proposals arrays in tool results are a capped preview: store lessons " +
-      "with dewey_store_learning from the artifact's payload.proposals, never from the preview. " +
+      "plan and runs) on finalization. The proposals arrays in tool results are a count-capped preview of " +
+      "complete entries: store lessons with dewey_store_learning from the artifact's payload.proposals, " +
+      "never from the preview. " +
       "Findings and proposals harvested from non-success runs are excluded from the payload and reported in a " +
       "top-level warnings array as orphaned_submissions_excluded entries (agent, run_id, discarded counts); " +
       "harvested findings or proposals that fail their schemas are likewise excluded and reported as " +
