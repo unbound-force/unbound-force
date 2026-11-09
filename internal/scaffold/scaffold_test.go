@@ -1803,9 +1803,15 @@ func TestPluginPackageInputs_GitignoreTracksCanonicalInputs(t *testing.T) {
 	}
 }
 
+// osvTransitiveWorkflows lists every workflow that runs a copy of the
+// throwaway-lock osv_plugin_transitive job. ci_security.yml is the
+// canonical copy (push and pull request); ci_scheduled.yml repeats it
+// daily. Each one is a pin-copy surface the drift sweeps must cover.
+var osvTransitiveWorkflows = []string{"ci_security.yml", "ci_scheduled.yml"}
+
 // TestPluginTestNpmPin_TwinsCISecurityPin pins the twin npm CLI pins:
 // the Makefile PLUGIN_TEST_NPM runner and every npx -y npm@ invocation
-// in .github/workflows/ci_security.yml must resolve the same npm
+// in each osvTransitiveWorkflows file must resolve the same npm
 // version. The pins exist because node 22's bundled npm 10.9.9 crashes
 // in Arborist on the lockless vitest 5 peer graph; drifting one surface
 // silently reintroduces the crash for the other.
@@ -1826,19 +1832,22 @@ func TestPluginTestNpmPin_TwinsCISecurityPin(t *testing.T) {
 	}
 	makefilePin := match[1]
 
-	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci_security.yml"))
-	if err != nil {
-		t.Fatalf("read ci_security.yml: %v", err)
-	}
 	workflowRe := regexp.MustCompile(`npx -y npm@(\S+)`)
-	matches := workflowRe.FindAllStringSubmatch(string(workflow), -1)
-	if len(matches) == 0 {
-		t.Fatal("ci_security.yml declares no npx -y npm@ pin; the throwaway-lock scan lost its runner pin")
-	}
-	for _, m := range matches {
-		if m[1] != makefilePin {
-			t.Errorf("ci_security.yml pins npm@%s, want the PLUGIN_TEST_NPM twin npm@%s; keep the two in sync",
-				m[1], makefilePin)
+	for _, name := range osvTransitiveWorkflows {
+		workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		matches := workflowRe.FindAllStringSubmatch(string(workflow), -1)
+		if len(matches) == 0 {
+			t.Errorf("%s declares no npx -y npm@ pin; the throwaway-lock scan lost its runner pin", name)
+			continue
+		}
+		for _, m := range matches {
+			if m[1] != makefilePin {
+				t.Errorf("%s pins npm@%s, want the PLUGIN_TEST_NPM twin npm@%s; keep the two in sync",
+					name, m[1], makefilePin)
+			}
 		}
 	}
 }
@@ -1891,8 +1900,17 @@ func TestRemediationConstants_CarryNpm11EscapeHatch(t *testing.T) {
 // docs/osv-transitive-scan.md pinned to the canonical job in
 // ci_security.yml. Hero repos copy the recipe verbatim, so a drifted
 // pin there ships a different scan than the one this repository tested
-// (PR #957 feedback). The Makefile twin of the npm pin is enforced by
-// TestPluginTestNpmPin_TwinsCISecurityPin.
+// (PR #957 feedback). The scheduled copy in ci_scheduled.yml must carry
+// the same pins as the canonical job. The Makefile twin of the npm pin
+// is enforced by TestPluginTestNpmPin_TwinsCISecurityPin.
+//
+// Scope: this sweep compares version pins only (npm runner,
+// GOTOOLCHAIN, osv-scanner). It does not compare flags, permissions,
+// action SHAs, or step structure between the recipe doc and the
+// workflow: the doc's comments and guidance deliberately differ, and
+// hero repos resolve their own action SHAs. The two CI copies are held
+// to full step parity by
+// TestOsvPluginTransitive_ScheduledStepsMatchCanonical.
 func TestOsvRecipeDoc_PinsMatchCanonicalJob(t *testing.T) {
 	root := findProjectRoot(t)
 	if root == "" {
@@ -1906,6 +1924,10 @@ func TestOsvRecipeDoc_PinsMatchCanonicalJob(t *testing.T) {
 	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci_security.yml"))
 	if err != nil {
 		t.Fatalf("read ci_security.yml: %v", err)
+	}
+	scheduled, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci_scheduled.yml"))
+	if err != nil {
+		t.Fatalf("read ci_scheduled.yml: %v", err)
 	}
 
 	// The doc npm pin appears inside backticks, so its sweep must stop
@@ -1938,7 +1960,79 @@ func TestOsvRecipeDoc_PinsMatchCanonicalJob(t *testing.T) {
 					pin.name, m[1], canonical)
 			}
 		}
+		scheduledMatches := pin.workflowRe.FindAllStringSubmatch(string(scheduled), -1)
+		if len(scheduledMatches) == 0 {
+			t.Errorf("ci_scheduled.yml declares no %s pin; the daily transitive scan lost its pin", pin.name)
+		}
+		for _, m := range scheduledMatches {
+			if m[1] != canonical {
+				t.Errorf("ci_scheduled.yml pins %s %s, want the ci_security.yml pin %s; keep the daily copy in sync",
+					pin.name, m[1], canonical)
+			}
+		}
 	}
+}
+
+// TestOsvPluginTransitive_ScheduledStepsMatchCanonical holds the daily
+// osv_plugin_transitive copy in ci_scheduled.yml to byte-identical
+// steps with the canonical job in ci_security.yml, so flags, step order
+// and action SHAs cannot drift between the push/PR scan and the daily
+// scan. The job header (name, comment, permissions) may differ.
+func TestOsvPluginTransitive_ScheduledStepsMatchCanonical(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+
+	steps := make(map[string]string, len(osvTransitiveWorkflows))
+	for _, name := range osvTransitiveWorkflows {
+		workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		block, err := osvTransitiveSteps(string(workflow))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		steps[name] = block
+	}
+	canonical := steps[osvTransitiveWorkflows[0]]
+	for _, name := range osvTransitiveWorkflows[1:] {
+		if steps[name] != canonical {
+			t.Errorf("%s osv_plugin_transitive steps differ from %s; keep the two copies byte-identical:\n--- %s\n%s\n--- %s\n%s",
+				name, osvTransitiveWorkflows[0], osvTransitiveWorkflows[0], canonical, name, steps[name])
+		}
+	}
+}
+
+// osvTransitiveSteps returns the steps: block of the osv_plugin_transitive
+// job: from its "    steps:" line to the next top-level job key or EOF.
+func osvTransitiveSteps(workflow string) (string, error) {
+	lines := strings.Split(workflow, "\n")
+	jobKey := regexp.MustCompile(`^  [A-Za-z0-9_-]+:\s*$`)
+	start := -1
+	for i, line := range lines {
+		if line == "  osv_plugin_transitive:" {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return "", fmt.Errorf("no osv_plugin_transitive job")
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if jobKey.MatchString(lines[i]) {
+			end = i
+			break
+		}
+	}
+	for i := start + 1; i < end; i++ {
+		if lines[i] == "    steps:" {
+			return strings.TrimRight(strings.Join(lines[i:end], "\n"), "\n"), nil
+		}
+	}
+	return "", fmt.Errorf("osv_plugin_transitive job has no steps: block")
 }
 
 func TestPluginPackageInputs_MirrorsMatchCanonical(t *testing.T) {

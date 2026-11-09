@@ -1440,6 +1440,19 @@ Each entry follows the format: `- <change-name>: <summary>`.
   packages, so a user-added package is not reported as drift; the
   provenance record is unchanged. (Spec:
   openspec/changes/merge-plugin-runtime-deps/, Fixes: #978)
+- plugin-lock-advisories (#991): the throwaway-lock scan pin sweeps
+  now cover the daily `osv_plugin_transitive` copy in
+  `ci_scheduled.yml`, and a new test holds its steps byte-identical
+  to the canonical `ci_security.yml` job. `uf doctor`'s tracked-lock
+  check runs git under `LC_ALL=C` and matches the
+  not-a-repository signature only at the start of a line, so a
+  translated message or a path embedding the phrase no longer flips
+  the result; `pluginManifestHasDevDependencies` falls back to
+  `os.ReadFile` like its sibling seams. Adds the SC-FR-004
+  scenario test, and records the accepted GOTOOLCHAIN
+  patch-staleness window and the recipe sweep's pins-only scope in
+  `docs/osv-transitive-scan.md`.
+  (Spec: openspec/changes/plugin-lock-advisories/)
 - stop-shipping-plugin-lock: bump the review-plugin pins for CVE
   remediation after the CI throwaway-lock OSV scan surfaced five
   HIGH advisories: zod 4.1.8 → 4.6.6 (GHSA-mrhx-c7xc-m3w5) and

@@ -68,7 +68,7 @@ Always run tests with `-race -count=1`. CI enforces this.
 | Dependencies | `ci_dependencies.yml` | Dependency review + dependabot |
 | CRAP Load | `ci_crapload.yml` | CRAP regression analysis |
 | Release | `release.yml` | workflow_dispatch, GoReleaser + Cosign + Syft + Homebrew tap |
-| Scheduled | `ci_scheduled.yml` | Daily OSV-Scanner + Scorecards |
+| Scheduled | `ci_scheduled.yml` | Daily OSV-Scanner + Scorecards, plus the daily plugin transitive OSV scan (throwaway lock; steps kept identical to `ci_security.yml`) |
 
 ## Project Structure
 

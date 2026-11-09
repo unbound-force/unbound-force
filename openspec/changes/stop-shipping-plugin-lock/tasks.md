@@ -65,7 +65,10 @@
   compensating vulnerability-scan posture, and the rollout note
   for existing hero repositories
 - [x] 4.4 Add the compensating `osv_plugin_transitive` job to
-  `.github/workflows/ci_security.yml` (throwaway-lock OSV scan)
+  `.github/workflows/ci_security.yml` (throwaway-lock OSV scan),
+  and repeat it daily in `.github/workflows/ci_scheduled.yml` so
+  newly-disclosed transitive advisories surface without a push
+  (pin and step parity enforced by `plugin-lock-advisories`)
 - [x] 4.5 Reconcile the sibling deltas for the lockless install:
   `ts-plugin-coverage-gate`, `init-override-stubs-gitignore-sync`,
   and `fix-triage-issue-dispatch-docs` (FR-007 lockstep set)

@@ -123,8 +123,9 @@ requirement.
 - **THEN** no plugin source remains in `.opencode/plugins/`
 - **AND** remediation names
   `npm install --ignore-scripts --omit=dev --no-package-lock`
-- **AND** remediation offers `npx -y npm@11.6.2` for targets whose
-  npm 10 crashes resolving devDependencies
+- **AND** remediation offers a pinned npm 11 runner through `npx`
+  (the `PLUGIN_TEST_NPM` twin) for targets whose npm 10 crashes
+  resolving devDependencies
 
 ### Requirement: Plugin Doctor Validation
 

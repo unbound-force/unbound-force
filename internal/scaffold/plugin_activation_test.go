@@ -560,6 +560,63 @@ func TestRun_PartialResultOnPluginActivationFailure(t *testing.T) {
 	}
 }
 
+// TestSCFR004_OfflineInstallFailure composes the SC-FR-004 "Offline
+// install failure" scenario through Run(): when npm cannot reach its
+// dependencies, no plugin source becomes auto-discoverable, and the
+// remediation names both the lockless install command and the pinned
+// npm 11 escape hatch (the Makefile PLUGIN_TEST_NPM twin) for targets
+// whose npm 10 crashes resolving devDependencies.
+func TestSCFR004_OfflineInstallFailure(t *testing.T) {
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+	makefile, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	match := regexp.MustCompile(`(?m)^PLUGIN_TEST_NPM \?= (npx -y npm@(\d+)\.\S+)$`).FindStringSubmatch(string(makefile))
+	if match == nil {
+		t.Fatal("Makefile does not declare PLUGIN_TEST_NPM as an npx -y npm@ pin")
+	}
+	escapeHatch, major := match[1], match[2]
+	if major != "11" {
+		t.Fatalf("PLUGIN_TEST_NPM pins npm major %s, want 11 (the runner class the scenario names)", major)
+	}
+
+	targetDir := t.TempDir()
+	var stdout bytes.Buffer
+	result, err := Run(reviewPluginRunOpts(t, targetDir, &stdout, true))
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil (soft failure exits zero)", err)
+	}
+	if result.FailedSubTools != 1 {
+		t.Errorf("Run() FailedSubTools = %d, want 1 (the failed install)", result.FailedSubTools)
+	}
+
+	// THEN no plugin source remains in .opencode/plugins/.
+	pluginsDir := filepath.Join(targetDir, ".opencode", "plugins")
+	if entries, readErr := os.ReadDir(pluginsDir); readErr == nil {
+		for _, entry := range entries {
+			t.Errorf("plugin source left in auto-discovery after offline failure: %s", entry.Name())
+		}
+	} else if !os.IsNotExist(readErr) {
+		t.Fatalf("read %s: %v", pluginsDir, readErr)
+	}
+
+	// AND remediation names the lockless install and the escape hatch.
+	out := stdout.String()
+	for _, want := range []string{
+		"npm install --ignore-scripts --omit=dev --no-package-lock",
+		escapeHatch,
+		"npm 10 crashes resolving devDependencies",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("offline failure output does not name %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRun_IndependentSubtoolsContinueOnPluginFailure(t *testing.T) {
 	targetDir := t.TempDir()
 	var stdout bytes.Buffer
@@ -1163,14 +1220,6 @@ func TestSCFR003_RunPreservesTargetDevDependencies(t *testing.T) {
 	}
 	stale := strings.Replace(current, "\"overrides\": {\n", "\"overrides\": {\n    \"stale-override\": \"1.0.0\",\n", 1)
 
-	contains := func(list []string, want string) bool {
-		for _, item := range list {
-			if item == want {
-				return true
-			}
-		}
-		return false
-	}
 	tests := []struct {
 		name     string
 		existing string
@@ -1208,7 +1257,7 @@ func TestSCFR003_RunPreservesTargetDevDependencies(t *testing.T) {
 			if string(got) != current {
 				t.Errorf("manifest after Run() differs from shipped plus devDependencies:\n%s", got)
 			}
-			if !contains(tt.bucket(result), manifestRel) {
+			if !containsPath(tt.bucket(result), manifestRel) {
 				t.Errorf("%s not reported in the expected result bucket: %+v", manifestRel, result)
 			}
 		})
