@@ -82,3 +82,8 @@ positives in repos that do not follow these pack conventions.
   review.
 - If B3 is accepted, #971's scaffold item closes and a tracking
   issue for the readiness criterion replaces it.
+- The baseline fixes in `speckit.constitution.md`, `opsx-apply.md`
+  and `skills/openspec-apply-change/SKILL.md` are not durable.
+  Upstream `specify init` and `openspec init` regenerate those
+  files (ADR-002), so the next regeneration can reopen the IL-010
+  error and the prose warnings until A2's CI step catches it.
