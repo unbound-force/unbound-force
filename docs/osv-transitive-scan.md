@@ -84,6 +84,15 @@ when it changes.
   security releases. Downloads are verified through
   `sum.golang.org` either way; the pin is about determinism, not
   integrity.
+- **Accepted GOTOOLCHAIN staleness window**: the floor pin fails
+  closed when the osv-scanner pin raises its Go floor, but nothing
+  moves it on a Go patch security release. The meta repo accepts
+  that staleness until the next deliberate osv-scanner bump, or
+  until a Go security release names a fix that affects building or
+  running the scanner, whichever comes first. The toolchain only
+  compiles the scanner in an ephemeral `contents: read` runner and
+  nothing it builds ships, so no scheduled tripwire is added. Watch
+  the Go security announcements and bump the floor on that trigger.
 - **`go-version-file` presumes a Go repo.** If your hero repo has no
   go.mod (the scanner is Go-built but your project need not be Go),
   replace it with an explicit floor, e.g. `go-version: '1.27.x'`, and
@@ -100,6 +109,13 @@ when it changes.
 - **Exact tool pins**: `osv-scanner@v2.7.0` is a version pin, not a
   mutable branch. Bump it deliberately, with the GOTOOLCHAIN floor,
   and re-review the scan output.
+- **What the meta repo's drift tests cover**: the npm runner,
+  `GOTOOLCHAIN`, and osv-scanner pins on this page must match the
+  canonical job (`TestOsvRecipeDoc_PinsMatchCanonicalJob`). Flags,
+  permissions, action SHAs, and step structure on this page are not
+  compared, because its comments and guidance differ on purpose.
+  The meta repo's two CI copies (`ci_security.yml` and
+  `ci_scheduled.yml`) are held to byte-identical steps.
 
 ## Running it locally
 

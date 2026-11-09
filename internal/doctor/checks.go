@@ -2353,6 +2353,10 @@ func checkManifestInstallConsistency(opts *Options) CheckResult {
 	}
 }
 
+// gitNotARepositoryRe matches git's C-locale outside-a-repository fatal
+// message only at the start of an output line.
+var gitNotARepositoryRe = regexp.MustCompile(`(?m)^fatal: not a git repository\b`)
+
 // checkTrackedPluginLock warns when .opencode/package-lock.json is still
 // git-tracked. The merged .gitignore line (stop-shipping-plugin-lock D3)
 // does not untrack an already-committed lock, so hero repositories that
@@ -2366,16 +2370,20 @@ func checkTrackedPluginLock(opts *Options) CheckResult {
 		return CheckResult{Name: "tracked lock", Severity: Pass, Message: "not checked"}
 	}
 	lockPath := filepath.Join(".opencode", "package-lock.json")
-	output, err := opts.ExecCmd("git", "-C", opts.TargetDir, "ls-files", "--", lockPath)
+	// LC_ALL=C pins git's messages to the untranslated C locale (gettext
+	// ignores LANGUAGE under it), so the not-a-repository signature below
+	// is stable whatever the user's locale (plugin-lock-advisories D2).
+	output, err := opts.ExecCmd("env", "LC_ALL=C", "git", "-C", opts.TargetDir, "ls-files", "--", lockPath)
 	if err != nil {
 		// git exits 128 with "fatal: not a git repository" when the
 		// target sits outside any repository; ExecCmd returns combined
-		// output, so the signature is visible here. Matching the full
-		// "fatal:" prefix keeps a TargetDir path that happens to
-		// contain the phrase from masquerading as the skip. Anything
-		// else is a real git failure and gets its own message, with
-		// the command output appended so the cause is observable.
-		if strings.Contains(string(output), "fatal: not a git repository") {
+		// output, so the signature is visible here. The signature must
+		// start a line, so a TargetDir path that embeds the phrase
+		// inside another git error cannot masquerade as the skip.
+		// Anything else is a real git failure and gets its own
+		// message, with the command output appended so the cause is
+		// observable.
+		if gitNotARepositoryRe.Match(output) {
 			return CheckResult{Name: "tracked lock", Severity: Pass, Message: "not a git repository"}
 		}
 		message := fmt.Sprintf("git ls-files failed: %v", err)
@@ -2493,10 +2501,14 @@ func checkReviewPluginRuntime(opts *Options, name string, allowVPrefix bool) Che
 
 // pluginManifestHasDevDependencies reports whether the target's
 // .opencode/package.json declares devDependencies. Reads through the
-// Options.ReadFile seam like its sibling checks. An unreadable or
-// malformed manifest reports false: the manifest checks own that failure.
+// Options.ReadFile seam like its sibling checks, falling back to
+// os.ReadFile when the seam is unset. An unreadable or malformed manifest
+// reports false: the manifest checks own that failure.
 func pluginManifestHasDevDependencies(opts *Options) bool {
 	readFile := opts.ReadFile
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
 	data, err := readFile(filepath.Join(opts.TargetDir, ".opencode", "package.json"))
 	if err != nil {
 		return false

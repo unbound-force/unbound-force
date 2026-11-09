@@ -159,7 +159,7 @@ func TestCheckReviewPlugins_AllPass(t *testing.T) {
 			"node --version": "v22.15.0",
 			"npm --version":  "10.9.2",
 			// Empty git ls-files output: the lock is untracked.
-			"git -C " + dir + " ls-files -- .opencode/package-lock.json": "",
+			"env LC_ALL=C git -C " + dir + " ls-files -- .opencode/package-lock.json": "",
 		},
 	)
 
@@ -435,6 +435,21 @@ func TestCheckReviewPluginRuntime_NpmDevDependencies(t *testing.T) {
 	}
 }
 
+// TestPluginManifestHasDevDependencies_NilReadFileFallsBack pins the nil
+// seam fallback shared with the sibling checks: a direct call with a
+// partial Options (no ReadFile) must read through os.ReadFile instead of
+// panicking.
+func TestPluginManifestHasDevDependencies_NilReadFileFallsBack(t *testing.T) {
+	dir := t.TempDir()
+	createFile(t, dir, ".opencode/package.json", `{"devDependencies":{"vitest":"5.0.3"}}`)
+	if !pluginManifestHasDevDependencies(&Options{TargetDir: dir}) {
+		t.Error("pluginManifestHasDevDependencies with nil ReadFile = false, want true (os.ReadFile fallback)")
+	}
+	if pluginManifestHasDevDependencies(&Options{TargetDir: t.TempDir()}) {
+		t.Error("pluginManifestHasDevDependencies with no manifest = true, want false")
+	}
+}
+
 func TestReviewPluginRemediation_NamesNpm11(t *testing.T) {
 	for name, hint := range map[string]string{
 		"runtime": reviewPluginRuntimeRemediation,
@@ -591,7 +606,7 @@ func TestCheckTrackedPluginLock(t *testing.T) {
 		dir := t.TempDir()
 		opts := reviewPluginDoctorOpts(dir, nil,
 			map[string]string{
-				"git -C " + dir + " ls-files -- .opencode/package-lock.json": ".opencode/package-lock.json\n",
+				"env LC_ALL=C git -C " + dir + " ls-files -- .opencode/package-lock.json": ".opencode/package-lock.json\n",
 			})
 		result := checkTrackedPluginLock(opts)
 		if result.Severity != Warn {
@@ -609,7 +624,7 @@ func TestCheckTrackedPluginLock(t *testing.T) {
 		dir := t.TempDir()
 		opts := reviewPluginDoctorOpts(dir, nil,
 			map[string]string{
-				"git -C " + dir + " ls-files -- .opencode/package-lock.json": "",
+				"env LC_ALL=C git -C " + dir + " ls-files -- .opencode/package-lock.json": "",
 			})
 		result := checkTrackedPluginLock(opts)
 		if result.Severity != Pass {
@@ -622,7 +637,7 @@ func TestCheckTrackedPluginLock(t *testing.T) {
 		// git exits 128 with a fatal message outside a repository.
 		// ExecCmd returns the combined output, so the check can
 		// recognize the signature and pass instead of warning.
-		cmd := "git -C " + dir + " ls-files -- .opencode/package-lock.json"
+		cmd := "env LC_ALL=C git -C " + dir + " ls-files -- .opencode/package-lock.json"
 		opts := &Options{
 			TargetDir: dir,
 			ReadFile:  os.ReadFile,
@@ -649,7 +664,7 @@ func TestCheckTrackedPluginLock(t *testing.T) {
 		// (for example a corrupted checkout) must surface as a
 		// warning rather than silently pass, and carry the
 		// command output so the cause is observable.
-		cmd := "git -C " + dir + " ls-files -- .opencode/package-lock.json"
+		cmd := "env LC_ALL=C git -C " + dir + " ls-files -- .opencode/package-lock.json"
 		opts := &Options{
 			TargetDir: dir,
 			ReadFile:  os.ReadFile,
@@ -667,6 +682,62 @@ func TestCheckTrackedPluginLock(t *testing.T) {
 		}
 		if !strings.Contains(result.Message, "dubious ownership") {
 			t.Errorf("message %q should surface the git output", result.Message)
+		}
+	})
+
+	t.Run("runs git under the C locale", func(t *testing.T) {
+		dir := t.TempDir()
+		var got []string
+		opts := &Options{
+			TargetDir: dir,
+			ReadFile:  os.ReadFile,
+			ExecCmd: func(name string, args ...string) ([]byte, error) {
+				got = append([]string{name}, args...)
+				return nil, nil
+			},
+		}
+		checkTrackedPluginLock(opts)
+		if len(got) < 3 || got[0] != "env" || got[1] != "LC_ALL=C" || got[2] != "git" {
+			t.Errorf("command = %q, want env LC_ALL=C git ... so the signature match is locale-stable", got)
+		}
+	})
+
+	t.Run("warns when the path embeds the signature mid-line", func(t *testing.T) {
+		// A TargetDir containing the phrase shows up inside another
+		// git error. The signature must start a line, so this is a
+		// real git failure, not the outside-repository skip.
+		dir := filepath.Join(t.TempDir(), "fatal: not a git repository")
+		cmd := "env LC_ALL=C git -C " + dir + " ls-files -- .opencode/package-lock.json"
+		opts := &Options{
+			TargetDir: dir,
+			ReadFile:  os.ReadFile,
+			ExecCmd: stubExecCmd(
+				map[string]string{cmd: "fatal: cannot change to '" + dir + "': No such file or directory\n"},
+				map[string]error{cmd: fmt.Errorf("exit status 128")},
+			),
+		}
+		result := checkTrackedPluginLock(opts)
+		if result.Severity != Warn {
+			t.Errorf("severity = %v, want Warn (spoofed signature is a git failure)", result.Severity)
+		}
+		if !strings.Contains(result.Message, "git ls-files failed") {
+			t.Errorf("message %q should name the git failure", result.Message)
+		}
+	})
+
+	t.Run("passes when the signature follows another line", func(t *testing.T) {
+		dir := t.TempDir()
+		cmd := "env LC_ALL=C git -C " + dir + " ls-files -- .opencode/package-lock.json"
+		opts := &Options{
+			TargetDir: dir,
+			ReadFile:  os.ReadFile,
+			ExecCmd: stubExecCmd(
+				map[string]string{cmd: "warning: some preamble\nfatal: not a git repository (or any of the parent directories): .git\n"},
+				map[string]error{cmd: fmt.Errorf("exit status 128")},
+			),
+		}
+		if result := checkTrackedPluginLock(opts); result.Severity != Pass {
+			t.Errorf("severity = %v, want Pass (line-anchored signature)", result.Severity)
 		}
 	})
 

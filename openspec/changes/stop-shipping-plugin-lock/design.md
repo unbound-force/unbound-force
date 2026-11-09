@@ -195,7 +195,11 @@ heads, and integrity hashes, and `verified_at` moves to 2026-11-06.
   --package-lock-only --ignore-scripts`, coordinated with
   `PLUGIN_TEST_NPM`), runs osv-scanner against it, and discards
   it — the lock is never tracked or shipped, so the delta
-  holds. Direct `package.json` pins remain scannable;
+  holds. The step runs on push and pull request
+  (`ci_security.yml`) and again daily (`ci_scheduled.yml`), so
+  advisories disclosed after merge surface without a push; the
+  two copies carry identical pins and steps, enforced by drift
+  tests. Direct `package.json` pins remain scannable;
   `--no-audit` on the install commands silences npm's own
   advisory report, which the throwaway scan replaces.
 - **npm 10 on the upgrade path.** D2a protects fresh scaffolds only.
