@@ -1,3 +1,28 @@
+<!-- capability: ci
+     change: fix-pinact-gaze-pin
+     originating_issue: 961
+     Version-comment verifiability for SHA-pinned uses:
+     references, mirroring the pinact --verify contract
+     (codes 001 and 005). -->
+
+Requirement numbering: this change allocates no new FR ids.
+The modified `Reusable Workflow Pinning` requirement is
+unnumbered in the live spec (`openspec/specs/ci/spec.md:46`)
+and stays unnumbered here as a documented
+unnumbered-predecessor exception; MP-002's no-renumbering
+rule leaves no existing id to reuse. The CI-FR-001..CI-FR-020
+range is reserved for future ci-capability changes that
+introduce numbering. No sibling ci delta allocates numbered
+ids -- `ts-plugin-coverage-gate` (2026-10-22) predates the
+numbering convention -- and sibling capabilities' numbered
+requirements (for example review-dispatch's RD-FR ids) live
+in their own capability deltas. Requirement ids, when
+introduced, MUST stay inside the allocated range.
+
+## ADDED Requirements
+
+None.
+
 ## MODIFIED Requirements
 
 ### Requirement: Reusable Workflow Pinning
@@ -12,10 +37,6 @@ tagged commit whose referenced workflow file is unchanged, and
 the previous SHA MUST be recorded in the fixing pull request
 as the documented rollback path. The `ci_crapload.yml` SHA
 MUST remain managed by dependabot for automated updates.
-
-Previously: The consumer workflow MUST reference the reusable
-workflow using a pinned commit SHA, not a branch name. The SHA
-MUST be managed by dependabot for automated updates.
 
 #### Scenario: Dependabot updates reusable workflow SHA
 
@@ -57,3 +78,11 @@ MUST be managed by dependabot for automated updates.
   workflow's inputs, secrets, and permissions MUST be
   unchanged, and the fixing pull request MUST record the
   previous SHA as the rollback path
+
+Previously: The consumer workflow MUST reference the reusable
+workflow using a pinned commit SHA, not a branch name. The SHA
+MUST be managed by dependabot for automated updates.
+
+## REMOVED Requirements
+
+None.

@@ -76,6 +76,15 @@ PR as the documented rollback path.
   on the bump branch (PR #864). The gate is strengthened,
   not bypassed -- suppressing the finding via `.pinact.yaml`
   ignore rules is rejected as supply-chain gate weakening.
+- **Cross-change consistency**: the unarchived `gaze-ai-report`
+  delta (`openspec/changes/gaze-ai-report/specs/ci-local/
+  spec.md:24`) hardcodes the same `uses:` reference at the
+  untagged SHA `c133b1180f26bf0b2ae433d22f6c7adf9fbff992`
+  with no version comment, which contradicts this delta's
+  invariant. This change records the divergence instead of
+  editing another change's artifacts (commit scope); a
+  pre-archive follow-up MUST repin `gaze-ai-report` to a
+  tagged commit or mark it superseded before it archives.
 - **Gatekeeping conditions** (pinned-dependency update policy):
   documented CI reliability fix (the failing check); target
   immutable 40-character SHA verified against the upstream

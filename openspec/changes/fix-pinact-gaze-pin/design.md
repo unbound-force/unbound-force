@@ -128,3 +128,14 @@ Principle III (Observable Quality).
   correctness is verified by the authoring-time API checks
   (tasks 1.1-1.2), reproducible by any contributor. CI-only
   changes are exempt from the documentation-issue gate.
+- **Sibling delta divergence**: the unarchived `gaze-ai-report`
+  delta hardcodes the same `uses:` reference at the untagged
+  SHA `c133b1180f26bf0b2ae433d22f6c7adf9fbff992` with no
+  version comment. Archiving both deltas unchanged would leave
+  `specs/ci` and `specs/ci-local` asserting contradictory
+  MUSTs, and a spec-directed correction back to `c133b118`
+  would re-break the pinact gate. Accepted as tracked
+  governance debt: this change records the divergence instead
+  of editing another change's artifacts (commit scope); the
+  pre-archive follow-up repins `gaze-ai-report` to a tagged
+  commit or marks it superseded.
