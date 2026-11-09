@@ -125,3 +125,45 @@ The meta repo also repeats this transitive job on the daily schedule
 (`ci_scheduled.yml`), so newly-disclosed advisories surface without
 a push; hero repos copying the recipe should wire their copy into
 their own scheduled workflow the same way.
+
+## Plugin dependency pins (zod 4.6.6, toml 5.0.1)
+
+The throwaway-lock scan surfaced five HIGH advisories in the review
+plugin's dependencies. PR #957 fixed them in the scaffolded
+`.opencode/package.json` that `uf init` ships:
+
+| Package | Was | Now | How it is pinned | Advisories |
+|---------|-----|-----|------------------|------------|
+| `zod` | 4.1.8 | 4.6.6 | `dependencies` and `overrides` | GHSA-mrhx-c7xc-m3w5 |
+| `toml` | 4.2.0 | 5.0.1 | `overrides` (transitive only) | GHSA-4qx8-w7c3-pj3p, GHSA-9j65-hcg3-gc64, GHSA-9qmh-m7c6-f92p, GHSA-h895-cgqg-jf52 |
+
+`zod` needs the `overrides` entry as well as the direct pin:
+`@opencode-ai/plugin` 1.19.0 declares its own exact `zod` 4.1.8
+dependency, so bumping the root pin alone leaves a vulnerable
+4.1.8 copy in the install tree. The override forces the plugin's
+copy onto 4.6.6 too.
+
+**Picking up the fix in a hero repository.** `.opencode/package.json`
+is tool-owned, so re-running `uf init` rewrites it with the new pins
+(it keeps any `devDependencies` your copy declares) and reinstalls the
+plugin dependencies without a lock. If that install fails, run
+`npm install --ignore-scripts --omit=dev --no-package-lock` in
+`.opencode/` and rerun `uf init`.
+`uf doctor`'s `manifest-install` check compares each direct pin with
+the installed version; it does not read `overrides`, so confirm the
+nested copies with:
+
+```bash
+(cd .opencode && npm ls zod toml)
+```
+
+Every `zod` entry should read 4.6.6 and every `toml` entry 5.0.1.
+
+**Provenance.** This repository records the verification trail in
+`internal/scaffold/testdata/plugin-package-provenance.json`: for each
+direct pin its version, license, and registry maintainers, and for
+each security override (`toml`, `uuid`, `zod`) its version, upstream
+git head, and npm integrity hash, with the date they were verified
+(`verified_at`). A scaffold test fails if the shipped pins and that
+record drift apart. Rollback is a revert of the PR #957 pin commit,
+which restores zod 4.1.8 and toml 4.2.0.
