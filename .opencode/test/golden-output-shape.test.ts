@@ -36,14 +36,14 @@ import { createMockSpawn, patchBunSpawn } from "./helpers/gh-spawn-mock.js"
 // scratch-project filesystems with DI'd git/gh fakes, then asserts the
 // documented fields on the returned envelope.
 //
-// Coverage: 45 of the 49 documented sites. The four dispatch_review_runs
+// Coverage: 47 of the 51 documented sites. The four dispatch_review_runs
 // sites (uf.triage-issue.md:238, uf.review-council.md:260,
 // uf.review-pr.md:421, uf.address-feedback.md:363) belong to task 2.3
 // and are pinned in dispatch-review-runs.test.ts instead — one golden
 // per documented input variant (triage, code, feedback).
 //
 // Per-plugin site counts (registered-tool attribution):
-// - uf-workflow: 22 sites -- get_progress x4 (uf.unleash.md:87,
+// - uf-workflow: 24 sites -- get_progress x4 (uf.unleash.md:87,
 //   uf.finale.md:42, uf.review-council.md:51, uf.address-feedback.md:71),
 //   uf_unleash_branch_gate (uf.unleash.md:114), uf_unleash_detect_resume
 //   (uf.unleash.md:285), scan_clarifications (uf.unleash.md:374),
@@ -53,7 +53,9 @@ import { createMockSpawn, patchBunSpawn } from "./helpers/gh-spawn-mock.js"
 //   format_unleash_demo (uf.unleash.md:1790), resolve_base_ref
 //   (uf.review-council.md:132), normalize_model_name
 //   (uf.address-feedback.md:910), uf_preflight_declared_checks
-//   (skills/pre-flight/SKILL.md Phase 2b)
+//   (skills/pre-flight/SKILL.md Phase 2b), post_feedback_replies and
+//   file_feedback_issue (uf.address-feedback.md Section 4.6;
+//   feedback-reply-tools)
 // - uf-finale: 9 sites -- uf_finale_startup (uf.finale.md:51),
 //   uf_finale_stage (72), uf_finale_commit_context (83),
 //   uf_finale_base_state (132), uf_finale_push_state (172),
@@ -450,7 +452,7 @@ async function setupGoldenDispatchSession(
 // uf-workflow registry -- 22 documented sites
 // ---------------------------------------------------------------------------
 
-describe("golden output shapes -- uf-workflow registry (22 documented sites)", () => {
+describe("golden output shapes -- uf-workflow registry (24 documented sites)", () => {
   it("get_progress [uf.unleash.md:87, uf.finale.md:42, uf.review-council.md:51, uf.address-feedback.md:71] returns completed_steps and current_step", async () => {
     const directory = await makeScratch()
     const registry = await loadRegistry(UfWorkflowPlugin, directory)
@@ -844,7 +846,139 @@ describe("golden output shapes -- uf-workflow registry (22 documented sites)", (
     expect(fallback.normalized).toBe("unknown-model")
     expect(fallback.warning).toContain("???")
   })
+
+  it("post_feedback_replies [uf.address-feedback.md Section 4.6] returns per-item outcomes and records the reply-comments checkpoint", async () => {
+    const directory = await makeScratch()
+    const registry = await loadRegistry(UfWorkflowPlugin, directory)
+    mockFeedbackGh(directory)
+
+    const data = expectOk(
+      await callEnvelopeTool<{
+        complete: boolean
+        counts: Record<string, number>
+        items: Array<Record<string, unknown>>
+        checkpoint_recorded: boolean
+        summary: string
+        warnings: string[]
+      }>(registry, "post_feedback_replies", {
+        pr_number: 42,
+        repo: "acme/widgets",
+        resolve_threads: true,
+        items: [
+          { comment_kind: "review", comment_id: 11, decision: "accept", body: "Addressed in `abc1234`." },
+          {
+            comment_kind: "review",
+            comment_id: 12,
+            decision: "file",
+            body: "tracks the retry gap. Not changed in this PR (LOW).",
+            issue: { title: "Retry gap", body: "LOW finding from PR #42" },
+          },
+        ],
+      }),
+    )
+    expect(data.complete).toBe(true)
+    expect(data.counts).toEqual({
+      total: 2,
+      posted: 2,
+      pending: 0,
+      failed: 0,
+      issues_filed: 1,
+      threads_resolved: 2,
+      threads_resolvable: 2,
+    })
+    expect(data.items.map((item) => [item.key, item.reply, item.issue, item.issue_number, item.thread, item.thread_id])).toEqual([
+      ["review:11", "posted", null, null, "resolved", "T11"],
+      ["review:12", "posted", "filed", 301, "resolved", "T12"],
+    ])
+    expect(data.summary).toBe("Posted 2 of 2 reply comments. Resolved 2 of 2 addressed threads.")
+    expect(data.checkpoint_recorded).toBe(true)
+    expect(data.warnings).toEqual([])
+
+    // Write→read round-trips: the tool's checkpoint reads back through
+    // get_progress (the command's progress gate), and its cache record
+    // reads back from .uf/feedback/pr-42/state.json.
+    const progress = expectOk(
+      await callEnvelopeTool<{ completed_steps: string[]; data: Record<string, unknown> }>(registry, "get_progress", {
+        command: "uf.address-feedback",
+      }),
+    )
+    expect(progress.completed_steps).toContain("reply-comments")
+    expect(progress.data).toMatchObject({ posted: 2, total: 2, threads_resolved: 2, threads_resolvable: 2 })
+    const state = JSON.parse(await readFile(join(directory, ".uf", "feedback", "pr-42", "state.json"), "utf8")) as {
+      replies: Record<string, Record<string, unknown>>
+    }
+    expect(state.replies["review:12"]).toMatchObject({ comment_posted: true, issue_number: 301, thread_resolved: true, thread_id: "T12" })
+  })
+
+  it("file_feedback_issue [uf.address-feedback.md Section 4.6] returns issue_number and issue_url, then deduplicates", async () => {
+    const directory = await makeScratch()
+    const registry = await loadRegistry(UfWorkflowPlugin, directory)
+    mockFeedbackGh(directory)
+    const args = {
+      pr_number: 42,
+      repo: "acme/widgets",
+      comment_kind: "review",
+      comment_id: 12,
+      title: "Retry gap",
+      body: "LOW finding from PR #42",
+    }
+
+    const filed = expectOk(await callEnvelopeTool<Record<string, unknown>>(registry, "file_feedback_issue", args))
+    expect(filed).toEqual({
+      pr_number: 42,
+      repo: "acme/widgets",
+      key: "review:12",
+      issue_number: 301,
+      issue_url: "https://github.com/acme/widgets/issues/301",
+      deduplicated: false,
+      attempts: 1,
+    })
+    const again = expectOk(await callEnvelopeTool<Record<string, unknown>>(registry, "file_feedback_issue", args))
+    expect(again).toMatchObject({ issue_number: 301, deduplicated: true, attempts: 0 })
+  })
 })
+
+/**
+ * Configure execFileSync for the feedback reply tools: git branch
+ * resolution for the checkpoint key, and the gh calls of one
+ * file-post-resolve cycle on PR 42 (temp-file paths vary, so gh calls
+ * are matched by their leading arguments).
+ */
+function mockFeedbackGh(directory: string): void {
+  vi.mocked(execFileSync).mockImplementation(((command: string, args: readonly string[], options?: { cwd?: string }) => {
+    expect(options?.cwd).toBe(directory)
+    const joined = `${command} ${args.join(" ")}`
+    if (joined === GIT_BRANCH) return "opsx/golden"
+    if (command !== "gh") throw new Error(`unexpected invocation: ${joined}`)
+    if (args[0] === "issue" && args[1] === "create") return "https://github.com/acme/widgets/issues/301\n"
+    if (args[0] === "api" && args[1] === "--method") {
+      const id = /comments\/(\d+)\/replies$/.exec(args[3] ?? "")?.[1] ?? "0"
+      return JSON.stringify({ id: Number(id) + 1000, html_url: `https://github.com/acme/widgets/pull/42#discussion_r${id}` })
+    }
+    if (args[0] === "api" && args[1] === "graphql" && args.some((arg) => arg.startsWith("threadId="))) {
+      const id = args.find((arg) => arg.startsWith("threadId="))?.slice("threadId=".length)
+      return JSON.stringify({ data: { resolveReviewThread: { thread: { id, isResolved: true } } } })
+    }
+    if (args[0] === "api" && args[1] === "graphql") {
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [
+                  { id: "T11", isResolved: false, comments: { nodes: [{ databaseId: 11 }] } },
+                  { id: "T12", isResolved: false, comments: { nodes: [{ databaseId: 12 }] } },
+                ],
+              },
+            },
+          },
+        },
+      })
+    }
+    throw new Error(`unexpected gh invocation: ${joined}`)
+  }) as unknown as typeof execFileSync)
+}
 
 // ---------------------------------------------------------------------------
 // checkout_pr_head -- uf.address-feedback.md Section 1.2.1 (checkout-pr-head

@@ -981,6 +981,30 @@ Each entry follows the format: `- <change-name>: <summary>`.
   the zod 4.6.6 / toml 5.0.1 pins, their advisories, the zod
   override, and the provenance record for hero-repo adopters.
   (Docs: #967, #970, #977, #980, #995, #996)
+- feedback-reply-tools: `/uf.address-feedback` posts replies, files
+  FILE items' issues, and resolves addressed threads in one call to
+  the new `uf-workflow` tool `post_feedback_replies` (#966). The
+  tool takes the confirmed reply text, decisions, and the author's
+  resolve decision, maps review comments to thread node IDs through
+  a paginated GraphQL `reviewThreads` lookup, stops posting at the
+  first failed post, records each step per item in
+  `.uf/feedback/pr-<N>/state.json` so a re-run resumes (including
+  resolving threads an earlier run left open), records the
+  `reply-comments` checkpoint only when nothing is left, and
+  returns a rendered summary line. Both reply questions are now
+  asked before posting, and `clear_progress` moves after the
+  artifact. The new `file_feedback_issue` tool files one finding
+  with one retry and a duplicate check against the feedback cache
+  (#998). Both tools pass untrusted text to `gh` only through
+  `0o600` temp files and argument arrays and fail with the
+  fetch-tool error contract. New feedback-triage schema 1.1.0
+  (#999): `file` and `reply` decisions, `filed_issue_number` and
+  `filed_issue_url`, and `filed` and `replied` summary counts; 1.0.0
+  stays for historical reads and is a strict subset. Instruction
+  delta (DE-004): `uf.address-feedback.md` 1510 -> 1509 lines,
+  +147 tokens (three shell blocks and the cache-flag bookkeeping
+  removed; the parameter mapping and two output examples added).
+  (Spec: openspec/changes/feedback-reply-tools/, Docs: #1003)
 - feedback-loop-scope: `/uf.address-feedback` changes code only for
   CRITICAL and HIGH findings (unlabelled findings count as HIGH);
   MEDIUM and LOW findings are filed as issues or answered, and their

@@ -43,6 +43,17 @@ import {
   type PreflightDeclaredDependencies,
   type ProcessResult,
 } from "../../lib/preflight-declared.js"
+import {
+  FeedbackOperationError,
+  FileFeedbackIssueInputSchema,
+  PostFeedbackRepliesInputSchema,
+  defaultFeedbackGhExec,
+  feedbackFailure,
+  feedbackSuccess,
+  fileFeedbackIssue,
+  postFeedbackReplies,
+  type FeedbackReplyDeps,
+} from "../../lib/feedback-replies.js"
 import { createBunYamlParser, type YamlParser } from "../../lib/reviewer-manifest.js"
 import {
   BASE_REF_CANDIDATES,
@@ -2094,6 +2105,108 @@ export function createCheckoutPrHeadTool(exec: GitExec, gh: GhRunner, cwd: strin
       }
     },
   })
+}
+
+// ---------------------------------------------------------------------------
+// post_feedback_replies and file_feedback_issue tools (feedback-reply-tools)
+// ---------------------------------------------------------------------------
+
+/** Render a zod validation failure as the feedback tools' invalid_input envelope. */
+function feedbackInvalidInput(error: z.ZodError): string {
+  const details = error.issues
+    .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+    .join("; ")
+  return JSON.stringify(feedbackFailure("invalid_input", details))
+}
+
+/** Render a thrown error as the feedback tools' failure envelope. */
+function feedbackErrorOutput(err: unknown): string {
+  if (err instanceof FeedbackOperationError) {
+    return JSON.stringify(feedbackFailure(err.code, err.message, err.retryable))
+  }
+  const message = err instanceof Error ? err.message : String(err)
+  return JSON.stringify(feedbackFailure("internal_error", message))
+}
+
+/**
+ * Factory for the post_feedback_replies tool (issue #966): files each
+ * FILE item's issue, posts every confirmed reply, and resolves the
+ * approved review threads in one call. Judgment products (reply text,
+ * decisions, the resolve decision) arrive as parameters; the chain runs
+ * in lib/feedback-replies.ts. Failures use the fetch-tool error
+ * contract (`error: true`, code, message, retryable) alongside
+ * `status: "error"`.
+ *
+ * @param deps gh executor, repository root, and checkpoint recorder.
+ * @returns The post_feedback_replies tool.
+ */
+export function createPostFeedbackRepliesTool(deps: FeedbackReplyDeps): ReturnType<typeof tool> {
+  return tool({
+    description:
+      "Post /uf.address-feedback replies and resolve addressed review threads in one call. " +
+      "Files each file item's issue first (one retry, cached so a re-run never files twice), " +
+      "posts each reply through a temp-file request body to the review-thread or PR-conversation " +
+      "endpoint, stops posting at the first failed post, maps review comments to GraphQL thread " +
+      "IDs, and, when resolve_threads is true, resolves the threads of accept, modify, file, and " +
+      "reply review items whose replies are posted. Progress is recorded per item in " +
+      ".uf/feedback/pr-<N>/state.json, so re-running with the same items resumes. Records the " +
+      "reply-comments checkpoint when nothing is left to do. Returns per-item outcomes and a " +
+      "rendered summary line.",
+    args: PostFeedbackRepliesInputSchema.shape,
+    async execute(args) {
+      const parsed = PostFeedbackRepliesInputSchema.safeParse(args)
+      if (!parsed.success) {
+        return { output: feedbackInvalidInput(parsed.error) }
+      }
+      try {
+        return { output: JSON.stringify(feedbackSuccess(postFeedbackReplies(parsed.data, deps))) }
+      } catch (err: unknown) {
+        return { output: feedbackErrorOutput(err) }
+      }
+    },
+  })
+}
+
+/**
+ * Factory for the file_feedback_issue tool (issue #998): files one
+ * finding as a GitHub issue with one retry, returning the issue number
+ * and URL. A finding already filed for the same comment (per the
+ * feedback cache) is returned without filing again.
+ *
+ * @param deps gh executor and repository root.
+ * @returns The file_feedback_issue tool.
+ */
+export function createFileFeedbackIssueTool(deps: FeedbackReplyDeps): ReturnType<typeof tool> {
+  return tool({
+    description:
+      "File one /uf.address-feedback finding as a GitHub issue. The title and body reach gh " +
+      "as an argument-array element and a temp file, never shell text. Retries gh issue create " +
+      "once; if the feedback cache already records an issue for the same comment, returns it " +
+      "with deduplicated true instead of filing again. Returns issue_number and issue_url and " +
+      "records them in .uf/feedback/pr-<N>/state.json.",
+    args: FileFeedbackIssueInputSchema.shape,
+    async execute(args) {
+      const parsed = FileFeedbackIssueInputSchema.safeParse(args)
+      if (!parsed.success) {
+        return { output: feedbackInvalidInput(parsed.error) }
+      }
+      try {
+        return { output: JSON.stringify(feedbackSuccess(fileFeedbackIssue(parsed.data, deps))) }
+      } catch (err: unknown) {
+        return { output: feedbackErrorOutput(err) }
+      }
+    },
+  })
+}
+
+/** Production dependencies for the feedback reply tools. */
+function feedbackReplyDeps(cwd: string): FeedbackReplyDeps {
+  return {
+    gh: defaultFeedbackGhExec,
+    cwd,
+    recordCheckpoint: (step, data) =>
+      recordAutoCheckpoint(cwd, resolveKey(defaultGitExec, cwd), "uf.address-feedback", step, data),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -6164,6 +6277,8 @@ const UfWorkflowPlugin = {
         uf_unleash_route_decision: createUnleashRouteDecisionTool(defaultGitExec, cwd),
         uf_unleash_resolve_issue: createUnleashResolveIssueTool(defaultGhRunner, cwd),
         checkout_pr_head: createCheckoutPrHeadTool(defaultGitExec, defaultGhRunner, cwd),
+        post_feedback_replies: createPostFeedbackRepliesTool(feedbackReplyDeps(cwd)),
+        file_feedback_issue: createFileFeedbackIssueTool(feedbackReplyDeps(cwd)),
         uf_delegate_command: createDelegateCommandTool(defaultGitExec, cwd, {
           client: input.client,
           readText: (path: string) => readFile(path, "utf8"),
