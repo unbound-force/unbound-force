@@ -69,5 +69,10 @@
 - [x] 4.1 Add a `CHANGELOG.md` entry with the DE-004 delta
   (Section 1.2.1 108 → 50 lines per copy), spec footer, and
   `(Docs: #967)` — the existing docs issue covers the behavior.
-- [x] 4.2 Run `make check` and `make lint-instructions`; confirm
-  green with coverage floors unchanged.
+- [ ] 4.2 Run `make check` and `make lint-instructions`; confirm
+  green with coverage floors unchanged. Locally: Go tests, lint
+  and the plugin suite (2048/2048, 96.65%) pass with
+  `--testTimeout 60000`; plain `make plugin-test` timed out on
+  pre-existing real-git tests under load, and
+  `lint-instructions` reports the pre-existing IL-010 baseline
+  error (fixed by PR #1001). Confirm green in CI.
