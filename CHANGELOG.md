@@ -1390,6 +1390,20 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- instruction-lint-baseline (#971): clear the instruction-lint
+  baseline from 1 error / 31 warnings / 23 info to 0 errors /
+  16 warnings / 24 info. `/opsx-apply` and the
+  openspec-apply-change skill now point a blocked change at
+  `/opsx-propose` to generate its missing artifacts (IL-010).
+  Vague qualifiers and lowercase RFC 2119 words in agents,
+  commands and convention packs are restated with concrete
+  criteria; rule force is unchanged, and the three IL-021
+  force mismatches are left for a maintainer decision. The
+  `/uf.init` Step 6 guardrails template carries the same
+  content-portability wording as the installed
+  `speckit.taskstoissues.md`. ADR-003 proposes the CI wiring
+  and scaffold adoption follow-ups.
+  (Decision: docs/decisions/003-instruction-lint-ci-and-scaffold-adoption.md)
 - stop-shipping-plugin-lock: bump the review-plugin pins for CVE
   remediation after the CI throwaway-lock OSV scan surfaced five
   HIGH advisories: zod 4.1.8 → 4.6.6 (GHSA-mrhx-c7xc-m3w5) and
