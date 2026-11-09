@@ -32,7 +32,7 @@ by slash commands. You rarely need to call them directly.
 | Agent | Invoked by | Role |
 |-------|-----------|------|
 | `cobalt-crush-dev` | `/uf.cobalt-crush` | Developer persona |
-| `divisor-*` (11 agents) | `/uf.review-council` | Review council personas |
+| `divisor-*` (9 agents; 11 in this repository) | `/uf.review-council` | Review council personas |
 | `gaze-reporter` | `/gaze` | Quality analysis |
 | `gaze-test-generator` | `/gaze-fix` | Test generation |
 
@@ -47,17 +47,62 @@ the agent name in your message.
 /uf.review-council
 ```
 
-Runs 9 AI reviewer personas in parallel. Each focuses
-on a different aspect (security, architecture, testing,
-operations, intent drift). You receive an **APPROVE** or
-**REQUEST CHANGES** verdict with specific findings. The
-council auto-detects whether to review code or specs
-based on what changed on your branch.
+Runs the 9 AI reviewer personas that `uf init` delivers in
+parallel. Each focuses on a different aspect (security,
+architecture, testing, operations, intent drift). You
+receive an **APPROVE** or **REQUEST CHANGES** verdict with
+specific findings. The council auto-detects whether to
+review code or specs based on what changed on your branch.
 
-The unbound-force repository also runs a repo-local
-`divisor-linguist` reviewer for instruction prose, which
-`uf init` does not deliver. Run its linter on its own with
-`make lint-instructions`.
+#### Repo-local reviewers (unbound-force repository only)
+
+The unbound-force repository enrolls two more personas in
+its `.uf/reviewer-capabilities.yaml`, for an 11-persona
+council. `uf init` does not deliver them:
+
+| Persona | Owns | Evidence it runs |
+|---------|------|------------------|
+| `divisor-determinism` (The Determinist) | Determinism pack rules DE-001 through DE-008 | `.uf/scripts/instruction-lint --json --base BASE --changed` (IL-040 to IL-042 hints and the DE-004 size deltas); `node .opencode/lib/tool-inventory.ts --seams --base BASE --json` (DE-007 seam map); `node .opencode/lib/tool-inventory.ts --json --match "<words>"` (owner lookup for DE-001, DE-003, DE-005) |
+| `divisor-linguist` (The Linguist) | Instruction clarity and the other instruction-lint findings | `.uf/scripts/instruction-lint`; it defers DE findings and the IL-040 to IL-042 hints to The Determinist |
+
+The instruction linter checks agent, command, skill, and
+convention pack files and `AGENTS.md`: frontmatter,
+references, RFC 2119 marker and body agreement, vague
+qualifiers, token budgets, and near-duplicate paragraphs,
+plus IL-042, which flags a `uf_delegate_command` or
+`replicator_forge_spawn_subtask` call block that omits
+`task_classification` or the skill contract (DE-008). Run
+it on its own:
+
+```bash
+make lint-instructions                              # whole tree
+make lint-instructions ARGS="--base main --changed" # files changed since merge-base(main, HEAD), with size deltas
+make lint-instructions ARGS="--strict"              # fail on warnings too
+```
+
+Exit codes: `0` clean, `1` lint errors, `2` the linter could
+not run (dependencies missing, node without TypeScript
+support, bad arguments). The wrapper checks its dependencies
+before node starts and prints an
+`(cd .opencode && npm install --no-package-lock)` hint when
+they are missing. `--changed` requires `--base`.
+
+The linter also runs as an **advisory** pre-flight check,
+declared in `.uf/preflight.yaml` behind the
+`.uf/scripts/instruction-lint` wrapper. It runs only when
+instruction files change, and a failure never blocks the
+gate.
+
+`tool-inventory` lists registered plugin tools and repository
+scripts:
+
+```bash
+node .opencode/lib/tool-inventory.ts --match "checkout pr head"  # rank tools by matching words
+node .opencode/lib/tool-inventory.ts --seams --base main         # tools added, modified, or removed, with their tests
+```
+
+Specs: `openspec/changes/instruction-lint/` and
+`openspec/changes/divisor-determinism-persona/`.
 
 ### Address Review Feedback
 
@@ -365,7 +410,7 @@ command documentation with flags and examples.
 
 | Command | Description |
 |---------|-------------|
-| `/uf.review-council` | Run the 11-persona review council |
+| `/uf.review-council` | Run the review council (9 personas; 11 in this repository) |
 | `/uf.review-pr` | Review a GitHub PR (post-PR) |
 | `/uf.address-feedback` | Triage and address PR review feedback |
 | `/uf.fix-ci` | Diagnose and fix failing PR CI checks |

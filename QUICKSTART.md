@@ -3,10 +3,12 @@
 Unbound Force adds AI-powered development workflows to
 your project:
 
-- **Code review council** -- 11 AI reviewer personas
+- **Code review council** -- 9 AI reviewer personas
   audit your code for security, architecture, testing,
-  operations, intent drift, documentation, determinism,
-  instruction quality, content, and communications
+  operations, intent drift, documentation, content,
+  and communications (the unbound-force repository
+  itself adds two repo-local personas for determinism
+  and instruction quality, for 11)
 - **Specification-driven development** -- structured
   workflows from idea to implementation
 - **Quality analysis** -- CRAP scores, coverage metrics,
