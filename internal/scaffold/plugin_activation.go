@@ -443,6 +443,85 @@ func normalizePluginActivationOptions(opts *Options) {
 // pluginManifestAsset is the embedded path of the review plugin manifest.
 const pluginManifestAsset = "opencode/package.json"
 
+// mergePluginManifest refreshes the tool-owned .opencode/package.json from
+// the shipped manifest while keeping what a target declares on its own:
+// user-added runtime dependencies (preservePluginRuntimeDependencies) and
+// devDependencies (preservePluginDevDependencies). Every other field,
+// including overrides, stays tool-owned.
+func mergePluginManifest(shipped, existing []byte) []byte {
+	return preservePluginDevDependencies(preservePluginRuntimeDependencies(shipped, existing), existing)
+}
+
+// preservePluginRuntimeDependencies merges a target's existing runtime
+// dependencies into the shipped manifest when uf init refreshes the
+// tool-owned .opencode/package.json (merge-plugin-runtime-deps). Shipped
+// pins win: a missing shipped package is added and a drifted pin is
+// bumped. Packages the shipped manifest does not declare are kept at the
+// target's version, so the following lockless install does not prune them.
+// The merged block is rendered with sorted keys in the manifest's
+// two-space layout. When the target adds no package of its own, the
+// shipped bytes are returned unchanged, so an unchanged target stays
+// byte-identical and is skipped. An unparsable target, or a shipped
+// manifest without a populated dependencies block, passes the shipped
+// manifest through: the tool-owned restore repairs a broken manifest, and
+// internal/scaffold has no warnings channel (the contract
+// preservePluginDevDependencies already follows).
+func preservePluginRuntimeDependencies(shipped, existing []byte) []byte {
+	var target, source struct {
+		Dependencies map[string]string `json:"dependencies"`
+	}
+	if err := json.Unmarshal(existing, &target); err != nil {
+		return shipped
+	}
+	if err := json.Unmarshal(shipped, &source); err != nil || len(source.Dependencies) == 0 {
+		return shipped
+	}
+	merged := make(map[string]string, len(source.Dependencies)+len(target.Dependencies))
+	for name, version := range target.Dependencies {
+		if _, pinned := source.Dependencies[name]; !pinned {
+			merged[name] = version
+		}
+	}
+	if len(merged) == 0 {
+		return shipped
+	}
+	for name, version := range source.Dependencies {
+		merged[name] = version
+	}
+	open := []byte("\n  \"dependencies\": {\n")
+	start := bytes.Index(shipped, open)
+	if start < 0 {
+		// Anchor miss: contained at origin by the round-trip and
+		// anchor-miss cases in plugin_activation_test.go.
+		return shipped
+	}
+	bodyStart := start + len(open)
+	end := bytes.Index(shipped[bodyStart:], []byte("\n  }"))
+	if end < 0 {
+		return shipped
+	}
+	// bodyEnd sits just past the last entry's newline, before "  }".
+	bodyEnd := bodyStart + end + 1
+	names := make([]string, 0, len(merged))
+	for name := range merged {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var block bytes.Buffer
+	for i, name := range names {
+		sep := ","
+		if i == len(names)-1 {
+			sep = ""
+		}
+		fmt.Fprintf(&block, "    %s: %s%s\n", jsonString(name), jsonString(merged[name]), sep)
+	}
+	out := make([]byte, 0, len(shipped)+block.Len())
+	out = append(out, shipped[:bodyStart]...)
+	out = append(out, block.Bytes()...)
+	out = append(out, shipped[bodyEnd:]...)
+	return out
+}
+
 // preservePluginDevDependencies keeps a target's existing devDependencies
 // when uf init refreshes the tool-owned .opencode/package.json. The shipped
 // manifest has no devDependencies: activation installs with --omit=dev, yet

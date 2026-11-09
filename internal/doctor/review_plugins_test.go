@@ -306,6 +306,43 @@ func TestCheckManifestInstallConsistency_Undeclared(t *testing.T) {
 	}
 }
 
+// TestCheckManifestInstallConsistency_UserRuntimeDependencyIsNotDrift covers
+// merge-plugin-runtime-deps: uf init keeps runtime packages a user adds, so
+// doctor must not flag them, while a shipped pin is still checked.
+func TestCheckManifestInstallConsistency_UserRuntimeDependencyIsNotDrift(t *testing.T) {
+	withExtra := strings.Replace(reviewPluginManifestFixture, `"zod": "4.6.6"`, `"left-pad": "1.3.0",
+    "zod": "4.6.6"`, 1)
+	tests := []struct {
+		name        string
+		manifest    string
+		installZod  string
+		want        Severity
+		wantMessage string
+	}{
+		{name: "extra runtime package passes", manifest: withExtra, want: Pass},
+		{name: "extra runtime package beside drifted shipped pin fails", manifest: withExtra, installZod: "4.2.0", want: Fail, wantMessage: "zod"},
+		{name: "extra runtime package beside missing shipped pin fails", manifest: strings.Replace(withExtra, `"zod": "4.6.6"`, `"other": "1.0.0"`, 1), want: Fail, wantMessage: "zod not declared"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			createFile(t, dir, ".opencode/package.json", tt.manifest)
+			writeInstalledPackages(t, dir)
+			createFile(t, dir, ".opencode/node_modules/left-pad/package.json", `{"version": "1.3.0"}`)
+			if tt.installZod != "" {
+				createFile(t, dir, ".opencode/node_modules/zod/package.json", `{"version": "`+tt.installZod+`"}`)
+			}
+			result := checkManifestInstallConsistency(&Options{TargetDir: dir, ReadFile: os.ReadFile})
+			if result.Severity != tt.want || !strings.Contains(result.Message, tt.wantMessage) {
+				t.Errorf("result = %v %q, want %v containing %q", result.Severity, result.Message, tt.want, tt.wantMessage)
+			}
+			if strings.Contains(result.Message, "left-pad") {
+				t.Errorf("message %q must not flag the user-added package", result.Message)
+			}
+		})
+	}
+}
+
 func TestCheckReviewPluginDependencies_Missing(t *testing.T) {
 	dir := t.TempDir()
 	createFile(t, dir, ".opencode/package.json", reviewPluginManifestFixture)

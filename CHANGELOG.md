@@ -1404,6 +1404,18 @@ Each entry follows the format: `- <change-name>: <summary>`.
   `speckit.taskstoissues.md`. ADR-003 proposes the CI wiring
   and scaffold adoption follow-ups.
   (Decision: docs/decisions/003-instruction-lint-ci-and-scaffold-adoption.md)
+- merge-plugin-runtime-deps: `uf init` no longer drops runtime
+  dependencies a user added to `.opencode/package.json`. On refresh
+  (plain or `--force`) it merges the file's `dependencies` with
+  uf's shipped pins: missing shipped packages are added, drifted
+  shipped pins are bumped, and packages uf does not ship keep their
+  declared version, written in sorted key order. `overrides` and the
+  other top-level fields stay tool-owned, `devDependencies` keep
+  their existing merge, and an unparsable manifest is restored to
+  the shipped one. `uf doctor` already compares only uf's shipped
+  packages, so a user-added package is not reported as drift; the
+  provenance record is unchanged. (Spec:
+  openspec/changes/merge-plugin-runtime-deps/, Fixes: #978)
 - stop-shipping-plugin-lock: bump the review-plugin pins for CVE
   remediation after the CI throwaway-lock OSV scan surfaced five
   HIGH advisories: zod 4.1.8 → 4.6.6 (GHSA-mrhx-c7xc-m3w5) and
