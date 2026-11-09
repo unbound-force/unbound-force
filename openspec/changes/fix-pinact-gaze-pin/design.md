@@ -134,7 +134,7 @@ Principle III (Observable Quality).
   version comment. Archiving both deltas unchanged would leave
   `specs/ci` and `specs/ci-local` asserting contradictory
   MUSTs, and a spec-directed correction back to `c133b118`
-  would re-break the pinact gate. Accepted as tracked
+  would re-break the pinact gate. Accepted as documented
   governance debt: this change records the divergence instead
   of editing another change's artifacts (commit scope); the
   pre-archive follow-up repins `gaze-ai-report` to a tagged
