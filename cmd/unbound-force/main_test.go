@@ -35,14 +35,15 @@ func TestRunInit_FreshDir(t *testing.T) {
 	// The exact count is environment-dependent: review plugin activation
 	// appends the activation-gated plugin sources to the created set only
 	// when Node/npm/OpenCode are present and the install plus probes
-	// succeed. With 86 total embedded assets, minus 1 non-deployed
-	// (devcontainer) and 4 activation-gated plugins, the base count is 81
+	// succeed. With 87 total embedded assets, minus 1 non-deployed
+	// (devcontainer) and 4 activation-gated plugins, the base count is 82
 	// (the meta-prompt pack, its custom template, and the model-matrix
 	// classifier subagent joined the deployed set with the
 	// model-matrix-scaffold-deployment change; .uf/preflight.yaml and
 	// lib/preflight-declared.ts joined with preflight-project-checks;
-	// .opencode/package-lock.json left with stop-shipping-plugin-lock).
-	// Each successful activation probe adds one file, yielding [81-85].
+	// .opencode/package-lock.json left with stop-shipping-plugin-lock;
+	// lib/feedback-replies.ts joined with feedback-reply-tools).
+	// Each successful activation probe adds one file, yielding [82-86].
 	// The scaffold-level asset inventory and drift tests pin the exact
 	// asset list, so this CLI check asserts any count in that range.
 	// (devcontainer excluded — OS-specific, generated per-user by
@@ -67,8 +68,8 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected 'N files processed' line in output, got:\n%s", output)
-	} else if fileCount < 82 || fileCount > 86 {
-		t.Errorf("expected files processed in [82-86], got %d:\n%s", fileCount, output)
+	} else if fileCount < 83 || fileCount > 87 {
+		t.Errorf("expected files processed in [83-87], got %d:\n%s", fileCount, output)
 	}
 
 	// Verify a user-owned file was created

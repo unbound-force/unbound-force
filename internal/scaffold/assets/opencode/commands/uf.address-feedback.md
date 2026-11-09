@@ -66,14 +66,17 @@ Progress steps in order:
 - `commits` — Phase 4.2 complete
 - `verify` — Phase 4.3 complete
 - `push` — Phase 4.4 complete
-- `reply-comments` — Phase 4.5 complete (then clear)
+- `reply-comments` — Phase 4.6 complete (recorded by
+  `post_feedback_replies` once every reply is posted and every
+  approved thread is resolved; cleared after Phase 4.7)
 
 ### TodoWrite Progress Tracking
 
 Use the **TodoWrite tool** for live session visibility.
 At pipeline start, initialize TodoWrite with all phases
 and sub-steps (Phase 1, Phase 2, Phase 3, Phase 4.1,
-Phase 4.2, Phase 4.3, Phase 4.4, Phase 4.5) as `pending`.
+Phase 4.2, Phase 4.3, Phase 4.4, Phase 4.5, Phase 4.6,
+Phase 4.7) as `pending`.
 Before starting each phase/sub-step, mark it `in_progress`.
 After completing each phase/sub-step, mark it `completed`.
 This runs alongside `checkpoint` tool progress tracking —
@@ -295,7 +298,7 @@ Check local cache at `.uf/feedback/pr-<PR_NUMBER>/state.json`:
 - **Thread resolved on GitHub since last run**: skip entirely
 - **Cache missing**: assess from scratch (correct but slower)
 
-On crash-recovery re-entry: items marked as fully executed (`comment-posted`) in the cache MUST be skipped to prevent duplicate comments.
+On crash-recovery re-entry: pass items whose replies were already posted to `post_feedback_replies` again unchanged. The tool reads its own per-item record (`replies` in the cache) and skips posted replies and resolved threads, so a re-run never duplicates a comment or an issue and still resolves threads a prior run left open.
 
 If no items remain after filtering: report "No unresolved feedback to address" and **STOP**.
 
@@ -979,7 +982,8 @@ Present the execution summary to the user:
 >
 > This will execute all queued actions from Phase 3
 > triage. Individual sub-steps (4.4 push, 4.5 reply
-> comments) have their own confirmation prompts.
+> comments, 4.6 thread resolution) have their own
+> confirmation prompts.
 
 Present the decision as follows:
 
@@ -1168,7 +1172,7 @@ git push "<HEAD_REMOTE>" "HEAD:<HEAD_MERGE_REF>"
 > **CHECKPOINT**: Call `checkpoint` with
 > `command: "uf.address-feedback"`, `step: "push"`.
 
-### 4.5 Post Reply Comments
+### 4.5 Compose and Confirm Replies
 
 **Apply review voice**: The reply comment prose composed in this
 step MUST follow the review-voice rules already loaded by the
@@ -1189,7 +1193,7 @@ requirement, the structural or content requirement prevails.
 Voice governs the GitHub-posted reply prose only.
 
 After push succeeds (or if there are no code changes),
-post reply comments to the PR.
+compose the reply comments.
 
 **Progress gate**: Before presenting comments for posting,
 call `get_progress` with `command: "uf.address-feedback"`
@@ -1203,6 +1207,21 @@ this command template and rebuild state from `state.json`
 and the git log. Do NOT post comments without verified
 progress state.
 
+For each item, compose the reply:
+
+| Decision | Reply content |
+|---|---|
+| ACCEPT | "Addressed in \`<commit_sha>\`: <brief description of the change>" |
+| MODIFY | "Addressed in \`<commit_sha>\` (modified approach): <brief description>" |
+| REJECT | Evidence-based reasoning referencing convention pack rules or constitution principles |
+| ASK | Author's clarification question |
+| FILE | "<what it tracks>. Not changed in this PR (<SEVERITY>)." — the tool files the issue and prefixes "Filed as #<issue_number>: " |
+| REPLY | Acknowledges the finding in a sentence or two and says why it is not changed in this PR (<SEVERITY>) |
+
+For each FILE item, also compose the issue: a title (the finding
+summary) and a body (the finding, its severity, file:line, and a
+link to the review comment on PR #<PR_NUMBER>).
+
 Before posting, print the full composed replies as plain
 session text and present the decision as follows:
 
@@ -1211,16 +1230,18 @@ session text and present the decision as follows:
    and the question tool MUST present the
    same details and options):
    - The full composed reply for every item, verified
-     against the reply-content table below, and the title
+     against the reply-content table above, and the title
      and body of every issue to file
    - Per-option reasoning: what each choice does and
      when it fits:
-     - **"Yes -- post reply comments"** files each FILE
-       item's issue, then posts each reply to its review
+     - **"Yes -- post reply comments"** continues to the
+       resolution question in Section 4.6, then files each
+       FILE item's issue and posts each reply to its review
        thread; fits replies that verify against the
        reply-content table
-     - **"No -- skip posting"** posts nothing; fits replies
-       that still need correction
+     - **"No -- skip posting"** posts nothing, files nothing,
+       and skips Section 4.6; fits replies that still need
+       correction
    - A recommendation with its justification (advisory only —
      the human decides): "Yes -- post" after the printed
      replies verify against the reply-content table.
@@ -1232,85 +1253,13 @@ session text and present the decision as follows:
    labeled "(Recommended)":
    `["Yes -- post reply comments", "No -- skip posting"]`.
 
-For each item, compose the reply:
+### 4.6 Post Replies and Resolve Threads
 
-| Decision | Reply content |
-|---|---|
-| ACCEPT | "Addressed in \`<commit_sha>\`: <brief description of the change>" |
-| MODIFY | "Addressed in \`<commit_sha>\` (modified approach): <brief description>" |
-| REJECT | Evidence-based reasoning referencing convention pack rules or constitution principles |
-| ASK | Author's clarification question |
-| FILE | "Filed as #<issue_number>: <what it tracks>. Not changed in this PR (<SEVERITY>)." |
-| REPLY | Acknowledges the finding in a sentence or two and says why it is not changed in this PR (<SEVERITY>) |
-
-File each FILE item's issue before posting its reply, so the reply can
-link it. Write the title and body to temporary files, so quotes,
-newlines, and backslashes in finding text never reach the shell as
-code (a quoted `$(cat ...)` is not re-parsed):
-
-```bash
-TITLE_FILE=$(mktemp); BODY_FILE=$(mktemp)
-cat > "$TITLE_FILE" << 'TITLE_EOF'
-<finding summary>
-TITLE_EOF
-cat > "$BODY_FILE" << 'BODY_EOF'
-<finding, severity, file:line, and a link to the review comment on PR #<PR_NUMBER>>
-BODY_EOF
-gh issue create --repo {owner}/{repo} --title "$(cat "$TITLE_FILE")" --body-file "$BODY_FILE"
-rm -f "$TITLE_FILE" "$BODY_FILE"
-```
-
-`gh issue create` prints the new issue's URL; its last path segment
-is the issue number.
-
-Record each filed issue number in the cache so a retry does not file
-it twice. If `gh issue create` fails, retry it once. If it fails again, do not
-post that item's reply or resolve its thread: report the error with
-the item, continue with the other items, and leave the item for the
-next run.
-
-Post replies to the correct review thread. Always write the comment body to a temporary file and use `--input` to prevent shell injection from AI-generated or reviewer-authored text:
-
-```bash
-# Write reply body to temp file (never interpolate into shell args)
-REPLY_FILE=$(mktemp)
-cat > "$REPLY_FILE" << 'REPLY_EOF'
-<reply content here>
-REPLY_EOF
-
-# For review comments (inline threads)
-gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments/<comment_id>/replies \
-  --method POST --input "$REPLY_FILE"
-
-# For issue comments (general)
-gh api repos/{owner}/{repo}/issues/<PR_NUMBER>/comments \
-  --method POST --input "$REPLY_FILE"
-
-# Clean up
-rm -f "$REPLY_FILE"
-```
-
-**Crash recovery**: Track each comment's posting status in the cache (`comment-posted` flag). If posting fails partway (e.g., API rate limit after 3 of 6 comments), report partial progress:
-> "Posted 3 of 6 reply comments. Items 4-6 pending. Re-run `/uf.address-feedback <PR_NUMBER>` to retry."
-
-Record progress in `.uf/feedback/pr-<PR_NUMBER>/state.json` for idempotent retry.
-
-> **CHECKPOINT**: Call `checkpoint` with
-> `command: "uf.address-feedback"`,
-> `step: "reply-comments"`,
-> `data: {"posted": N, "total": M}`.
-> Then call `clear_progress` with
-> `command: "uf.address-feedback"` to clean up progress
-> state.
-
-### 4.6 Resolve Threads
-
-After posting reply comments, offer to resolve the threads of ACCEPT, MODIFY, FILE, and REPLY items. Each of those is addressed: left open, it reads as unresolved feedback and starts another feedback run.
-
-```bash
-# GraphQL mutation to resolve a thread
-gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread_id>"}) { thread { isResolved } } }'
-```
+Ask whether to resolve the threads of ACCEPT, MODIFY, FILE, and
+REPLY items once their replies are posted. Each of those is
+addressed: left open, it reads as unresolved feedback and starts
+another feedback run. Ask this before posting, so one tool call
+does both.
 
 Present the decision as follows:
 
@@ -1318,19 +1267,19 @@ Present the decision as follows:
    the question tool (visibility directive — the printed text
    and the question tool MUST present the
    same details and options):
-   - The addressed threads with their posted replies, and
+   - The addressed threads with the replies to post, and
      the note that REJECT and ASK threads stay open
    - Per-option reasoning: what each choice does and
      when it fits:
      - **"Yes -- resolve addressed threads"** resolves the
-       threads of ACCEPT, MODIFY, FILE, and REPLY items that
-       have posted replies; fits addressed threads with
-       posted replies
-     - **"No -- leave threads open"** leaves every thread
-       open; fits threads that need further discussion
+       threads of ACCEPT, MODIFY, FILE, and REPLY items whose
+       replies are posted; fits addressed threads
+     - **"No -- leave threads open"** posts the replies and
+       leaves every thread open; fits threads that need
+       further discussion
    - A recommendation with its justification (advisory only —
      the human decides): "Yes -- resolve" for addressed
-     threads with posted replies.
+     threads.
      If the assessment data does not ground any option, the
      gate MUST say so, present the trade-off, and still ask
      the full option set (fail-closed, per FR-006/FR-012)
@@ -1340,13 +1289,54 @@ Present the decision as follows:
    `["Yes -- resolve addressed threads", "No -- leave
    threads open"]`.
 
-The question MUST be answered before resolving.
+The question MUST be answered before posting.
+
+Then call `post_feedback_replies` once, with:
+
+- `pr_number`: `<PR_NUMBER>`
+- `resolve_threads`: `true` when the author chose to resolve
+  the addressed threads, `false` when they chose to leave them
+  open
+- `items`: one entry per item, in the order shown, each with
+  `comment_kind` (`review` for an inline thread, `issue` for a
+  PR conversation comment), `comment_id` (the thread's
+  top-level review comment or the issue comment), `decision`
+  (`accept`, `modify`, `reject`, `ask`, `file`, or `reply`),
+  `body` (the composed reply exactly as confirmed), and, for
+  `file` items only, `issue: {title, body}`
+
+The tool owns the mechanics: it files each FILE item's issue
+before its reply (one retry; a FILE item whose issue still
+fails is not posted or resolved), stops posting at the first
+failed post, and records each step in
+`.uf/feedback/pr-<PR_NUMBER>/state.json`, so a re-run with the
+same items resumes. When nothing is left to do, it records the
+`reply-comments` checkpoint.
+
+Print the returned `summary` line verbatim; on `complete: false`,
+also print each item whose `error` is set. Complete and partial
+runs look like this:
+
+```text
+Posted 4 of 4 reply comments. Resolved 3 of 3 addressed threads.
+Posted 3 of 6 reply comments. Items 4, 5, 6 not posted. Resolved 2 of 3 addressed threads. Re-run `/uf.address-feedback 42` to retry.
+```
+
+Do not post, file, or resolve anything by hand: the re-run
+resumes from the cache. On an error envelope (`status: "error"`,
+with `code`, `message`, and `retryable`), report it verbatim and
+**STOP**.
+
+To file a finding without a reply, call `file_feedback_issue`,
+which takes `pr_number`, `comment_kind`, `comment_id`, `title`,
+and `body` and returns `issue_number` and `issue_url`. Both tools
+reuse an issue already recorded for the same comment.
 
 ### 4.7 Produce Feedback-Triage Artifact
 
 Write the artifact to `.uf/artifacts/feedback-triage/pr-<PR_NUMBER>-round-<M>.json`.
-This existing feedback-triage artifact and its schema remain unchanged. It is
-emitted in addition to each Tier 2 `review-dispatch` artifact and returned
+This existing feedback-triage artifact uses schema 1.1.0
+(`schemas/feedback-triage/v1.1.0.schema.json`). It is emitted in addition to each Tier 2 `review-dispatch` artifact and returned
 canonical `review-verdict` version 2 decision; it does not replace or embed
 either new contract.
 
@@ -1368,7 +1358,7 @@ authoritative and MUST NOT be interpreted as approval.
   "version": "1.0.0",
   "timestamp": "<ISO 8601>",
   "artifact_type": "feedback-triage",
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "context": {
     "branch": "<PR source branch>",
     "commit": "<HEAD SHA after fixes, or pre-fix HEAD>",
@@ -1390,9 +1380,11 @@ authoritative and MUST NOT be interpreted as approval.
         "tier": 1,
         "evidence": ["go.md CS-001: ..."],
         "recommendation": "accept|author-decides",
-        "decision": "accept|modify|reject|ask",
+        "decision": "accept|modify|reject|ask|file|reply",
         "decision_reasoning": "...",
         "commit_sha": "abc1234",
+        "filed_issue_number": null,
+        "filed_issue_url": null,
         "divisor_agents_used": [],
         "tier2_unavailable": false,
         "conflict_flag": false
@@ -1404,6 +1396,8 @@ authoritative and MUST NOT be interpreted as approval.
       "modified": 1,
       "rejected": 1,
       "asked": 1,
+      "filed": 0,
+      "replied": 0,
       "tier1_count": 4,
       "tier2_count": 2,
       "divisor_agents_invoked": ["adversary", "architect"]
@@ -1414,11 +1408,16 @@ authoritative and MUST NOT be interpreted as approval.
 
 Fields `file`, `line`, `decision_reasoning`, and `commit_sha` may be `null` (general PR comments have null file/line; REJECT/ASK items have null commit_sha).
 
-The schema has no FILE or REPLY values. Record those items with
-`recommendation: "author-decides"`, `decision: "reject"` (no code
-change in this PR), a null `commit_sha`, and a `decision_reasoning`
-that starts with `filed: <issue URL>` or `reply:`. Count them under
-`rejected` in the summary.
+Record FILE items with `decision: "file"` and REPLY items with
+`decision: "reply"`, each with `recommendation: "author-decides"` and
+a null `commit_sha`. Take a FILE item's `filed_issue_number` and
+`filed_issue_url` from the `issue_number` and `issue_url` that
+`post_feedback_replies` returned for it; every other item has null
+for both. Count FILE items under `filed` and REPLY items under
+`replied`, not under `rejected`.
+
+After the artifact is written, call `clear_progress` with
+`command: "uf.address-feedback"` to clean up progress state.
 
 ---
 
@@ -1439,7 +1438,7 @@ that starts with `filed: <issue URL>` or `reply:`. Count them under
 
 7. **Gatekeeping integrity**: MUST NOT modify quality gates, coverage thresholds, CI flags, or convention pack rules while addressing feedback. If a feedback item requests weakening a gate, classify as SUBJECTIVE with AUTHOR-DECIDES and note the gatekeeping constraint.
 
-8. **Shell injection prevention**: Always write AI-generated or reviewer-authored text to temporary files and use `--input` for `gh api` calls. Never interpolate untrusted text into shell arguments.
+8. **Shell injection prevention**: Post replies, file issues, and resolve threads only through `post_feedback_replies` and `file_feedback_issue`, which pass AI-generated and reviewer-authored text to `gh` through temporary files and argument arrays. Never interpolate untrusted text into shell arguments.
 
 9. **File permissions**: Cache files `600`, cache directories `700`. The `.uf/feedback/` directory MUST be in `.gitignore`.
 

@@ -637,8 +637,8 @@ func TestCommandContracts_FeedbackLoopScope(t *testing.T) {
 	assertCommandCopies(t, "uf.address-feedback.md", true, []commandClause{
 		{name: "severity scope", all: []string{"a medium or low item never becomes a code change in this run", "counts as high and keeps the matrix above", "medium and low items are always tier 1."}},
 		{name: "medium and low options", all: []string{"`[\"file issue\", \"reply\", \"ask\"]`"}},
-		{name: "issue filing", all: []string{"gh issue create --repo {owner}/{repo} --title \"$(cat \"$title_file\")\" --body-file \"$body_file\"", "if `gh issue create` fails, retry it once.", "do not post that item's reply or resolve its thread"}},
-		{name: "artifact prefixes", all: []string{"starts with `filed: <issue url>` or `reply:`"}},
+		{name: "issue filing", all: []string{"then call `post_feedback_replies` once, with:", "it files each file item's issue before its reply (one retry; a file item whose issue still fails is not posted or resolved)", "stops posting at the first failed post"}},
+		{name: "artifact decisions", all: []string{"record file items with `decision: \"file\"` and reply items with `decision: \"reply\"`", "count file items under `filed` and reply items under `replied`, not under `rejected`."}},
 		{name: "one council per cycle", all: []string{"this command does not run `/uf.review-council`.", "run its phases in `hard-gate` mode", "at most 3 attempts in all", "step: \"verify\""}},
 		{name: "learnings off the branch", all: []string{"never stage `.uf/dewey/learnings/`", "never commit `.uf/dewey/learnings/` on the pr branch."}},
 	})
@@ -654,12 +654,30 @@ func TestCommandContracts_FeedbackLoopScope(t *testing.T) {
 	})
 	for _, copy := range loadCommandCopies(t, "uf.address-feedback.md", true) {
 		normalized := normalizeCommandText(copy.text)
-		for _, gone := range []string{"step: \"review-council\"", "no push without review-council"} {
+		for _, gone := range []string{"step: \"review-council\"", "no push without review-council", "starts with `filed: <issue url>`", "gh issue create --repo", "resolvereviewthread(input", "--method post --input"} {
 			if strings.Contains(normalized, gone) {
 				t.Errorf("%s still carries removed text %q", copy.name, gone)
 			}
 		}
 	}
+}
+
+// TestCommandContracts_FeedbackReplyTools pins the feedback-reply-tools
+// rules (issues #966, #998, #999): replies, issue filing, and thread
+// resolution run through one post_feedback_replies call between the
+// two human gates; the tool records the reply-comments checkpoint;
+// progress is cleared only after the artifact; and the artifact uses
+// feedback-triage schema 1.1.0.
+func TestCommandContracts_FeedbackReplyTools(t *testing.T) {
+	assertCommandCopies(t, "uf.address-feedback.md", true, []commandClause{
+		{name: "both gates before the call", all: []string{"ask this before posting, so one tool call does both.", "the question must be answered before posting."}},
+		{name: "judgment products as parameters", all: []string{"`resolve_threads`: `true` when the author chose to resolve the addressed threads", "`body` (the composed reply exactly as confirmed)"}},
+		{name: "tool-rendered summary", all: []string{"print the returned `summary` line verbatim;"}},
+		{name: "no hand retries", all: []string{"do not post, file, or resolve anything by hand: the re-run resumes from the cache."}},
+		{name: "checkpoint and clear", all: []string{"it records the `reply-comments` checkpoint.", "after the artifact is written, call `clear_progress`"}},
+		{name: "schema 1.1.0", all: []string{"\"schema_version\": \"1.1.0\"", "`schemas/feedback-triage/v1.1.0.schema.json`"}},
+		{name: "issue filing tool", all: []string{"`file_feedback_issue`, which takes `pr_number`, `comment_kind`, `comment_id`, `title`, and `body`"}},
+	})
 }
 
 func TestCommandContracts_CanonicalScaffoldParity(t *testing.T) {
