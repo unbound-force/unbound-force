@@ -1468,7 +1468,7 @@ Each entry follows the format: `- <change-name>: <summary>`.
   `git rev-list --left-right --count HEAD...FETCH_HEAD` (a URL
   remote's fetch updates only `FETCH_HEAD`, which `git status`
   cannot see); a failed fetch stops before the divergence check
-  (a failed fetch leaves `FETCH_HEAD` stale).   (Fixes: #954)
+  (a failed fetch leaves `FETCH_HEAD` stale). (Fixes: #954)
 - fix-pinact-gaze-pin: the Gaze reusable workflow pin in
   `ci_local.yml` moved from the untagged commit `8bdfb59` to
   the v2.3.0 tag commit `8031d419` with a `# v2.3.0` version
