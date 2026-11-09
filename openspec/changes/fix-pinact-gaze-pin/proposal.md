@@ -62,7 +62,7 @@ PR as the documented rollback path.
 - **Files**: `.github/workflows/ci_local.yml:101` only. The old
   SHA `8bdfb59` has no remaining functional references; the
   rollback documentation in this change and the CHANGELOG
-  deliberately retains it.
+  deliberately retain it.
 - **Behavior**: none. `reusable_gaze_ai_report.yml` is
   byte-for-byte identical between the two SHAs (170 lines,
   matching SHA-256, verified via the GitHub API), so inputs,

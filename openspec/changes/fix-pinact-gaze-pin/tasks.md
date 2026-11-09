@@ -23,7 +23,11 @@
   byte-identical between `8bdfb59f8b10de854ba289e5e545d1eb9fee0f56`
   and the target SHA (line count plus content SHA-256 via the
   GitHub contents API). On any difference, stop and report --
-  the zero-behavior-change premise would not hold.
+  the zero-behavior-change premise would not hold. Recorded
+  result: 170 lines at both refs, identical git blob
+  `86132290e5334397f6d2d537e8a616ec1226e3bf` (6954 bytes)
+  and identical content SHA-256
+  `e807f8aeeff5e7e29596b508db8b171e22d02138c4ca4a74e2cc8f54fd363099`.
 
 ## 2. Apply the re-pin
 
@@ -67,3 +71,13 @@
   verification (tasks 1.1-1.2) plus the written pin's
   compliance with the pinact `--verify` contract; the check
   itself first runs when the v0.9.0 bump merges.
+
+## 5. Post-merge verification
+
+- [ ] 5.1 After the org-infra reusable CI v0.9.0 bump (#864)
+  merges, confirm the `Standardized CI / Verify action
+  versions` (pinact `--verify`) check passes on that
+  main-based PR, and confirm the first push-to-`main`
+  `gaze-ai-report` run publishes a non-empty report (a
+  skip-on-missing-secret run can pass silently). Record the
+  observed results in this change.
