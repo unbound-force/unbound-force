@@ -166,7 +166,7 @@ Classify files as user-facing or internal based on path patterns:
 #### 4. Content Portability
 
 All filed issue titles and bodies MUST use language
-appropriate to the target repository's language and
+that matches the target repository's language and
 project type. Read README.md or AGENTS.md to determine
 the project type. MUST NOT reference tools or concepts
 specific to a different repository type (e.g.,

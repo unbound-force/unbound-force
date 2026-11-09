@@ -49,8 +49,9 @@ This skill teaches the Swarm coordinator about the Unbound Force hero team, thei
 ## Knowledge Retrieval in the Hero Lifecycle
 
 Before delegating to a hero agent, Swarm coordinators SHOULD
-query Dewey for relevant context that grounds the hero's work
-in project history. This step is optional — if Dewey is
+query Dewey for context on the files and topics the hero will
+touch (prior decisions, learnings, related specs) to ground the
+hero's work in project history. This step is optional — if Dewey is
 unavailable, skip it and proceed with delegation.
 
 ### Per-Stage Dewey Queries
