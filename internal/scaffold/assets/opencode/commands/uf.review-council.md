@@ -402,8 +402,8 @@ mode — no finalization occurs and no finalization artifacts are
 written. Prefer the returned summary: its `correlation_id`,
 `proposals`, and `warnings` precede `findings` and `advisories`, so
 host-side truncation cannot cut them. The summary's `proposals` array
-is a capped preview (at most 10 entries, each `information` cut to 512
-characters) for presentation only: never store lessons from it, and
+is a capped preview (at most 10 complete entries; `proposals_truncated`
+marks dropped ones) for presentation only: never store lessons from it, and
 never source the proposals from `dispatch_review_runs`. Lessons are
 stored from the persisted artifact after the Section 5 finalization of
 the same iteration, as **Lesson storage** below describes.
