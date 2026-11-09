@@ -62,7 +62,7 @@ Follow this execution flow:
    - No remaining unexplained bracket tokens.
    - Version line matches report.
    - Dates ISO format YYYY-MM-DD.
-   - Principles are declarative, testable, and free of vague language ("should" → replace with MUST/SHOULD rationale where appropriate).
+   - Principles are declarative, testable, and free of vague language (replace each vague "should" with MUST or SHOULD plus its rationale).
 
 7. Write the completed constitution back to `.specify/memory/constitution.md` (overwrite).
 
