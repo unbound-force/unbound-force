@@ -111,6 +111,7 @@ The Divisor acts as the ultimate guarantor of technical quality, ensuring that t
 
 **Current Capabilities**:
 - 11-persona review council (Guard, Architect, Adversary, SRE, Testing, Curator, Scribe, Herald, Envoy, plus repo-local Linguist and Determinist that are not delivered by `uf init`)
+- The Determinist (`divisor-determinism`) owns determinism pack rules DE-001 through DE-008 and reviews from tool evidence: `instruction-lint --base BASE --changed` size deltas and IL-040 to IL-042 hints, and `tool-inventory` owner lookup (`--match`) and seam maps (`--seams`). The Linguist (`divisor-linguist`) keeps instruction clarity and the other `instruction-lint` findings and defers DE findings to the Determinist. Specs: [`openspec/changes/divisor-determinism-persona/`](../openspec/changes/divisor-determinism-persona/) and [`openspec/changes/instruction-lint/`](../openspec/changes/instruction-lint/); usage: [Repo-local reviewers](usage.md#repo-local-reviewers-unbound-force-repository-only)
 - Dynamic agent discovery
 - Convention pack enforcement
 - Auto-detection of code vs spec review mode

@@ -528,6 +528,14 @@ of code quality.
 | **Scribe** | Changelog entries, commit messages, release notes |
 | **Herald** | Cross-repo impact, downstream effects, migration |
 | **Envoy** | External dependency changes, license compliance |
+| **Linguist** (repo-local) | Instruction prose clarity and `instruction-lint` findings; defers determinism findings to the Determinist |
+| **Determinist** (repo-local) | Determinism pack rules DE-001 through DE-008, from `instruction-lint --base --changed` and `tool-inventory` evidence |
+
+`uf init` delivers the first nine. The Linguist and the
+Determinist are enrolled only in this repository's
+`.uf/reviewer-capabilities.yaml`, for an 11-persona council
+here. See [Repo-local reviewers](usage.md#repo-local-reviewers-unbound-force-repository-only)
+for the evidence commands they run.
 
 ### Auto-Detection
 
