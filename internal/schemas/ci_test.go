@@ -192,6 +192,11 @@ var handAuthoredSchemas = []handAuthoredSchema{
 		schemaFile: filepath.Join("review-verdict", "v2.0.0.schema.json"),
 		samplesDir: filepath.Join("review-verdict", "samples", "v2"),
 	},
+	{
+		typeName:   "feedback-triage-v1.1.0",
+		schemaFile: filepath.Join("feedback-triage", "v1.1.0.schema.json"),
+		samplesDir: filepath.Join("feedback-triage", "samples", "v1.1.0"),
+	},
 }
 
 func handAuthoredPaths(schemasDir string, handAuthored handAuthoredSchema) (string, string) {
@@ -287,7 +292,7 @@ func TestHandAuthoredSchemas_DirectoryStructure(t *testing.T) {
 		t.Run(handAuthored.typeName, func(t *testing.T) {
 			typeDir := filepath.Join(schemasDir, handAuthored.typeName)
 			if handAuthored.samplesDir != "" {
-				typeDir = filepath.Join(schemasDir, "review-verdict")
+				typeDir = filepath.Join(schemasDir, filepath.Dir(handAuthored.schemaFile))
 			}
 
 			info, err := os.Stat(typeDir)
@@ -312,6 +317,79 @@ func TestHandAuthoredSchemas_DirectoryStructure(t *testing.T) {
 				t.Errorf("README.md missing: %v", err)
 			}
 		})
+	}
+}
+
+// TestFeedbackTriageSchema_MinorVersionCompatibility verifies the
+// feedback-triage 1.1.0 schema is a strict superset of 1.0.0 (issue
+// #999): every 1.0.0 artifact still validates under 1.1.0, and the
+// 1.1.0 file and reply decisions stay invalid under 1.0.0, so a 1.0.0
+// reader keeps rejecting values it cannot interpret instead of
+// misreading them.
+func TestFeedbackTriageSchema_MinorVersionCompatibility(t *testing.T) {
+	schemasDir := repoSchemasDir()
+	v100 := filepath.Join(schemasDir, "feedback-triage", "v1.0.0.schema.json")
+	v110 := filepath.Join(schemasDir, "feedback-triage", "v1.1.0.schema.json")
+
+	v100Samples := filepath.Join(schemasDir, "feedback-triage", "samples")
+	entries, err := os.ReadDir(v100Samples)
+	if err != nil {
+		t.Fatalf("read 1.0.0 samples: %v", err)
+	}
+	var checked int
+	for _, entry := range entries {
+		if entry.IsDir() || strings.HasPrefix(entry.Name(), "invalid-") || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		checked++
+		if err := schemas.ValidateArtifact(v110, filepath.Join(v100Samples, entry.Name())); err != nil {
+			t.Errorf("1.0.0 sample %s must validate under 1.1.0: %v", entry.Name(), err)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no 1.0.0 positive samples found")
+	}
+
+	v110Sample := filepath.Join(schemasDir, "feedback-triage", "samples", "v1.1.0", "sample-feedback-triage.json")
+	if err := schemas.ValidateArtifact(v100, v110Sample); err == nil {
+		t.Error("1.0.0 schema must reject the 1.1.0 file and reply decisions")
+	}
+
+	data, err := os.ReadFile(v110)
+	if err != nil {
+		t.Fatalf("read 1.1.0 schema: %v", err)
+	}
+	var doc struct {
+		Properties struct {
+			Items struct {
+				Items struct {
+					Properties map[string]struct {
+						Enum []string `json:"enum"`
+					} `json:"properties"`
+				} `json:"items"`
+			} `json:"items"`
+			Summary struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+				Required   []string                   `json:"required"`
+			} `json:"summary"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse 1.1.0 schema: %v", err)
+	}
+	decisions := strings.Join(doc.Properties.Items.Items.Properties["decision"].Enum, ",")
+	if decisions != "accept,modify,reject,ask,file,reply" {
+		t.Errorf("1.1.0 decision enum = %q, want accept,modify,reject,ask,file,reply", decisions)
+	}
+	for _, count := range []string{"filed", "replied"} {
+		if _, ok := doc.Properties.Summary.Properties[count]; !ok {
+			t.Errorf("1.1.0 summary missing %q", count)
+		}
+		for _, required := range doc.Properties.Summary.Required {
+			if required == count {
+				t.Errorf("1.1.0 summary %q must stay optional (minor version)", count)
+			}
+		}
 	}
 }
 
