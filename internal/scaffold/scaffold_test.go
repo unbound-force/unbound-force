@@ -1609,9 +1609,10 @@ func TestPluginPackageInputs_ExactVersions(t *testing.T) {
 		"yaml":                "2.9.1",
 	}
 	expectedOverrides := map[string]string{
-		"toml": "5.0.1",
-		"uuid": "13.0.1",
-		"zod":  "4.6.6",
+		"effect": "4.0.0-beta.103",
+		"toml":   "5.0.1",
+		"uuid":   "13.0.1",
+		"zod":    "4.6.6",
 	}
 	expectedEngines := map[string]string{
 		"node": "^22.22.2 || ^24.15.0 || >=26.0.0",
@@ -1696,8 +1697,8 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 		"@vitest/coverage-v8": {version: "5.0.3", project: "Vitest", license: "MIT"},
 		"yaml":                {version: "2.9.1", project: "yaml", license: "ISC"},
 	}
-	if provenance.VerifiedAt != "2026-11-06" {
-		t.Errorf("provenance verification date = %q, want 2026-11-06", provenance.VerifiedAt)
+	if provenance.VerifiedAt != "2026-11-10" {
+		t.Errorf("provenance verification date = %q, want 2026-11-10", provenance.VerifiedAt)
 	}
 	if len(provenance.Packages) != len(expectedPackages) {
 		t.Errorf("provenance has %d packages, want %d", len(provenance.Packages), len(expectedPackages))
@@ -1736,6 +1737,14 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 	}
 
 	expectedOverrides := map[string]overrideProvenance{
+		"effect": {
+			Version:      "4.0.0-beta.103",
+			License:      "MIT",
+			GitHead:      "dff25449dfc927f2cce912c329f343cfb5365f88",
+			Integrity:    "sha512-pE8TxF4m2tQzVI+77dIlm3s+81TACV1AiX1JEkvY+zVuxgQQ8aGSkqXNJF6b/ST+coCSk5cUdbULpQ7sm4oHyw==",
+			MaintainedBy: "Effect",
+			ProjectURL:   "https://github.com/Effect-TS/effect",
+		},
 		"toml": {
 			Version:      "5.0.1",
 			License:      "MIT",

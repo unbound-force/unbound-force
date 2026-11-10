@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-11-06",
+  "verified_at": "2026-11-10",
   "packages": {
     "@opencode-ai/plugin": {
       "version": "1.19.0",
@@ -38,6 +38,14 @@
     }
   },
   "security_overrides": {
+    "effect": {
+      "version": "4.0.0-beta.103",
+      "license": "MIT",
+      "git_head": "dff25449dfc927f2cce912c329f343cfb5365f88",
+      "integrity": "sha512-pE8TxF4m2tQzVI+77dIlm3s+81TACV1AiX1JEkvY+zVuxgQQ8aGSkqXNJF6b/ST+coCSk5cUdbULpQ7sm4oHyw==",
+      "maintained_by": "Effect",
+      "project_url": "https://github.com/Effect-TS/effect"
+    },
     "toml": {
       "version": "5.0.1",
       "license": "MIT",

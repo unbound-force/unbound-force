@@ -159,6 +159,12 @@ dependency, so bumping the root pin alone leaves a vulnerable
 4.1.8 copy in the install tree. The override forces the plugin's
 copy onto 4.6.6 too.
 
+A later Medium advisory (GHSA-chp3-j5qr-2vfr, CVSS 6.3 — cookie
+attribute injection in `@effect/platform`'s `makeCookie()`) hit
+`effect` 4.0.0-beta.83, an exact transitive of
+`@opencode-ai/plugin` 1.19.0. It is pinned the same way: the
+`overrides` entry forces the nested copy onto 4.0.0-beta.103.
+
 **Picking up the fix in a hero repository.** `.opencode/package.json`
 is tool-owned, so re-running `uf init` rewrites it with the new pins
 (it keeps any `devDependencies` your copy declares) and reinstalls the
@@ -178,8 +184,9 @@ Every `zod` entry should read 4.6.6 and every `toml` entry 5.0.1.
 **Provenance.** This repository records the verification trail in
 `internal/scaffold/testdata/plugin-package-provenance.json`: for each
 direct pin its version, license, and registry maintainers, and for
-each security override (`toml`, `uuid`, `zod`) its version, upstream
+each security override (`effect`, `toml`, `uuid`, `zod`) its version, upstream
 git head, and npm integrity hash, with the date they were verified
 (`verified_at`). A scaffold test fails if the shipped pins and that
-record drift apart. Rollback is a revert of the PR #957 pin commit,
-which restores zod 4.1.8 and toml 4.2.0.
+record drift apart. Rollback is a revert of the pin commit: PR
+#957's restores zod 4.1.8 and toml 4.2.0; reverting the effect
+override restores effect 4.0.0-beta.83.
