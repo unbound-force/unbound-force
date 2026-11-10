@@ -841,6 +841,41 @@ func TestCommandContracts_RejectIncompatibleGhSlurpFlag(t *testing.T) {
 	}
 }
 
+func TestCommandContracts_RejectShellHeredocPayloads(t *testing.T) {
+	// #1011: a heredoc ends at any line equal to its delimiter, quoted or
+	// not, so composed text (comment bodies, child issue payloads) written
+	// through one could break out and run as shell. Command templates must
+	// write payload files with the host's file-write tool instead.
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatal("project root not found")
+	}
+	heredoc := regexp.MustCompile(`<<-?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?`)
+	for _, dir := range []string{
+		filepath.Join(root, ".opencode", "commands"),
+		filepath.Join(root, "internal", "scaffold", "assets", "opencode", "commands"),
+	} {
+		paths, err := filepath.Glob(filepath.Join(dir, "*.md"))
+		if err != nil {
+			t.Fatalf("list command templates in %s: %v", dir, err)
+		}
+		if len(paths) == 0 {
+			t.Fatalf("no command templates found in %s", dir)
+		}
+		for _, path := range paths {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			for i, line := range strings.Split(string(data), "\n") {
+				if m := heredoc.FindString(line); m != "" {
+					t.Errorf("%s:%d: shell heredoc %q; write the payload with the host's file-write tool instead", path, i+1, m)
+				}
+			}
+		}
+	}
+}
+
 func assertCommandCopies(t *testing.T, name string, scaffolded bool, clauses []commandClause) {
 	t.Helper()
 
