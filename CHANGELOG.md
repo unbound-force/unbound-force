@@ -1414,6 +1414,18 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- effect-security-override: pin `effect` 4.0.0-beta.83 →
+  4.0.0-beta.103 with a tool-owned `overrides` entry after the CI
+  throwaway-lock OSV scan surfaced GHSA-chp3-j5qr-2vfr
+  (CVE-2026-115779, Medium 6.3: cookie attribute injection in
+  `@effect/platform` `makeCookie()`). `@opencode-ai/plugin` 1.19.0
+  declares an exact `effect` 4.0.0-beta.83 dependency, so only an
+  override forces the nested copy onto the fixed version; the pin
+  lands in both `.opencode/package.json` and the scaffolded
+  mirror, and the provenance record carries the upstream git head
+  and npm integrity hash, verified 2026-11-10. Rollback: revert
+  this commit to restore effect 4.0.0-beta.83.
+  (Advisory: GHSA-chp3-j5qr-2vfr)
 - instruction-lint-baseline (#971): clear the instruction-lint
   baseline from 1 error / 31 warnings / 23 info to 0 errors /
   16 warnings / 24 info. `/opsx-apply` and the
