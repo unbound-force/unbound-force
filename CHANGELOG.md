@@ -964,6 +964,12 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/remove-mutimind-mxf-orchestration/, Fixes: #565, Fixes: #566)
 
 ### Changed
+- merge-plugin-runtime-deps-docs (#1012): the hero-repository
+  remediation runbook in `docs/osv-transitive-scan.md` now says
+  `uf init` merges `.opencode/package.json` (keeping user-added
+  runtime and dev dependencies, resetting shipped pins, rewriting
+  the tool-owned `overrides`) and that `manifest-install` compares
+  only the pins uf ships.
 - feedback-reply-tools-docs (#1003): `docs/usage.md` and
   `docs/architecture.md` now describe `/uf.address-feedback`
   asking both reply questions before posting, then filing
