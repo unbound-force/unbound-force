@@ -1426,6 +1426,16 @@ Each entry follows the format: `- <change-name>: <summary>`.
   and npm integrity hash, verified 2026-11-10. Rollback: revert
   this commit to restore effect 4.0.0-beta.83.
   (Advisory: GHSA-chp3-j5qr-2vfr)
+- triage-issue-heredoc (#1011): `/uf.triage-issue` no longer
+  writes the issue comment (4.3) or child issue payload (4.4)
+  through a quoted shell heredoc. A heredoc ends at any line
+  equal to its delimiter, so composed text containing
+  `COMMENT_EOF` or `CHILD_EOF` could break out and run as shell.
+  Both steps now create the temp file in the shell, write the
+  JSON payload with the host's file-write tool, and post with
+  `gh api --input`. A new contract test rejects any heredoc in
+  the canonical or scaffolded command templates. Instruction
+  delta: `uf.triage-issue.md` +24/-14 lines (1250 to 1260).
 - instruction-lint-baseline (#971): clear the instruction-lint
   baseline from 1 error / 31 warnings / 23 info to 0 errors /
   16 warnings / 24 info. `/opsx-apply` and the

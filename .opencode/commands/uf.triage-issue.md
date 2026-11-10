@@ -866,22 +866,26 @@ session text, then present the decision as follows:
 
 **Post the comment** (on Approve or Modify):
 
-Write the comment body to a temporary file and post via `gh api --input`. NEVER interpolate comment text into shell arguments.
+Write the comment body to a temporary file and post via `gh api --input`. NEVER interpolate comment text into shell arguments, and NEVER write it through a shell heredoc: a heredoc ends at any line equal to its delimiter, so comment text containing that line would run as shell.
+
+1. Create the temp file:
 
 ```bash
-# Write comment body to temp file (never interpolate into shell args)
 COMMENT_FILE=$(mktemp)
 chmod 600 "$COMMENT_FILE"
-cat > "$COMMENT_FILE" << 'COMMENT_EOF'
-{"body": "<comment content as JSON-escaped string>"}
-COMMENT_EOF
+echo "$COMMENT_FILE"
+```
 
-# Post the comment
+2. Write the payload `{"body": "<comment content as JSON-escaped string>"}` to the printed path with the host's file-write tool, not the shell. In the commands below, `<COMMENT_FILE>` is that printed path (shell variables do not persist between separate shell calls).
+
+3. Post the comment:
+
+```bash
 gh api repos/{owner}/{repo}/issues/<ISSUE_NUMBER>/comments \
-  --method POST --input "$COMMENT_FILE"
+  --method POST --input "<COMMENT_FILE>"
 
 # Clean up temp file in ALL paths (success, failure, abort)
-rm -f "$COMMENT_FILE"
+rm -f "<COMMENT_FILE>"
 ```
 
 **On API failure**: Report the error, do NOT retry. Record the failure in `actions_taken`. Clean up the temp file.
@@ -969,19 +973,25 @@ gh issue list --search "<sanitized-child-title>" --state open --json number,titl
 
 Each child issue body MUST include a cross-reference: `Split from #<ISSUE_NUMBER>`.
 
-Write the child issue payload to a temporary file and create via `gh api --input`:
+Write the child issue payload to a temporary file and create via `gh api --input`. As in 4.3, write the payload with the host's file-write tool, never a shell heredoc:
+
+1. Create the temp file:
 
 ```bash
 CHILD_FILE=$(mktemp)
 chmod 600 "$CHILD_FILE"
-cat > "$CHILD_FILE" << 'CHILD_EOF'
-{"title": "<child title>", "body": "<child body with Split from #N>"}
-CHILD_EOF
+echo "$CHILD_FILE"
+```
 
+2. Write the payload `{"title": "<child title>", "body": "<child body with Split from #N>"}` to the printed path with the host's file-write tool. In the commands below, `<CHILD_FILE>` is that printed path.
+
+3. Create the child issue:
+
+```bash
 gh api repos/{owner}/{repo}/issues \
-  --method POST --input "$CHILD_FILE"
+  --method POST --input "<CHILD_FILE>"
 
-rm -f "$CHILD_FILE"
+rm -f "<CHILD_FILE>"
 ```
 
 Record each created child issue number and title.
