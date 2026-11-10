@@ -128,10 +128,18 @@ The command runs four phases:
    For a MEDIUM or LOW item you choose: File issue, Reply, or
    Ask; those never change code in this run
 4. **Execute** — Implements code fixes, runs the pre-flight
-   checks in hard-gate mode, pushes, files issues, posts reply
-   comments, and resolves the addressed threads. A failing
-   check gets a fix commit and a re-run, at most 3 attempts in
-   all; if it still fails, the command stops and does not push
+   checks in hard-gate mode, and pushes. A failing check gets a
+   fix commit and a re-run, at most 3 attempts in all; if it
+   still fails, the command stops and does not push. It then
+   asks both reply questions before posting anything: whether
+   to post the composed replies, and whether to resolve the
+   addressed threads (ACCEPT, MODIFY, FILE and REPLY items;
+   REJECT and ASK threads stay open). One `post_feedback_replies`
+   call files each FILE item's issue, posts the replies, and
+   resolves the threads. If a run stops partway, running the
+   command again resumes from the feedback cache: it skips
+   replies already posted and resolves threads an earlier run
+   left open
 
 #### Checking out the PR head
 
