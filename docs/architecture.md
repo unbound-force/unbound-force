@@ -611,8 +611,13 @@ feedback.
 4. **Execute** -- Commit code fixes, run the pre-flight
    checks in hard-gate mode (at most 3 attempts; a check
    that still fails stops the command before the push),
-   push, file issues, post reply comments, and resolve the
-   addressed threads. Dewey learnings stay untracked and
+   push, then ask both reply questions (post the replies;
+   resolve the addressed threads) before posting anything.
+   One `post_feedback_replies` call files issues, posts
+   reply comments, and resolves the addressed threads; a
+   re-run after a partial failure resumes from the feedback
+   cache. `file_feedback_issue` files a single finding as an
+   issue. Dewey learnings stay untracked and
    reach `main` through a separate `chore/dewey-learnings-*`
    PR.
 
@@ -664,7 +669,14 @@ reviewers flag). The `feedback-triage` schema captures
 the inbound response (how the author triaged each
 finding). Together they form the complete review
 feedback loop: `review-verdict` → reviewer comments →
-`feedback-triage`.
+`feedback-triage`. From schema 1.1.0, FILE and REPLY
+items are recorded as `decision: "file"` and
+`decision: "reply"` (with `filed_issue_number` and
+`filed_issue_url` for filed issues), and the summary
+counts `filed` and `replied`. Artifacts written under
+1.0.0 encode them as `reject` with a `filed:` or `reply:`
+prefix; a reader pinned to 1.0.0 rejects 1.1.0 artifacts
+(see `schemas/feedback-triage/README.md`).
 
 The command is re-entrant -- run it again after
 reviewers respond to your ASK items or post new

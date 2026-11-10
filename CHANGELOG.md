@@ -964,6 +964,14 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/remove-mutimind-mxf-orchestration/, Fixes: #565, Fixes: #566)
 
 ### Changed
+- feedback-reply-tools-docs (#1003): `docs/usage.md` and
+  `docs/architecture.md` now describe `/uf.address-feedback`
+  asking both reply questions before posting, then filing
+  issues, posting replies and resolving threads in one
+  `post_feedback_replies` call that a re-run resumes, plus
+  `file_feedback_issue`. `docs/architecture.md` notes the
+  feedback-triage 1.1.0 `file`/`reply` decisions and the
+  1.0.0 reader incompatibility.
 - docs-catchup-955-993: user docs now describe what PRs #955,
   #957, #958, #959, and #993 shipped. `docs/usage.md` covers the
   `/uf.address-feedback` PR-head checkout (HEAD-keyed identity,
