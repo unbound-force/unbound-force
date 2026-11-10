@@ -1492,7 +1492,8 @@ Each entry follows the format: `- <change-name>: <summary>`.
   Instruction deltas (DE-004): uf.review-council.md 1481 lines
   (+1), tokens 16503 -> 16506 (+3); uf.review-pr.md 1229 lines
   (0), tokens 12863 -> 12865 (+2).
-  (Spec: openspec/changes/full-lesson-proposals/, Fixes: #969)
+  (Spec: openspec/changes/full-lesson-proposals/, Fixes: #969,
+  Docs: #1036, unbound-force/website#406)
 - effect-override-cve-2026-115779: pin the transitive `effect`
   dependency to 4.0.0-beta.103 (from 4.0.0-beta.83, exact-declared
   by `@opencode-ai/plugin` 1.19.0) through the established
