@@ -81,8 +81,9 @@ Fixes #969.
 - **CI replication**: `make check`.
 - **Documentation impact**: CHANGELOG.md entry. The edited command
   prose is user-facing — `uf init` deploys the mirrored commands —
-  so the website documentation surface may also apply (website#303
-  precedent: command contract docs live in the website repo).
+  so the website documentation surface applies:
+  unbound-force/website#406 tracks it (website#303 precedent), and
+  in-repo docs issue #1036 covers the documentation impact.
 
 ## Constitution Alignment
 
