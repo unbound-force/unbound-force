@@ -1468,16 +1468,37 @@ Each entry follows the format: `- <change-name>: <summary>`.
 - full-lesson-proposals: `consolidate_dispatch` no longer cuts
   lesson proposals to 512 characters in its summary retrieval or
   compact finalization result (issue #969, RD-FR-058). PR #955
-  stored 12 council learnings from the summary preview, each cut
-  mid-word. Every proposal field is now copied verbatim; a
-  proposal that does not fit the 40,960-byte budget is dropped
-  whole and counted by `proposals_truncated`, and no proposal
-  entry carries `truncated`. The compact finalization result
-  gains the same byte budget. Findings, advisories, and warnings
-  keep their display caps. `uf.review-council.md` and
-  `uf.review-pr.md` describe the preview as complete entries;
-  lessons are still stored from the artifact. Adds an end-to-end
-  harvest regression test
+  stored 12 council learnings from the summary preview; 11 of the
+  12 were damaged by the 512-character cut (ended mid-word or
+  lost the closing sentence). Every proposal field is now copied
+  verbatim; a proposal that does not fit the 40,960-byte budget
+  is dropped whole and counted by `proposals_truncated`, and no
+  proposal entry carries `truncated`. The compact finalization
+  result gains the same byte budget, and its residual `errors`
+  array is capped (5 strings of 256 characters, flagged by
+  `errors_truncated`) so the budget holds on error-heavy paths.
+  Findings, advisories, and warnings keep their display caps.
+  `uf.review-council.md` and `uf.review-pr.md` describe the
+  preview as complete entries; lessons are still stored from the
+  artifact. Adds an end-to-end harvest regression test.
+  Instruction deltas (DE-004): uf.review-council.md 1481 lines
+  (+1), tokens 16503 -> 16506 (+3); uf.review-pr.md 1229 lines
+  (0), tokens 12863 -> 12865 (+2).
+  (Spec: openspec/changes/full-lesson-proposals/, Fixes: #969)
+- effect-override-cve-2026-115779: pin the transitive `effect`
+  dependency to 4.0.0-beta.103 (from 4.0.0-beta.83, exact-declared
+  by `@opencode-ai/plugin` 1.19.0) through the established
+  `.opencode/package.json` `overrides` block and its scaffold
+  mirror, remediating GHSA-chp3-j5qr-2vfr (CVE-2026-115779, CVSS
+  6.3: cookie attribute injection in @effect/platform
+  makeCookie()). The advisory, published 2026-11-10, turned the
+  ci_security OSV-Scanner (plugin transitive) check red on this
+  branch's base and on main alike. The provenance record carries
+  the upstream commit (git head
+  dff25449dfc927f2cce912c329f343cfb5365f88, verified via the
+  peeled effect@4.0.0-beta.103 tag) and the registry dist
+  integrity hash, verified 2026-11-10. Rollback: revert this
+  commit to restore effect 4.0.0-beta.83.
 - stop-shipping-plugin-lock: bump the review-plugin pins for CVE
   remediation after the CI throwaway-lock OSV scan surfaced five
   HIGH advisories: zod 4.1.8 → 4.6.6 (GHSA-mrhx-c7xc-m3w5) and

@@ -1677,6 +1677,7 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 
 	var manifest struct {
 		Dependencies map[string]string `json:"dependencies"`
+		Overrides    map[string]string `json:"overrides"`
 	}
 	readJSONFile(t, filepath.Join(root, "internal", "scaffold", "assets", "opencode", "package.json"), &manifest)
 	// The scaffolded manifest ships without devDependencies (design
@@ -1782,6 +1783,12 @@ func TestPluginPackageInputs_ApprovedMaintenanceProvenance(t *testing.T) {
 		}
 		if got != expected {
 			t.Errorf("security override provenance for %s = %+v, want %+v", name, got, expected)
+		}
+		declared, ok := manifest.Overrides[name]
+		if !ok {
+			t.Errorf("%s is not declared by the scaffolded manifest overrides block", name)
+		} else if got.Version != declared {
+			t.Errorf("%s override provenance version %q does not match manifest override %q", name, got.Version, declared)
 		}
 		parsedURL, err := url.ParseRequestURI(got.ProjectURL)
 		if err != nil || parsedURL.Scheme != "https" || parsedURL.Host == "" {

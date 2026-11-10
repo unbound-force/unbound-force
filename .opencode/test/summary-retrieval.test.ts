@@ -266,6 +266,7 @@ describe("summary retrieval", () => {
       advisories: 15,
       proposals: 10,
       warnings: 5,
+      errors: 5,
       severityChars: 16,
       categoryChars: 128,
       descriptionChars: 512,
@@ -273,6 +274,7 @@ describe("summary retrieval", () => {
       verdictReasonChars: 512,
       warningKindChars: 64,
       warningDetailChars: 256,
+      errorChars: 256,
       maxBytes: BYTE_BUDGET,
     })
   })
@@ -489,6 +491,8 @@ describe("summary retrieval", () => {
       expect(summary.proposals_truncated).toBe(true)
       // Findings drop before proposals.
       expect(summary.findings).toEqual([])
+      // The displacement damage design.md names as the mitigation.
+      expect(summary.findings_truncated).toBe(true)
       const kept = summary.proposals as Array<Record<string, unknown>>
       expect(kept.length).toBeGreaterThan(0)
       expect(kept.length).toBeLessThan(10)
@@ -596,15 +600,21 @@ describe("compact finalization", () => {
 
   it("caps observability arrays and reports truncation flags", () => {
     const compact = buildCompactFinalization(
-      result,
+      {
+        ...result,
+        errors: Array.from({ length: 7 }, () => "e".repeat(300)),
+      } as unknown as Parameters<typeof buildCompactFinalization>[0],
       RUN_COUNTS,
       Array.from({ length: 12 }, (_, index) => makeProposal(index)),
       Array.from({ length: 7 }, () => makeWarning("orphaned_submissions_excluded")),
     )
     expect(compact.proposals).toHaveLength(10)
     expect(compact.warnings).toHaveLength(5)
+    expect(compact.errors).toHaveLength(5)
+    expect(compact.errors[0]).toHaveLength(256)
     expect(compact.proposals_truncated).toBe(true)
     expect(compact.warnings_truncated).toBe(true)
+    expect(compact.errors_truncated).toBe(true)
     const keys = Object.keys(compact)
     expect(keys.indexOf("proposals_truncated")).toBeLessThan(
       keys.indexOf("calculated_assessment"),
