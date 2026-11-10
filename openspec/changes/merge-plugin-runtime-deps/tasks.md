@@ -43,5 +43,6 @@
   `docs/architecture.md` (File Ownership Model), `AGENTS.md`, and
   `CHANGELOG.md`
 - [x] 4.2 `make check` passes
-- [x] 4.3 File the documentation-gate issue (#1012) for the user-facing
-  `uf init` manifest merge before merge
+- [x] 4.3 File the documentation-gate issues for the user-facing
+  `uf init` manifest merge before merge: unbound-force/unbound-force#1012
+  (in-repo) and unbound-force/website#400 (adopter guidance)
