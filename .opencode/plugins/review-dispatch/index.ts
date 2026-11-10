@@ -4095,6 +4095,7 @@ export const SUMMARY_LIMITS = {
   advisories: 15,
   proposals: 10,
   warnings: 5,
+  errors: 5,
   severityChars: 16,
   categoryChars: 128,
   descriptionChars: 512,
@@ -4102,6 +4103,7 @@ export const SUMMARY_LIMITS = {
   verdictReasonChars: 512,
   warningKindChars: 64,
   warningDetailChars: 256,
+  errorChars: 256,
   maxBytes: 40 * 1024,
 } as const
 
@@ -4116,6 +4118,16 @@ function truncateText(value: string, max: number): TruncatedText {
   const cut = value.slice(0, max)
   const last = cut.charCodeAt(cut.length - 1)
   return { text: last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut, truncated: true }
+}
+
+/**
+ * Compact-JSON byte size shared by every bounded result budget (RD-FR-049,
+ * RD-FR-058): UTF-8 length of the canonical JSON serialization. One idiom
+ * for the summary retrieval and the compact finalization result alike, so
+ * both budgets measure the same bytes.
+ */
+function byteSize(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).length
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -4309,9 +4321,7 @@ export function buildSummaryRetrieval(
   }
 
   let result = assemble()
-  const size = (value: unknown): number =>
-    new TextEncoder().encode(JSON.stringify(value)).length
-  while (size(result) >= SUMMARY_LIMITS.maxBytes) {
+  while (byteSize(result) >= SUMMARY_LIMITS.maxBytes) {
     if (findings.length > 0) {
       findings.pop()
       findingsTruncated = true
@@ -4369,7 +4379,9 @@ export function buildFullRetrieval(
  * Build the compact finalization response (RD-FR-051). The persisted artifact
  * remains the only place the full projection (findings, advisories, plan,
  * runs) is echoed; this result carries the outcome, the scalar review verdict,
- * and the bounded observability arrays.
+ * and the bounded observability arrays. Errors are capped like warnings
+ * (entry count plus per-string length), so the post-assembly byte budget
+ * below stays enforceable on error-heavy paths.
  */
 export function buildCompactFinalization(
   result: FinalizeReviewDispatchResult,
@@ -4384,6 +4396,9 @@ export function buildCompactFinalization(
     .slice(0, SUMMARY_LIMITS.warnings)
     .map(projectSummaryWarning)
     .filter((warning): warning is Record<string, unknown> => warning !== null)
+  const projectedErrors = result.errors
+    .slice(0, SUMMARY_LIMITS.errors)
+    .map((error) => truncateText(error, SUMMARY_LIMITS.errorChars))
   const compact: Record<string, unknown> = {
     status: result.status,
     operation_verdict: result.operation_verdict,
@@ -4399,6 +4414,9 @@ export function buildCompactFinalization(
   }
   let proposalsTruncated = proposals.length > SUMMARY_LIMITS.proposals
   const warningsTruncated = warnings.length > SUMMARY_LIMITS.warnings
+  const errorsTruncated =
+    result.errors.length > SUMMARY_LIMITS.errors ||
+    projectedErrors.some((error) => error.truncated)
   const assemble = (): Record<string, unknown> => {
     const assembled: Record<string, unknown> = { ...compact }
     if (projectedProposals.length > 0) assembled.proposals = projectedProposals
@@ -4408,16 +4426,19 @@ export function buildCompactFinalization(
     assembled.calculated_assessment = result.calculated_assessment === null
       ? null
       : { authoritative: result.calculated_assessment.authoritative }
-    assembled.errors = result.errors
+    assembled.errors = projectedErrors.map((error) => error.text)
+    if (errorsTruncated) assembled.errors_truncated = true
     return assembled
   }
   // Full-length proposals (RD-FR-058) are the only entries here without a
   // per-field cap: drop trailing proposals whole until the compact JSON is
-  // strictly under the RD-FR-049 byte budget, flagging every drop.
+  // strictly under the RD-FR-049 byte budget, flagging every drop. Every
+  // other array is count- and length-capped above, so the budget holds even
+  // once the proposals are gone.
   let assembled = assemble()
   while (
     projectedProposals.length > 0 &&
-    Buffer.byteLength(JSON.stringify(assembled), "utf8") >= SUMMARY_LIMITS.maxBytes
+    byteSize(assembled) >= SUMMARY_LIMITS.maxBytes
   ) {
     projectedProposals.pop()
     proposalsTruncated = true
@@ -4763,7 +4784,8 @@ export function createConsolidateDispatchTool(
       "operation_verdict, correlation_id, artifact_path, review_verdict (scalar canonical decision or null), " +
       "run_counts, optional proposals / warnings / proposals_truncated / warnings_truncated, " +
       "calculated_assessment (null on validation rejection, otherwise { authoritative } — false when " +
-      "persistence failed), errors. The full findings, advisories, plan, and runs live only in the persisted " +
+      "persistence failed), errors (capped at 5 strings of 256 characters, flagged by errors_truncated). " +
+      "The full findings, advisories, plan, and runs live only in the persisted " +
       "artifact at artifact_path. When provenance is omitted, detail selects the retrieval shape: " +
       "\"full\" (default) returns the finalization-ready payload with correlation_id, proposals, and warnings " +
       "ahead of verdict, runs, plan, findings, and advisories; \"summary\" returns only correlation_id, " +

@@ -2736,7 +2736,7 @@ describe("consolidate_dispatch durable and deduplicated proposals (RD-FR-054, RD
     expect(persisted[511].information).toContain("lesson 511")
   })
 
-  it("round-trips the production writer's artifact through read_dispatch_artifact (RD-FR-056/057)", async () => {
+  it("round-trips consolidate_dispatch's finalized artifact through read_dispatch_artifact (RD-FR-056/057)", async () => {
     const projectRoot = await scratchRoot("proposals")
     const information = "Round-trip the writer's envelope through the bounded reader. ".repeat(80)
     await setupDispatchSession(

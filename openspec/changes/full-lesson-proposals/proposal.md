@@ -79,8 +79,10 @@ Fixes #969.
 - **Out of scope**: `dewey_store_learning` lives in the dewey repo;
   no change there.
 - **CI replication**: `make check`.
-- **Documentation impact**: CHANGELOG.md entry. Internal tool
-  behavior; no user-facing documentation issue.
+- **Documentation impact**: CHANGELOG.md entry. The edited command
+  prose is user-facing — `uf init` deploys the mirrored commands —
+  so the website documentation surface may also apply (website#303
+  precedent: command contract docs live in the website repo).
 
 ## Constitution Alignment
 
