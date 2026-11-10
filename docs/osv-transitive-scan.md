@@ -165,15 +165,19 @@ attribute injection in `@effect/platform`'s `makeCookie()`) hit
 `@opencode-ai/plugin` 1.19.0. It is pinned the same way: the
 `overrides` entry forces the nested copy onto 4.0.0-beta.103.
 
-**Picking up the fix in a hero repository.** `.opencode/package.json`
-is tool-owned, so re-running `uf init` rewrites it with the new pins
-(it keeps any `devDependencies` your copy declares) and reinstalls the
-plugin dependencies without a lock. If that install fails, run
+**Picking up the fix in a hero repository.** Re-running `uf init`
+merges the new pins into `.opencode/package.json`: it adds missing
+shipped pins and resets drifted ones to uf's version, keeps any
+runtime `dependencies` and `devDependencies` your copy adds, and
+rewrites the tool-owned `overrides` (a user-added override is
+dropped). It then reinstalls the plugin dependencies without a lock.
+If that install fails, run
 `npm install --ignore-scripts --omit=dev --no-package-lock` in
 `.opencode/` and rerun `uf init`.
-`uf doctor`'s `manifest-install` check compares each direct pin with
-the installed version; it does not read `overrides`, so confirm the
-nested copies with:
+`uf doctor`'s `manifest-install` check compares each pin uf ships
+with the installed version, so packages you add are never reported
+as drift. It does not read `overrides`, so confirm the nested copies
+with:
 
 ```bash
 (cd .opencode && npm ls zod toml)
