@@ -29,7 +29,8 @@ lifecycle.
 - Changing Phase 1.3 ingestion or the Section 1.2.1 PR-head
   checkout (a concurrent change owns 1.2.1).
 - Rendering the feedback-triage artifact in a tool. It stays
-  agent-written in 4.7; a follow-up can extract it.
+  agent-written in 4.7; extraction is tracked in
+  unbound-force/unbound-force#1022.
 - Duplicate detection against GitHub issue search. The duplicate
   check is the feedback cache, as #998 specifies.
 

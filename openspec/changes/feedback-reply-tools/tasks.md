@@ -83,7 +83,11 @@
 ## 4. Documentation and verification
 
 - [x] 4.1 Add the CHANGELOG entry with the DE-004 instruction delta.
-- [x] 4.2 File the documentation issue for the user-visible changes
-  (resolve question before posting, feedback-triage 1.1.0).
+- [x] 4.2 File the documentation issues for the user-visible changes
+  (resolve question before posting, feedback-triage 1.1.0):
+  unbound-force/unbound-force#1003 (in-repo) and
+  unbound-force/website#401 (website).
+- [x] 4.5 File the follow-up to extract the 4.7 feedback-triage
+  artifact write into a tool (DE-001): unbound-force/unbound-force#1022.
 - [x] 4.3 Run `make check` and `make lint-instructions`.
 - [x] 4.4 Run `openspec validate feedback-reply-tools --strict`.
