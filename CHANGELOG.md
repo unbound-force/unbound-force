@@ -1431,11 +1431,25 @@ Each entry follows the format: `- <change-name>: <summary>`.
   through a quoted shell heredoc. A heredoc ends at any line
   equal to its delimiter, so composed text containing
   `COMMENT_EOF` or `CHILD_EOF` could break out and run as shell.
-  Both steps now create the temp file in the shell, write the
-  JSON payload with the host's file-write tool, and post with
-  `gh api --input`. A new contract test rejects any heredoc in
-  the canonical or scaffolded command templates. Instruction
-  delta: `uf.triage-issue.md` +24/-14 lines (1250 to 1260).
+  Both mutations now route through two new intent-level tools,
+  `post_issue_comment` and `create_child_issue`
+  (`.opencode/lib/feedback-replies.ts` + the uf-workflow
+  plugin), which take the author-confirmed text as a validated
+  parameter and own temp-file creation (0o600), JSON
+  serialization, `gh --input` posting, failure-stop, and
+  cleanup on all exit paths; the human-confirmation gates stay
+  in the command's prose. Seam tests cover registration,
+  schema parity, output shape, and write-to-read round-trips.
+  A new contract test rejects any heredoc in the canonical or
+  scaffolded command templates. Constitution trade-off record:
+  Principle V (Security by Default) closed the injection
+  immediately with an interim prose choreography, and Principle
+  VI (Deterministic Execution) extracted that choreography into
+  the tools above in the same change after the PR #1024 review
+  flagged it as a DE-005 violation; both remediated command
+  families (`uf.address-feedback` and `/uf.triage-issue`) now
+  converge on tool-routed GitHub mutations. Instruction delta:
+  `uf.triage-issue.md` +44/-45 lines (1250 to 1249).
 - instruction-lint-baseline (#971): clear the instruction-lint
   baseline from 1 error / 31 warnings / 23 info to 0 errors /
   16 warnings / 24 info. `/opsx-apply` and the
