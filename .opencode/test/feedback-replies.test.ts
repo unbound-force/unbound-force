@@ -7,31 +7,39 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { z } from "zod"
 
 import {
+  CreateChildIssueInputSchema,
   FileFeedbackIssueInputSchema,
   MAX_THREAD_PAGES,
   PostFeedbackRepliesInputSchema,
+  PostIssueCommentInputSchema,
   RESOLVE_THREAD_MUTATION,
   REVIEW_THREADS_QUERY,
   classifyGhError,
+  createChildIssue,
   defaultFeedbackGhExec,
   feedbackStatePath,
   fileFeedbackIssue,
   itemKey,
   parseIssueUrl,
   postFeedbackReplies,
+  postIssueComment,
   readFeedbackState,
   renderReplyBody,
   replyEndpoint,
   writeFeedbackState,
+  type CreateChildIssueData,
   type FeedbackGhExec,
   type FeedbackReplyDeps,
   type FileFeedbackIssueData,
   type PostFeedbackRepliesData,
   type PostFeedbackRepliesInput,
+  type PostIssueCommentData,
 } from "../lib/feedback-replies.js"
 import {
+  createCreateChildIssueTool,
   createFileFeedbackIssueTool,
   createPostFeedbackRepliesTool,
+  createPostIssueCommentTool,
 } from "../plugins/uf-workflow/index.js"
 
 // ---------------------------------------------------------------------------
@@ -289,6 +297,21 @@ describe("input validation", () => {
     expect(FileFeedbackIssueInputSchema.safeParse({ ...valid, title: "x".repeat(257) }).success).toBe(false)
     expect(FileFeedbackIssueInputSchema.safeParse({ ...valid, comment_id: -1 }).success).toBe(false)
     expect(FileFeedbackIssueInputSchema.safeParse({ ...valid, extra: true }).success).toBe(false)
+  })
+
+  it("rejects malformed post_issue_comment and create_child_issue input", () => {
+    const comment = { repo: REPO, issue_number: 42, body: "b" }
+    expect(PostIssueCommentInputSchema.safeParse(comment).success).toBe(true)
+    expect(PostIssueCommentInputSchema.safeParse({ ...comment, issue_number: 0 }).success).toBe(false)
+    expect(PostIssueCommentInputSchema.safeParse({ ...comment, body: "   " }).success).toBe(false)
+    expect(PostIssueCommentInputSchema.safeParse({ ...comment, repo: "acme/w; rm -rf /" }).success).toBe(false)
+    expect(PostIssueCommentInputSchema.safeParse({ ...comment, extra: true }).success).toBe(false)
+
+    const child = { repo: REPO, title: "t", body: "b" }
+    expect(CreateChildIssueInputSchema.safeParse(child).success).toBe(true)
+    expect(CreateChildIssueInputSchema.safeParse({ ...child, title: "" }).success).toBe(false)
+    expect(CreateChildIssueInputSchema.safeParse({ ...child, title: "x".repeat(257) }).success).toBe(false)
+    expect(CreateChildIssueInputSchema.safeParse({ ...child, extra: true }).success).toBe(false)
   })
 })
 
@@ -897,6 +920,79 @@ describe("fileFeedbackIssue", () => {
 })
 
 // ---------------------------------------------------------------------------
+// postIssueComment and createChildIssue (uf.triage-issue 4.3/4.4)
+// ---------------------------------------------------------------------------
+
+describe("postIssueComment and createChildIssue (uf.triage-issue 4.3/4.4)", () => {
+  it("postIssueComment posts the confirmed body as a JSON temp file", () => {
+    const { gh, calls } = fakeGh([
+      {
+        match: isPost(`repos/${REPO}/issues/42/comments`),
+        responses: [JSON.stringify({ id: 5501, html_url: "https://github.com/acme/widgets/issues/42#issuecomment-5501" })],
+      },
+    ])
+    const data = postIssueComment(PostIssueCommentInputSchema.parse({ repo: REPO, issue_number: 42, body: "Confirmed comment body" }), deps(gh))
+    expect(data).toEqual({
+      repo: REPO,
+      issue_number: 42,
+      comment_id: 5501,
+      comment_url: "https://github.com/acme/widgets/issues/42#issuecomment-5501",
+    })
+    // DE-007 write→read round-trip: the body reached gh as a JSON-serialized
+    // temp file, never as shell text.
+    expect(calls[0]?.fileContents).toBe(JSON.stringify({ body: "Confirmed comment body" }))
+  })
+
+  it("createChildIssue creates the issue with a --body-file temp file", () => {
+    const { gh, calls } = fakeGh([{ match: isIssueCreate, responses: ["https://github.com/acme/widgets/issues/301\n"] }])
+    const data = createChildIssue(
+      CreateChildIssueInputSchema.parse({ repo: REPO, title: "Triage follow-up: extract the posting choreography", body: "CRITICAL finding from PR #1024 review (DE-005)." }),
+      deps(gh),
+    )
+    expect(data).toEqual({
+      repo: REPO,
+      issue_number: 301,
+      issue_url: "https://github.com/acme/widgets/issues/301",
+      attempts: 1,
+    })
+    expect(calls[0]?.fileContents).toBe("CRITICAL finding from PR #1024 review (DE-005).")
+  })
+
+  it("resolves the repository through gh repo view when repo is omitted", () => {
+    const { gh, calls } = fakeGh([
+      { match: isRepoView, responses: ["acme/widgets\n"] },
+      { match: isIssueCreate, responses: ["https://github.com/acme/widgets/issues/302\n"] },
+    ])
+    const data = createChildIssue(CreateChildIssueInputSchema.parse({ title: "t", body: "b" }), deps(gh))
+    expect(data).toMatchObject({ repo: REPO, issue_number: 302 })
+    expect(calls.some((call) => isRepoView(call.args))).toBe(true)
+  })
+
+  it("tool envelope success shapes for the issue-mutation tools", async () => {
+    const posting = fakeGh([
+      {
+        match: isPost(`repos/${REPO}/issues/42/comments`),
+        responses: [JSON.stringify({ id: 5501, html_url: "https://github.com/acme/widgets/issues/42#issuecomment-5501" })],
+      },
+    ])
+    const posted = (await run(createPostIssueCommentTool(deps(posting.gh)), { repo: REPO, issue_number: 42, body: "b" })) as {
+      status: string
+      data: PostIssueCommentData
+    }
+    expect(posted.status).toBe("ok")
+    expect(Object.keys(posted.data).sort()).toEqual(["comment_id", "comment_url", "issue_number", "repo"])
+
+    const creating = fakeGh([{ match: isIssueCreate, responses: ["https://github.com/acme/widgets/issues/303\n"] }])
+    const created = (await run(createCreateChildIssueTool(deps(creating.gh)), { repo: REPO, title: "t", body: "b" })) as {
+      status: string
+      data: CreateChildIssueData
+    }
+    expect(created.status).toBe("ok")
+    expect(Object.keys(created.data).sort()).toEqual(["attempts", "issue_number", "issue_url", "repo"])
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Tool boundary (envelopes)
 // ---------------------------------------------------------------------------
 
@@ -912,9 +1008,15 @@ describe("tool envelopes", () => {
   it("exposes the validation schema shapes as the tool args (input-schema parity)", () => {
     const post = createPostFeedbackRepliesTool(deps(fakeGh([]).gh)) as unknown as { args: z.ZodRawShape }
     const file = createFileFeedbackIssueTool(deps(fakeGh([]).gh)) as unknown as { args: z.ZodRawShape }
+    const issueComment = createPostIssueCommentTool(deps(fakeGh([]).gh)) as unknown as { args: z.ZodRawShape }
+    const childIssue = createCreateChildIssueTool(deps(fakeGh([]).gh)) as unknown as { args: z.ZodRawShape }
     expect(Object.keys(post.args).sort()).toEqual(Object.keys(PostFeedbackRepliesInputSchema.shape).sort())
     expect(Object.keys(post.args).sort()).toEqual(["items", "pr_number", "repo", "resolve_threads"])
     expect(Object.keys(file.args).sort()).toEqual(["body", "comment_id", "comment_kind", "pr_number", "repo", "title"])
+    expect(Object.keys(issueComment.args).sort()).toEqual(Object.keys(PostIssueCommentInputSchema.shape).sort())
+    expect(Object.keys(issueComment.args).sort()).toEqual(["body", "issue_number", "repo"])
+    expect(Object.keys(childIssue.args).sort()).toEqual(Object.keys(CreateChildIssueInputSchema.shape).sort())
+    expect(Object.keys(childIssue.args).sort()).toEqual(["body", "repo", "title"])
     expect(post.args.resolve_threads?.safeParse(undefined).success).toBe(false)
     expect(post.args.repo?.safeParse(undefined).success).toBe(true)
   })
