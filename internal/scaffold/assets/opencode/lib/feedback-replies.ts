@@ -225,6 +225,34 @@ export const FileFeedbackIssueInputSchema = z
 /** file_feedback_issue input after validation. */
 export type FileFeedbackIssueInput = z.infer<typeof FileFeedbackIssueInputSchema>
 
+/** post_issue_comment input (the /uf.triage-issue 4.3 DE-005 extraction). */
+export const PostIssueCommentInputSchema = z
+  .object({
+    repo: RepoSchema.optional().describe(
+      "owner/repo of the issue; defaults to `gh repo view` in the working tree",
+    ),
+    issue_number: PrNumberSchema.describe("Issue number to post the comment on"),
+    body: BodySchema.describe("Confirmed comment body, exactly as the author approved it"),
+  })
+  .strict()
+
+/** post_issue_comment input after validation. */
+export type PostIssueCommentInput = z.infer<typeof PostIssueCommentInputSchema>
+
+/** create_child_issue input (the /uf.triage-issue 4.4 DE-005 extraction). */
+export const CreateChildIssueInputSchema = z
+  .object({
+    repo: RepoSchema.optional().describe(
+      "owner/repo to create the issue in; defaults to `gh repo view` in the working tree",
+    ),
+    title: TitleSchema.describe("Child issue title"),
+    body: BodySchema.describe("Confirmed child issue body, exactly as the author approved it"),
+  })
+  .strict()
+
+/** create_child_issue input after validation. */
+export type CreateChildIssueInput = z.infer<typeof CreateChildIssueInputSchema>
+
 // ---------------------------------------------------------------------------
 // Output shapes (documented in the command; pinned by golden tests)
 // ---------------------------------------------------------------------------
@@ -313,6 +341,22 @@ export interface FileFeedbackIssueData {
   readonly issue_number: number
   readonly issue_url: string
   readonly deduplicated: boolean
+  readonly attempts: number
+}
+
+/** post_issue_comment success data. */
+export interface PostIssueCommentData {
+  readonly repo: string
+  readonly issue_number: number
+  readonly comment_id: number | null
+  readonly comment_url: string | null
+}
+
+/** create_child_issue success data. */
+export interface CreateChildIssueData {
+  readonly repo: string
+  readonly issue_number: number
+  readonly issue_url: string
   readonly attempts: number
 }
 
@@ -879,6 +923,43 @@ export function fileFeedbackIssue(input: FileFeedbackIssueInput, deps: FeedbackR
 /** Mutable per-item working result. */
 type WorkingResult = {
   -readonly [K in keyof ReplyItemResult]: ReplyItemResult[K]
+}
+
+/**
+ * Post one confirmed comment on an issue (the /uf.triage-issue 4.3
+ * DE-005 extraction). The body is a human-confirmed judgment product
+ * passed as a validated parameter; temp-file creation, 0o600
+ * permissions, JSON serialization, `gh api --input`, and all-paths
+ * cleanup are owned by the tool. The comment id/url are null only
+ * when the POST succeeded but gh printed unparseable output.
+ */
+export function postIssueComment(input: PostIssueCommentInput, deps: FeedbackReplyDeps): PostIssueCommentData {
+  const repo = resolveRepo(deps, input.repo)
+  const posted = postReply(deps, `repos/${repo}/issues/${input.issue_number}/comments`, input.body)
+  return {
+    repo,
+    issue_number: input.issue_number,
+    comment_id: posted.id,
+    comment_url: posted.url,
+  }
+}
+
+/**
+ * Create one confirmed child issue (the /uf.triage-issue 4.4 DE-005
+ * extraction). Title and body are human-confirmed judgment products
+ * passed as validated parameters; temp-file creation, 0o600
+ * permissions, `gh issue create --body-file`, retry, and all-paths
+ * cleanup are owned by the tool.
+ */
+export function createChildIssue(input: CreateChildIssueInput, deps: FeedbackReplyDeps): CreateChildIssueData {
+  const repo = resolveRepo(deps, input.repo)
+  const created = createIssue(deps, repo, input.title, input.body)
+  return {
+    repo,
+    issue_number: created.number,
+    issue_url: created.url,
+    attempts: created.attempts,
+  }
 }
 
 /**

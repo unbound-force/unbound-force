@@ -1,6 +1,7 @@
 import type { PluginInput, PluginModule, ToolContext } from "@opencode-ai/plugin"
 import { execFile, execFileSync, execSync } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
+import { readFileSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -43,7 +44,7 @@ import { createMockSpawn, patchBunSpawn } from "./helpers/gh-spawn-mock.js"
 // per documented input variant (triage, code, feedback).
 //
 // Per-plugin site counts (registered-tool attribution):
-// - uf-workflow: 24 sites -- get_progress x4 (uf.unleash.md:87,
+// - uf-workflow: 26 sites -- get_progress x4 (uf.unleash.md:87,
 //   uf.finale.md:42, uf.review-council.md:51, uf.address-feedback.md:71),
 //   uf_unleash_branch_gate (uf.unleash.md:114), uf_unleash_detect_resume
 //   (uf.unleash.md:285), scan_clarifications (uf.unleash.md:374),
@@ -55,7 +56,8 @@ import { createMockSpawn, patchBunSpawn } from "./helpers/gh-spawn-mock.js"
 //   (uf.address-feedback.md:910), uf_preflight_declared_checks
 //   (skills/pre-flight/SKILL.md Phase 2b), post_feedback_replies and
 //   file_feedback_issue (uf.address-feedback.md Section 4.6;
-//   feedback-reply-tools)
+//   feedback-reply-tools), post_issue_comment and create_child_issue
+//   (uf.triage-issue.md Sections 4.3/4.4; the PR #1024 DE-005 extraction)
 // - uf-finale: 9 sites -- uf_finale_startup (uf.finale.md:51),
 //   uf_finale_stage (72), uf_finale_commit_context (83),
 //   uf_finale_base_state (132), uf_finale_push_state (172),
@@ -936,22 +938,92 @@ describe("golden output shapes -- uf-workflow registry (24 documented sites)", (
     const again = expectOk(await callEnvelopeTool<Record<string, unknown>>(registry, "file_feedback_issue", args))
     expect(again).toMatchObject({ issue_number: 301, deduplicated: true, attempts: 0 })
   })
+
+  it("post_issue_comment [uf.triage-issue.md Section 4.3] posts the confirmed body as a JSON temp file and returns the comment id and url", async () => {
+    const directory = await makeScratch()
+    const registry = await loadRegistry(UfWorkflowPlugin, directory)
+    const postedBodies = mockFeedbackGh(directory)
+
+    const body = "## Council Consensus\n\nVALID — the issue reproduces as described."
+    const data = expectOk(
+      await callEnvelopeTool<Record<string, unknown>>(registry, "post_issue_comment", {
+        repo: "acme/widgets",
+        issue_number: 42,
+        body,
+      }),
+    )
+    expect(data).toEqual({
+      repo: "acme/widgets",
+      issue_number: 42,
+      comment_id: 5501,
+      comment_url: "https://github.com/acme/widgets/issues/42#issuecomment-5501",
+    })
+
+    // Write→read round-trip (DE-007): the confirmed body reached gh
+    // through the JSON temp file the tool serialized it into, never
+    // through shell text.
+    expect(postedBodies).toEqual([body])
+  })
+
+  it("create_child_issue [uf.triage-issue.md Section 4.4] creates the issue from the confirmed body through a --body-file temp file", async () => {
+    const directory = await makeScratch()
+    const registry = await loadRegistry(UfWorkflowPlugin, directory)
+    const postedBodies = mockFeedbackGh(directory)
+
+    const body = "CRITICAL finding from PR #1024 review (DE-005)."
+    const data = expectOk(
+      await callEnvelopeTool<Record<string, unknown>>(registry, "create_child_issue", {
+        repo: "acme/widgets",
+        title: "Triage follow-up: extract the posting choreography",
+        body,
+      }),
+    )
+    expect(data).toEqual({
+      repo: "acme/widgets",
+      issue_number: 301,
+      issue_url: "https://github.com/acme/widgets/issues/301",
+      attempts: 1,
+    })
+
+    // Write→read round-trip (DE-007): the confirmed body reached gh
+    // through the --body-file temp file, never through shell text.
+    expect(postedBodies).toEqual([body])
+  })
 })
 
 /**
- * Configure execFileSync for the feedback reply tools: git branch
- * resolution for the checkpoint key, and the gh calls of one
- * file-post-resolve cycle on PR 42 (temp-file paths vary, so gh calls
- * are matched by their leading arguments).
+ * Configure execFileSync for the feedback reply and issue mutation
+ * tools: git branch resolution for the checkpoint key, and the gh calls
+ * of one file-post-resolve cycle on PR 42 (temp-file paths vary, so gh
+ * calls are matched by their leading arguments). Returns the captured
+ * request bodies in call order so tests can verify the write→read
+ * round-trip: each body reached gh through the JSON `--input` temp file
+ * (post_issue_comment, post_feedback_replies replies) or the
+ * `--body-file` temp file (file_feedback_issue, create_child_issue),
+ * never through shell text.
  */
-function mockFeedbackGh(directory: string): void {
+function mockFeedbackGh(directory: string): string[] {
+  const postedBodies: string[] = []
   vi.mocked(execFileSync).mockImplementation(((command: string, args: readonly string[], options?: { cwd?: string }) => {
     expect(options?.cwd).toBe(directory)
     const joined = `${command} ${args.join(" ")}`
     if (joined === GIT_BRANCH) return "opsx/golden"
     if (command !== "gh") throw new Error(`unexpected invocation: ${joined}`)
-    if (args[0] === "issue" && args[1] === "create") return "https://github.com/acme/widgets/issues/301\n"
+    if (args[0] === "issue" && args[1] === "create") {
+      const bodyFlag = args.indexOf("--body-file")
+      if (bodyFlag >= 0) postedBodies.push(readFileSync(args[bodyFlag + 1], "utf8"))
+      return "https://github.com/acme/widgets/issues/301\n"
+    }
     if (args[0] === "api" && args[1] === "--method") {
+      const issueComment = /issues\/(\d+)\/comments$/.exec(args[3] ?? "")
+      if (issueComment) {
+        const inputFlag = args.indexOf("--input")
+        if (inputFlag >= 0) postedBodies.push(JSON.parse(readFileSync(args[inputFlag + 1], "utf8")).body)
+        return JSON.stringify({
+          id: 5501,
+          html_url: `https://github.com/acme/widgets/issues/${issueComment[1]}#issuecomment-5501`,
+        })
+      }
       const id = /comments\/(\d+)\/replies$/.exec(args[3] ?? "")?.[1] ?? "0"
       return JSON.stringify({ id: Number(id) + 1000, html_url: `https://github.com/acme/widgets/pull/42#discussion_r${id}` })
     }
@@ -978,6 +1050,7 @@ function mockFeedbackGh(directory: string): void {
     }
     throw new Error(`unexpected gh invocation: ${joined}`)
   }) as unknown as typeof execFileSync)
+  return postedBodies
 }
 
 // ---------------------------------------------------------------------------

@@ -44,14 +44,18 @@ import {
   type ProcessResult,
 } from "../../lib/preflight-declared.js"
 import {
+  CreateChildIssueInputSchema,
   FeedbackOperationError,
   FileFeedbackIssueInputSchema,
   PostFeedbackRepliesInputSchema,
+  PostIssueCommentInputSchema,
+  createChildIssue,
   defaultFeedbackGhExec,
   feedbackFailure,
   feedbackSuccess,
   fileFeedbackIssue,
   postFeedbackReplies,
+  postIssueComment,
   type FeedbackReplyDeps,
 } from "../../lib/feedback-replies.js"
 import { createBunYamlParser, type YamlParser } from "../../lib/reviewer-manifest.js"
@@ -2192,6 +2196,76 @@ export function createFileFeedbackIssueTool(deps: FeedbackReplyDeps): ReturnType
       }
       try {
         return { output: JSON.stringify(feedbackSuccess(fileFeedbackIssue(parsed.data, deps))) }
+      } catch (err: unknown) {
+        return { output: feedbackErrorOutput(err) }
+      }
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// post_issue_comment and create_child_issue tools (feedback-reply-tools)
+// ---------------------------------------------------------------------------
+
+/**
+ * Factory for the post_issue_comment tool (the /uf.triage-issue 4.3 DE-005
+ * extraction, PR #1024 review): posts one author-confirmed comment on a
+ * GitHub issue. The confirmed body arrives as a validated parameter; the
+ * tool owns temp-file creation, 0o600 permissions, JSON serialization,
+ * `gh api --input`, failure-stop, and all-paths cleanup.
+ *
+ * @param deps gh executor and repository root.
+ * @returns The post_issue_comment tool.
+ */
+export function createPostIssueCommentTool(deps: FeedbackReplyDeps): ReturnType<typeof tool> {
+  return tool({
+    description:
+      "Post one confirmed comment on a GitHub issue (/uf.triage-issue step 4.3). The body reaches gh " +
+      "as a JSON-serialized temp-file request body, never shell text. The comment body MUST be the " +
+      "exact text the author confirmed; the human-confirmation gate stays in the calling command. " +
+      "Returns the issue's repo, issue_number, and the posted comment_id and comment_url (null only " +
+      "when gh printed unparseable output after a successful POST).",
+    args: PostIssueCommentInputSchema.shape,
+    async execute(args) {
+      const parsed = PostIssueCommentInputSchema.safeParse(args)
+      if (!parsed.success) {
+        return { output: feedbackInvalidInput(parsed.error) }
+      }
+      try {
+        return { output: JSON.stringify(feedbackSuccess(postIssueComment(parsed.data, deps))) }
+      } catch (err: unknown) {
+        return { output: feedbackErrorOutput(err) }
+      }
+    },
+  })
+}
+
+/**
+ * Factory for the create_child_issue tool (the /uf.triage-issue 4.4 DE-005
+ * extraction, PR #1024 review): creates one author-confirmed GitHub issue.
+ * The confirmed title and body arrive as validated parameters; the tool
+ * owns temp-file creation, 0o600 permissions, `gh issue create
+ * --body-file`, one retry, and all-paths cleanup.
+ *
+ * @param deps gh executor and repository root.
+ * @returns The create_child_issue tool.
+ */
+export function createCreateChildIssueTool(deps: FeedbackReplyDeps): ReturnType<typeof tool> {
+  return tool({
+    description:
+      "Create one confirmed GitHub issue (/uf.triage-issue step 4.4). The title and body reach gh " +
+      "as an argument-array element and a temp body file, never shell text. Retries gh issue create " +
+      "once and fails with a structured error when it still fails. The title and body MUST be the " +
+      "exact text the author confirmed; the human-confirmation gate stays in the calling command. " +
+      "Returns the repo, issue_number, issue_url, and attempt count.",
+    args: CreateChildIssueInputSchema.shape,
+    async execute(args) {
+      const parsed = CreateChildIssueInputSchema.safeParse(args)
+      if (!parsed.success) {
+        return { output: feedbackInvalidInput(parsed.error) }
+      }
+      try {
+        return { output: JSON.stringify(feedbackSuccess(createChildIssue(parsed.data, deps))) }
       } catch (err: unknown) {
         return { output: feedbackErrorOutput(err) }
       }
@@ -6279,6 +6353,8 @@ const UfWorkflowPlugin = {
         checkout_pr_head: createCheckoutPrHeadTool(defaultGitExec, defaultGhRunner, cwd),
         post_feedback_replies: createPostFeedbackRepliesTool(feedbackReplyDeps(cwd)),
         file_feedback_issue: createFileFeedbackIssueTool(feedbackReplyDeps(cwd)),
+        post_issue_comment: createPostIssueCommentTool({ gh: defaultFeedbackGhExec, cwd }),
+        create_child_issue: createCreateChildIssueTool({ gh: defaultFeedbackGhExec, cwd }),
         uf_delegate_command: createDelegateCommandTool(defaultGitExec, cwd, {
           client: input.client,
           readText: (path: string) => readFile(path, "utf8"),
