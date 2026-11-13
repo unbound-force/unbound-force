@@ -90,25 +90,26 @@ Go (reviewers run `go test` in the mini repo), and opencode-ai at
 the version pinned in `.eval/` (1.19.0). Python 3 and git come with
 the runner image.
 
-## Open Questions
-
-### OQ1. Dewey and Replicator MCP servers
+### D7. Dewey and Replicator run in CI
 
 The tracked `opencode.json` declares `dewey serve` and
 `replicator serve` as MCP servers. Both ran in every local eval, and
-`/uf.review-council` stores its lessons through Dewey. A bare runner
-has neither binary, and Dewey's semantic search also expects
-Ollama. Options:
+`/uf.review-council` stores its lessons through Dewey, so the evals
+keep them rather than disabling them in the per-run config.
 
-- **Install both** from pinned releases, accepting degraded Dewey
-  search without Ollama. This is closest to how uf really runs.
-  (Recommended)
-- **Disable both** in the per-run config. This is simpler but
-  changes what's tested.
+Each job downloads the Linux release tarballs at pinned versions
+(Dewey v3.5.3 and Replicator v0.7.0 at the time of writing), checks
+them against the release's `checksums.txt`, and puts the binaries on
+`PATH`. The versions are pinned next to the other pins, so a version
+bump is a reviewed change.
 
-Task 1.1 settles this before the workflow is written. Either way,
-the first nightly run is checked by hand before its results are
-trusted (task 5.2).
+Ollama is not installed. Dewey's semantic search, which uses
+`granite-embedding:30m` through Ollama, is unavailable in CI, while
+its other tools still work. That is a known gap between CI and a
+maintainer's machine. The first nightly run is checked by hand to
+confirm both servers start and what Dewey does without embeddings
+(task 5.2); if Dewey can't start at all without Ollama, the fallback
+is to add an Ollama step with the embedding model.
 
 ## Coverage Strategy
 
