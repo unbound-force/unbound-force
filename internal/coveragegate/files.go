@@ -8,13 +8,17 @@ import (
 
 // PackagesFromFiles derives module-relative package paths from a list of
 // changed file paths. It drops test files, vendored code, common generated
-// suffixes, and non-Go files, then deduplicates and sorts the resulting
-// package directory set.
+// suffixes, non-Go files, and paths the go tool's package wildcard matching
+// ignores, then deduplicates and sorts the resulting package directory set.
+// The ignore rule keeps the changed-package set aligned with what a
+// `go test ./...` coverprofile of this module can measure: wildcard-ignored
+// paths appear in a git diff but can never appear in the profile, so
+// demanding manifest coverage for them could never pass.
 func PackagesFromFiles(files []string) []string {
 	seen := make(map[string]struct{})
 	var packages []string
 	for _, file := range files {
-		if !isProductionGoFile(file) {
+		if !isProductionGoFile(file) || ignoredByGoTool(file) {
 			continue
 		}
 		pkg := path.Dir(file)
@@ -46,4 +50,23 @@ func isProductionGoFile(file string) bool {
 		}
 	}
 	return true
+}
+
+// ignoredByGoTool reports whether a path is ignored by the go tool's package
+// wildcard matching. Per `go help packages`, directory and file names that
+// begin with "." or "_" are ignored, as are directories named "testdata".
+// Such paths show up in a git diff -- for example the .eval/ fixture trees
+// that carry their own Go sources -- but never in the module's own test
+// run, so the gate must not demand manifest coverage for them.
+func ignoredByGoTool(file string) bool {
+	segments := strings.Split(file, "/")
+	for index, segment := range segments {
+		if strings.HasPrefix(segment, ".") || strings.HasPrefix(segment, "_") {
+			return true
+		}
+		if index < len(segments)-1 && segment == "testdata" {
+			return true
+		}
+	}
+	return false
 }
