@@ -17,7 +17,7 @@ EVAL_AQ_SHA=6eb86836928b421a6863d8f2f1ef1f303141e3f6
 
 # Eval driver (unbound-force/eval-infra).
 EVAL_DRIVER_URL=https://github.com/unbound-force/eval-infra.git
-EVAL_DRIVER_SHA=e074d33250059d4bf3b59a2251d582a8d5844f4f
+EVAL_DRIVER_SHA=8a31ef09d0dcce900f556103b3f412ef2f91f81f
 
 # MCP servers declared in opencode.json. CI installs these Linux
 # release builds; locally the installed binaries are used.
