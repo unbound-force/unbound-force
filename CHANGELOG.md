@@ -6,6 +6,16 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- nightly-command-evals: end-to-end evals of uf commands under
+  `.eval/`. Five `/uf.review-council` fixtures (three
+  argument-rejection fixtures and two council fixtures with a
+  purpose-built mini repo) drive the command through opencode
+  with uf's plugins, DCP and auto-question at pinned commits
+  (`.eval/lib/pins.sh`), and check deterministic assertions on
+  the trajectory. `ci_eval.yml` runs every fixture nightly and on
+  demand, one job per fixture, report-only; `make eval` and
+  `make eval-fast` run them locally. Needs `ENMAAS_KEY`.
+  (Spec: openspec/changes/nightly-command-evals/)
 - checkout-pr-head: new `checkout_pr_head` tool in the
   `uf-workflow` plugin puts the working tree on a PR's head and
   resolves its push target through argument-array git/gh calls

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# gh stub for eval fixtures: records every call and refuses it, so no
+# fixture can read from or write to GitHub. Assert on the record with
+# `stub_called` / `stub_not_called`.
+printf 'gh\t%s\n' "$*" >> "${EVAL_STUB_LOG:?}"
+echo "gh: disabled in eval fixtures" >&2
+exit 1

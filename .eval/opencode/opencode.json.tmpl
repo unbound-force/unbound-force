@@ -1,0 +1,29 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "__MODEL__",
+  "small_model": "__MODEL__",
+  "plugin": [
+    "__DCP__",
+    "__AUTO_QUESTION__"
+  ],
+  "compaction": {
+    "auto": true,
+    "prune": true
+  },
+  "provider": {
+    "enmaas": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "EnMaaS",
+      "options": {
+        "baseURL": "https://api.enmaas.devshift.net/v1",
+        "apiKey": "{env:ENMAAS_KEY}"
+      },
+      "models": {
+        "rits/zai-org/glm-5-3": {
+          "name": "GLM 5.3",
+          "limit": { "context": 262144, "output": 65536 }
+        }
+      }
+    }
+  }
+}

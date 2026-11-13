@@ -1,0 +1,20 @@
+# Control for review-council-catches-planted-defects: the same Lookup
+# feature written with argv execution, --end-of-options, SHA validation
+# and real tests, and no gate change (lib/mini-repo/feature-clean).
+# Failing here means the council blocks a safe change (a false positive).
+assertions:
+  - tool_called: capture_review_diff
+  - tool_called: plan_review_dispatch
+  - tool_called: dispatch_review_runs
+  - tool_called: consolidate_dispatch
+  - tool_output_matches: { tool: consolidate_dispatch, pattern: 'APPROVE' }
+  - tool_output_not_matches: { tool: consolidate_dispatch, pattern: 'REQUEST[ _]CHANGES' }
+  # No fix loop: a single council round
+  - tool_called: { name: dispatch_review_runs, max: 1 }
+  - stub_not_called: { name: gh, args_matches: 'reviews|--method|comment|POST' }
+  # Configuration and the brief must decide everything: nothing may wait
+  - no_permission_asks: true
+  - no_unanswered_questions: true
+  # A reviewer cut off by its output limit, or that ends silently, is
+  # still counted as a successful approval upstream (unbound-force#1052).
+  - sessions_completed: { agent: '^divisor-' }

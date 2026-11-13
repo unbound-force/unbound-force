@@ -1,0 +1,7 @@
+task_id: review-council-reject-case-variant
+task_version: "1"
+description: "/uf.review-council rejects a case variation of the `code` mode before any discovery or dispatch"
+exec_mode: interactive
+command: uf.review-council
+timeout_seconds: 300
+setup: setup.sh

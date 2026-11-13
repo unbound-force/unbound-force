@@ -1,0 +1,10 @@
+task_id: review-council-catches-planted-defects
+task_version: "1"
+description: >
+  /uf.review-council code on a branch that adds a shell-injectable git
+  helper and lowers a coverage-gate threshold must dispatch the council
+  and return REQUEST CHANGES with both defects among the findings.
+exec_mode: interactive
+command: uf.review-council
+timeout_seconds: 5400
+setup: setup.sh

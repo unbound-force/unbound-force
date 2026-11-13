@@ -1,0 +1,149 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Command Evals
+# =============
+# Runs every end-to-end command eval fixture under .eval/fixtures
+# nightly and on demand (OpenSpec change nightly-command-evals,
+# EV-FR-005 to EV-FR-007). Each fixture drives a uf command through
+# opencode with the pinned runtime in .eval/lib/pins.sh and checks
+# deterministic assertions on what the agent did.
+#
+# Report-only: nothing gates on this workflow. It never runs on pull
+# requests, so the provider key never reaches a fork's code.
+
+name: Command Evals
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: command-evals
+  cancel-in-progress: false
+
+jobs:
+  fixtures:
+    name: List fixtures
+    if: github.repository == 'unbound-force/unbound-force'
+    runs-on: ubuntu-latest
+    outputs:
+      names: ${{ steps.list.outputs.names }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: List fixture directories
+        id: list
+        run: |
+          names="$(find .eval/fixtures -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \
+            | sort | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+          echo "names=$names" >> "$GITHUB_OUTPUT"
+
+  eval:
+    name: ${{ matrix.fixture }}
+    needs: fixtures
+    if: github.repository == 'unbound-force/unbound-force'
+    runs-on: ubuntu-latest
+    # The driver serves opencode on a fixed port, so each fixture gets
+    # its own runner. The slowest council run so far took 89 minutes.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: ${{ fromJSON(needs.fixtures.outputs.names) }}
+    env:
+      FIXTURE: ${{ matrix.fixture }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Load pins
+        run: |
+          set -a
+          . .eval/lib/pins.sh
+          set +a
+          env | grep '^EVAL_[A-Z_]*=' >> "$GITHUB_ENV"
+          echo "EVAL_OUT=$RUNNER_TEMP/eval-out" >> "$GITHUB_ENV"
+
+      - name: Set git identity
+        # Fixes made during a council fix loop are committed in the run's
+        # workdir; a bare runner has no identity to commit with.
+        run: |
+          git config --global user.name "uf-eval"
+          git config --global user.email "uf-eval@example.invalid"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Set up Node 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Install opencode
+        run: npm install -g "opencode-ai@${EVAL_OPENCODE_VERSION}"
+
+      - name: Install Dewey and Replicator
+        # MCP servers declared in opencode.json, from pinned releases
+        # checked against each release's checksums.txt (design.md D7).
+        run: |
+          bin="$HOME/.local/bin"
+          mkdir -p "$bin"
+          cd "$RUNNER_TEMP"
+          for spec in "dewey:$EVAL_DEWEY_VERSION" "replicator:$EVAL_REPLICATOR_VERSION"; do
+            name="${spec%%:*}"
+            version="${spec##*:}"
+            base="https://github.com/unbound-force/$name/releases/download/v$version"
+            tarball="${name}_${version}_linux_amd64.tar.gz"
+            curl -fsSLO "$base/$tarball"
+            curl -fsSL -o "$name-checksums.txt" "$base/checksums.txt"
+            grep " $tarball\$" "$name-checksums.txt" | sha256sum --check --strict
+            tar -xzf "$tarball" -C "$bin" "$name"
+          done
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Cache eval runtime
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.cache/uf-eval/plugins
+          key: uf-eval-plugins-${{ hashFiles('.eval/lib/pins.sh', '.eval/lib/prepare-eval-env.sh', '.eval/opencode/patches/**') }}
+
+      - name: Run ${{ matrix.fixture }}
+        env:
+          ENMAAS_KEY: ${{ secrets.ENMAAS_KEY }}
+        run: |
+          mkdir -p "$EVAL_OUT"
+          make eval-deps
+          .eval/run.sh --only "^${FIXTURE}\$" --output "$EVAL_OUT" 2>&1 | tee "$EVAL_OUT/run.log"
+
+      - name: Write job summary
+        if: always()
+        run: |
+          if [ -f "$EVAL_OUT/eval-summary.md" ]; then
+            cat "$EVAL_OUT/eval-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No eval summary: the run stopped before any fixture finished. See run.log in the artifact." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: eval-${{ matrix.fixture }}
+          path: ${{ env.EVAL_OUT }}
+          retention-days: 30
+          if-no-files-found: warn
