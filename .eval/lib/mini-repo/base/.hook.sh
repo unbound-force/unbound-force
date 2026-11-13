@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Register the base packages in the files the snapshot owns, so the
 # base commit is internally consistent and the feature diff carries
 # only the feature. Fails if upstream moved the anchors these edits

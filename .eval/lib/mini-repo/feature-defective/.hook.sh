@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Planted defect: lower the helper-scope coverage threshold from 80 to
 # 50, a gate change the Gatekeeping rule forbids.
 set -euo pipefail
