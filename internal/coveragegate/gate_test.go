@@ -162,15 +162,67 @@ func TestPackagesFromFiles(t *testing.T) {
 	}
 }
 
+func TestIgnoredByGoTool(t *testing.T) {
+	tests := []struct {
+		name string
+		file string
+		want bool
+	}{
+		{"plain module file", "internal/scaffold/scaffold.go", false},
+		{"root-level file", "main.go", false},
+		{"dot directory", ".eval/lib/run.sh", true},
+		{"nested dot directory", ".eval/lib/mini-repo/base/internal/refs/refs.go", true},
+		{"underscore directory", "_build/tools/main.go", true},
+		{"testdata directory", "internal/scaffold/testdata/golden.go", true},
+		{"deep testdata directory", "a/b/testdata/c/d.go", true},
+		{"dot file name", ".hidden.go", true},
+		{"underscore file name", "_private.go", true},
+		{"testdata file name is not a directory", "internal/scaffold/testdata.go", false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ignoredByGoTool(test.file); got != test.want {
+				t.Fatalf("ignoredByGoTool(%q) = %v, want %v", test.file, got, test.want)
+			}
+		})
+	}
+}
+
+func TestPackagesFromFiles_IgnoresWildcardIgnoredFixturePaths(t *testing.T) {
+	// Regression for the nightly-command-evals PR: the .eval/ mini-repo
+	// fixture trees carry Go sources that appear in the branch diff but can
+	// never appear in a `go test ./...` coverprofile of this module, so the
+	// gate must not demand manifest coverage for them.
+	files := []string{
+		".eval/lib/mini-repo/base/internal/provenance/provenance.go",
+		".eval/lib/mini-repo/base/internal/refs/refs.go",
+		".eval/lib/mini-repo/feature-clean/2-impl/internal/provenance/provenance.go",
+		".eval/lib/mini-repo/feature-clean/2-impl/internal/refs/lookup.go",
+		".eval/lib/mini-repo/feature-defective/internal/refs/lookup.go",
+		"internal/scaffold/scaffold.go",
+		"cmd/coverage-gate/main.go",
+	}
+	got := PackagesFromFiles(files)
+	want := []string{"cmd/coverage-gate", "internal/scaffold"}
+	if len(got) != len(want) {
+		t.Fatalf("PackagesFromFiles = %v, want %v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("PackagesFromFiles = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestCheck(t *testing.T) {
 	manifest, err := ParseManifest([]byte(validManifest))
 	if err != nil {
 		t.Fatalf("ParseManifest: %v", err)
 	}
 	coverage := map[string]float64{
-		"internal/scaffold":  85,
-		"internal/artifacts": 95,
-		"internal/schemas":   87,
+		"internal/scaffold":    85,
+		"internal/artifacts":   95,
+		"internal/schemas":     87,
 		"internal/artifactpkg": 85,
 	}
 
