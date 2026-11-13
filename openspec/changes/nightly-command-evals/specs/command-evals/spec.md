@@ -1,7 +1,7 @@
 <!-- capability: command-evals
      change: nightly-command-evals
      End-to-end evals of uf commands, run nightly in CI and
-     locally. Design rationale: design.md (D1-D6). -->
+     locally. Design rationale: design.md (D1-D7). -->
 
 Requirement numbering: EV-FR-001 through EV-FR-008 are allocated
 for this change. EV-FR-009 through EV-FR-030 are reserved for

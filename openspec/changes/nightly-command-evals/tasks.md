@@ -12,8 +12,8 @@
 
 ## 1. Prerequisites
 
-- [ ] 1.1 Settle OQ1 (Dewey and Replicator MCP servers in CI) and
-      record the decision in design.md.
+- [x] 1.1 Decide how CI handles the Dewey and Replicator MCP
+      servers: install both from pinned releases (design.md D7).
 - [ ] 1.2 Merge eval-infra's `feat/trajectory-assertions` into
       `unbound-force/eval-infra` main and note the commit to pin.
 - [ ] 1.3 Ask an org admin to add the `ENMAAS_KEY` Actions secret
@@ -26,8 +26,8 @@
 - [ ] 2.2 Add the eval-infra driver to `prepare-eval-env.sh` as a
       pinned, cached, explicitly error-checked fetch, and make
       `run.sh` use it when `EVAL_DRIVER` is unset (D4).
-- [ ] 2.3 Apply the OQ1 decision to the per-run config written by
-      `write-run-config.sh`, if it disables the MCP servers.
+- [ ] 2.3 Pin the Dewey and Replicator versions alongside the other
+      pins, in one place the workflow reads (D7).
 
 ## 3. Local parity (EV-FR-008)
 
@@ -42,8 +42,9 @@
       `workflow_dispatch`, repo guard, `contents: read`, one matrix
       job per fixture, 120-minute timeout, actions and driver
       pinned by SHA (D1, D2).
-- [ ] 4.2 Install the toolchain (D6) and, per OQ1, the MCP server
-      binaries; cache `~/.cache/uf-eval/plugins` keyed on
+- [ ] 4.2 Install the toolchain (D6) and the Dewey and Replicator
+      Linux release binaries, verified against each release's
+      `checksums.txt` (D7); cache `~/.cache/uf-eval/plugins` keyed on
       `prepare-eval-env.sh`.
 - [ ] 4.3 Write each fixture's result to the job summary and upload
       the trajectory, run log and `runs.db` with `if: always()`
@@ -54,8 +55,9 @@
 - [ ] 5.1 Run the workflow once through `workflow_dispatch` on this
       branch and confirm every job starts, reports, and uploads.
 - [ ] 5.2 After merge, review the first nightly run by hand: check
-      that MCP tools behaved as decided in OQ1 and that any failure
-      is a real assertion failure, not a setup error.
+      that any failure is a real assertion failure, not a setup
+      error. Confirm Dewey and Replicator started, and record what
+      Dewey does without Ollama (D7).
 - [ ] 5.3 Confirm no log, summary or artifact contains the provider
       key (EV-FR-007).
 - [ ] 5.4 Verify constitution alignment against proposal.md (I to
