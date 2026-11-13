@@ -1,0 +1,28 @@
+{
+  // Eval copy of the auto-question config. The llm engine is pinned so a
+  // run does not depend on which Jev carrier keys the host happens to have.
+  "enabled": true,
+  "agents": ["autonomy"],
+  "engine": "llm",
+  "llm": {
+    "baseUrl": "https://api.enmaas.devshift.net/v1",
+    "apiKey": "{env:ENMAAS_KEY}",
+    "model": "rits/zai-org/glm-5-3",
+    "timeoutMs": 120000
+  },
+  "confidenceThreshold": 0.6,
+  "fallbackThreshold": 0.35,
+  "contextGathering": { "agent": "auto-question-ctx", "timeoutMs": 120000 },
+  "agentDecision": { "agent": "auto-question-decide", "timeoutMs": 240000 },
+  // A fixture's brief is the only guidance: the global path is inside the
+  // eval config directory and holds nothing.
+  "guidance": {
+    "enabled": true,
+    "projectPath": ".opencode/auto-question/guidance",
+    "globalPath": "__XDG__/opencode/auto-question/guidance"
+  },
+  "handlerTimeoutMs": 420000,
+  "immediateContext": true,
+  "sessionSummary": true,
+  "verbose": true
+}

@@ -1,0 +1,7 @@
+task_id: review-council-reject-specs-with-pr
+task_version: "1"
+description: "/uf.review-council rejects `specs` combined with a PR number before any discovery or dispatch"
+exec_mode: interactive
+command: uf.review-council
+timeout_seconds: 300
+setup: setup.sh

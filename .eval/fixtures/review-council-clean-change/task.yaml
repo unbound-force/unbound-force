@@ -1,0 +1,9 @@
+task_id: review-council-clean-change
+task_version: "1"
+description: >
+  Control for review-council-catches-planted-defects: the same feature
+  written safely, with no gate change. The council must not block it.
+exec_mode: interactive
+command: uf.review-council
+timeout_seconds: 5400
+setup: setup.sh

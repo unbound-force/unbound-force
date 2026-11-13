@@ -1,0 +1,28 @@
+# Contract: .opencode/commands/uf.review-council.md, "Parse Arguments
+# and Resolve Review Input" — a case variation of the `code` mode is
+# rejected before any discovery or dispatch; the command reports the
+# invalid token and the exact accepted grammar, then stops.
+# Static twin: TestCommandContracts_ReviewCouncil "argument rejection boundary".
+assertions:
+  # No input resolution, planning, evidence gathering, or dispatch
+  - tool_not_called:
+      - resolve_base_ref
+      - capture_review_diff
+      - fetch_pr_review_context
+      - acquire_sibling_evidence
+      - plan_review_dispatch
+      - build_review_prompts
+      - dispatch_review_runs
+      - dispatch_agent_run
+      - consolidate_dispatch
+      - finalize_review_dispatch
+      - invoke_agent
+      - task
+  # No PR lookup
+  - stub_not_called: gh
+  - bash_not_matches: '\bgh\s'
+  # Reports the accepted grammar
+  - text_matches: { pattern: 'code\|specs.*PR_NUMBER.*--full', flags: i }
+  - files_unchanged: true
+  # Names the invalid token
+  - text_matches: '\bCode\b'

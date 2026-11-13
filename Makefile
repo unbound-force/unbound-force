@@ -45,6 +45,20 @@ plugin-test: ## run TypeScript plugin unit, integration, smoke, and coverage che
 lint-instructions: ## static checks on agent/command/skill/pack prose (add --strict to fail on warnings)
 	.uf/scripts/instruction-lint $(ARGS)
 
+##@ Command Evals (not part of check; need ENMAAS_KEY)
+
+EVAL_OUT ?= $(HOME)/.cache/uf-eval/out/local
+
+.PHONY: eval eval-fast eval-deps
+eval-deps: ## install the .opencode plugin dependencies evals link into each run
+	cd .opencode && $(PLUGIN_TEST_NPM) install --ignore-scripts --no-package-lock --no-audit --no-fund
+
+eval: eval-deps ## run every command eval fixture (council fixtures take up to 90 minutes each)
+	.eval/run.sh --output $(EVAL_OUT) $(ARGS)
+
+eval-fast: eval-deps ## run the argument-rejection eval fixtures (a few minutes)
+	.eval/run.sh --only '^review-council-reject-' --output $(EVAL_OUT) $(ARGS)
+
 ##@ CRAP Load Monitoring
 
 GAZE_VERSION ?= latest

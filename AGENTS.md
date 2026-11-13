@@ -68,6 +68,7 @@ Always run tests with `-race -count=1`. CI enforces this.
 | Dependencies | `ci_dependencies.yml` | Dependency review + dependabot |
 | CRAP Load | `ci_crapload.yml` | CRAP regression analysis |
 | Release | `release.yml` | workflow_dispatch, GoReleaser + Cosign + Syft + Homebrew tap |
+| Command Evals | `ci_eval.yml` | Nightly + workflow_dispatch: one job per `.eval/fixtures/` fixture, report-only (summary + artifacts), needs `ENMAAS_KEY` |
 | Scheduled | `ci_scheduled.yml` | Daily OSV-Scanner + Scorecards, plus the daily plugin transitive OSV scan (throwaway lock; steps kept identical to `ci_security.yml`) |
 
 ## Project Structure
@@ -88,6 +89,7 @@ unbound-force/
 │   ├── skills/                       # Skills packages (uf init migrates legacy skill/)
 │   ├── package.json                  # Plugin npm manifest (exact pins; no lock tracked)
 │   └── uf/packs/                     # Convention packs
+├── .eval/                            # End-to-end command evals (fixtures, pinned runtime, run.sh)
 ├── council-review-action/             # AI code review composite GitHub Action
 │   ├── action.yml                    # Composite action definition
 │   ├── scripts/                      # Pipeline scripts (diff, prompt, review, parse)
@@ -163,6 +165,17 @@ imported externally.
   parity by copying the canonical manifest over the mirror would
   regress the npm 10.9.9 crash avoidance
 - **Policy mirrors**: `.uf/preflight.yaml` and `.uf/reviewer-capabilities.yaml` are project-owned and intentionally diverge from embedded assets; compensating tests pin their shape (`projectOwnedPolicyMirrors` in scaffold_test.go, the repo-local persona enrollment lock in reviewer_capabilities_test.go)
+- **Command evals**: `.eval/fixtures/<name>/` holds a `task.yaml`
+  (command, timeout), `setup.sh`, `assertions.yaml` (deterministic
+  trajectory checks), and a `guidance.md` brief that auto-question
+  answers the command's questions from. `make eval-fast` (a few
+  minutes) or `make eval` (council fixtures up to 90 minutes each)
+  runs them with the pins in `.eval/lib/pins.sh`; both need
+  `ENMAAS_KEY` and are not part of `make check`. Council fixtures
+  build a mini repo from `.eval/lib/mini-repo/`, which must keep
+  satisfying this repo's own rules (constitution principles,
+  MP-014 numbering, coverage-gate format): update it when those
+  change
 - **Plugin coverage floor**: The `.opencode/` TypeScript plugin suite carries a 94 percent statements coverage floor (`.opencode/vitest.config.ts`); this floor is governance-controlled and may only be changed through a spec-workflow governance change per the Gatekeeping rule.
 
 ## Technology Stack

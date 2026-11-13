@@ -1,0 +1,14 @@
+diff --git a/src/config.ts b/src/config.ts
+index 082aacd..cd1f6bf 100644
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -6,7 +6,8 @@ import type { Config } from "./types"
+ export class ConfigError extends Error {}
+ 
+ export function defaultConfigPath(): string {
+-  return join(homedir(), ".config", "opencode", "auto-question.jsonc")
++  const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config")
++  return join(base, "opencode", "auto-question.jsonc")
+ }
+ 
+ export const DEFAULT_CONFIG: Config = {
