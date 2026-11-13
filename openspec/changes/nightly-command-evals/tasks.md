@@ -14,8 +14,9 @@
 
 - [x] 1.1 Decide how CI handles the Dewey and Replicator MCP
       servers: install both from pinned releases (design.md D7).
-- [ ] 1.2 Merge eval-infra's `feat/trajectory-assertions` into
-      `unbound-force/eval-infra` main and note the commit to pin.
+- [x] 1.2 Merge eval-infra's `feat/trajectory-assertions` into
+      `unbound-force/eval-infra` main and note the commit to pin
+      (8a31ef0, eval-infra#3).
 - [x] 1.3 Ask an org admin to add the `ENMAAS_KEY` Actions secret
       for this repo (D3).
 
