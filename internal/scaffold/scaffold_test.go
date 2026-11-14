@@ -549,8 +549,8 @@ func TestQuestionToolPresentationContractGates(t *testing.T) {
 		`"Abort -- discard changes"`:             2,
 		`"Yes -- post as GitHub review"`:         3,
 		`"No -- terminal summary is sufficient"`: 2,
-		`"Yes -- post new review"`:               2,
-		`"No -- skip posting"`:                   6,
+		`"Yes -- post new review"`:               5,
+		`"No -- skip posting"`:                   8,
 		`"Yes -- override with <new_verdict>"`:   2,
 		`"No -- keep existing <old_verdict>"`:    2,
 		`"Approve -- post review"`:               2,
@@ -586,7 +586,7 @@ func TestQuestionToolPresentationContractGates(t *testing.T) {
 		}{
 			{"uf.triage-issue", triage, 8},
 			{"uf.address-feedback", feedback, 6},
-			{"uf.review-pr", review, 8},
+			{"uf.review-pr", review, 9},
 		} {
 			for _, fragment := range contractFragments {
 				if got := strings.Count(tc.asset, fragment); got != tc.want {
@@ -599,7 +599,8 @@ func TestQuestionToolPresentationContractGates(t *testing.T) {
 	t.Run("option-array literal counts", func(t *testing.T) {
 		// The backtick-bracket opener counts one per house-style
 		// option array; embedded JSON examples (no backtick) are
-		// excluded. review-pr records 9, not 8, because Step 8c
+		// excluded. review-pr records 10, not 9, because Step 8a
+		// splits true-duplicate vs stale and Step 8c
 		// carries two verdict-specific option sets; address-feedback
 		// records 7, not 6, because Section 3.2 carries a second set
 		// for MEDIUM and LOW items.
@@ -610,7 +611,7 @@ func TestQuestionToolPresentationContractGates(t *testing.T) {
 		}{
 			{"uf.triage-issue", triage, 8},
 			{"uf.address-feedback", feedback, 7},
-			{"uf.review-pr", review, 9},
+			{"uf.review-pr", review, 10},
 		} {
 			if got := strings.Count(tc.asset, "`[\""); got != tc.want {
 				t.Errorf("%s command carries %d backtick-bracket option arrays, want %d", tc.assetName, got, tc.want)
