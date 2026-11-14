@@ -999,32 +999,77 @@ formal GitHub review on the PR. Present the decision as follows:
 user (from Step 3.10-iii) already exists in the review list (from
 Step 3.10-i):
 
-- If a prior review with the **same verdict** exists: present
-  the decision as follows:
+- If a prior review with the **same verdict** exists: determine
+  whether it is a true duplicate before recommending:
 
-  1. Print the decision content as plain session text **above**
-     the question tool (visibility directive — the printed text
-     and the question tool MUST present the
-     same details and options):
-     - The duplicate-review finding: the prior review with the
-       same verdict
-     - Per-option reasoning: what each choice does and
-       when it fits:
-       - **"Yes -- post new review"** posts a fresh review
-         with the same verdict; fits a materially updated
-         review body
-       - **"No -- skip posting"** keeps the existing review;
-         fits an unchanged assessment
-     - A recommendation with its justification (advisory only —
-       the human decides): "No -- skip posting" (duplicate
-       same-verdict review adds noise).
-       If the assessment data does not ground any option, the
-       gate MUST say so, present the trade-off, and still ask
-       the full option set (fail-closed, per FR-006/FR-012)
-  2. Present the **question tool** below the printed text with
-     the same options, the recommended option FIRST and
-     labeled "(Recommended)":
-     `["No -- skip posting", "Yes -- post new review"]`.
+  1. **Assess staleness**: Compare the prior review's `commit_id`
+     (from Step 3.10-i) with the frozen `head_sha` from Step 2,
+     and compare its finding set with the current council findings
+     for material differences (resolved vs new findings, severity
+     changes). A review is a **true duplicate** only when
+     `commit_id == head_sha` AND the finding set has not
+     materially changed.
+  2. **If true duplicate** (`commit_id == head_sha` and findings
+     unchanged): present the decision as follows:
+
+     a. Print the decision content as plain session text **above**
+        the question tool (visibility directive — the printed text
+        and the question tool MUST present the
+        same details and options):
+        - The duplicate-review finding: the prior review with the
+          same verdict on the same head commit and unchanged
+          findings
+        - Per-option reasoning: what each choice does and
+          when it fits:
+          - **"Yes -- post new review"** posts a fresh review
+            with the same verdict; fits a materially updated
+            review body
+          - **"No -- skip posting"** keeps the existing review;
+            fits an unchanged assessment
+        - A recommendation with its justification (advisory only —
+          the human decides): "No -- skip posting" (true
+          duplicate same-verdict review on the same head with
+          unchanged findings adds noise).
+          If the assessment data does not ground any option, the
+          gate MUST say so, present the trade-off, and still ask
+          the full option set (fail-closed, per FR-006/FR-012)
+     b. Present the **question tool** below the printed text with
+        the same options, the recommended option FIRST and
+        labeled "(Recommended)":
+        `["No -- skip posting", "Yes -- post new review"]`.
+  3. **If stale** (`commit_id != head_sha` OR findings have
+     materially changed): present the decision as follows:
+
+     a. Print the decision content as plain session text **above**
+        the question tool (visibility directive — the printed text
+        and the question tool MUST present the
+        same details and options):
+        - The stale-review finding: the prior review's verdict,
+          its `commit_id` (short SHA) versus the current
+          `head_sha` (short SHA), and which findings are now
+          resolved vs newly introduced
+        - Per-option reasoning: what each choice does and
+          when it fits:
+          - **"Yes -- post new review"** posts a fresh review
+            superseding the stale one; fits when the new
+            assessment reflects the current PR state (new commits
+            or changed findings)
+          - **"No -- skip posting"** keeps the stale review;
+            fits only when the prior review is intentionally
+            retained despite staleness
+        - A recommendation with its justification (advisory only —
+          the human decides): "Yes -- post new review" (prior
+          review is on an older commit or findings have
+          materially changed — posting updates the PR with
+          current findings). When posting a superseding review,
+          link the prior review in the body (see Step 8d).
+          If the assessment data does not ground any option, the
+          gate MUST say so, present the trade-off, and still ask
+          the full option set (fail-closed, per FR-006/FR-012)
+     b. Present the **question tool** below the printed text with
+        the same options, the recommended option FIRST and
+        labeled "(Recommended)":
+        `["Yes -- post new review", "No -- skip posting"]`.
 - If a prior review with a **different verdict** exists:
   present the decision as follows:
 
