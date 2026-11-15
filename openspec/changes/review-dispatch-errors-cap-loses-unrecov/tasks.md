@@ -109,7 +109,7 @@
       declaring the record payload (strict, sanity bounds
       matching task 2.1), following the hand-authored schema
       conventions of `schemas/review-dispatch/v1.0.0.schema.json`.
-- [ ] 5.2 Register the schema in `internal/schemas` fixture
+- [x] 5.2 Register the schema in `internal/schemas` fixture
       validation (`handAuthoredSchemas` in `ci_test.go`) with a
       valid fixture.
 - [ ] 5.3 Mirror the schema to

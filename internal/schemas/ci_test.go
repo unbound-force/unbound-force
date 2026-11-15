@@ -186,6 +186,7 @@ var handAuthoredSchemas = []handAuthoredSchema{
 	{typeName: "review-matrix", schemaFile: "v3.schema.json"},
 	{typeName: "reviewer-capabilities", schemaFile: "v1.0.0.schema.json"},
 	{typeName: "review-dispatch", schemaFile: "v1.0.0.schema.json"},
+	{typeName: "review-dispatch-failure", schemaFile: "v1.0.0.schema.json"},
 	{typeName: "sibling-repos", schemaFile: "v1.0.0.schema.json"},
 	{
 		typeName:   "review-verdict-v2",

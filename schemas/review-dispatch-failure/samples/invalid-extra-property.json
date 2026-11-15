@@ -1,0 +1,1 @@
+{"dispatch_correlation_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","command":"review-council","mode":"code","schema_version":"1.0.0","status":"failed","operation_verdict":"INCONCLUSIVE","errors":["verdict is APPROVE; expected INCONCLUSIVE"]}
