@@ -3,7 +3,8 @@
 The model matrix is the canonical configuration for capability-driven
 content-agent model selection in `uf_delegate_command`. Version 1
 defines capability profiles, convention-pack mappings, task-kind
-defaults, agent pins, and the classifier configuration block. The
+defaults, agent pins, the classifier configuration block, and the
+selection headroom knob. The
 tracked file (`.uf/model-matrix.yaml`) carries structure only;
 per-developer model identities arrive via the gitignored override.
 
@@ -23,8 +24,13 @@ verdicts, so the two representations cannot drift.
   (`additionalProperties: false` at every object level).
 - `samples/valid-starter-matrix.json` mirrors the tracked starter
   matrix: the four starter capabilities with structure-only profiles,
-  the starter pack mappings, task-kind defaults, and an empty
-  classifier.
+  the starter pack mappings, task-kind defaults, an empty
+  classifier, and the starter selection headroom knob.
+- `samples/valid-selection-margin.json` proves the optional
+  `selection.footprint_margin_tokens` knob parses on both surfaces
+  with a valid integer value.
+- `samples/invalid-unknown-selection-key.json` carries an unknown
+  key under `selection` (closed key set).
 - `samples/valid-minimal-matrix.json` proves only `version` and
   `profiles` are required — every other root key is optional.
 - `samples/invalid-unknown-root-field.json` carries an unknown root
@@ -74,6 +80,15 @@ and fail only `loadModelMatrix`; `invalid-override-*` must make
   (bounded at 1,800,000), `llm` (`endpoint`, `model`, `apiKey`,
   `request_timeout_ms` bounded at 180,000), and
   `confidence_threshold` (0 to 1).
+- `selection` — `footprint_margin_tokens` (DELEG-FR-001): the
+  selection headroom working margin in tokens. The key set is
+  closed, but the value is intentionally unconstrained on both
+  parse surfaces — the runtime normalizer
+  (`resolveFootprintMarginTokens`) substitutes the documented
+  default (24,000; accepted range 1,000-256,000 integer tokens)
+  plus a recorded warning for an invalid value, so the knob can
+  never fail the matrix load or silently disable the headroom
+  gate.
 
 ## Override File
 
@@ -123,3 +138,4 @@ a tracked-matrix change, never an override concern.
 | Version | Date | Changes |
 |---------|------|---------|
 | 1 | 2026-11-01 | Initial closed capability contract: profiles, packs, defaults, agents, classifier. |
+| 1 | 2026-11-15 | Amendment: added the optional `selection.footprint_margin_tokens` headroom knob (DELEG-FR-001). |

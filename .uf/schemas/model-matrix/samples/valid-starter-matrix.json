@@ -19,5 +19,8 @@
     "implement": "code-writing"
   },
   "agents": {},
-  "classifier": {}
+  "classifier": {},
+  "selection": {
+    "footprint_margin_tokens": 24000
+  }
 }

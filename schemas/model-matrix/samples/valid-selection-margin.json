@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "profiles": {
+    "code-writing": {}
+  },
+  "selection": {
+    "footprint_margin_tokens": 32000
+  }
+}

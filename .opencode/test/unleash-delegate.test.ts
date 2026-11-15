@@ -13,6 +13,7 @@ import {
   type DelegateCommandData,
   type DelegateCommandDependencies,
   type FileExists,
+  type FootprintEstimatorDependencies,
   type GitExec,
   type ProgressState,
 } from "../plugins/uf-workflow/index.js"
@@ -302,6 +303,27 @@ function fakeReadText(files: Record<string, string>): {
     return files[path]
   }
   return { readText, calls }
+}
+
+/**
+ * Footprint-estimator seam (DELEG-FR-001, compaction-storm task 1.1)
+ * reading from the same fake files map as fakeReadText: the estimator
+ * measures command bodies through its own guarded read (deliberately
+ * not the tool-level readText seam, whose calls the tests assert
+ * exactly), so command-path tests inject this to keep the measurement
+ * deterministic. realpath is the identity — the lexical path already
+ * sits inside the fake repository root.
+ */
+function fakeFootprintSeam(files: Record<string, string>): FootprintEstimatorDependencies {
+  return {
+    readText: async (path) => {
+      if (!(path in files)) {
+        throw Object.assign(new Error(`ENOENT: no such file or directory, ${path}`), { code: "ENOENT" })
+      }
+      return files[path]
+    },
+    realpath: (path) => path,
+  }
 }
 
 /** Fake FileExists keyed on repo-relative paths resolved against FAKE_CWD. */
@@ -1745,6 +1767,14 @@ describe("uf_delegate_command expected-artifact verification", () => {
         selection_model: null,
         selection_confidence: null,
         selection_fallback_reason: null,
+        // DELEG-FR-001 (compaction-storm task 1.1): headroom provenance —
+        // prompt-only footprint = cached prefix 56,000 + "Write the plan."
+        // (15 bytes = 4 tokens at 4 bytes/token); clean measurement and no
+        // matrix, so the documented default margin applies.
+        selection_footprint: 56_004,
+        selection_footprint_fallback: null,
+        selection_margin_tokens: 24_000,
+        selection_margin_warning: null,
         usage: { cost_usd: 0.25, tokens: { input: 11, output: 7 } },
         provenance: {
           agent: "cobalt-crush-dev",
@@ -2138,11 +2168,15 @@ describe("uf_delegate_command checkpoint recording", () => {
   it("auto-checkpoints checkpoint_step on verified success with the delegation facts as data", async () => {
     const commandAbs = resolve(FAKE_CWD, ".opencode/commands/speckit.plan.md")
     const fake = fakeClient()
-    const reads = fakeReadText({ [commandAbs]: "Create the implementation plan." })
+    const commandFiles: Record<string, string> = { [commandAbs]: "Create the implementation plan." }
+    const reads = fakeReadText(commandFiles)
     const artifact = fakeFileExists(["specs/018-unleash-command/plan.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
-      modelMatrix: matrixFreeDeps,
+      // DELEG-FR-001 (task 1.1): the footprint seam reads the same fake
+      // files map, so the estimator measures the command body cleanly
+      // instead of hitting the real filesystem.
+      modelMatrix: { ...matrixFreeDeps, footprint: fakeFootprintSeam(commandFiles) },
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2479,11 +2513,15 @@ describe("uf_delegate_command audit trail", () => {
   it("round-trips the audit fields through the progress store", async () => {
     const commandAbs = resolve(FAKE_CWD, "cmd.md")
     const fake = fakeClient()
-    const reads = fakeReadText({ [commandAbs]: "Run the delegated command." })
+    const commandFiles: Record<string, string> = { [commandAbs]: "Run the delegated command." }
+    const reads = fakeReadText(commandFiles)
     const artifact = fakeFileExists([".opencode/skills/pre-flight/SKILL.md"])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
-      modelMatrix: matrixFreeDeps,
+      // DELEG-FR-001 (task 1.1): the footprint seam reads the same fake
+      // files map (both runs share these deps), keeping the command-path
+      // measurement deterministic.
+      modelMatrix: { ...matrixFreeDeps, footprint: fakeFootprintSeam(commandFiles) },
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2616,11 +2654,15 @@ describe("uf_delegate_command audit trail", () => {
   it("leaves checkpoint data and envelope audit fields absent for unclassified command-path calls", async () => {
     const commandAbs = resolve(FAKE_CWD, "cmd.md")
     const fake = fakeClient()
-    const reads = fakeReadText({ [commandAbs]: "Run the delegated command." })
+    const commandFiles: Record<string, string> = { [commandAbs]: "Run the delegated command." }
+    const reads = fakeReadText(commandFiles)
     const artifact = fakeFileExists([])
     const deps: DelegateCommandDependencies = {
       client: fake.client,
-      modelMatrix: matrixFreeDeps,
+      // DELEG-FR-001 (task 1.1): the footprint seam reads the same fake
+      // files map, so the estimator's clean measurement keeps the
+      // conditional audit keys out of the pre-change checkpoint shape.
+      modelMatrix: { ...matrixFreeDeps, footprint: fakeFootprintSeam(commandFiles) },
       readText: reads.readText,
       fileExists: artifact.fileExists,
     }
@@ -2721,6 +2763,15 @@ describe("uf_delegate_command seam verification", () => {
         selection_model: null,
         selection_confidence: null,
         selection_fallback_reason: null,
+        // DELEG-FR-001 (compaction-storm task 1.1): headroom provenance —
+        // prompt-only footprint = cached prefix 56,000 + the in-memory
+        // material (feature-dir line + skill directive + prompt, 409
+        // bytes = 103 tokens at 4 bytes/token); no matrix, so the
+        // documented default margin applies.
+        selection_footprint: 56_103,
+        selection_footprint_fallback: null,
+        selection_margin_tokens: 24_000,
+        selection_margin_warning: null,
         usage: null,
         provenance: {
           agent: "cobalt-crush-dev",
@@ -2815,6 +2866,14 @@ describe("uf_delegate_command seam verification", () => {
         selection_model: null,
         selection_confidence: null,
         selection_fallback_reason: null,
+        // DELEG-FR-001 (compaction-storm task 1.1): headroom provenance —
+        // prompt-only footprint = cached prefix 56,000 + "Rename the
+        // variable across the module." (38 bytes = 10 tokens at 4
+        // bytes/token); no matrix, so the documented default margin.
+        selection_footprint: 56_010,
+        selection_footprint_fallback: null,
+        selection_margin_tokens: 24_000,
+        selection_margin_warning: null,
         usage: null,
         provenance: {
           agent: "cobalt-crush-dev",
