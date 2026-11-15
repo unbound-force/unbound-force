@@ -128,7 +128,7 @@
 - [x] 6.2 File the in-repo documentation issue for the
       user-facing tool-description changes (documentation gate;
       `uf init` deploys the mirrored plugin).
-- [ ] 6.3 Run `make check` (lint, test, build, coverage gate,
+- [x] 6.3 Run `make check` (lint, test, build, coverage gate,
       plugin tests) and confirm the 94 percent plugin statements
       floor and the review-dispatch 85 percent branch gate hold.
 - [ ] 6.4 Verify constitution alignment (v1.4.0): the failure
