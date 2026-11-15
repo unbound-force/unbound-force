@@ -104,6 +104,16 @@ import {
   type ReviewerManifest,
   type YamlParser,
 } from "../../lib/reviewer-manifest.js"
+import {
+  appendSpecReviewIterationToState,
+  readSpecReviewGateRecord,
+} from "../../lib/progress-state.js"
+import {
+  evaluateSpecReviewGate,
+  nextSpecReviewIteration,
+  specReviewFindingIds,
+  SPEC_REVIEW_ITERATION_CAP,
+} from "../../lib/uf-workflow-types.js"
 export { createBunYamlParser, parseReviewerManifest, type YamlParser } from "../../lib/reviewer-manifest.js"
 
 const MATRIX_PATH = ".uf/review-matrix.yaml"
@@ -4525,6 +4535,9 @@ function projectSummaryWarning(
     case "duplicate_proposal_merged":
       detail = `agent=${agent} kept=${typeof record.kept_agent === "string" ? record.kept_agent : ""}`
       break
+    case "spec_review_state_write_failed":
+      detail = `correlation=${typeof record.correlation_id === "string" ? record.correlation_id : ""} ${typeof record.detail === "string" ? record.detail : ""}`
+      break
     default:
       return null
   }
@@ -4885,6 +4898,23 @@ interface DuplicateProposalMergedWarning {
   readonly type: "duplicate_proposal_merged"
   readonly agent: string
   readonly kept_agent: string
+}
+
+/**
+ * Machine-readable consolidate_dispatch warning: the spec-review gate record
+ * could not be persisted to the uf.unleash progress state after the dispatch
+ * artifact was finalized (HARDEN-001, harden-spec-review-gate). The verdict
+ * is durable in the artifact store; every gate reader reconciles the two
+ * stores (get_progress heals unrecorded artifacts), so the gate cannot be
+ * bypassed through this failure — but the window is reported rather than
+ * silent. This shape is consolidate-result observability only; it MUST NOT
+ * flow into the finalization payload, whose strict schema rejects unknown
+ * top-level keys.
+ */
+interface SpecReviewStateWriteFailedWarning {
+  readonly type: "spec_review_state_write_failed"
+  readonly correlation_id: string
+  readonly detail: string
 }
 
 /**
@@ -5416,6 +5446,7 @@ export function createConsolidateDispatchTool(
         | ConsolidatedFindingsOverflowWarning
         | DuplicateProposalMergedWarning
         | ProposalsOverflowWarning
+        | SpecReviewStateWriteFailedWarning
       )[] = [
         // RD-FR-061 first: an incomplete reviewer is the strongest
         // operational signal in the array, and the bounded summary
@@ -5605,6 +5636,35 @@ export function createConsolidateDispatchTool(
           { payload, provenance: input.provenance },
           finalizationDependencies,
         )
+        // HARDEN-001 (harden-spec-review-gate, task 2.1): persist the
+        // spec-review verdict to the uf.unleash progress state in the same
+        // finalization step that persisted the artifact, so the gate record
+        // exists before control returns to the model. Specs mode only —
+        // code/triage/feedback reviews do not gate /uf.unleash. A write
+        // failure cannot lose the verdict (the artifact is durable and every
+        // gate reader reconciles the two stores); it is reported so the
+        // window is never silent.
+        if (sessionMetadata.mode === "specs" && result.status === "success") {
+          try {
+            appendSpecReviewIterationToState(
+              finalizationDependencies.projectRoot,
+              input.provenance.branch,
+              {
+                verdict: result.operation_verdict,
+                correlation_id: result.correlation_id ?? correlationId,
+                finding_count: consolidatedFindings.length,
+                finding_ids: specReviewFindingIds(consolidatedFindings.length),
+              },
+            )
+          } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error)
+            warnings.push({
+              type: "spec_review_state_write_failed",
+              correlation_id: result.correlation_id ?? correlationId,
+              detail: message,
+            })
+          }
+        }
         return {
           output: JSON.stringify(
             // warnings ride along on the compact finalization wrapper only —
@@ -6961,6 +7021,73 @@ async function resolveTimeoutLimits(deps: {
  * @param projectRoot Absolute project worktree path.
  * @returns Aggregate output with run counts, findings, proposals, and warnings.
  */
+/**
+ * HARDEN-003 (harden-spec-review-gate, task 4.1): guard a specs-mode
+ * dispatch against re-rolling a recorded spec-review iteration. The gate
+ * record for the dispatch's head branch is read reconciled (crash-window
+ * artifacts heal here, exactly as every gate consumer does), and the
+ * dispatch is refused while the latest recorded iteration still stands
+ * undischarged — an undecided REQUEST CHANGES the human has not
+ * adjudicated, or one held by a pause decision — naming the recorded
+ * iteration and its verdict. The iteration cap is enforced here too: the
+ * initial review plus SPEC_REVIEW_ITERATION_CAP fix iterations may
+ * dispatch; a would-be iteration beyond that is refused so a persistent
+ * REQUEST CHANGES exits through the spec-review paused path instead of
+ * re-rolling. A decided or approving latest iteration — or no record at
+ * all — proceeds: the next iteration number is fresh, so its verdict
+ * cannot collide with a sealed one. Non-specs modes never consult the
+ * record; a specs dispatch whose input context carries no head branch
+ * (issue-kind) cannot be keyed and proceeds — the checkpoint gate
+ * (HARDEN-002) still holds the pipeline.
+ *
+ * @param projectRoot Absolute project worktree path.
+ * @param mode Dispatch mode; only "specs" consults the gate record.
+ * @param headRef Head branch the dispatch reviews (state key, sanitized by the reader).
+ * @returns The refusal message, or null when the dispatch may proceed.
+ */
+export function specReviewDispatchGuard(
+  projectRoot: string,
+  mode: string,
+  headRef: string | undefined,
+): { message: string } | null {
+  if (mode !== "specs") return null
+  if (headRef === undefined || headRef.length === 0) return null
+  const record = readSpecReviewGateRecord(projectRoot, headRef)
+  if (record === null) return null
+  const status = evaluateSpecReviewGate(record)
+  if (status.kind === "missing_decisions") {
+    return {
+      message:
+        `iteration_already_recorded: spec-review iteration ${status.iteration} ` +
+        `(${status.verdict}) is recorded with undecided findings ` +
+        `[${status.undecided.join(", ")}]; record per-finding decisions via ` +
+        "the checkpoint spec_review_decisions argument before dispatching " +
+        "the next iteration",
+    }
+  }
+  if (status.kind === "paused") {
+    return {
+      message:
+        `iteration_already_recorded: spec-review iteration ${status.iteration} ` +
+        `(${status.verdict}) is held by a pause decision on findings ` +
+        `[${status.paused.join(", ")}]; exit through the spec-review paused ` +
+        "path before dispatching again",
+    }
+  }
+  const nextIteration = nextSpecReviewIteration(record)
+  if (nextIteration > SPEC_REVIEW_ITERATION_CAP + 1) {
+    return {
+      message:
+        `spec_review_iteration_cap_exceeded: the dispatch would start ` +
+        `iteration ${nextIteration}, beyond the maximum of ` +
+        `${SPEC_REVIEW_ITERATION_CAP + 1} (initial review plus ` +
+        `${SPEC_REVIEW_ITERATION_CAP} fix iterations); a persistent REQUEST ` +
+        "CHANGES must exit through the spec-review paused path",
+    }
+  }
+  return null
+}
+
 async function dispatchReviewRuns(
   rawInput: unknown,
   context: ToolContext,
@@ -6985,6 +7112,32 @@ async function dispatchReviewRuns(
 
   const input = parsed.data
   const warnings: string[] = []
+
+  // HARDEN-003 (harden-spec-review-gate, task 4.1): a specs-mode dispatch
+  // is refused while the latest recorded spec-review iteration stands
+  // undischarged (undecided or paused) or the iteration cap would be
+  // exceeded — checked before correlation minting so a refused dispatch
+  // leaves no dispatch session behind and the previous session's map entry
+  // stays intact.
+  const inputContext = input.session_metadata.input_context
+  const headRef =
+    inputContext.kind === "local" || inputContext.kind === "pr"
+      ? inputContext.head_ref
+      : undefined
+  const specReviewRefusal = specReviewDispatchGuard(projectRoot, input.mode, headRef)
+  if (specReviewRefusal !== null) {
+    return {
+      status: "error",
+      runs_completed: 0,
+      runs_failed: 0,
+      runs_skipped: 0,
+      findings: [],
+      proposals: [],
+      warnings: [],
+      message: specReviewRefusal.message,
+      retryable: false,
+    }
+  }
 
   // Design D1 (fix-review-dispatch-correlation-release, issue #794): every
   // aggregate dispatch invocation owns a freshly minted correlation ID, so a
@@ -7317,7 +7470,7 @@ async function dispatchReviewRuns(
  * @param projectRoot Absolute project worktree path.
  * @returns An OpenCode tool definition.
  */
-function createDispatchReviewRunsTool(
+export function createDispatchReviewRunsTool(
   deps: DispatchAgentRunDependencies,
   siblingDeps: SiblingAcquisitionDependencies,
   projectRoot: string,

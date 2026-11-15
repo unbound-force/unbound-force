@@ -164,6 +164,7 @@ describe("provider-free scratch-repository smoke test", () => {
         "parse_tasks",
         "post_feedback_replies",
         "post_issue_comment",
+        "relay_spec_review_gate",
         "resolve_base_ref",
         "resolve_clarification",
         "scan_clarifications",
