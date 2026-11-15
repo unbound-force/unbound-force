@@ -18,6 +18,7 @@ import {
   makeSessionMetadata,
   pathExists,
 } from "./helpers/aggregate-dispatch-fixtures.js"
+import matrixFixture from "./fixtures/review-dispatch/matrix.json"
 
 // ── Test infrastructure ─────────────────────────────────────
 
@@ -1137,6 +1138,220 @@ describe("dispatch_review_runs", () => {
       expect(dispatchSummaryLine({ ...base, status: "error", retryable: true })).toContain(
         "— error: no failure message reported (retryable: true)",
       )
+    })
+  })
+
+  // ── RD-FR-065: all-failed summary carries causes ────────────
+
+  // Issue #1009 (dispatch-tier-resolvability, design D3/D4): before
+  // RD-FR-065, pre-execution early exits (tier_model_unavailable,
+  // host_model_unavailable, unknown_agent) never reached the result
+  // warnings, and an all-failed dispatch rendered the generic "no
+  // failure message reported" placeholder instead of its cause. These
+  // tests drive the real dispatch_review_runs tool over scratch
+  // matrices with model-less profiles so runs fail before child
+  // execution, asserting cause capture (warnings), the all-failed
+  // message fold, the partial-failure non-fold, the #946 render
+  // bound, and first-cause determinism.
+  //
+  // The `run rejected:` arm of design D3 (a thrown batch promise) is
+  // defensive and not drivable through schema-valid input: every
+  // dispatchAgentRun failure path — input validation, session-metadata
+  // persistence, prompt reading, policy loading, model resolution, and
+  // child execution (executeAgentSession converts any throw into a
+  // fulfilled invocation_failed result) — resolves as a
+  // fulfilled-but-failed result, and the aggregate's own
+  // no-prompt-file Promise.reject is unreachable because
+  // buildReviewPrompts writes a prompt for every included agent. That
+  // arm stays verified by code inspection; every reachable failure
+  // shape is covered end-to-end below.
+  describe("all-failed summary carries causes (RD-FR-065)", () => {
+    /** Scratch review matrix with the named profiles stripped of their model. */
+    function matrixWithoutModels(...profiles: string[]): Record<string, unknown> {
+      const next: Record<string, Record<string, unknown>> = { ...matrixFixture.profiles }
+      for (const profile of profiles) {
+        const { model: _omitted, ...rest } = next[profile] ?? {}
+        next[profile] = rest
+      }
+      return { ...matrixFixture, profiles: next }
+    }
+
+    it("folds the first pre-execution cause into the all-failed message and summary line", async () => {
+      await withBun(async () => {
+        const { directory, diffPath } = await scratchProject()
+        await writeFile(join(directory, ".uf", "review-matrix.yaml"), JSON.stringify(matrixWithoutModels("heavy")))
+        const hooks = await ReviewDispatchPlugin.server({
+          client: fakeClient(),
+          directory,
+          worktree: directory,
+        } as unknown as PluginInput)
+
+        const input = makeBaseInput(diffPath, [
+          makePlanEntry({ agent: "divisor-guard", sequence: 1, source: "explicit", tier: "heavy" }),
+          makePlanEntry({ agent: "divisor-adversary", sequence: 2, source: "explicit", tier: "heavy" }),
+        ])
+
+        const response = await hooks.tool.dispatch_review_runs.execute(input, toolContext())
+
+        const meta = response.metadata as Record<string, unknown>
+        expect(meta.status).toBe("error")
+        expect(meta.runs_completed).toBe(0)
+        expect(meta.runs_failed).toBe(2)
+        // D4: the message is the first run-failure cause; no aggregate
+        // retryable, since a mixed failure set has no honest single value.
+        expect(meta.message).toBe('tier_model_unavailable: profile "heavy" has no model configured in the review matrix')
+        expect("retryable" in meta).toBe(false)
+        // The #946 one-line summary renders the cause, not the placeholder.
+        expect(response.output).toContain(
+          '— error: tier_model_unavailable: profile "heavy" has no model configured in the review matrix',
+        )
+        expect(response.output).not.toContain("no failure message reported")
+        expect(response.output).not.toContain("retryable")
+        expect(response.output).not.toContain("\n")
+        trackDispatchDir(meta.correlation_id as string)
+      })
+    })
+
+    it("captures early-exit causes as run failed warnings naming agent, sequence, code, and message", async () => {
+      await withBun(async () => {
+        const { directory, diffPath } = await scratchProject()
+        await writeFile(join(directory, ".uf", "review-matrix.yaml"), JSON.stringify(matrixWithoutModels("standard")))
+        // The advisor entry on the model-less standard profile falls to
+        // host introspection (issue #693); a failing session.message fails
+        // the run pre-execution as host_model_unavailable.
+        const base = fakeClient()
+        const client = {
+          ...base,
+          session: {
+            ...base.session,
+            message: async (): Promise<unknown> => ({
+              data: undefined,
+              error: "host introspection failed",
+            }),
+          },
+        } as unknown as PluginInput["client"]
+        const hooks = await ReviewDispatchPlugin.server({
+          client,
+          directory,
+          worktree: directory,
+        } as unknown as PluginInput)
+
+        const input = makeBaseInput(diffPath, [
+          makePlanEntry({ agent: "divisor-guard", sequence: 1 }),
+          makePlanEntry({ agent: "divisor-ghost", sequence: 2 }),
+        ])
+
+        const response = await hooks.tool.dispatch_review_runs.execute(input, toolContext())
+
+        const meta = response.metadata as Record<string, unknown>
+        expect(meta.status).toBe("error")
+        expect(meta.runs_failed).toBe(2)
+        const warnings = meta.warnings as string[]
+        expect(warnings).toContain(
+          "run failed: divisor-guard/1: host_model_unavailable: current assistant message is unavailable: host introspection failed",
+        )
+        expect(warnings).toContain(
+          "run failed: divisor-ghost/2: unknown_agent: agent divisor-ghost is absent from the reviewer manifest",
+        )
+        // First cause in batch order wins the message fold.
+        expect(meta.message).toContain("host_model_unavailable")
+        trackDispatchDir(meta.correlation_id as string)
+      })
+    })
+
+    it("keeps the ok status and no message fold on partial failure", async () => {
+      await withBun(async () => {
+        const { directory, diffPath } = await scratchProject()
+        await writeFile(join(directory, ".uf", "review-matrix.yaml"), JSON.stringify(matrixWithoutModels("heavy")))
+        const hooks = await ReviewDispatchPlugin.server({
+          client: fakeClient(),
+          directory,
+          worktree: directory,
+        } as unknown as PluginInput)
+
+        const input = makeBaseInput(diffPath, [
+          makePlanEntry({ agent: "divisor-guard", sequence: 1 }),
+          makePlanEntry({ agent: "divisor-adversary", sequence: 2, source: "explicit", tier: "heavy" }),
+        ])
+
+        const response = await hooks.tool.dispatch_review_runs.execute(input, toolContext())
+
+        const meta = response.metadata as Record<string, unknown>
+        expect(meta.status).toBe("ok")
+        expect(meta.runs_completed).toBe(1)
+        expect(meta.runs_failed).toBe(1)
+        expect("message" in meta).toBe(false)
+        const warnings = meta.warnings as string[]
+        expect(warnings).toContain(
+          'run failed: divisor-adversary/2: tier_model_unavailable: profile "heavy" has no model configured in the review matrix',
+        )
+        expect(response.output).not.toContain("— error:")
+        expect(response.output).not.toContain("no failure message reported")
+        trackDispatchDir(meta.correlation_id as string)
+      })
+    })
+
+    it("bounds a long first cause to the #946 render contract without a retryable suffix", () => {
+      const base = {
+        correlation_id: "44444444-4444-4444-8444-444444444444",
+        runs_completed: 0,
+        runs_failed: 2,
+        runs_skipped: 0,
+        findings: [],
+        proposals: [],
+        warnings: [],
+      }
+      // A run-cause message that exceeds the render bound after line
+      // collapsing: D4 sets no retryable, so the rendered tail carries
+      // the collapsed cause and the ellipsis only.
+      const line = dispatchSummaryLine({
+        ...base,
+        status: "error",
+        message: `tier_model_unavailable: ${"profile detail ".repeat(60)}\nsecond line`,
+      })
+      const tail = line.slice(line.indexOf("— error: ") + "— error: ".length)
+      expect(tail.startsWith("tier_model_unavailable: profile detail")).toBe(true)
+      expect(tail.endsWith("…")).toBe(true)
+      expect(tail).toHaveLength(512)
+      expect(line).not.toContain("\n")
+      expect(line).not.toContain("retryable")
+    })
+
+    it("selects the first cause in batch order identically across invocations", async () => {
+      await withBun(async () => {
+        const { directory, diffPath } = await scratchProject()
+        await writeFile(join(directory, ".uf", "review-matrix.yaml"), JSON.stringify(matrixWithoutModels("heavy")))
+        const hooks = await ReviewDispatchPlugin.server({
+          client: fakeClient(),
+          directory,
+          worktree: directory,
+        } as unknown as PluginInput)
+
+        // Two distinct pre-execution failure codes: sequence 1 fails on
+        // the model-less heavy profile, sequence 2 on the manifest miss.
+        // The parallel batch settles nondeterministically, but
+        // allSettled preserves input order, so the first cause must be
+        // sequence 1's on every invocation.
+        const input = makeBaseInput(diffPath, [
+          makePlanEntry({ agent: "divisor-guard", sequence: 1, source: "explicit", tier: "heavy" }),
+          makePlanEntry({ agent: "divisor-ghost", sequence: 2 }),
+        ])
+
+        const first = await hooks.tool.dispatch_review_runs.execute(input, toolContext())
+        const second = await hooks.tool.dispatch_review_runs.execute(input, toolContext())
+
+        const firstMeta = first.metadata as Record<string, unknown>
+        const secondMeta = second.metadata as Record<string, unknown>
+        const expected = 'tier_model_unavailable: profile "heavy" has no model configured in the review matrix'
+        expect(firstMeta.message).toBe(expected)
+        expect(secondMeta.message).toBe(expected)
+        // The rendered summary is identical modulo the minted correlation id.
+        expect(first.output).toBe(
+          second.output.replace(secondMeta.correlation_id as string, firstMeta.correlation_id as string),
+        )
+        trackDispatchDir(firstMeta.correlation_id as string)
+        trackDispatchDir(secondMeta.correlation_id as string)
+      })
     })
   })
 

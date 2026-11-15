@@ -1530,11 +1530,23 @@ interface ResolvedRun {
   readonly tier: Tier | null
   readonly model: string | null
   readonly variant: string | null
+  /** Internal profile-name provenance for advisory emission; never emitted into PlanEntry. */
+  readonly profileName: string | null
   readonly reasonCode: string
   readonly reason: string
   readonly validationErrors: readonly string[]
 }
 
+/**
+ * Resolves authoritative `runs.<mode>.<agent>` matrix entries. The profile
+ * form threads the named profile as internal provenance (consumed when the
+ * planner emits the D1 advisory for advisor destinations on the same
+ * profile); the direct-model form carries no profile. D2 (RD-FR-064): a
+ * profile with no configured model makes an explicit-source run
+ * unexecutable — explicit runs never inherit the host model — so the run
+ * records a validation error, its entry flips to skip, and the plan returns
+ * INCONCLUSIVE.
+ */
 function explicitRuns(matrix: ReviewMatrix, mode: MatrixMode, agent: string): ResolvedRun[] | null {
   const configured = matrix.runs?.[mode]?.[agent]
   if (configured === undefined) {
@@ -1547,6 +1559,7 @@ function explicitRuns(matrix: ReviewMatrix, mode: MatrixMode, agent: string): Re
         tier: null,
         model: run.model,
         variant: run.variant ?? null,
+        profileName: null,
         reasonCode: "explicit-run",
         reason: "authoritative matrix run",
         validationErrors: [],
@@ -1554,12 +1567,28 @@ function explicitRuns(matrix: ReviewMatrix, mode: MatrixMode, agent: string): Re
     }
     try {
       const resolved = profilePair(matrix, run.profile, run.variant)
+      // D2 (RD-FR-064): an explicit-source run never reaches host-model
+      // inheritance — execution rejects it with non-retryable
+      // tier_model_unavailable before any child session exists — so a
+      // model-less profile makes the run unexecutable as written. Fail
+      // closed at plan time rather than emit a doomed ready plan. This
+      // also closes the model-less non-tier variant, where execution
+      // would silently resolve the standard profile. Advisor and host
+      // destinations on the same profile are governed by RD-FR-063.
+      const unexecutable = resolved.model === null
       return {
         source: "explicit",
         ...resolved,
-        reasonCode: "explicit-run",
-        reason: "authoritative matrix run",
-        validationErrors: [],
+        profileName: run.profile,
+        reasonCode: unexecutable ? "invalid-explicit-run" : "explicit-run",
+        reason: unexecutable ? "explicit run failed validation" : "authoritative matrix run",
+        validationErrors: unexecutable
+          ? [
+              `profile "${run.profile}" has no model configured in the review matrix; ` +
+                `explicit-source runs cannot inherit the host model; ` +
+                `configure profiles.${run.profile}.model in .uf/review-matrix.yaml or the gitignored override`,
+            ]
+          : [],
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "invalid explicit run"
@@ -1568,6 +1597,7 @@ function explicitRuns(matrix: ReviewMatrix, mode: MatrixMode, agent: string): Re
         tier: null,
         model: null,
         variant: null,
+        profileName: null,
         reasonCode: "invalid-explicit-run",
         reason: "explicit run failed validation",
         validationErrors: [message],
@@ -1576,6 +1606,15 @@ function explicitRuns(matrix: ReviewMatrix, mode: MatrixMode, agent: string): Re
   })
 }
 
+/**
+ * Resolves an agent's runs by matrix precedence: explicit runs (validated
+ * per D2/RD-FR-064 in explicitRuns), advisor-selected profile runs, then the
+ * host fallback. Advisor runs thread the selected profile as internal
+ * provenance so the planner can emit the D1 advisory (RD-FR-063) when that
+ * profile has no model — the run stays includable and inherits the parent
+ * session's active model at execution (#693). Host-fallback runs carry no
+ * profile and emit no advisory.
+ */
 function baseRuns(matrix: ReviewMatrix, mode: MatrixMode, agent: string): ResolvedRun[] {
   const explicit = explicitRuns(matrix, mode, agent)
   if (explicit !== null) {
@@ -1588,6 +1627,7 @@ function baseRuns(matrix: ReviewMatrix, mode: MatrixMode, agent: string): Resolv
       {
         source: "advisor",
         ...resolved,
+        profileName: selectedProfile,
         reasonCode: "advisor-run",
         reason: `advisor selected ${selectedProfile} profile`,
         validationErrors: [],
@@ -1600,6 +1640,7 @@ function baseRuns(matrix: ReviewMatrix, mode: MatrixMode, agent: string): Resolv
       tier: null,
       model: null,
       variant: null,
+      profileName: null,
       reasonCode: "host-fallback",
       reason: "no explicit or advisor run; use the active host model",
       validationErrors: [],
@@ -1642,6 +1683,7 @@ function addAugmentation(
     {
       source: "advisor",
       ...resolved,
+      profileName: tier,
       reasonCode: "risk-augmentation",
       reason: `opt-in risk augmentation selected adjacent ${tier} profile`,
       validationErrors: [],
@@ -1683,6 +1725,7 @@ function fullPanelRuns(matrix: ReviewMatrix): ResolvedRun[] {
     {
       source: "advisor",
       ...resolved,
+      profileName: "standard",
       reasonCode: "full-panel",
       reason: "full panel forces one standard-profile run",
       validationErrors: [],
@@ -1964,6 +2007,10 @@ function buildPlan(
   const omissions: PlanOmission[] = []
   const errors: string[] = []
   const includedAgents = new Set<string>()
+  // D1 (RD-FR-063): advisor-destination agents per model-less profile,
+  // accumulated during Pass 2 so the planner emits one advisory per distinct
+  // profile after the pass completes.
+  const modellessAdvisorAgents = new Map<string, string[]>()
 
   // Pass 1: Evaluate relevance for all agents.
   const relevanceIncluded = new Map<string, string>() // agent → reason_code
@@ -2026,6 +2073,23 @@ function buildPlan(
     deduplicated.runs.forEach((run, index) => {
       if (run.validationErrors.length > 0) {
         errors.push(`${agent} run ${index + 1}: ${run.validationErrors.join("; ")}`)
+      }
+      // D1 (RD-FR-063): an advisor-destination include-entry on a model-less
+      // profile inherits the parent session's active model at execution
+      // (#693) — the sanctioned fallback — so it stays includable; track it
+      // per profile for the post-Pass-2 advisory. Host-source entries carry
+      // no profile; explicit-source entries fail closed in explicitRuns (D2).
+      if (
+        run.source === "advisor" &&
+        run.model === null &&
+        run.profileName !== null &&
+        run.validationErrors.length === 0
+      ) {
+        const affected = modellessAdvisorAgents.get(run.profileName) ?? []
+        if (!affected.includes(agent)) {
+          affected.push(agent)
+          modellessAdvisorAgents.set(run.profileName, affected)
+        }
       }
       entries.push({
         agent,
@@ -2092,6 +2156,23 @@ function buildPlan(
     })
   }
 
+  // D1 (RD-FR-063): one LOW advisory per distinct model-less profile behind
+  // advisor-destination include-entries, appended to the existing advisory
+  // block and sorted by profile name. The plan stays ready — the host-model
+  // inheritance fallback is sanctioned execution (#693) — so this is a
+  // signal, not a failure.
+  for (const profileName of [...modellessAdvisorAgents.keys()].sort()) {
+    const affectedAgents = modellessAdvisorAgents.get(profileName) ?? []
+    advisories.push({
+      severity: "LOW",
+      description:
+        `profile "${profileName}" has no model configured in the review matrix; ` +
+        `advisor-destination runs (${affectedAgents.join(", ")}) will inherit the ` +
+        `parent session's active model at execution (advisor host-model fallback, #693); ` +
+        `configure profiles.${profileName}.model in .uf/review-matrix.yaml or the gitignored override`,
+    })
+  }
+
   const orderedErrors = [...new Set(errors)].sort()
   const status = orderedErrors.length === 0 ? "ready" : "inconclusive"
   return {
@@ -2114,6 +2195,16 @@ function buildPlan(
 
 /**
  * Produces a deterministic dispatch plan from raw change inputs and injected policy dependencies.
+ *
+ * Tier resolvability: advisor-destination include-entries that resolve to a
+ * profile with no configured model keep `status: "ready"` — execution
+ * inherits the parent session's active model (#693) — and the plan appends
+ * one LOW advisory per distinct affected profile naming the agents, the
+ * fallback, and the remediation (RD-FR-063). Explicit `runs.<mode>.<agent>`
+ * profile runs against a model-less profile fail closed: a validation error
+ * names the profile, the entry is skipped, and the plan returns INCONCLUSIVE
+ * (RD-FR-064).
+ *
  * @param rawInput Untrusted tool input.
  * @param dependencies Policy I/O and YAML parser dependencies.
  * @returns A ready plan or a fail-closed INCONCLUSIVE plan.
@@ -7038,6 +7129,11 @@ async function dispatchReviewRuns(
   let cumulativeCostUsd = 0
   let budgetExceeded = false
   let isFirstRun = true
+  // RD-FR-065 (design D4): the first run-failure cause in batch order — a
+  // fulfilled failure's `<code>: <message>` or a rejection reason — set
+  // once so later failures cannot displace it, then folded into the
+  // all-failed aggregate message below.
+  let firstRunFailureCause: string | null = null
 
   // Split included entries into batches of max_parallel_runs (FR-005).
   const batches: (typeof includedEntries)[] = []
@@ -7110,13 +7206,29 @@ async function dispatchReviewRuns(
 
     const results = await Promise.allSettled(batchPromises)
 
-    for (const result of results) {
+    // RD-FR-065 (design D3): capture every failed run's cause into
+    // warnings. allSettled preserves input order, so each settled result
+    // zips with the batch entry that produced it — the warning's agent
+    // and sequence come from the entry, not the result. The
+    // fulfilled-but-failed branch covers pre-execution early exits
+    // (tier_model_unavailable, host_model_structural,
+    // host_model_unavailable, unknown_agent) whose errors previously
+    // never reached warnings; rejected batch promises keep the existing
+    // `run rejected:` warning.
+    for (const [resultIndex, result] of results.entries()) {
+      const entry = batch[resultIndex]
       if (result.status === "fulfilled") {
         const runResult = result.value
         if (runResult.error === null) {
           runsCompleted++
         } else {
           runsFailed++
+          warnings.push(
+            `run failed: ${entry.agent}/${entry.sequence}: ${runResult.error.code}: ${runResult.error.message}`,
+          )
+          if (firstRunFailureCause === null) {
+            firstRunFailureCause = `${runResult.error.code}: ${runResult.error.message}`
+          }
         }
         // Track cost for budget checking.
         if (runResult.usage?.cost_usd != null) {
@@ -7124,7 +7236,11 @@ async function dispatchReviewRuns(
         }
       } else {
         runsFailed++
-        warnings.push(`run rejected: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`)
+        const rejectionReason = result.reason instanceof Error ? result.reason.message : String(result.reason)
+        warnings.push(`run rejected: ${rejectionReason}`)
+        if (firstRunFailureCause === null) {
+          firstRunFailureCause = rejectionReason
+        }
       }
     }
 
@@ -7157,7 +7273,19 @@ async function dispatchReviewRuns(
     allProposals.push(...result.run.proposals)
   }
 
-  await settleOperationRecord(correlationId, operation, runsFailed > 0 && runsCompleted === 0 ? "error" : "ok", {
+  // RD-FR-065 (design D4): an all-failed dispatch — every dispatched run
+  // failed, none completed — folds its first run-failure cause into the
+  // aggregate `message`, first-cause precedence over warnings[0] so an
+  // earlier-phase warning (sibling evidence, limits degradation) cannot
+  // displace a run cause; dispatchSummaryLine renders it under the #946
+  // contract unchanged. Partial failure sets no message — causes stay
+  // visible through runs_failed and warnings. No aggregate `retryable`:
+  // a mixed failure set has no honest single value, and the sanctioned
+  // recovery paths (caller re-invocation after remediation, DR-FR-002
+  // redispatch where run files exist) do not need it.
+  const allRunsFailed = runsFailed > 0 && runsCompleted === 0
+
+  await settleOperationRecord(correlationId, operation, allRunsFailed ? "error" : "ok", {
     total: input.plan_entries.length,
     success: runsCompleted,
     failed: runsFailed,
@@ -7167,7 +7295,7 @@ async function dispatchReviewRuns(
     cancelled: 0,
   })
   return {
-    status: runsFailed > 0 && runsCompleted === 0 ? "error" : "ok",
+    status: allRunsFailed ? "error" : "ok",
     // D3: report the invocation's minted correlation — the same local the
     // findings collection above read, so the reported identity always
     // matches the session that was actually collected.
@@ -7178,6 +7306,7 @@ async function dispatchReviewRuns(
     findings: allFindings,
     proposals: allProposals,
     warnings,
+    ...(allRunsFailed ? { message: firstRunFailureCause ?? warnings[0] } : {}),
   }
 }
 
@@ -7202,7 +7331,8 @@ function createDispatchReviewRunsTool(
       "Capture the correlation_id this tool reports (in the one-line summary and machine-readable metadata) " +
       "and pass it as correlation_id on every subsequent consolidate_dispatch call in the same workflow. " +
       "An error summary also ends with \" — error: <message> (retryable: <bool>)\", the failure message " +
-      "collapsed to one line and cut to at most 512 characters including the ellipsis. Its proposals count is " +
+      "collapsed to one line and cut to at most 512 characters including the ellipsis; all-failed dispatches " +
+      "report the first run-failure cause as their message. Its proposals count is " +
       "taken before consolidate_dispatch merges near-identical proposals, so the artifact may hold fewer.",
     args: DispatchReviewRunsInputSchema.shape,
     async execute(
