@@ -1,0 +1,8 @@
+{
+  "dispatch_correlation_id": null,
+  "status": "failed",
+  "operation_verdict": "INCONCLUSIVE",
+  "errors": [
+    "validate review dispatch input: Invalid input: expected string, received undefined at 'command'"
+  ]
+}

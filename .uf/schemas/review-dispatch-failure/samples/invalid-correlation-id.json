@@ -1,0 +1,1 @@
+{"dispatch_correlation_id":"not-a-uuid","command":"review-council","mode":"code","status":"failed","operation_verdict":"INCONCLUSIVE","errors":["verdict is APPROVE; expected INCONCLUSIVE"]}

@@ -112,7 +112,7 @@
 - [x] 5.2 Register the schema in `internal/schemas` fixture
       validation (`handAuthoredSchemas` in `ci_test.go`) with a
       valid fixture.
-- [ ] 5.3 Mirror the schema to
+- [x] 5.3 Mirror the schema to
       `.uf/schemas/review-dispatch-failure/` and
       `internal/scaffold/assets/uf/schemas/review-dispatch-failure/`,
       and add the path to the scaffold asset list in
