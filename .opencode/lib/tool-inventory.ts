@@ -455,15 +455,39 @@ const LAYER_FILE: Array<[RegExp, SeamLayer]> = [
   [/round-?trip/, "round-trip"],
 ]
 
-/** Classify a test file's seam layer for one tool.
+// Describe/it/test titles that credit a seam layer when they name the
+// tool, in either word order. "X ... seam verification" describes hold
+// the golden output-shape suites (unleash-delegate.test.ts,
+// model-matrix-integration.test.ts); "X ... storm surfacing" describes
+// drive a tool's failure surfaces through the checkpoint store and
+// read them back (write->read round trips); "round trip" was the
+// original title fallback. A tool-naming describe scopes its whole
+// suite, so one test file can verify several layers at once.
+const LAYER_TITLE: Array<[RegExp, SeamLayer]> = [
+  [/seam[- ]?verification/, "output-shape"],
+  [/storm[- ]?surfacing/, "round-trip"],
+  [/round[- ]?trip/, "round-trip"],
+]
+
+/** The three DE-007 seam layers a tool change should verify, in the
+ * order the report lists them and reports them missing. */
+const SEAM_LAYERS: readonly SeamLayer[] = ["registration", "output-shape", "round-trip"]
+
+/** Classify a test file's seam layers for one tool.
  * @param file Test file path; layer suites match on the file name first.
  * @param text Test file source.
- * @param tool Tool name to look for in round-trip test titles.
- * @returns The seam layer the test covers. */
-export function classifyTest(file: string, text: string, tool: string): SeamLayer {
-  for (const [re, layer] of LAYER_FILE) if (re.test(file)) return layer
-  const titled = new RegExp(`\\b(?:describe|it|test)\\([^\\n]*${ident(tool)}[^\\n]*round[- ]?trip|\\b(?:describe|it|test)\\([^\\n]*round[- ]?trip[^\\n]*${ident(tool)}`, "i")
-  return titled.test(text) ? "round-trip" : "other"
+ * @param tool Tool name to look for in layer-carrying test titles.
+ * @returns Every seam layer the test covers, in DE-007 order;
+ *   ["other"] when no layer signal marks the file. */
+export function classifyTest(file: string, text: string, tool: string): SeamLayer[] {
+  for (const [re, layer] of LAYER_FILE) if (re.test(file)) return [layer]
+  const layers = new Set<SeamLayer>()
+  for (const [re, layer] of LAYER_TITLE) {
+    const kw = re.source
+    const titled = new RegExp(`\\b(?:describe|it|test)\\([^\\n]*${ident(tool)}[^\\n]*${kw}|\\b(?:describe|it|test)\\([^\\n]*${kw}[^\\n]*${ident(tool)}`, "i")
+    if (titled.test(text)) layers.add(layer)
+  }
+  return layers.size === 0 ? ["other"] : SEAM_LAYERS.filter((l) => layers.has(l))
 }
 
 /** Build the DE-007 seam evidence: plugin tools added, modified, or
@@ -521,12 +545,16 @@ export function seamReport(root: string, ref: string, git: Git = realGit(root)):
     const tests: TestRef[] = []
     for (const [file, text] of testText) {
       if (!names.some((n) => new RegExp(ident(n)).test(text))) continue
-      tests.push({ file, layer: classifyTest(file, text, tool), changed: changedTests.has(file) })
+      // One test file can verify several layers (a file with several
+      // tool-naming describes), so it carries one row per layer.
+      for (const layer of classifyTest(file, text, tool)) {
+        tests.push({ file, layer, changed: changedTests.has(file) })
+      }
     }
     const genericRegistration = status !== "removed" && genericPlugins.has(plugin)
     const have = new Set(tests.map((t) => t.layer))
     if (genericRegistration) have.add("registration")
-    const missing = status === "removed" ? [] : (["registration", "output-shape", "round-trip"] as SeamLayer[]).filter((l) => !have.has(l))
+    const missing = status === "removed" ? [] : SEAM_LAYERS.filter((l) => !have.has(l))
     return { tool, plugin, status, genericRegistration, tests, missing }
   }
 
