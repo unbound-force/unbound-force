@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
+import { z } from "zod"
 
+import { formatValidationError } from "../lib/reviewer-manifest.js"
 import {
   buildCompactFinalization,
   buildFullRetrieval,
@@ -728,6 +730,64 @@ describe("compact finalization", () => {
       [],
     )
     expect(compact.errors).toEqual([long])
+    expect(compact.errors_truncated).toBeUndefined()
+  })
+
+  it("carries a composed validation error whole with no truncated key (RD-FR-066)", () => {
+    // The structural-failure path's real error: formatValidationError joins
+    // every Zod issue as `path: message`, sorted, with "; " — the spec's
+    // three-or-more-issue threshold pushes the composition past the removed
+    // 256-character cap. Issue #1039 regression: the old projection cut
+    // this string mid-composition, silently discarding the tail issues on
+    // exactly the path where no artifact existed to recover them from. The
+    // composition uses the production function over a representative
+    // schema, so the fixture is the string shape the finalizer produces.
+    const outcome = z
+      .object({
+        command: z.enum(["review-council", "triage-issue", "address-feedback"]),
+        mode: z.enum(["code", "specs", "triage", "feedback"]),
+        correlation_id: z.string().uuid(),
+        full: z.boolean(),
+        run_counts: z.object({
+          total: z.number().int(),
+          success: z.number().int(),
+          failed: z.number().int(),
+        }),
+      })
+      .safeParse({
+        command: "review-council",
+        mode: "definitely-not-a-mode",
+        correlation_id: "not-a-uuid-at-all",
+        full: "yes",
+        run_counts: { total: "four", success: -1.5, failed: null },
+      })
+    if (outcome.success) {
+      throw new Error("test fixture bug: the invalid input must fail validation")
+    }
+    expect(outcome.error.issues.length).toBeGreaterThanOrEqual(3)
+    // Composed exactly as structuralFailure composes it: the wrapper plus
+    // the joined issues, with nothing between them and the projection.
+    const composed = `validate review dispatch input: ${formatValidationError(outcome.error)}`
+    expect(composed.length).toBeGreaterThan(256)
+
+    const compact = buildCompactFinalization(
+      {
+        ...result,
+        status: "failed",
+        operation_verdict: "INCONCLUSIVE",
+        artifact_path: null,
+        review_verdict: null,
+        calculated_assessment: null,
+        errors: [composed],
+      } as unknown as Parameters<typeof buildCompactFinalization>[0],
+      RUN_COUNTS,
+      [],
+      [],
+    )
+    // The complete composition survives — every issue, verbatim. The entry
+    // is the bare string itself, so no truncated key can exist on it, and a
+    // kept-but-long entry raises no errors_truncated flag.
+    expect(compact.errors).toEqual([composed])
     expect(compact.errors_truncated).toBeUndefined()
   })
 
