@@ -117,7 +117,7 @@
       `internal/scaffold/assets/uf/schemas/review-dispatch-failure/`,
       and add the path to the scaffold asset list in
       `internal/scaffold/scaffold_test.go`.
-- [ ] 5.4 Copy every edited `.opencode/` file byte-identical to
+- [x] 5.4 Copy every edited `.opencode/` file byte-identical to
       `internal/scaffold/assets/opencode/` (plugin, and lib only
       if touched), keeping the drift tests green.
 
