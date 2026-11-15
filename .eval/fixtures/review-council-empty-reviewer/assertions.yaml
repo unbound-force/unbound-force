@@ -1,0 +1,57 @@
+# Issue #1052 reproduction (RD-FR-059): the setup pins every review
+# persona's run to a 64-token output cap, so each reviewer session ends
+# with finish reason "length" and no final text. A session with that
+# signature must never yield an approving vote. The 64-token budget
+# cannot produce structured submissions, so this drives the
+# zero-submissions branch: every empty run satisfies
+# status != success with workflow_verdict null, run_counts.failed
+# counts it, and the council follows the RD-FR-007 zero-success
+# non-approving path. The with-submissions branch (success with a
+# forced kind-native non-approving verdict) is covered by the
+# consolidate_dispatch plugin tests; a live 64-token reviewer cannot
+# reach it.
+#
+# Pre-fix — the recorded shape from issue #1052 — this fixture fails:
+# each empty reviewer recorded success with an APPROVE vote,
+# run_counts showed zero failures, and the council result was an
+# approval. Every assertion below that names the failure, the counts,
+# or the verdict flips between the two states.
+#
+# sessions_completed (EV-FR-004) is deliberately absent: that assertion
+# exists to catch the length-terminated-session shape, which is the
+# condition under test here — asserting it would fail by design. The
+# non-approval outcome is asserted at the consolidation layer instead.
+assertions:
+  # The council ran end to end over the mini repo's clean feature
+  - tool_called: capture_review_diff
+  - tool_called: plan_review_dispatch
+  - tool_called: dispatch_review_runs
+  - tool_called: consolidate_dispatch
+  # The empty reviewers are classified, not approved (RD-FR-059/061):
+  # the consolidation result names child_empty_response ...
+  - tool_output_matches: { tool: consolidate_dispatch, pattern: 'child_empty_response' }
+  # ... carrying the length-terminated provenance of the #1052
+  # signature (finish reason length, no final text) ...
+  - tool_output_matches: { tool: consolidate_dispatch, pattern: 'finish=length' }
+  # ... every empty run failed with zero accepted submissions ...
+  - tool_output_matches: { tool: consolidate_dispatch, pattern: '"failed":[1-9]' }
+  - tool_output_matches: { tool: consolidate_dispatch, pattern: '"success":0' }
+  # ... and the council verdict is the zero-success non-approving one
+  # (RD-FR-007: INCONCLUSIVE, or UNAVAILABLE when every failure is an
+  # availability error).
+  - tool_output_matches: { tool: consolidate_dispatch, pattern: 'INCONCLUSIVE|UNAVAILABLE' }
+  # The non-approval check itself: nothing in the consolidation result
+  # approves on the empty votes.
+  - tool_output_not_matches: { tool: consolidate_dispatch, pattern: 'APPROVE' }
+  # No fix loop and no re-execution: one dispatch round (RD-FR-062 —
+  # re-runs stay operator-invoked), no partial re-dispatch. The brief
+  # deviates from lib/guidance/review-council.md on one rule: a retry
+  # would re-run the same 64-token reviewer and change nothing, so the
+  # fixture-local guidance.md says do-not-retry where the shared brief
+  # says retry-once.
+  - tool_called: { name: dispatch_review_runs, max: 1 }
+  - tool_not_called: [redispatch_failed_runs]
+  # Configuration and the brief must decide everything: nothing may wait
+  - stub_not_called: { name: gh, args_matches: 'reviews|--method|comment|POST' }
+  - no_permission_asks: true
+  - no_unanswered_questions: true

@@ -1,0 +1,10 @@
+task_id: review-council-empty-reviewer
+task_version: "1"
+description: >
+  Issue #1052 reproduction: every reviewer in a clean-change council
+  burns a 64-token output budget on reasoning and returns no final
+  text. The council must not approve on those empty votes.
+exec_mode: interactive
+command: uf.review-council
+timeout_seconds: 5400
+setup: setup.sh

@@ -755,6 +755,15 @@ interface PersistedRunData {
   readonly findings: z.infer<typeof RunFindingSchema>[]
   readonly proposals: LessonProposal[]
   readonly text: string
+  /**
+   * Finish reason reported by the child's final step-finish part
+   * (RD-FR-060), null when unreported or when the executor failed the
+   * run before a final response. Run-file only: DispatchRunSchema is
+   * strict and the consolidate_dispatch dispatchRuns mapping deliberately
+   * omits this field. Older run files that predate the field remain
+   * valid (undefined reads as not length-terminated).
+   */
+  readonly finish_reason?: string | null
   readonly read_only: boolean
   /**
    * Full resolved prompt text (inline prompt or promptFile contents) used to
@@ -3494,6 +3503,14 @@ export async function executeDispatchRun(
     findings: harvestedFindings,
     proposals: harvestedProposals,
     text: result.text,
+    // Finish-reason provenance (RD-FR-060): the executor reports it on
+    // success results (null when unreported; failure results never carry
+    // it). Persisted so consolidate_dispatch can re-derive the
+    // incomplete-response rule (RD-FR-059) for length-terminated runs
+    // with truncated text. Run-file only — the consolidate_dispatch
+    // dispatchRuns mapping deliberately omits it (DispatchRunSchema is
+    // strict). Older run files that predate the field remain valid.
+    finish_reason: result.finish_reason ?? null,
     read_only: options.readOnly,
     // Full resolved prompt persisted verbatim at dispatch time (design D4,
     // task 5.1 of fix-review-dispatch-recovery): redispatch_failed_runs
@@ -4063,6 +4080,148 @@ function workflowVerdictValue(
 }
 
 /**
+ * Kind-native non-approving value an incomplete run's workflow_verdict is
+ * forced to (RD-FR-059): `REQUEST CHANGES` for council and test-review,
+ * `NEEDS-CLARIFICATION` for triage, `AUTHOR-DECIDES` for feedback. Every
+ * value is inside allowedRunVerdicts() for its kind, so a forced verdict
+ * passes finalizer validation by construction, and a forced vote can
+ * never produce an approving successfulPersonaVotes entry.
+ *
+ * @param kind Workflow kind derived from the dispatch command.
+ * @returns The kind-native non-approving verdict an incomplete run carries.
+ */
+function forcedNonApprovingVerdict(kind: ReturnType<typeof workflowKind>): NonNullable<DispatchRun["workflow_verdict"]> {
+  switch (kind) {
+    case "triage":
+      return "NEEDS-CLARIFICATION"
+    case "feedback":
+      return "AUTHOR-DECIDES"
+    default:
+      return "REQUEST CHANGES"
+  }
+}
+
+/**
+ * Outcome of re-deriving the incomplete-response rule (RD-FR-059, design
+ * D2) for one persisted run at dispatch finalization.
+ */
+export interface IncompleteResponseClassification {
+  /** Run with status/error adjusted per RD-FR-059; the original when unaffected. */
+  readonly run: PersistedRunData
+  /**
+   * True when the run's workflow_verdict must be forced to the
+   * kind-native non-approving value (incomplete + accepted submissions).
+   */
+  readonly verdictForced: boolean
+  /**
+   * True when a success run with zero accepted submissions was
+   * reclassified to a retryable child_empty_response failure.
+   */
+  readonly reclassifiedToFailed: boolean
+}
+
+/**
+ * Whether a persisted run's final response is incomplete per RD-FR-059:
+ * final text whose trimmed length is zero, or a final response terminated
+ * by finish reason `length` (RD-FR-060 provenance persisted by
+ * executeDispatchRun). Post-submission aborts reclassified per RD-FR-026
+ * carry non-empty text and no finish reason, so they are never incomplete
+ * and keep their findings-derived verdict.
+ *
+ * Pure predicate over its argument (Constitution IV — Testability).
+ *
+ * @param run Persisted run record to evaluate.
+ * @returns True exactly when the run's final response is incomplete.
+ */
+export function isIncompleteFinalResponse(run: PersistedRunData): boolean {
+  return run.text.trim().length === 0 || run.finish_reason === "length"
+}
+
+/**
+ * Synthesize the retryable child_empty_response error a reclassified
+ * incomplete run carries (RD-FR-059/RD-FR-060): names the incomplete
+ * condition(s) and the model when available, so operators can see why
+ * the reviewer was failed without re-parsing the run file.
+ *
+ * @param run Incomplete run being reclassified to failed.
+ * @returns A schema-valid run error (code, message, retryable).
+ */
+function incompleteResponseError(run: PersistedRunData): z.infer<typeof RunErrorSchema> {
+  const conditions: string[] = []
+  if (run.text.trim().length === 0) {
+    conditions.push("empty final text")
+  }
+  if (run.finish_reason === "length") {
+    conditions.push("finish reason length")
+  }
+  const model = run.reported_model ?? run.model_id
+  const modelDetail = model === null ? "" : `; model=${model}`
+  return {
+    code: "child_empty_response",
+    message: `reviewer final response incomplete (${conditions.join(", ")})${modelDetail}`,
+    retryable: true,
+  }
+}
+
+/**
+ * Re-derive the incomplete-response rule for one persisted run at
+ * dispatch finalization (RD-FR-059, design D2 — defense-in-depth for
+ * executor-bypassing callers and length-terminated runs the executor
+ * returned as success):
+ *
+ * 1. `success` + incomplete + zero accepted submissions → reclassify
+ *    `failed` with a retryable child_empty_response error and
+ *    workflow_verdict null; the run is excluded from
+ *    successfulPersonaVotes and counted in run_counts.failed.
+ * 2. incomplete + accepted submissions → RD-FR-026 precedence: the run
+ *    is classified `success` (kept, or restored when the executor failed
+ *    it as child_empty_response — the executor cannot see harvested
+ *    submissions), its submissions contribute, and its verdict is forced
+ *    to the kind-native non-approving value.
+ * 3. Every other run — including post-submission aborts already
+ *    reclassified by executeDispatchRun (RD-FR-026) — passes through
+ *    unchanged: non-empty text and no finish reason mean those aborts
+ *    are never incomplete here.
+ *
+ * Accepted submissions are the run file's harvested findings and
+ * proposals — the same measure shouldReclassifyToSuccess applies at the
+ * executor boundary; submission schema validation runs later, downstream
+ * of this classification.
+ *
+ * Pure function over its argument (Constitution IV — Testability).
+ *
+ * @param run Persisted run record to classify.
+ * @returns The classified run plus the flags the finalization path needs.
+ */
+export function classifyIncompleteResponse(run: PersistedRunData): IncompleteResponseClassification {
+  const incomplete = isIncompleteFinalResponse(run)
+  const hasSubmissions = run.findings.length > 0 || run.proposals.length > 0
+
+  if (run.status === "success" && incomplete && !hasSubmissions) {
+    return {
+      run: {
+        ...run,
+        status: "failed",
+        error: incompleteResponseError(run),
+        workflow_verdict: null,
+      },
+      verdictForced: false,
+      reclassifiedToFailed: true,
+    }
+  }
+
+  if (incomplete && hasSubmissions && (run.status === "success" || run.error?.code === "child_empty_response")) {
+    return {
+      run: { ...run, status: "success", error: null, workflow_verdict: null },
+      verdictForced: true,
+      reclassifiedToFailed: false,
+    }
+  }
+
+  return { run, verdictForced: false, reclassifiedToFailed: false }
+}
+
+/**
  * Create advisories from MEDIUM and LOW findings for APPROVE WITH ADVISORIES verdicts.
  */
 function buildAdvisories(
@@ -4138,6 +4297,16 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0
+}
+
+/**
+ * Token count for a child_empty_response warning projection (RD-FR-061):
+ * unlike asCount, a missing or non-numeric field reads as unavailable
+ * (null) rather than zero — a reported zero is meaningful (#1052's
+ * `tokens.output: 0`), so it must not be conflated with an absent count.
+ */
+function asTokenCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
 }
 
 function projectSummaryFinding(
@@ -4236,6 +4405,26 @@ function projectSummaryWarning(
     case "consolidated_findings_overflow":
       detail = `kept=${asCount(record.kept_findings)} dropped=${asCount(record.dropped_findings)}`
       break
+    case "child_empty_response": {
+      // RD-FR-061: agent and run id always; finish reason and token counts
+      // only when available (a reported zero output count is meaningful —
+      // issue #1052's signature — so it is never conflated with absent).
+      const parts = [`agent=${agent}`, `run=${run}`]
+      const finish = typeof record.finish_reason === "string" && record.finish_reason.length > 0 ? record.finish_reason : null
+      if (finish !== null) {
+        parts.push(`finish=${finish}`)
+      }
+      const tokensInput = asTokenCount(record.tokens_input)
+      const tokensOutput = asTokenCount(record.tokens_output)
+      if (tokensInput !== null) {
+        parts.push(`tokens.input=${tokensInput}`)
+      }
+      if (tokensOutput !== null) {
+        parts.push(`tokens.output=${tokensOutput}`)
+      }
+      detail = parts.join(" ")
+      break
+    }
     case "empty_coverage_attestation":
       detail = `agent=${agent}`
       break
@@ -4445,6 +4634,94 @@ export function buildCompactFinalization(
     assembled = assemble()
   }
   return assembled
+}
+
+/**
+ * Machine-readable consolidate_dispatch warning: a reviewer run whose final
+ * response was incomplete — empty final text or a finish reason `length`
+ * (RD-FR-059) — was reclassified to a retryable child_empty_response failure
+ * or kept/restored successful with its verdict forced to the kind-native
+ * non-approving value. One entry per affected run, never duplicated
+ * (RD-FR-061); the finish reason and token counts ride along when available
+ * so operators see which reviewer was incomplete and why. For a run whose
+ * final text is empty this warning replaces empty_coverage_attestation (the
+ * more specific kind wins, regardless of delivery mode); the attestation
+ * advisory still fires independently for non-empty manifest-mode text. This
+ * shape is consolidate-result observability only; it MUST NOT flow into the
+ * finalization payload, whose strict schema rejects unknown top-level keys.
+ */
+interface ChildEmptyResponseWarning {
+  readonly type: "child_empty_response"
+  readonly agent: string
+  readonly run_id: string
+  /** Reported finish reason, null when unreported. */
+  readonly finish_reason: string | null
+  /** Input token count from the run's usage, null when usage is absent. */
+  readonly tokens_input: number | null
+  /** Output token count from the run's usage, null when usage is absent. */
+  readonly tokens_output: number | null
+}
+
+/**
+ * Fixed pattern the executor embeds into child_empty_response error messages
+ * (agent-executor.ts: "child returned no final text (finish reason: length);
+ * model=..."). Failure results carry no structured finish_reason field —
+ * RD-FR-060 scopes that to success results — so this recovers the reason the
+ * executor already diagnosed. Bounded to short provider finish-reason
+ * tokens; any other message shape reads as unreported.
+ */
+const ERROR_FINISH_REASON_PATTERN = /\(finish reason: ([^)]{1,64})\)/
+
+/**
+ * Finish reason for a child_empty_response warning (RD-FR-061): the run's
+ * structured finish_reason field wins when reported; otherwise, for a run
+ * the executor failed as child_empty_response, the reason is recovered from
+ * the executor's fixed error-message format. Null when neither source
+ * reports one. Takes the pre-classification run record:
+ * classifyIncompleteResponse nulls the error of a restored run, which would
+ * erase the message the executor left the reason in.
+ *
+ * Pure function over its argument (Constitution IV — Testability).
+ *
+ * @param run Run record the warning is built from (pre-classification).
+ * @returns The reported finish reason, or null when unreported.
+ */
+function warningFinishReason(run: PersistedRunData): string | null {
+  if (typeof run.finish_reason === "string" && run.finish_reason.length > 0) {
+    return run.finish_reason
+  }
+  if (run.error?.code === "child_empty_response") {
+    const match = ERROR_FINISH_REASON_PATTERN.exec(run.error.message)
+    if (match !== null) {
+      const recovered = match[1].trim()
+      if (recovered.length > 0) {
+        return recovered
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Build the child_empty_response warning for one incomplete run (RD-FR-061):
+ * names the agent and run id and carries the finish reason and token counts
+ * when available. Built from the pre-classification record so a restored run
+ * keeps the executor error message its finish reason is recovered from.
+ *
+ * Pure function over its argument (Constitution IV — Testability).
+ *
+ * @param run Run record the warning is built from (pre-classification).
+ * @returns The machine-readable warning entry.
+ */
+function childEmptyResponseWarning(run: PersistedRunData): ChildEmptyResponseWarning {
+  return {
+    type: "child_empty_response",
+    agent: run.agent,
+    run_id: run.run_id,
+    finish_reason: warningFinishReason(run),
+    tokens_input: run.usage?.tokens?.input ?? null,
+    tokens_output: run.usage?.tokens?.output ?? null,
+  }
 }
 
 /**
@@ -4812,9 +5089,14 @@ export function createConsolidateDispatchTool(
       "bounded to the first 20 lines with the total issue count); valid findings exceeding the finalizer's " +
       "cardinality bounds are kept to the bounds (512 per run, 512 consolidated after deduplication) and " +
       "reported as run_findings_overflow / consolidated_findings_overflow warnings (kept and dropped counts); " +
-      "successful manifest-mode runs whose persisted final text carries a missing or empty `**Files Reviewed**:` " +
+      "successful manifest-mode runs whose persisted final text carries a missing or empty `**Files Reviewed**`: " +
       "coverage attestation are reported as empty_coverage_attestation warnings (advisory quality signal only, " +
-      "no finding and no verdict change); when " +
+      "no finding and no verdict change); a reviewer run whose final response is incomplete (empty final text or " +
+      "finish reason length) never casts an approving vote — with no accepted submissions it is failed as retryable " +
+      "child_empty_response, with accepted submissions it stays successful with a forced kind-native non-approving " +
+      "verdict — and exactly one child_empty_response warning per run names its agent, run id, finish reason, and " +
+      "token counts when available, while empty_coverage_attestation is suppressed for a run whose final text is " +
+      "empty; when " +
       "finalizing externally, submit the payload without the top-level warnings observability field. " +
       "Automatically resolves the dispatch session from prior dispatch_agent_run calls; pass correlation_id " +
       "explicitly to consolidate a dispatch started by a different session (e.g. after a restart).",
@@ -4888,6 +5170,59 @@ export function createConsolidateDispatchTool(
         runs.push(result.run)
       }
 
+      // Re-derive the incomplete-response rule (RD-FR-059, design D2)
+      // before anything else consumes run status: the executor fails
+      // empty final text at its boundary, but executor-bypassing callers
+      // and length-terminated runs with truncated text still reach this
+      // point recorded as success. Classifying here makes every
+      // downstream consumer — success scoping, attestation checks,
+      // submission validation, orphaned-submission warnings, run counts,
+      // verdicts — agree by construction:
+      //   - incomplete + zero accepted submissions → failed
+      //     child_empty_response (retryable), no vote, run_counts.failed;
+      //   - incomplete + accepted submissions → success (restored when
+      //     the executor failed it) with a forced kind-native
+      //     non-approving verdict (RD-FR-026 precedence).
+      // Post-submission aborts reclassified by executeDispatchRun
+      // (RD-FR-026) carry non-empty text and no finish reason, so they
+      // are not incomplete and keep their findings-derived verdict —
+      // RD-FR-026's rule is unchanged.
+      const forcedVerdictRunIds = new Set<string>()
+      const childEmptyResponseWarnings: ChildEmptyResponseWarning[] = []
+      const emptyResponseRunIds = new Set<string>()
+      const emptyResponseEmptyTextRunIds = new Set<string>()
+      const classifiedRuns: PersistedRunData[] = []
+      for (const run of runs) {
+        const classification = classifyIncompleteResponse(run)
+        classifiedRuns.push(classification.run)
+        if (classification.verdictForced) {
+          forcedVerdictRunIds.add(run.run_id)
+        }
+        // RD-FR-061 warning emission: every run the incomplete-response rule
+        // touched — reclassified here, verdict-forced, or already failed as
+        // child_empty_response at the executor boundary (task 1.1's guard,
+        // the same RD-FR-059 rule one layer down; those runs stay failed
+        // with no submissions to restore them) — is named by exactly one
+        // warning. The run-id set also deduplicates foreign-written run
+        // files that repeat a run id. The warning is built from the
+        // pre-classification record so a restored run keeps the executor
+        // error message its finish reason is recovered from; runs whose
+        // final text is empty are tracked separately so the attestation
+        // advisory can be suppressed for them below.
+        const failedAsEmptyResponse =
+          classification.run.status === "failed" && classification.run.error?.code === "child_empty_response"
+        if (
+          (classification.reclassifiedToFailed || classification.verdictForced || failedAsEmptyResponse) &&
+          !emptyResponseRunIds.has(run.run_id)
+        ) {
+          emptyResponseRunIds.add(run.run_id)
+          childEmptyResponseWarnings.push(childEmptyResponseWarning(run))
+          if (classification.run.text.trim().length === 0) {
+            emptyResponseEmptyTextRunIds.add(run.run_id)
+          }
+        }
+      }
+
       // Success-scoped consolidation (RD-FR-025, design D1): a child run
       // can abort AFTER its structured submissions were accepted and
       // harvested into its run file (issue #751). Submissions orphaned by
@@ -4896,7 +5231,7 @@ export function createConsolidateDispatchTool(
       // recovery path. The filter lives here, the single choke point
       // before the finalizer; the harvest keeps writing every submission
       // to the run files for the audit trail.
-      const successRuns = runs.filter((run) => run.status === "success")
+      const successRuns = classifiedRuns.filter((run) => run.status === "success")
 
       // RD-FR-035: advisory quality signal for manifest-mode coverage
       // attestations. Successful manifest-mode runs were instructed (via the
@@ -4910,6 +5245,12 @@ export function createConsolidateDispatchTool(
       // prompts carried the full diff inline), and non-success runs are out
       // of scope (their output was not trusted into the payload either).
       const attestationWarnings: EmptyCoverageAttestationWarning[] = successRuns
+        // RD-FR-061: a run whose final text is empty already carries the more
+        // specific child_empty_response warning, so the attestation advisory
+        // is suppressed for it regardless of delivery mode. Non-empty
+        // (truncated) manifest-mode text keeps the independent attestation
+        // check below.
+        .filter((run) => !emptyResponseEmptyTextRunIds.has(run.run_id))
         .filter((run) => run.manifest_mode === true)
         .filter((run) => {
           const attestation = parseCoverageAttestation(run.text)
@@ -4938,7 +5279,7 @@ export function createConsolidateDispatchTool(
       const invalidSubmissionWarnings: InvalidSubmissionsExcludedWarning[] = []
       const findingsOverflowWarnings: RunFindingsOverflowWarning[] = []
       const validatedRuns: PersistedRunData[] = []
-      for (const run of runs) {
+      for (const run of classifiedRuns) {
         if (run.status !== "success") {
           validatedRuns.push(run)
           continue
@@ -4976,6 +5317,7 @@ export function createConsolidateDispatchTool(
       // warnings array is result observability only and MUST NOT flow into
       // the finalization payload (strict schema).
       const warnings: (
+        | ChildEmptyResponseWarning
         | OrphanedSubmissionsExcludedWarning
         | EmptyCoverageAttestationWarning
         | InvalidSubmissionsExcludedWarning
@@ -4984,7 +5326,12 @@ export function createConsolidateDispatchTool(
         | DuplicateProposalMergedWarning
         | ProposalsOverflowWarning
       )[] = [
-        ...runs
+        // RD-FR-061 first: an incomplete reviewer is the strongest
+        // operational signal in the array, and the bounded summary
+        // projections drop trailing warnings first when the byte budget
+        // binds.
+        ...childEmptyResponseWarnings,
+        ...classifiedRuns
           .filter((run) => run.status !== "success" && (run.findings.length > 0 || run.proposals.length > 0))
           .map(
             (run): OrphanedSubmissionsExcludedWarning => ({
@@ -5082,22 +5429,37 @@ export function createConsolidateDispatchTool(
         error: run.status === "success" ? null : run.error,
         reported_model: run.reported_model,
         model_mismatch: run.model_mismatch,
-        workflow_verdict: run.status === "success" ? workflowVerdictValue(kind, runVerdict(run.findings)) : null,
+        // RD-FR-059: an incomplete run with accepted submissions keeps its
+        // success status (RD-FR-026 precedence) but its vote is forced to
+        // the kind-native non-approving value, so it can never contribute
+        // an approving vote to successfulPersonaVotes or the council
+        // verdict. Every other success run derives its verdict from its
+        // findings as before; non-success runs never vote.
+        workflow_verdict:
+          run.status !== "success"
+            ? null
+            : forcedVerdictRunIds.has(run.run_id)
+              ? forcedNonApprovingVerdict(kind)
+              : workflowVerdictValue(kind, runVerdict(run.findings)),
         // RD-FR-025: every plan run keeps its payload slot (run counts and
         // plan validation need the full run list), but non-success runs
         // emit empty findings — orphaned submissions are excluded.
         findings: run.status === "success" ? run.findings : [],
       }))
 
-      // Compute run counts.
+      // Compute run counts. Derived from the classified runs so an
+      // incomplete response with zero accepted submissions lands in
+      // `failed` (RD-FR-059) and a restored executor failure lands in
+      // `success` — the counts, the payload runs, and the finalizer's
+      // validateRunCounts recomputation agree by construction.
       const runCounts = {
-        total: runs.length,
-        success: runs.filter((r) => r.status === "success").length,
-        failed: runs.filter((r) => r.status === "failed").length,
-        skipped: runs.filter((r) => r.status === "skipped").length,
+        total: classifiedRuns.length,
+        success: classifiedRuns.filter((r) => r.status === "success").length,
+        failed: classifiedRuns.filter((r) => r.status === "failed").length,
+        skipped: classifiedRuns.filter((r) => r.status === "skipped").length,
         budget_skipped: 0,
         limit_skipped: 0,
-        cancelled: runs.filter((r) => r.status === "cancelled").length,
+        cancelled: classifiedRuns.filter((r) => r.status === "cancelled").length,
       }
 
       // Build workflow result. Derive the value from the successful runs'

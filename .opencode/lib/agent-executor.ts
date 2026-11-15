@@ -131,6 +131,12 @@ export interface InvokeAgentResult {
   readonly childSessionID?: string
   /** Limit details, present only when a timeout or exhausted budget ended the run. */
   readonly timeout?: TimeoutDetails
+  /**
+   * Finish reason reported by the child's final step-finish part, null
+   * when unreported. Present on success results so dispatch can apply
+   * length policy to non-empty (truncated) runs (RD-FR-060).
+   */
+  readonly finish_reason?: string | null
 }
 
 /** Injected dependencies for the shared executor's child session lifecycle. */
@@ -273,6 +279,29 @@ export function responseText(parts: readonly PromptPart[]): string {
     .trim()
 }
 
+/**
+ * Finish reason from the child's final step-finish part, null when no
+ * step-finish part reported one. The last part wins because a
+ * multi-step run reports one finish per step and only the final part
+ * states how the stream terminated (e.g. "length"). The SDK declares
+ * `reason` required, but provider and SDK variance can omit it at
+ * runtime; a missing, empty, or non-string reason is unreported
+ * (null), never a crash.
+ *
+ * @param parts Response parts from the child's final prompt result.
+ * @returns The reported finish reason, or null when unreported.
+ */
+export function responseFinishReason(parts: readonly PromptPart[]): string | null {
+  const finishes = parts.filter(
+    (part): part is Extract<PromptPart, { type: "step-finish" }> => part.type === "step-finish",
+  )
+  if (finishes.length === 0) {
+    return null
+  }
+  const reason: unknown = finishes[finishes.length - 1].reason
+  return typeof reason === "string" && reason.length > 0 ? reason : null
+}
+
 export function validateTimeout(timeoutMilliseconds: number): void {
   if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds <= 0 || timeoutMilliseconds > MAX_TIMEOUT_MILLISECONDS) {
     throw new Error("invoke_agent timeout must be a positive integer no greater than 1800000 milliseconds")
@@ -360,7 +389,9 @@ export async function resolveHostModel(
  * Executes one child agent session with full lifecycle management.
  *
  * Owns: abort controller setup, child session create/prompt,
- * response parsing (text, usage, mismatch), timeout, cancellation,
+ * response parsing (text, usage, finish reason, mismatch), the
+ * empty-final-response guard (RD-FR-059: trimmed-empty final text
+ * fails as retryable child_empty_response), timeout, cancellation,
  * and cleanup, plus the delegation-timeout-budgets limits: the wall
  * clock is clamped to any inherited parent budget (D1), the child's
  * deadline is registered for nested runs, the optional idle watchdog
@@ -375,7 +406,8 @@ export async function resolveHostModel(
  * @param variant Optional runtime variant for the child session.
  * @param read_only Invocation provenance flag (default true).
  * @param provenance Initial provenance populated by the caller.
- * @returns Observable result with status, text, usage, error, and provenance.
+ * @returns Observable result with status, text, usage, error, provenance,
+ *   and the finish reason on success results.
  */
 export async function executeAgentSession(
   deps: ExecutorDependencies,
@@ -573,6 +605,7 @@ export async function executeAgentSession(
     provenance = { ...provenance, reported_child_model: childModel, model_mismatch: mismatch }
     const text = responseText(prompted.data.parts)
     const usage = invocationUsage(prompted.data.parts)
+    const finishReason = responseFinishReason(prompted.data.parts)
 
     if (prompted.data.info.error !== undefined) {
       return withChild(
@@ -583,6 +616,27 @@ export async function executeAgentSession(
           "isRetryable" in prompted.data.info.error.data
             ? prompted.data.info.error.data.isRetryable
             : prompted.data.info.error.name !== "MessageAbortedError",
+          "failed",
+          text,
+          usage,
+        ),
+      )
+    }
+    // Fail-closed guard (RD-FR-059, design D1): a child whose final text is
+    // empty after trimming did not complete its response — including the
+    // length-terminated case, whose finish reason is preserved in the error
+    // message for diagnostics. The guard sits after the info.error
+    // classification so session aborts keep their child_message_error
+    // signature (trigger disjointness with RD-FR-026) and before the
+    // model-mismatch check, per design D1.
+    if (text.trim().length === 0) {
+      const reasonDetail = finishReason === null ? "" : ` (finish reason: ${finishReason})`
+      return withChild(
+        failedResult(
+          provenance,
+          "child_empty_response",
+          `child returned no final text${reasonDetail}; model=${childModel ?? model.combined}`,
+          true,
           "failed",
           text,
           usage,
@@ -603,7 +657,7 @@ export async function executeAgentSession(
       )
     }
 
-    return withChild({ status: "success", text, usage, error: null, provenance })
+    return withChild({ status: "success", text, usage, error: null, provenance, finish_reason: finishReason })
   } catch (error: unknown) {
     if (abortCause === "timeout") {
       return withChild({

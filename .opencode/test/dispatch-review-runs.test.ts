@@ -55,8 +55,27 @@ function promptResponseWithCost(costUsd: number, request: unknown): unknown {
       info: { role: "assistant", providerID, modelID },
       parts: [
         { id: "t", sessionID: "child", messageID: "m", type: "text", text: "review output", ignored: false },
-        { type: "step-finish", cost: costUsd, tokens: { input: 100, output: 50 } },
+        { type: "step-finish", reason: "stop", cost: costUsd, tokens: { input: 100, output: 50 } },
       ],
+    },
+    error: undefined,
+  }
+}
+
+/**
+ * Issue #1052 prompt shape: the child burned its output budget on
+ * reasoning and produced no final text — only a length-terminated
+ * step-finish with zero output tokens. The executor's RD-FR-059 guard
+ * must fail this as a retryable child_empty_response.
+ */
+function emptyLengthResponse(request: unknown): unknown {
+  const req = request as { body?: { model?: { providerID: string; modelID: string } } }
+  const providerID = req.body?.model?.providerID ?? "provider"
+  const modelID = req.body?.model?.modelID ?? "standard"
+  return {
+    data: {
+      info: { role: "assistant", providerID, modelID },
+      parts: [{ type: "step-finish", reason: "length", cost: 0, tokens: { input: 4096, output: 0 } }],
     },
     error: undefined,
   }
@@ -428,6 +447,196 @@ describe("dispatch_review_runs", () => {
         expect(meta.status).toBe("error")
         expect(meta.runs_completed).toBe(0)
         expect(meta.runs_failed).toBe(2)
+      })
+    })
+  })
+
+  describe("incomplete-response handling (RD-FR-059, issue #1052)", () => {
+    it("fails an empty length-terminated reviewer at the executor boundary without re-executing it (RD-FR-062)", async () => {
+      await withBun(async () => {
+        const { directory, diffPath } = await scratchProject()
+        const promptCounts = new Map<string, number>()
+        const client = fakeClient({
+          promptHandler: async (request) => {
+            const req = request as { body?: { agent?: string } }
+            const agent = req.body?.agent ?? "unknown"
+            promptCounts.set(agent, (promptCounts.get(agent) ?? 0) + 1)
+            // The adversary returns the issue #1052 empty shape; the
+            // guard completes normally.
+            if (agent === "divisor-adversary") {
+              return emptyLengthResponse(request)
+            }
+            return promptResponseWithCost(0.25, request)
+          },
+        })
+        const hooks = await ReviewDispatchPlugin.server({
+          client,
+          directory,
+          worktree: directory,
+        } as unknown as PluginInput)
+
+        const input = makeBaseInput(diffPath, [
+          makePlanEntry({ agent: "divisor-guard", sequence: 1 }),
+          makePlanEntry({ agent: "divisor-adversary", sequence: 2 }),
+        ])
+
+        const response = await hooks.tool.dispatch_review_runs.execute(input, toolContext())
+
+        const meta = response.metadata as Record<string, unknown>
+        expect(meta.status).toBe("ok")
+        expect(meta.runs_completed).toBe(1)
+        expect(meta.runs_failed).toBe(1)
+        // RD-FR-062: a dispatch executes each planned run exactly once —
+        // the empty-response failure is recorded, never retried in-call.
+        expect(promptCounts.get("divisor-adversary")).toBe(1)
+        expect(promptCounts.get("divisor-guard")).toBe(1)
+
+        const correlationId = meta.correlation_id as string
+        trackDispatchDir(correlationId)
+        const runFile = JSON.parse(
+          await readFile(join(dispatchDir(correlationId), "run-divisor-adversary.json"), "utf8"),
+        )
+        // The executor boundary failed the run with the retryable
+        // child_empty_response code, the finish reason in the message,
+        // and the zero-output usage preserved.
+        expect(runFile.status).toBe("failed")
+        expect(runFile.error).toMatchObject({ code: "child_empty_response", retryable: true })
+        expect(runFile.error.message).toContain("finish reason: length")
+        expect(runFile.text).toBe("")
+        expect(runFile.usage).toEqual({ cost_usd: 0, tokens: { input: 4096, output: 0 } })
+        // No submissions were harvested, so the run stays failed (the
+        // restore branch at consolidation requires accepted submissions).
+        expect(runFile.findings).toEqual([])
+      })
+    })
+
+    it("restores an executor-failed empty reviewer with accepted submissions to a forced non-approving vote at consolidation", async () => {
+      await withBun(async () => {
+        const { directory, diffPath } = await scratchProject()
+        // Seed the child session the fake client creates for this single
+        // included run (child-session-0): the reviewer's finding was
+        // accepted before its output budget ran out.
+        _getSubmissionStore().set("child-session-0", {
+          findings: [
+            {
+              severity: "MEDIUM",
+              category: "documentation",
+              description: "Empty reviewer runs must not approve a council",
+              root_cause: "Executor treated an empty final response as success (issue #1052)",
+              file: "lib/agent-executor.ts",
+              line: 632,
+            },
+          ],
+          proposals: [],
+        })
+        const client = fakeClient({
+          promptHandler: async (request) => emptyLengthResponse(request),
+        })
+        const hooks = await ReviewDispatchPlugin.server({
+          client,
+          directory,
+          worktree: directory,
+        } as unknown as PluginInput)
+
+        const dispatch = await hooks.tool.dispatch_review_runs.execute(
+          makeBaseInput(diffPath, [makePlanEntry({ agent: "divisor-guard", sequence: 1 })]),
+          toolContext(),
+        )
+        const dispatchMeta = dispatch.metadata as Record<string, unknown>
+        // The dispatch-level view is the raw executor failure; the
+        // restoration happens at consolidation, where the harvested
+        // submissions are visible.
+        expect(dispatchMeta.status).toBe("error")
+        expect(dispatchMeta.runs_failed).toBe(1)
+        const correlationId = dispatchMeta.correlation_id as string
+        trackDispatchDir(correlationId)
+
+        const consolidated = await hooks.tool.consolidate_dispatch.execute({ correlation_id: correlationId }, toolContext())
+        const payload = JSON.parse(consolidated.output) as Record<string, unknown>
+
+        const runs = payload.runs as Array<{ run_id: string; status: string; workflow_verdict: string }>
+        expect(runs).toHaveLength(1)
+        // RD-FR-026 precedence for the incomplete rule: accepted
+        // submissions restore the run to success...
+        expect(runs[0]?.status).toBe("success")
+        // ...with the forced kind-native non-approving verdict.
+        expect(runs[0]?.workflow_verdict).toBe("REQUEST CHANGES")
+        const counts = payload.run_counts as Record<string, number>
+        expect(counts).toMatchObject({ total: 1, success: 1, failed: 0 })
+        // The accepted submission contributes to the payload.
+        const findings = payload.findings as Array<{ run_ids: string[] }>
+        expect(findings).toHaveLength(1)
+        expect(findings[0]?.run_ids).toEqual([runs[0]?.run_id])
+        expect(payload.verdict).toBe("REQUEST CHANGES")
+        expect(payload.workflow_result).toEqual({ kind: "council", value: "REQUEST CHANGES" })
+        // Exactly one child_empty_response warning names the restored
+        // run, with the finish reason recovered from the executor's
+        // error message and the preserved zero-output usage.
+        expect(payload.warnings).toEqual([
+          {
+            type: "child_empty_response",
+            agent: "divisor-guard",
+            run_id: runs[0]?.run_id,
+            finish_reason: "length",
+            tokens_input: 4096,
+            tokens_output: 0,
+          },
+        ])
+      })
+    })
+
+    it("fails closed as INCONCLUSIVE when every reviewer returns an empty response (RD-FR-007)", async () => {
+      await withBun(async () => {
+        const { directory, diffPath } = await scratchProject()
+        const promptCounts = new Map<string, number>()
+        const client = fakeClient({
+          promptHandler: async (request) => {
+            const req = request as { body?: { agent?: string } }
+            const agent = req.body?.agent ?? "unknown"
+            promptCounts.set(agent, (promptCounts.get(agent) ?? 0) + 1)
+            return emptyLengthResponse(request)
+          },
+        })
+        const hooks = await ReviewDispatchPlugin.server({
+          client,
+          directory,
+          worktree: directory,
+        } as unknown as PluginInput)
+
+        const input = makeBaseInput(diffPath, [
+          makePlanEntry({ agent: "divisor-guard", sequence: 1 }),
+          makePlanEntry({ agent: "divisor-adversary", sequence: 2 }),
+        ])
+
+        const response = await hooks.tool.dispatch_review_runs.execute(input, toolContext())
+
+        const meta = response.metadata as Record<string, unknown>
+        expect(meta.status).toBe("error")
+        expect(meta.runs_completed).toBe(0)
+        expect(meta.runs_failed).toBe(2)
+        // Exhaustion does not re-execute anyone (RD-FR-062).
+        expect(promptCounts.get("divisor-guard")).toBe(1)
+        expect(promptCounts.get("divisor-adversary")).toBe(1)
+        const correlationId = meta.correlation_id as string
+        trackDispatchDir(correlationId)
+
+        const consolidated = await hooks.tool.consolidate_dispatch.execute({ correlation_id: correlationId }, toolContext())
+        const payload = JSON.parse(consolidated.output) as Record<string, unknown>
+
+        // All-failed exhaustion lands on the RD-FR-007 zero-success
+        // path: INCONCLUSIVE, never the pre-fix zero-findings APPROVE.
+        expect(payload.verdict).toBe("INCONCLUSIVE")
+        expect(payload.workflow_result).toEqual({ kind: "council", value: "INCONCLUSIVE" })
+        const counts = payload.run_counts as Record<string, number>
+        expect(counts).toMatchObject({ total: 2, success: 0, failed: 2 })
+        const runs = payload.runs as Array<{ status: string; workflow_verdict: string }>
+        for (const run of runs) {
+          expect(run.status).toBe("failed")
+          expect(run.workflow_verdict).toBeNull()
+        }
+        const warnings = payload.warnings as Array<{ type: string }>
+        expect(warnings).toHaveLength(2)
+        expect(warnings.every((warning) => warning.type === "child_empty_response")).toBe(true)
       })
     })
   })
