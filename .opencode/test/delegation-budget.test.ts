@@ -332,6 +332,15 @@ describe("selectRunningTool (DT-FR-015)", () => {
     expect(selectRunningTool([part("a1", `x`.repeat(129))])).toBeNull()
     expect(selectRunningTool([part("a1", "mcp__server.tool:v2")])).toBe("mcp__server.tool:v2")
   })
+
+  it("enforces the DT-FR-015 name length boundary", () => {
+    // ^[A-Za-z0-9._:-]{1,128}$: a one-char and a 128-char name pass at the
+    // boundaries; a 129-char name and the empty string map to null.
+    expect(selectRunningTool([part("a1", "b")])).toBe("b")
+    expect(selectRunningTool([part("a1", "x".repeat(128))])).toBe("x".repeat(128))
+    expect(selectRunningTool([part("a1", "x".repeat(129))])).toBeNull()
+    expect(selectRunningTool([part("a1", "")])).toBeNull()
+  })
 })
 
 describe("idleDeferralExpired (DT-FR-014)", () => {
@@ -499,6 +508,30 @@ describe("probeSubtreeActivity running tools (DT-FR-013)", () => {
     const second = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
     expect(second?.fingerprint).toBe(first?.fingerprint)
     expect(second?.runningTools).toEqual([{ partId: "r1", status: "running", tool: "bash", deadlineMs: null }])
+  })
+
+  it("combines a synthetic marker session with a running part on another session (DT-FR-002 + DT-FR-013)", async () => {
+    const probeRoot = root("r-marker-plus-running")
+    const sessions: Record<string, FakeSession> = {
+      [probeRoot]: { children: ["markerKid", "runKid"] },
+      markerKid: { created: 1, latest: message("m1", [{ id: "p1", type: "text", text: "working" }]) },
+      runKid: { created: 2, latest: message("m2", [{ id: "b1", type: "tool", tool: "bash", state: { status: "running" } }]) },
+    }
+    const fake = treeClient({ sessions })
+    const first = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    // runKid's running triple rides its print inside the combined
+    // fingerprint while markerKid still contributes a real print.
+    expect(first?.fingerprint).toContain("~b1:running:bash")
+    expect(first?.runningTools).toEqual([{ partId: "b1", status: "running", tool: "bash", deadlineMs: null }])
+    // A marker arrives on markerKid: the synthetic stays excluded from the
+    // fingerprint (the remembered pre-marker print substitutes in) while
+    // the running triple from runKid stays included -- both rules hold in
+    // one sample, not just in isolation.
+    sessions.markerKid = { created: 1, latest: message("c1", [{ type: "compaction", auto: true }]) }
+    const second = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    expect(second?.fingerprint).toBe(first?.fingerprint)
+    expect(second?.runningTools).toEqual(first?.runningTools)
+    expect(second?.compactionsSinceProgress).toBe(1)
   })
 })
 

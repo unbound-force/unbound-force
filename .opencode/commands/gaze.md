@@ -50,7 +50,8 @@ the package pattern `./...`.
 
 ## Long analysis note
 For repository-wide analysis that may run several minutes, consider whether
-to run `gaze crap` in the background and poll the output file rather than
+to run `gaze crap` in the background with output redirected to a file you
+create (e.g. `> /tmp/gaze-report.json`) and poll the output file rather than
 blocking the turn. This is an applicability judgment based on expected
 runtime and scope, not a required step. Prefer backgrounding when holding
 the turn is wasteful and keep short scoped runs synchronous. If a
