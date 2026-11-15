@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer"
 import { execFile, execFileSync } from "node:child_process"
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, statSync, writeFileSync } from "node:fs"
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { lstat, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, resolve } from "node:path"
@@ -24,6 +24,7 @@ import {
   ClassifierCascade,
   createClassifierCache,
   loadModelMatrix,
+  resolveFootprintMarginTokens,
   resolveSelection,
   type ClassifierCache,
   type ModelMatrix,
@@ -2553,6 +2554,64 @@ function feedbackReplyDeps(cwd: string): FeedbackReplyDeps {
 const MAX_COMMAND_FILE_BYTES = 1 * 1024 * 1024 // 1 MiB
 
 /**
+ * Delegation footprint estimation (DELEG-FR-001, compaction-storm design
+ * D1). The cached-prefix constant is the parent-context material every
+ * delegated child session re-receives: the #1079 incident measured ~76.5k
+ * tokens of cached prefix including the ~20k-token uf.unleash.md body, so
+ * 56k is the prompt-material share with the largest command body removed
+ * — command-path calls measure that body directly from disk.
+ */
+export const DELEGATION_CACHED_PREFIX_TOKENS = 56_000
+
+/**
+ * Byte-per-token divisor for footprint estimation (D1): 4 approximates
+ * the observed plain-English ratio. An exact tokenizer was rejected as a
+ * dependency — the estimate feeds a conservative gate, not billing.
+ */
+export const DELEGATION_BYTES_PER_TOKEN = 4
+
+/**
+ * Conservative command-body default when a guarded read fails
+ * (fail-closed): the accepted 1 MiB command-file cap over the
+ * byte-per-token divisor, so a read failure can never understate the
+ * delegation's prompt material.
+ */
+export const CONSERVATIVE_COMMAND_BODY_TOKENS = MAX_COMMAND_FILE_BYTES / DELEGATION_BYTES_PER_TOKEN
+
+/**
+ * Estimates the token count of UTF-8 text using the D1 byte-per-token
+ * divisor, rounding up so a partial token never understates.
+ */
+export function estimateTokensFromText(text: string): number {
+  return Math.ceil(Buffer.byteLength(text, "utf8") / DELEGATION_BYTES_PER_TOKEN)
+}
+
+/** Result of a delegation footprint estimate (DELEG-FR-001). */
+export interface DelegationFootprint {
+  /** Estimated token count of the delegation's base prompt material. */
+  readonly tokens: number
+  /**
+   * Why the conservative default was used, when it was — a rejected
+   * command path (traversal or symlink escape) or an unreadable file;
+   * null when the command body was measured from disk or no command
+   * path applied. Recorded in the selection audit.
+   */
+  readonly fallback: string | null
+}
+
+/**
+ * Footprint estimator seams (DELEG-FR-001): deliberately separate from
+ * the tool-level readText seam, whose failures fail the call — estimator
+ * reads are best-effort and absorb into the conservative default.
+ */
+export interface FootprintEstimatorDependencies {
+  /** Reads UTF-8 text from an absolute path (command-body measurement). */
+  readonly readText: (path: string) => Promise<string>
+  /** Resolves the real (symlink-free) absolute path; null on failure. */
+  readonly realpath: (path: string) => string | null
+}
+
+/**
  * Exact /uf.unleash Step 2 STOP message when a delegated plan generation
  * finishes without creating plan.md (reproduced verbatim from the command).
  */
@@ -2662,6 +2721,36 @@ export interface DelegateCommandData {
    * failure), when the matrix recorded one; null otherwise.
    */
   selection_fallback_reason: string | null
+  /**
+   * Caller-computed delegation footprint in tokens (DELEG-FR-001,
+   * compaction-storm task 1.1): cached prefix plus command body plus
+   * in-memory prompt material, estimated by the delegating caller and
+   * supplied to selection via SelectionInputs. Every delegation records
+   * this field, even when the estimate fell back to the conservative
+   * default (see selection_footprint_fallback).
+   */
+  selection_footprint: number
+  /**
+   * Why the footprint estimator fell back to the conservative default —
+   * a rejected command path (traversal or symlink escape) or a read
+   * failure; null when the command body was measured from disk or no
+   * command path applied. The fallback never understates the
+   * delegation's prompt material (fail-closed).
+   */
+  selection_footprint_fallback: string | null
+  /**
+   * Effective selection headroom working margin in tokens
+   * (selection.footprint_margin_tokens, DELEG-FR-001): the configured
+   * value or the documented default after D4 substitution.
+   */
+  selection_margin_tokens: number
+  /**
+   * The D4 substitution warning for an invalid
+   * selection.footprint_margin_tokens value — naming the key, the
+   * invalid value, and the default applied; null when the configured
+   * value was valid or absent.
+   */
+  selection_margin_warning: string | null
   /** Child session usage, when the executor reported step-finish parts. */
   usage: InvocationUsage | null
   /** Request, host-resolution, and child-report provenance. */
@@ -2738,6 +2827,15 @@ export interface ModelMatrixSelectionDependencies {
    * instance (never module-level, design D5).
    */
   readonly classifierCache?: ClassifierCache
+  /**
+   * Footprint estimator seams (DELEG-FR-001, compaction-storm task 1.1).
+   * Optional so existing test sites stay green; production defaults
+   * read through node:fs/promises readFile and node:fs realpathSync.
+   * The estimator's guarded reads are best-effort — a failure falls
+   * back to the conservative default — so they deliberately do not
+   * share the tool-level readText seam, whose failures fail the call.
+   */
+  readonly footprint?: FootprintEstimatorDependencies
 }
 
 /**
@@ -3239,6 +3337,89 @@ async function spawnClassifierAgentSession(
 }
 
 /**
+ * Default realpath seam for the footprint estimator: resolves the real
+ * (symlink-free) absolute path, returning null on any failure so the
+ * estimator treats an unresolvable path as a rejection, never a crash.
+ */
+function defaultRealpath(path: string): string | null {
+  try {
+    return realpathSync(path)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Estimates a delegation's base prompt-material footprint in tokens
+ * (DELEG-FR-001, compaction-storm task 1.1, design D1): the cached
+ * prefix every child session re-receives, plus the command body measured
+ * from disk through its own guarded read, plus the caller-supplied
+ * in-memory prompt material (feature-dir context, skill directive, and
+ * extra prompt — everything except the command body, which the disk read
+ * already counted).
+ *
+ * The guarded read is fail-closed: a command path that escapes the
+ * repository root lexically (traversal) or through a symlink, or a file
+ * that cannot be read, yields the conservative default command body
+ * (the 1 MiB cap over the byte-per-token divisor), so a read failure can
+ * never understate the delegation's prompt material. The fallback reason
+ * is recorded in the selection audit. Prompt-only delegations (no
+ * command path) never touch the filesystem.
+ *
+ * @param cwd Repository root used for repo-relative path resolution.
+ * @param commandPath Optional repo-relative command-file path.
+ * @param promptMaterial In-memory prompt material beyond the command body.
+ * @param seams Read and realpath seams (best-effort, see
+ *   FootprintEstimatorDependencies).
+ * @returns The estimated footprint plus its fallback reason, when one fired.
+ */
+export async function estimateDelegationFootprint(
+  cwd: string,
+  commandPath: string | undefined,
+  promptMaterial: string,
+  seams: FootprintEstimatorDependencies,
+): Promise<DelegationFootprint> {
+  const materialTokens = estimateTokensFromText(promptMaterial)
+  if (commandPath === undefined) {
+    return { tokens: DELEGATION_CACHED_PREFIX_TOKENS + materialTokens, fallback: null }
+  }
+  const conservative = DELEGATION_CACHED_PREFIX_TOKENS + CONSERVATIVE_COMMAND_BODY_TOKENS + materialTokens
+  // Lexical traversal guard: the command path must resolve inside the
+  // repository root (the same guard the tool-level command read applies).
+  const abs = resolveRepoRelative(cwd, commandPath)
+  if (abs === null) {
+    return {
+      tokens: conservative,
+      fallback: `command path "${commandPath}" escapes the repository root; using the conservative default command-body footprint`,
+    }
+  }
+  // Symlink guard: the resolved real paths of both the repository root
+  // and the target must keep the target inside the root — a symlinked
+  // escape is rejected exactly like a lexical one.
+  const realRoot = seams.realpath(cwd)
+  const realAbs = realRoot === null ? null : seams.realpath(abs)
+  if (realRoot === null || realAbs === null || !realAbs.startsWith(`${realRoot}/`)) {
+    return {
+      tokens: conservative,
+      fallback: `command path "${commandPath}" resolves outside the repository root (symlink or unresolvable path); using the conservative default command-body footprint`,
+    }
+  }
+  try {
+    const text = await seams.readText(abs)
+    return {
+      tokens: DELEGATION_CACHED_PREFIX_TOKENS + estimateTokensFromText(text) + materialTokens,
+      fallback: null,
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return {
+      tokens: conservative,
+      fallback: `cannot read command body for footprint estimation: ${msg}; using the conservative default command-body footprint`,
+    }
+  }
+}
+
+/**
  * Factory that creates the uf_delegate_command tool with injectable git
  * executor, working directory, and session/I/O dependencies for
  * testability.
@@ -3292,7 +3473,10 @@ async function spawnClassifierAgentSession(
  *   and the model-matrix selection audit trail (model-matrix-delegation
  *   D7, MM-FR-007): selection_source always, plus pack, capability,
  *   model, confidence, and fallback_reason when non-null -- both also
- *   surfaced in the success envelope
+ *   surfaced in the success envelope, together with the DELEG-FR-001
+ *   headroom provenance (footprint and effective margin always in the
+ *   envelope; estimator fallback and margin-substitution warning when
+ *   non-null in both surfaces)
  * - limit-ended runs (delegation-timeout-budgets D4) return
  *   DELEGATE_FAILED with the executor's `timeout` details and, for
  *   command-path calls, `resume` (state key, last checkpoint step,
@@ -3316,6 +3500,13 @@ export function createDelegateCommandTool(
   // cache, so cache semantics match a per-instance cascade while the
   // spawn seam stays context-correct for concurrent invocations.
   const classifierCache = deps.modelMatrix.classifierCache ?? createClassifierCache()
+  // DELEG-FR-001 (compaction-storm task 1.1): footprint estimator seams,
+  // optional with production defaults (node:fs/promises readFile and the
+  // null-on-failure realpathSync wrapper above).
+  const footprintSeams: FootprintEstimatorDependencies = deps.modelMatrix.footprint ?? {
+    readText: (path) => readFile(path, "utf8"),
+    realpath: defaultRealpath,
+  }
   return tool({
     description:
       "Delegate a command or task to a content agent (default cobalt-crush-dev) in a " +
@@ -3524,14 +3715,24 @@ export function createDelegateCommandTool(
         // prompt), then extra instructions. The directive renders only on
         // calls carrying a resolved skill reference.
         const sections: string[] = []
+        // DELEG-FR-001 (compaction-storm task 1.1): the parallel
+        // contextSections array tracks the in-memory prompt material
+        // beyond the command body (feature-dir context, skill directive,
+        // extra prompt) so the footprint estimator counts it without
+        // double-counting the command text.
+        const contextSections: string[] = []
         if (commandText !== undefined) {
           sections.push(commandText)
         }
         if (input.feature_dir !== undefined) {
-          sections.push(`Feature directory: ${input.feature_dir}`)
+          const featureContext = `Feature directory: ${input.feature_dir}`
+          sections.push(featureContext)
+          contextSections.push(featureContext)
         }
         if (resolvedSkill !== null) {
-          sections.push(renderSkillDirective(resolvedSkill))
+          const skillDirective = renderSkillDirective(resolvedSkill)
+          sections.push(skillDirective)
+          contextSections.push(skillDirective)
         }
 
         // ── Model-matrix selection (model-matrix-delegation D2/D8, task
@@ -3596,6 +3797,22 @@ export function createDelegateCommandTool(
           readEnv: deps.modelMatrix.classifierReadEnv,
           cache: classifierCache,
         })
+        // DELEG-FR-001 (compaction-storm task 1.1): the caller-computed
+        // base footprint and the resolved headroom margin. The estimator
+        // measures the command body through its own fail-closed guarded
+        // read and the in-memory context sections plus the extra prompt
+        // make up the rest of the material; the margin resolves with D4
+        // substitution semantics (invalid value -> documented default
+        // plus a warning, never a load failure). Both are supplied to
+        // selection via SelectionInputs (consumed by the headroom gate,
+        // task 2.1) and recorded in the audit trail.
+        const footprint = await estimateDelegationFootprint(
+          cwd,
+          input.command_path,
+          input.prompt !== undefined ? [...contextSections, input.prompt].join("\n\n") : contextSections.join("\n\n"),
+          footprintSeams,
+        )
+        const margin = resolveFootprintMarginTokens(matrix)
         const selectionInputs = {
           model: input.model,
           variant: input.variant,
@@ -3603,6 +3820,7 @@ export function createDelegateCommandTool(
           pack: input.pack,
           checkpoint_step: input.checkpoint_step,
           agent: input.agent,
+          footprint: footprint.tokens,
         }
         const outcome = await cascade.classify(matrix, {
           inputs: selectionInputs,
@@ -3830,6 +4048,16 @@ export function createDelegateCommandTool(
           if (selection.fallback_reason !== null) {
             checkpointData.selection_fallback_reason = selection.fallback_reason
           }
+          // DELEG-FR-001 (compaction-storm task 1.1): headroom provenance.
+          // The estimator fallback and the margin-substitution warning
+          // ride along only when they occur, so calls that measure cleanly
+          // with a valid knob keep the pre-change checkpoint shape.
+          if (footprint.fallback !== null) {
+            checkpointData.selection_footprint_fallback = footprint.fallback
+          }
+          if (margin.warning !== null) {
+            checkpointData.selection_margin_warning = margin.warning
+          }
           recordAutoCheckpoint(cwd, key, "uf.unleash", input.checkpoint_step, checkpointData)
           checkpointRecorded = true
         }
@@ -3857,6 +4085,15 @@ export function createDelegateCommandTool(
           selection_model: selection.model,
           selection_confidence: selection.confidence,
           selection_fallback_reason: selection.fallback_reason,
+          // DELEG-FR-001 (compaction-storm task 1.1): headroom provenance,
+          // machine-parseable like the rest of the selection audit. The
+          // footprint and effective margin are always present; the
+          // fallback and warning are null when the estimate measured
+          // cleanly and the configured knob value was valid.
+          selection_footprint: footprint.tokens,
+          selection_footprint_fallback: footprint.fallback,
+          selection_margin_tokens: margin.tokens,
+          selection_margin_warning: margin.warning,
           usage: result.usage,
           provenance: result.provenance,
           text: result.text,

@@ -146,6 +146,18 @@ const ClassifierSchema = z
   })
   .strict()
 
+// Selection headroom knobs (compaction-storm change D4, DELEG-FR-001): the
+// key set is closed, but the knob VALUE is deliberately unconstrained at
+// parse time. D4 substitution semantics replace an invalid value with the
+// documented default plus a logged warning at consumption
+// (resolveFootprintMarginTokens), so a misconfigured knob can never fail
+// the whole matrix load — and can never silently disable the headroom gate.
+const SelectionSchema = z
+  .object({
+    footprint_margin_tokens: z.unknown().optional(),
+  })
+  .strict()
+
 /** Closed Zod schema for the v1 model matrix surface (mirrors v1.schema.json). */
 export const ModelMatrixSchema = z
   .object({
@@ -155,6 +167,7 @@ export const ModelMatrixSchema = z
     defaults: DefaultsSchema.optional(),
     agents: AgentsSchema.optional(),
     classifier: ClassifierSchema.optional(),
+    selection: SelectionSchema.optional(),
   })
   .strict()
   .superRefine((matrix, context) => {
@@ -200,6 +213,7 @@ export const EMPTY_MODEL_MATRIX: ModelMatrix = Object.freeze({
   defaults: Object.freeze({}),
   agents: Object.freeze({}),
   classifier: Object.freeze({}),
+  selection: Object.freeze({}),
 } satisfies ModelMatrix)
 
 // ── Parsing ───────────────────────────────────────────────────
@@ -659,6 +673,14 @@ export interface SelectionInputs {
   readonly checkpoint_step?: string
   /** Delegated agent name, consulted for the `agents:` pin (step 4). */
   readonly agent?: string
+  /**
+   * Caller-computed delegation footprint in tokens: the estimated prompt
+   * material the child will receive (cached prefix plus command body plus
+   * prompt material), supplied by the delegating caller (DELEG-FR-001,
+   * compaction-storm task 1.1). Selection consumes it for the headroom
+   * gate; absent means the caller did not measure a footprint.
+   */
+  readonly footprint?: number
 }
 
 /** Stable failure codes for non-retryable selection validation failures (design D2). */
@@ -1028,6 +1050,77 @@ export function resolveSelection(
     }
   }
   return hostSelection(null, null, `${attempt.fallbackReason}; no static default for task kind "${kind ?? "unknown"}"`)
+}
+
+// ── Selection headroom config (DELEG-FR-001, compaction-storm D4) ──
+
+/** Config key for the selection headroom working margin (DELEG-FR-001). */
+export const FOOTPRINT_MARGIN_TOKENS_KEY = "selection.footprint_margin_tokens"
+
+/** Default working margin in tokens: 24k of guaranteed child working memory (compaction-storm design D4). */
+export const DEFAULT_FOOTPRINT_MARGIN_TOKENS = 24_000
+
+/** Minimum accepted working margin in tokens (D4 documented range: 1k-256k). */
+export const MIN_FOOTPRINT_MARGIN_TOKENS = 1_000
+
+/** Maximum accepted working margin in tokens (D4 documented range: 1k-256k). */
+export const MAX_FOOTPRINT_MARGIN_TOKENS = 256_000
+
+/** Resolution outcome for the selection headroom margin knob. */
+export interface FootprintMarginResolution {
+  /** Effective margin in tokens: the configured value, or the documented default. */
+  readonly tokens: number
+  /**
+   * The D4 substitution warning naming the key, the invalid value, and the
+   * default applied — null when the configured value was valid or absent.
+   */
+  readonly warning: string | null
+}
+
+/**
+ * Renders an invalid margin value for the substitution warning. Non-finite
+ * numbers use String() directly because JSON.stringify(NaN) renders "null",
+ * which would misreport what was configured.
+ */
+function describeInvalidMarginValue(value: unknown): string {
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    return String(value)
+  }
+  const serialized = JSON.stringify(value)
+  return serialized === undefined ? String(value) : serialized
+}
+
+/**
+ * Resolves the selection headroom working margin from a parsed matrix
+ * (DELEG-FR-001, compaction-storm design D4). The schema accepts any value
+ * for the knob, so validation lives here at consumption: a missing or null
+ * value resolves to the documented default silently; a wrong-type,
+ * non-integer, or out-of-range value is replaced with the default plus a
+ * warning naming the key, the invalid value, and the default applied. The
+ * matrix never fails to load on this knob, and the headroom gate is never
+ * silently disabled.
+ */
+export function resolveFootprintMarginTokens(matrix: ModelMatrix | null): FootprintMarginResolution {
+  const raw = matrix?.selection?.footprint_margin_tokens
+  if (raw === undefined || raw === null) {
+    return { tokens: DEFAULT_FOOTPRINT_MARGIN_TOKENS, warning: null }
+  }
+  if (
+    typeof raw === "number" &&
+    Number.isInteger(raw) &&
+    raw >= MIN_FOOTPRINT_MARGIN_TOKENS &&
+    raw <= MAX_FOOTPRINT_MARGIN_TOKENS
+  ) {
+    return { tokens: raw, warning: null }
+  }
+  return {
+    tokens: DEFAULT_FOOTPRINT_MARGIN_TOKENS,
+    warning:
+      `${FOOTPRINT_MARGIN_TOKENS_KEY} is invalid (${describeInvalidMarginValue(raw)}); ` +
+      `replaced with the documented default ${DEFAULT_FOOTPRINT_MARGIN_TOKENS} ` +
+      `(accepted range ${MIN_FOOTPRINT_MARGIN_TOKENS}-${MAX_FOOTPRINT_MARGIN_TOKENS} integer tokens); ` +
+      "the headroom gate is not disabled",
+  }
 }
 
 // ── Classifier cascade (design D5, MM-FR-005/MM-FR-006) ────────

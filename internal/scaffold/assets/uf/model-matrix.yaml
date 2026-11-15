@@ -44,3 +44,15 @@ agents: {}
 # apiKey, and request_timeout_ms values live exclusively in
 # the override under classifier.llm.*.
 classifier: {}
+
+# Selection headroom (DELEG-FR-001, compaction-storm design D4):
+# the working margin of context tokens a delegated child needs
+# beyond its base footprint (cached prefix plus command body).
+# Selection rejects or ranks down models whose usable input
+# window cannot fit footprint + margin. Integer tokens, valid
+# range 1000-256000, default 24000. An invalid value is
+# replaced with the default and the substitution is recorded
+# as a warning in the selection audit — the headroom gate is
+# never disabled by a bad value.
+selection:
+  footprint_margin_tokens: 24000
