@@ -12,18 +12,18 @@
 
 ## 1. Error preview integrity (design D1, D2)
 
-- [ ] 1.1 In `.opencode/plugins/review-dispatch/index.ts`, drop
+- [x] 1.1 In `.opencode/plugins/review-dispatch/index.ts`, drop
       `errorChars` from `SUMMARY_LIMITS` and make
       `buildCompactFinalization` copy each error string verbatim;
       `errors_truncated` is true only when whole entries were
       dropped (count cap or byte budget), never for shortening
       (RD-FR-066).
-- [ ] 1.2 Extend the compact builder's post-assembly byte-budget
+- [x] 1.2 Extend the compact builder's post-assembly byte-budget
       loop: after proposals are exhausted, drop trailing errors
       whole and set `errors_truncated`, keeping the result
       strictly under 40,960 bytes (RD-FR-066, D2). Do not alter
       the budget constant.
-- [ ] 1.3 Add `failure_record` (`null` or
+- [x] 1.3 Add `failure_record` (`null` or
       `{ correlation_id, path }`) to
       `FinalizeReviewDispatchResult` and the compact result,
       inserted immediately after `artifact_path` and omitted when
@@ -31,7 +31,7 @@
 
 ## 2. Failure record persistence (design D3, D4)
 
-- [ ] 2.1 In `.opencode/plugins/review-dispatch/index.ts`, add
+- [x] 2.1 In `.opencode/plugins/review-dispatch/index.ts`, add
       the strict failure-record payload schema
       (`dispatch_correlation_id` nullable, `command`/`mode`
       optional, `status: "failed"`, `operation_verdict`,
@@ -40,12 +40,12 @@
       and the envelope builder emitting
       `artifact_type: "review-dispatch-failure"` with
       best-effort provenance context.
-- [ ] 2.2 Add `persistFailureRecord` over
+- [x] 2.2 Add `persistFailureRecord` over
       `FinalizationDependencies` using the `persistEnvelope`
       atomic discipline: 0o750 directory, exclusive-create temp
       file, rename-by-link, cleanup on failure, and `EEXIST`
       collision retry that mints a fresh record correlation id.
-- [ ] 2.3 Wire best-effort record writes into all three
+- [x] 2.3 Wire best-effort record writes into all three
       `finalizeReviewDispatch` failure paths: structural
       rejection (use the input's correlation id only when
       UUID-usable, else mint), semantic rejection, and
@@ -56,7 +56,7 @@
 
 ## 3. Reader section and tool descriptions (design D5, D7)
 
-- [ ] 3.1 In `.opencode/plugins/review-dispatch/index.ts`,
+- [x] 3.1 In `.opencode/plugins/review-dispatch/index.ts`,
       extend `read_dispatch_artifact` with section `errors`:
       derive `.uf/artifacts/dispatch/<correlation_id>.failure.json`,
       apply the existing regular-file / 64 MiB / parse / type /
@@ -64,7 +64,7 @@
       and return `{ status: "ok", correlation_id, section,
       total, errors }` complete and untruncated; a dispatch with
       only a success artifact returns `not_found` (RD-FR-066).
-- [ ] 3.2 Correct the two tool descriptions: the
+- [x] 3.2 Correct the two tool descriptions: the
       `consolidate_dispatch` errors-cap sentence now describes
       complete-or-dropped entries, the `failure_record` key, and
       its position after `artifact_path`; the

@@ -283,7 +283,6 @@ describe("summary retrieval", () => {
       verdictReasonChars: 512,
       warningKindChars: 64,
       warningDetailChars: 256,
-      errorChars: 256,
       maxBytes: BYTE_BUDGET,
     })
   })
@@ -557,6 +556,7 @@ describe("summary retrieval", () => {
         operation_verdict: "APPROVE",
         correlation_id: "11111111-1111-4111-8111-111111111111",
         artifact_path: "/tmp/artifact.json",
+        failure_record: null,
         review_verdict: { council_decision: "APPROVED" },
         calculated_assessment: { authoritative: true },
         errors: [],
@@ -616,6 +616,7 @@ describe("compact finalization", () => {
     operation_verdict: "APPROVE",
     correlation_id: "11111111-1111-4111-8111-111111111111",
     artifact_path: "/tmp/artifact.json",
+    failure_record: null,
     review_dispatch: { payload: { runs: [] } },
     review_verdict: { council_decision: "APPROVED" },
     calculated_assessment: { authoritative: true, payload: { runs: [] } },
@@ -645,6 +646,35 @@ describe("compact finalization", () => {
     expect(compact.calculated_assessment).toEqual({ authoritative: true })
     expect(compact).not.toHaveProperty("review_dispatch")
     expect(compact).not.toHaveProperty("payload")
+    // RD-FR-066: the failure-record locator is omitted when null.
+    expect(compact).not.toHaveProperty("failure_record")
+  })
+
+  it("places failure_record immediately after artifact_path (RD-FR-066 D3)", () => {
+    // A persisted failure record surfaces as a locator immediately after
+    // artifact_path — early keys survive host tail-truncation — while errors
+    // stays the final key. The record writes that produce non-null values
+    // land with the phase-2 persistence tasks; this pins the placement the
+    // compact builder must hold for them.
+    const failureRecord = {
+      correlation_id: "22222222-2222-4222-8222-222222222222",
+      path: "/project/.uf/artifacts/dispatch/22222222-2222-4222-8222-222222222222.failure.json",
+    }
+    const compact = buildCompactFinalization(
+      {
+        ...result,
+        status: "failed",
+        artifact_path: null,
+        failure_record: failureRecord,
+      } as unknown as Parameters<typeof buildCompactFinalization>[0],
+      RUN_COUNTS,
+      [],
+      [],
+    )
+    expect(compact.failure_record).toEqual(failureRecord)
+    const keys = Object.keys(compact)
+    expect(keys.indexOf("failure_record")).toBe(keys.indexOf("artifact_path") + 1)
+    expect(keys[keys.length - 1]).toBe("errors")
   })
 
   it("caps observability arrays and reports truncation flags", () => {
@@ -660,7 +690,9 @@ describe("compact finalization", () => {
     expect(compact.proposals).toHaveLength(10)
     expect(compact.warnings).toHaveLength(5)
     expect(compact.errors).toHaveLength(5)
-    expect(compact.errors[0]).toHaveLength(256)
+    // RD-FR-066: the count cap drops whole entries; every survivor carries
+    // its complete 300-character string, never a shortened one.
+    expect(compact.errors).toEqual(Array.from({ length: 5 }, () => "e".repeat(300)))
     expect(compact.proposals_truncated).toBe(true)
     expect(compact.warnings_truncated).toBe(true)
     expect(compact.errors_truncated).toBe(true)
@@ -671,6 +703,112 @@ describe("compact finalization", () => {
     expect(keys.indexOf("warnings_truncated")).toBeLessThan(
       keys.indexOf("calculated_assessment"),
     )
+    // RD-FR-066 amends RD-FR-051's order: errors_truncated rides with the
+    // other observability flags (it previously followed errors), so errors
+    // stays the final key.
+    expect(keys.indexOf("errors_truncated")).toBeLessThan(
+      keys.indexOf("calculated_assessment"),
+    )
+    expect(keys[keys.length - 1]).toBe("errors")
+  })
+
+  it("carries a long error verbatim without raising errors_truncated (RD-FR-066)", () => {
+    // Longer than the removed 256-character per-string cap: shortening no
+    // longer exists, so a long entry that is not dropped must neither be cut
+    // nor flagged. Issue #1039 regression — the old projection shortened the
+    // string and set errors_truncated for the shortening alone.
+    const long = "e".repeat(300)
+    const compact = buildCompactFinalization(
+      {
+        ...result,
+        errors: [long],
+      } as unknown as Parameters<typeof buildCompactFinalization>[0],
+      RUN_COUNTS,
+      [],
+      [],
+    )
+    expect(compact.errors).toEqual([long])
+    expect(compact.errors_truncated).toBeUndefined()
+  })
+
+  it("drops trailing errors whole once proposals are exhausted (RD-FR-066 D2)", () => {
+    // Five whole errors blow the 40 KiB budget: uncapped since RD-FR-066
+    // removed the 256-character per-string cap, the budget loop must drop
+    // trailing entries whole — never shorten — and flag the drop. Regression
+    // for issue #1039: before the loop learned to drop errors, an
+    // error-heavy failure result sailed past the budget intact.
+    const errors = Array.from({ length: 5 }, (_, index) => `error ${index}: `.padEnd(12_000, "e"))
+    const compact = buildCompactFinalization(
+      {
+        ...result,
+        status: "failed",
+        operation_verdict: "INCONCLUSIVE",
+        artifact_path: null,
+        review_verdict: null,
+        calculated_assessment: null,
+        errors,
+      } as unknown as Parameters<typeof buildCompactFinalization>[0],
+      RUN_COUNTS,
+      [],
+      [],
+    )
+    expect(byteSize(compact)).toBeLessThan(BYTE_BUDGET)
+    expect(compact.errors_truncated).toBe(true)
+    const kept = compact.errors as string[]
+    expect(kept.length).toBeGreaterThan(0)
+    expect(kept.length).toBeLessThan(errors.length)
+    // Trailing entries drop; every survivor is complete and verbatim.
+    expect(compact.errors).toEqual(errors.slice(0, kept.length))
+  })
+
+  it("drops proposals before errors when both compete for the budget (RD-FR-066 D2)", () => {
+    // Both arrays blow the budget together: proposals — recoverable from
+    // the success artifact — drop first and completely, then trailing
+    // errors drop whole. Errors drop last because they are the diagnostic
+    // payload of exactly the failure paths where nothing else is persisted.
+    const maximal = (index: number) => `${index}`.padEnd(16_384, "y")
+    const errors = Array.from({ length: 5 }, (_, index) => `error ${index}: `.padEnd(12_000, "e"))
+    const compact = buildCompactFinalization(
+      {
+        ...result,
+        status: "failed",
+        operation_verdict: "INCONCLUSIVE",
+        artifact_path: null,
+        review_verdict: null,
+        calculated_assessment: null,
+        errors,
+      } as unknown as Parameters<typeof buildCompactFinalization>[0],
+      RUN_COUNTS,
+      Array.from({ length: 3 }, (_, index) => makeProposal(index, { information: maximal(index) })),
+      [],
+    )
+    expect(byteSize(compact)).toBeLessThan(BYTE_BUDGET)
+    // Every proposal dropped: the key is omitted and the drop is flagged.
+    expect(compact).not.toHaveProperty("proposals")
+    expect(compact.proposals_truncated).toBe(true)
+    expect(compact.errors_truncated).toBe(true)
+    const kept = compact.errors as string[]
+    expect(kept.length).toBeGreaterThan(0)
+    expect(kept.length).toBeLessThan(errors.length)
+    expect(compact.errors).toEqual(errors.slice(0, kept.length))
+  })
+
+  it("stops once proposals and errors are both exhausted instead of spinning", () => {
+    // run_counts is caller-supplied projection input; a pathological
+    // oversized value leaves the loop nothing droppable, so it must break
+    // and return the complete result unflagged rather than loop forever.
+    // The real pipeline cannot build this shape (the payload schema bounds
+    // run_counts to seven numeric fields) — the branch is defensive.
+    const giantRunCounts = { filler: "r".repeat(50_000) }
+    const compact = buildCompactFinalization(
+      { ...result, errors: [] } as unknown as Parameters<typeof buildCompactFinalization>[0],
+      giantRunCounts,
+      [],
+      [],
+    )
+    expect(byteSize(compact)).toBeGreaterThanOrEqual(BYTE_BUDGET)
+    expect(compact.errors_truncated).toBeUndefined()
+    expect(compact.proposals_truncated).toBeUndefined()
   })
 
   it("reports a null calculated assessment and preserves errors", () => {

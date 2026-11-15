@@ -5,11 +5,17 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 
+import type { PluginInput } from "@opencode-ai/plugin"
 import { afterEach, describe, expect, it } from "vitest"
 
 import { DISPATCH_ARTIFACT_DIRECTORY } from "../lib/review-dispatch-artifact.js"
-import { readDispatchArtifact } from "../plugins/review-dispatch/index.js"
+import ReviewDispatchPlugin, {
+  buildFailureRecordEnvelope,
+  readDispatchArtifact,
+  type ReviewDispatchFailurePayload,
+} from "../plugins/review-dispatch/index.js"
 import samplePayload from "../../schemas/review-dispatch/samples/sample-review-dispatch.json"
+import { withBun } from "./helpers/bun-runtime.js"
 
 // RD-FR-057: consumers page through a finalized artifact with
 // read_dispatch_artifact instead of the file-read tool, whose 2000-character
@@ -40,6 +46,31 @@ function proposals(count: number, length: number) {
     tag: "review-dispatch",
     category: "gotcha",
   }))
+}
+
+// RD-FR-066 (design D5): section errors reads the failure record — a
+// distinct review-dispatch-failure artifact keyed by the record's own
+// correlation id under the same dispatch store — never the success artifact.
+const RECORD_CORRELATION = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+
+async function failureRecordWith(payload: object, artifactType = "review-dispatch-failure"): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "read-dispatch-artifact-"))
+  roots.push(root)
+  const directory = join(root, DISPATCH_ARTIFACT_DIRECTORY)
+  await mkdir(directory, { recursive: true })
+  const envelope = { hero: "the-divisor", artifact_type: artifactType, payload }
+  await writeFile(join(directory, `${RECORD_CORRELATION}.failure.json`), `${JSON.stringify(envelope, null, 2)}\n`, "utf8")
+  return root
+}
+
+function failurePayload(overrides: Partial<ReviewDispatchFailurePayload> = {}): ReviewDispatchFailurePayload {
+  return {
+    dispatch_correlation_id: null,
+    status: "failed",
+    operation_verdict: "INCONCLUSIVE",
+    errors: ["first", "second"],
+    ...overrides,
+  }
 }
 
 describe("read_dispatch_artifact (RD-FR-057)", () => {
@@ -220,6 +251,109 @@ describe("read_dispatch_artifact (RD-FR-057)", () => {
     expect(await readDispatchArtifact({ correlation_id: CORRELATION, section: "summary" }, root)).toMatchObject({
       status: "error",
       code: "invalid_artifact",
+    })
+  })
+})
+
+describe("read_dispatch_artifact section errors (RD-FR-066)", () => {
+  it("returns the complete, untruncated errors of a persisted failure record", async () => {
+    const root = await failureRecordWith(failurePayload())
+    const result = await readDispatchArtifact({ correlation_id: RECORD_CORRELATION, section: "errors" }, root)
+    expect(result).toMatchObject({
+      status: "ok",
+      correlation_id: RECORD_CORRELATION,
+      section: "errors",
+      total: 2,
+      errors: ["first", "second"],
+    })
+    // Pin the full result shape (typescript.md TC-003): the errors section
+    // serves the whole array under one key — no paging fields.
+    expect(Object.keys(result).sort()).toEqual(["correlation_id", "errors", "section", "status", "total"])
+  })
+
+  it("serves a record built by the real envelope builder with long errors verbatim", async () => {
+    // A composed validation error longer than any preview cap comes back
+    // whole — the record exists precisely so nothing is lost (design D5).
+    const composed = `validate review dispatch input: ${"issue; ".repeat(96)}`
+    const envelope = buildFailureRecordEnvelope(
+      failurePayload({
+        dispatch_correlation_id: CORRELATION,
+        command: "review-council",
+        mode: "code",
+        errors: [composed, "second"],
+      }),
+      { branch: "opsx/example", commit: "2222222222222222222222222222222222222222", workflow_id: "uf.review-council" },
+      RECORD_CORRELATION,
+      "2026-11-15T12:00:00.000Z",
+    )
+    const root = await mkdtemp(join(tmpdir(), "read-dispatch-artifact-"))
+    roots.push(root)
+    const directory = join(root, DISPATCH_ARTIFACT_DIRECTORY)
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, `${RECORD_CORRELATION}.failure.json`), `${JSON.stringify(envelope, null, 2)}\n`, "utf8")
+
+    const result = await readDispatchArtifact({ correlation_id: RECORD_CORRELATION, section: "errors" }, root)
+    expect(result).toMatchObject({ status: "ok", total: 2 })
+    expect(result.errors).toEqual([composed, "second"])
+    expect((result.errors as string[])[0]).toHaveLength(composed.length)
+  })
+
+  it("returns not_found for a dispatch with only a success artifact", async () => {
+    // RD-FR-066: a correlation id with only a success artifact has no
+    // failure record; success artifacts carry no errors by schema, so the
+    // not_found answer is authoritative, not a probe ordering.
+    const root = await projectWith({ ...samplePayload })
+    expect(await readDispatchArtifact({ correlation_id: CORRELATION, section: "errors" }, root)).toMatchObject({
+      status: "error",
+      code: "not_found",
+    })
+    // The same ENOENT path serves an entirely unknown correlation id.
+    expect(
+      await readDispatchArtifact({ correlation_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", section: "errors" }, root),
+    ).toMatchObject({ code: "not_found" })
+  })
+
+  it("fails closed on a wrong artifact type, an invalid payload, and unparseable JSON", async () => {
+    // A .failure.json carrying a success artifact's type is not a record.
+    const wrongType = await failureRecordWith(failurePayload(), "review-dispatch")
+    expect(await readDispatchArtifact({ correlation_id: RECORD_CORRELATION, section: "errors" }, wrongType)).toMatchObject({
+      status: "error",
+      code: "invalid_artifact",
+    })
+
+    // A payload failing the strict failure-record schema fails closed.
+    const badPayload = await failureRecordWith({ ...failurePayload(), status: "success" })
+    expect(await readDispatchArtifact({ correlation_id: RECORD_CORRELATION, section: "errors" }, badPayload)).toMatchObject({
+      code: "invalid_artifact",
+    })
+
+    const unparseable = await failureRecordWith(failurePayload())
+    await writeFile(join(unparseable, DISPATCH_ARTIFACT_DIRECTORY, `${RECORD_CORRELATION}.failure.json`), "{ not json", "utf8")
+    expect(await readDispatchArtifact({ correlation_id: RECORD_CORRELATION, section: "errors" }, unparseable)).toMatchObject({
+      code: "invalid_artifact",
+    })
+  })
+
+  it("documents the errors section in the description and the section parameter (RD-FR-066 D7)", async () => {
+    await withBun(async () => {
+      const hooks = await ReviewDispatchPlugin.server({
+        client: {} as PluginInput["client"],
+        directory: tmpdir(),
+        worktree: tmpdir(),
+      } as unknown as PluginInput)
+      const registry = (hooks.tool ?? {}) as Record<string, { readonly description: string; readonly args: Record<string, unknown> }>
+      const reader = registry["read_dispatch_artifact"]
+      // D7: the description lists the errors section beside the five paged
+      // ones and names its unpaged, fail-closed contract.
+      expect(reader).toBeDefined()
+      expect(reader?.description).toContain('section "errors"')
+      expect(reader?.description).toContain("failure record")
+      expect(reader?.description).toContain("no paging")
+      // The section parameter must not claim every array pages: errors is
+      // served whole from the failure record, never paged.
+      const section = reader?.args["section"] as { description?: string } | undefined
+      expect(section?.description).toContain("errors")
+      expect(section?.description).not.toBe("summary for scalars and counts, or one array to page through.")
     })
   })
 })
