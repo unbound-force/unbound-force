@@ -861,7 +861,7 @@ For each item, present the decision as follows:
      If the assessment data does not ground any option, the
      gate MUST say so, present the trade-off, and still ask
      the full option set (fail-closed, per FR-006/FR-012)
-2. Present the **question tool** below the printed text with
+2. Call the `question` tool below the printed text — do not write the call as text (`<invoke name="question">`) in your reply — with
    the same options, the recommended option FIRST and
    labeled "(Recommended)":
    `["Accept", "Modify", "Reject", "Ask"]`.
@@ -886,9 +886,9 @@ The author chooses exactly one:
 | Decision | Follow-up | Queued action |
 |---|---|---|
 | **Accept** | (none) | Code change using suggested approach |
-| **Modify** | Use **question tool** (open-ended, no preset options) to collect the alternative approach | Code change using author's approach |
-| **Reject** | Use **question tool** (open-ended, no preset options) to collect evidence-based reasoning | Reply comment with reasoning |
-| **Ask** | Use **question tool** (open-ended, no preset options) to collect the clarification question | Reply comment with question |
+| **Modify** | Call the `question` tool (open-ended, no preset options) to collect the alternative approach — do not write `<invoke name="question">` as text | Code change using author's approach |
+| **Reject** | Call the `question` tool (open-ended, no preset options) to collect evidence-based reasoning — do not write `<invoke name="question">` as text | Reply comment with reasoning |
+| **Ask** | Call the `question` tool (open-ended, no preset options) to collect the clarification question — do not write `<invoke name="question">` as text | Reply comment with question |
 | **File issue** | (none) | GitHub issue for the finding, then a reply comment linking it |
 | **Reply** | (none) | Reply comment acknowledging the finding |
 
@@ -939,7 +939,7 @@ follows:
      If the assessment data does not ground any option, the
      gate MUST say so, present the trade-off, and still ask
      the full option set (fail-closed, per FR-006/FR-012)
-2. Present the **question tool** below the printed text with
+2. Call the `question` tool below the printed text — do not write the call as text (`<invoke name="question">`) in your reply — with
    the same options, the recommended option FIRST and
    labeled "(Recommended)":
    `["Confirm -- proceed with execution",
@@ -963,7 +963,7 @@ from compressed context, or if you cannot verify that
 the human explicitly confirmed the Phase 4 execution
 plan in the current uncompressed conversation history,
 you MUST re-present the execution summary below and
-obtain fresh confirmation via the **question tool**
+obtain fresh confirmation via the `question` tool — do not write `<invoke name="question">` as text —
 before proceeding. Do NOT rely on confirmation recorded
 in compressed context. When in doubt, re-confirm —
 false re-confirmation is harmless; executing mutations
@@ -1011,7 +1011,7 @@ Present the decision as follows:
      If the assessment data does not ground any option, the
      gate MUST say so, present the trade-off, and still ask
      the full option set (fail-closed, per FR-006/FR-012)
-2. Present the **question tool** below the printed text with
+2. Call the `question` tool below the printed text — do not write the call as text (`<invoke name="question">`) in your reply — with
    the same options, the recommended option FIRST and
    labeled "(Recommended)":
    `["Proceed with Phase 4 execution",
@@ -1023,7 +1023,7 @@ Present the decision as follows:
 **CRITICAL RULE**: NEVER begin Phase 4 execution
 (code changes, commits, push, reply comments, or
 thread resolutions) without explicit human
-confirmation via the **question tool**.
+confirmation via the `question` tool — do not write `<invoke name="question">` as text.
 
 >>> END MANDATORY GATE <<<
 
@@ -1151,7 +1151,7 @@ decision as follows:
      If the assessment data does not ground any option, the
      gate MUST say so, present the trade-off, and still ask
      the full option set (fail-closed, per FR-006/FR-012)
-2. Present the **question tool** below the printed text with
+2. Call the `question` tool below the printed text — do not write the call as text (`<invoke name="question">`) in your reply — with
    the same options, the recommended option FIRST and
    labeled "(Recommended)":
    `["Rebase onto remote and push",
@@ -1248,7 +1248,7 @@ session text and present the decision as follows:
      If the assessment data does not ground any option, the
      gate MUST say so, present the trade-off, and still ask
      the full option set (fail-closed, per FR-006/FR-012)
-2. Present the **question tool** below the printed text with
+2. Call the `question` tool below the printed text — do not write the call as text (`<invoke name="question">`) in your reply — with
    the same options, the recommended option FIRST and
    labeled "(Recommended)":
    `["Yes -- post reply comments", "No -- skip posting"]`.
@@ -1283,7 +1283,7 @@ Present the decision as follows:
      If the assessment data does not ground any option, the
      gate MUST say so, present the trade-off, and still ask
      the full option set (fail-closed, per FR-006/FR-012)
-2. Present the **question tool** below the printed text with
+2. Call the `question` tool below the printed text — do not write the call as text (`<invoke name="question">`) in your reply — with
    the same options, the recommended option FIRST and
    labeled "(Recommended)":
    `["Yes -- resolve addressed threads", "No -- leave
