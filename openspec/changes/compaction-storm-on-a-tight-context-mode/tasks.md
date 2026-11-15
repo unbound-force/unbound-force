@@ -69,7 +69,7 @@
 
 ## 3. Tests (parallel-eligible)
 
-- [ ] 3.1 [P] Unit tests for headroom gate and footprint
+- [x] 3.1 [P] Unit tests for headroom gate and footprint
   estimator — classification: judgment (test
   authorship). Below/at/above threshold, missing limits
   bypass, inconsistent limits rejected, all-rejected host
@@ -83,7 +83,7 @@
   `.opencode/test/model-matrix-integration.test.ts`,
   `.opencode/test/uf-workflow.test.ts`.
 
-- [ ] 3.2 [P] Unit tests for storm detection —
+- [x] 3.2 [P] Unit tests for storm detection —
   classification: judgment (test authorship). N-1 no
   trigger, N triggers, successful non-read progress
   resets the counter, reads interleaved between
@@ -94,7 +94,7 @@
   `.opencode/test/delegation-budget.test.ts` (new or
   existing), `.opencode/test/agent-executor.test.ts`.
 
-- [ ] 3.3 Unit tests for final-text guard —
+- [x] 3.3 Unit tests for final-text guard —
   classification: judgment (test authorship). Compaction
   summary -> not success, synthetic prompt ->
   `synthetic_final_text`, legitimate final text (including
@@ -105,7 +105,7 @@
   same-file tasks MUST NOT both be [P]). Files:
   `.opencode/test/agent-executor.test.ts`.
 
-- [ ] 3.4 [P] Integration, contract, and seam tests —
+- [x] 3.4 [P] Integration, contract, and seam tests —
   classification: judgment (test authorship).
   `uf_delegate_command` surfaces
   `selection_fallback_reason` headroom message and

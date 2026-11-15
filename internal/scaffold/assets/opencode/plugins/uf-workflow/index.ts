@@ -26,6 +26,7 @@ import {
   loadModelMatrix,
   resolveFootprintMarginTokens,
   resolveSelection,
+  resolveStormThreshold,
   type ClassifierCache,
   type ModelLimits,
   type ModelMatrix,
@@ -2752,6 +2753,19 @@ export interface DelegateCommandData {
    * value was valid or absent.
    */
   selection_margin_warning: string | null
+  /**
+   * Effective compaction-storm threshold (delegation.storm_threshold,
+   * DELEG-FR-002): the configured value or the documented default after
+   * D4 substitution — the threshold the detector enforced for the run.
+   */
+  storm_threshold: number
+  /**
+   * The D4 substitution warning for an invalid
+   * delegation.storm_threshold value — naming the key, the invalid
+   * value, and the default applied; null when the configured value was
+   * valid or absent.
+   */
+  storm_threshold_warning: string | null
   /** Child session usage, when the executor reported step-finish parts. */
   usage: InvocationUsage | null
   /** Request, host-resolution, and child-report provenance. */
@@ -3517,7 +3531,10 @@ async function defaultModelLimits(
  *   (host model resolution via parent introspection, parenting, abort
  *   linkage, timeout — default 600,000 ms, up to 14,400,000 ms for
  *   command-path calls, clamped to any inherited parent budget; idle
- *   timeout default 600,000 ms) and expected_artifact is
+ *   timeout default 600,000 ms; storm threshold resolved from the
+ *   matrix delegation.storm_threshold knob — DELEG-FR-002, design D4:
+ *   documented default 3, invalid values substituted with the default
+ *   and the substitution surfaced as a warning) and expected_artifact is
  *   verified after the run; a missing artifact returns the command's exact
  *   STOP message (EXPECTED_ARTIFACT_MISSING)
  * - on success (child completed and artifact verified when supplied) the
@@ -3532,6 +3549,9 @@ async function defaultModelLimits(
  *   surfaced in the success envelope, together with the DELEG-FR-001
  *   headroom provenance (footprint and effective margin always in the
  *   envelope; estimator fallback and margin-substitution warning when
+ *   non-null in both surfaces), and the DELEG-FR-002 storm provenance
+ *   (effective threshold always in the envelope, and in the checkpoint
+ *   when the operator configured the knob; substitution warning when
  *   non-null in both surfaces)
  * - limit-ended runs (delegation-timeout-budgets D4) return
  *   DELEGATE_FAILED with the executor's `timeout` details and, for
@@ -3874,6 +3894,11 @@ export function createDelegateCommandTool(
           footprintSeams,
         )
         const margin = resolveFootprintMarginTokens(matrix)
+        // DELEG-FR-002 (compaction-storm): the storm-detector threshold
+        // resolved from the same loaded matrix (design D4) and threaded
+        // into the executor below — without this the knob validates but
+        // never configures the detector, leaving dead config behind.
+        const storm = resolveStormThreshold(matrix)
         // DELEG-FR-001 (compaction-storm task 2.1): declared model limits
         // for the headroom gate. Fetched only when a gated candidate can
         // arise — a configured matrix (non-empty profiles) and no explicit
@@ -4006,6 +4031,7 @@ export function createDelegateCommandTool(
             parentAbort: context.abort,
             timeoutMilliseconds: input.timeout ?? DEFAULT_TIMEOUT_MILLISECONDS,
             idleTimeoutMilliseconds: input.idle_timeout ?? DEFAULT_DELEGATE_IDLE_TIMEOUT_MS,
+            stormThreshold: storm.threshold,
           },
           input.agent,
           promptText,
@@ -4131,6 +4157,17 @@ export function createDelegateCommandTool(
           if (margin.warning !== null) {
             checkpointData.selection_margin_warning = margin.warning
           }
+          // DELEG-FR-002 (compaction-storm): the effective storm
+          // threshold rides the checkpoint when the operator configured
+          // the knob, plus the D4 substitution warning when it fired —
+          // the write side of the config-key round-trip seam. Calls
+          // without a delegation block keep the pre-change shape.
+          if (matrix?.delegation?.storm_threshold !== undefined) {
+            checkpointData.storm_threshold = storm.threshold
+          }
+          if (storm.warning !== null) {
+            checkpointData.storm_threshold_warning = storm.warning
+          }
           recordAutoCheckpoint(cwd, key, "uf.unleash", input.checkpoint_step, checkpointData)
           checkpointRecorded = true
         }
@@ -4167,6 +4204,11 @@ export function createDelegateCommandTool(
           selection_footprint_fallback: footprint.fallback,
           selection_margin_tokens: margin.tokens,
           selection_margin_warning: margin.warning,
+          // DELEG-FR-002 (compaction-storm): effective storm threshold
+          // and D4 substitution warning, machine-parseable like the rest
+          // of the audit trail.
+          storm_threshold: storm.threshold,
+          storm_threshold_warning: storm.warning,
           usage: result.usage,
           provenance: result.provenance,
           text: result.text,

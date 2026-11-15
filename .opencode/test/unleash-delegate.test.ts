@@ -6,6 +6,7 @@ import { join, resolve } from "node:path"
 import type { PluginInput } from "@opencode-ai/plugin"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { DEFAULT_STORM_THRESHOLD } from "../lib/model-matrix.js"
 import type { ToolResult } from "../lib/uf-workflow-types.js"
 import {
   createDelegateCommandTool,
@@ -106,6 +107,13 @@ interface FakeClientOptions {
    * (never idle-aborts; long wall-clock paths).
    */
   readonly activeProbe?: boolean
+  /**
+   * Expose the activity-probe endpoints serving a fresh compaction marker
+   * on every probe (the storm-detector path): each sample observes a new
+   * marker id, so the storm accounting climbs toward the threshold with
+   * no substantive progress between samples.
+   */
+  readonly compactionProbe?: boolean
 }
 
 function fieldsResponse<T>(data: T): T {
@@ -160,8 +168,9 @@ function finishPart(cost: number, input: number, output: number): Record<string,
  */
 function fakeClient(options: FakeClientOptions = {}): { readonly client: Client; readonly calls: FakeCalls } {
   const calls: FakeCalls = { creates: [], messages: [], prompts: [], aborts: [] }
-  // Probe counter backing the activeProbe option: each probe reports a new
-  // text part so the activity fingerprint changes on every sample.
+  // Probe counter backing the activeProbe and compactionProbe options:
+  // each probe reports a new part (a text part or a compaction marker) so
+  // the activity fingerprint changes on every sample.
   let probeCount = 0
   const session = {
     create: async (request: CreateOptions): Promise<CreateResponse> => {
@@ -259,6 +268,23 @@ function fakeClient(options: FakeClientOptions = {}): { readonly client: Client;
           children: async () => ({ data: [] }),
           messages: async () => ({
             data: [{ info: { id: "message-child" }, parts: [textPart(`thinking-${++probeCount}`)] }],
+          }),
+        }
+      : {}),
+    // Compaction-storm path: every probe observes a fresh compaction
+    // marker (distinct ids are distinct counted markers), so the storm
+    // accounting climbs toward the threshold with no substantive
+    // progress between samples.
+    ...(options.compactionProbe === true
+      ? {
+          children: async () => ({ data: [] }),
+          messages: async () => ({
+            data: [
+              {
+                info: { id: `compaction-${++probeCount}` },
+                parts: [{ type: "compaction", auto: true }],
+              },
+            ],
           }),
         }
       : {}),
@@ -1775,6 +1801,10 @@ describe("uf_delegate_command expected-artifact verification", () => {
         selection_footprint_fallback: null,
         selection_margin_tokens: 24_000,
         selection_margin_warning: null,
+        // DELEG-FR-002 (compaction-storm): storm provenance — no matrix,
+        // so the documented default threshold applies with no warning.
+        storm_threshold: DEFAULT_STORM_THRESHOLD,
+        storm_threshold_warning: null,
         usage: { cost_usd: 0.25, tokens: { input: 11, output: 7 } },
         provenance: {
           agent: "cobalt-crush-dev",
@@ -2772,6 +2802,10 @@ describe("uf_delegate_command seam verification", () => {
         selection_footprint_fallback: null,
         selection_margin_tokens: 24_000,
         selection_margin_warning: null,
+        // DELEG-FR-002 (compaction-storm): storm provenance — no matrix,
+        // so the documented default threshold applies with no warning.
+        storm_threshold: DEFAULT_STORM_THRESHOLD,
+        storm_threshold_warning: null,
         usage: null,
         provenance: {
           agent: "cobalt-crush-dev",
@@ -2874,6 +2908,10 @@ describe("uf_delegate_command seam verification", () => {
         selection_footprint_fallback: null,
         selection_margin_tokens: 24_000,
         selection_margin_warning: null,
+        // DELEG-FR-002 (compaction-storm): storm provenance — no matrix,
+        // so the documented default threshold applies with no warning.
+        storm_threshold: DEFAULT_STORM_THRESHOLD,
+        storm_threshold_warning: null,
         usage: null,
         provenance: {
           agent: "cobalt-crush-dev",
@@ -3470,5 +3508,418 @@ describe("uf_delegate_command timeout budgets", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// uf_delegate_command — compaction-storm surfacing (compaction-storm
+// task 3.4, DELEG-FR-001/002/003)
+// ---------------------------------------------------------------------------
+
+// The change's caller-facing surfaces through the delegation tool's own
+// envelope and checkpoint store. The executor-level behavior — probe
+// accounting, threshold boundaries, matcher structure — is pinned in
+// agent-executor.test.ts; these rows verify uf_delegate_command surfaces
+// each outcome to ITS caller: the headroom rejection chain riding
+// selection_fallback_reason into the success envelope and the
+// get_progress-readable checkpoint (DELEG-FR-001), the storm abort's
+// context_thrash code with the storm timeout kind plus the command resume
+// state (DELEG-FR-002), and the final-text guard's synthetic_final_text
+// reclassification (DELEG-FR-003).
+describe("uf_delegate_command compaction-storm surfacing", () => {
+  it("surfaces the headroom rejection chain in the envelope and checkpoints it for the get_progress store", async () => {
+    // A configured matrix where every gated candidate is tight: the
+    // agents: pin and the plan default both declare models whose usable
+    // window (context - output) cannot hold the measured footprint plus
+    // the default 24k margin, so the chain falls through both and
+    // terminates at host with every rejection recorded.
+    const commandAbs = resolve(FAKE_CWD, "cmd.md")
+    const files: Record<string, string> = {
+      [commandAbs]: "Run the pipeline.",
+      [MATRIX_PROBE]: JSON.stringify({
+        version: 1,
+        profiles: {
+          "pin-capability": { model: "tight-provider/pin-model" },
+          "plan-capability": { model: "tight-provider/plan-model" },
+        },
+        defaults: { plan: "plan-capability" },
+        agents: { "cobalt-crush-dev": "pin-capability" },
+      }),
+    }
+    const fake = fakeClient()
+    const artifact = fakeFileExists([])
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: {
+        // plan resolves statically (chain step 5), so the classifier
+        // cascade must stay dark for a plan-kind delegation.
+        parseYaml: testParseYaml,
+        classifierFetch: (() => {
+          throw new Error("classifier fetch must not run — plan resolves statically")
+        }) as typeof fetch,
+        classifierReadEnv: () => undefined,
+        spawnClassifierAgent: async () => {
+          throw new Error("classifier spawn must not run — plan resolves statically")
+        },
+        // The estimator reads the same fake files so the command body
+        // measures deterministically: 56k cached prefix + 5 tokens for
+        // the 17-byte body ("Run the pipeline." / 4, rounded up).
+        footprint: fakeFootprintSeam(files),
+        // Declared limits make both candidates tight — usable windows of
+        // 52k (pin) and 56k (plan default) against the required 80,005
+        // (footprint 56,005 + default margin 24,000).
+        modelLimits: async () => ({
+          "tight-provider/pin-model": { context: 60_000, output: 8_000 },
+          "tight-provider/plan-model": { context: 64_000, output: 8_000 },
+        }),
+      },
+      readText: fakeReadText(files).readText,
+      fileExists: artifact.fileExists,
+    }
+    const { exec } = recordingExec()
+
+    const result = await invokeDelegate(exec, deps, {
+      command_path: "cmd.md",
+      checkpoint_step: "plan",
+    })
+
+    // Every gated candidate was rejected as tight, so the chain fell
+    // through to host with both rejections recorded (DELEG-FR-001):
+    // each entry names the rejected model, its usable window, and the
+    // required footprint + margin; the decorate step closes with the
+    // fallback destination.
+    const chain =
+      'headroom: agent-pin model "tight-provider/pin-model" usable 52000 < required 80005 ' +
+      "(footprint 56005 + margin 24000); " +
+      'headroom: default-kind model "tight-provider/plan-model" usable 56000 < required 80005 ' +
+      "(footprint 56005 + margin 24000) — fell back to the host model"
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      expect(result.data.selection_source).toBe("host")
+      expect(result.data.selection_model).toBeNull()
+      expect(result.data.selection_fallback_reason).toBe(chain)
+      // Headroom provenance riding the same envelope (task 1.1 audit).
+      expect(result.data.selection_footprint).toBe(56_005)
+      expect(result.data.selection_margin_tokens).toBe(24_000)
+    }
+    // Host fallback ran the child on the host model (the fake prompt
+    // echoes the body model, so the mismatch guard stays quiet).
+    expect(fake.calls.messages).toHaveLength(1)
+    expect(fake.calls.prompts[0]?.body).toMatchObject({
+      model: { providerID: "host-provider", modelID: "host-model" },
+    })
+
+    // The auto-checkpoint persists the same chain through the state path
+    // get_progress reads (the write side of the round-trip).
+    expect(writeFileSync).toHaveBeenCalledTimes(1)
+    const [statePathArg, stateRaw] = vi.mocked(writeFileSync).mock.calls[0]
+    expect(statePathArg).toBe(
+      resolve(FAKE_CWD, ".uf/progress/opsx-unleash-deterministic-tools/uf.unleash.json"),
+    )
+    const written = JSON.parse(stateRaw as string) as ProgressState
+    expect(written.current_step).toBe("plan")
+    expect(written.completed_steps).toEqual(["plan"])
+    expect(written.data).toEqual({
+      agent: "cobalt-crush-dev",
+      command_path: "cmd.md",
+      selection_source: "host",
+      selection_fallback_reason: chain,
+    })
+
+    // Read side: get_progress parses the same bytes and returns the
+    // chain unchanged — the fallback reason survives the write→read
+    // round-trip through the store.
+    vi.mocked(lstatSync).mockImplementation(
+      () => ({ isSymbolicLink: () => false }) as unknown as ReturnType<typeof lstatSync>,
+    )
+    vi.mocked(readFileSync).mockImplementation(() => stateRaw)
+    const progress = createGetProgressTool(exec, FAKE_CWD)
+    const readResult = await (
+      progress as {
+        execute: (
+          args: Record<string, unknown>,
+          ctx: { sessionID: string },
+        ) => Promise<{ output: string }>
+      }
+    ).execute({ command: "uf.unleash" }, { sessionID: "parent-session" })
+    const readback = JSON.parse(readResult.output) as ToolResult<ProgressState>
+    expect(readback.status).toBe("ok")
+    if (readback.status === "ok") {
+      expect(readback.data).toStrictEqual(written)
+    }
+    expect(vi.mocked(readFileSync).mock.calls[0][0]).toBe(
+      resolve(FAKE_CWD, ".uf/progress/opsx-unleash-deterministic-tools/uf.unleash.json"),
+    )
+  })
+
+  it("surfaces a compaction-storm abort as DELEGATE_FAILED with the context_thrash code, storm kind, and resume state", async () => {
+    vi.useFakeTimers()
+    try {
+      const commandAbs = resolve(FAKE_CWD, ".opencode/commands/uf.unleash.md")
+      const fake = fakeClient({ hangPrompt: true, compactionProbe: true })
+      const state: ProgressState = {
+        command: "uf.unleash",
+        branch: "opsx-unleash-deterministic-tools",
+        key: "opsx-unleash-deterministic-tools",
+        current_step: "plan",
+        completed_steps: ["spec-review", "plan"],
+        data: {},
+        created_at: "2026-11-03T00:00:00.000Z",
+        updated_at: "2026-11-03T00:00:00.000Z",
+      }
+      vi.mocked(lstatSync).mockImplementation(
+        () => ({ isSymbolicLink: () => false }) as unknown as ReturnType<typeof lstatSync>,
+      )
+      vi.mocked(readFileSync).mockImplementation(() => JSON.stringify(state))
+
+      const deps: DelegateCommandDependencies = {
+        client: fake.client,
+        // Matrix-free selection keeps the row on the failure envelope:
+        // the surface under test is the executor wiring, not model
+        // selection (zero-config host default).
+        modelMatrix: matrixFreeDeps,
+        readText: fakeReadText({ [commandAbs]: "Run the pipeline." }).readText,
+        fileExists: fakeFileExists([]).fileExists,
+      }
+      const pending = invokeDelegate(recordingExec().exec, deps, {
+        command_path: ".opencode/commands/uf.unleash.md",
+      })
+      // Interval probes fire at the default 30 s poll; each observes a
+      // new compaction marker, so the default storm threshold (3) is
+      // reached at the 90 s tick — long before the 10-minute default
+      // wall clock and idle timeout.
+      await vi.advanceTimersByTimeAsync(100_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.status).toBe("error")
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.retryable).toBe(true)
+      expect(result.child_session_id).toBe("child-session")
+      // The executor's failure code prefixes the message so the storm
+      // classification is machine-parseable from the envelope.
+      expect(result.message).toBe(
+        `context_thrash: invoke_agent run recorded ${DEFAULT_STORM_THRESHOLD} consecutive compaction events ` +
+          `with no substantive progress between them (storm threshold ${DEFAULT_STORM_THRESHOLD}); ` +
+          "aborting so the caller can resume from durable state",
+      )
+      expect(result.timeout).toMatchObject({
+        kind: "storm",
+        effective_ms: 600_000,
+        requested_ms: 600_000,
+        budget_clamped: false,
+        idle_timeout_ms: 600_000,
+        elapsed_ms: 90_000,
+        pending_question: false,
+      })
+      // Limit-ended command-path runs thread the durable resume state.
+      expect(result.resume).toEqual({
+        command: "uf.unleash",
+        key: "opsx-unleash-deterministic-tools",
+        last_checkpoint_step: "plan",
+        completed_steps: ["spec-review", "plan"],
+      })
+      // The resume read went through the progress state store path.
+      expect(String(vi.mocked(readFileSync).mock.calls[0]?.[0])).toBe(
+        resolve(FAKE_CWD, ".uf/progress/opsx-unleash-deterministic-tools/uf.unleash.json"),
+      )
+      // The storm aborted the wedged child exactly once.
+      expect(fake.calls.aborts).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("surfaces a reclassified final text as DELEGATE_FAILED with the synthetic_final_text code and no resume", async () => {
+    // The child "finishes" with the compaction-summary wrapper as its
+    // final text while the probe endpoints are absent, so the guard's
+    // final probe cannot observe markers and the recorded window stays
+    // below the storm threshold: the run is reclassified
+    // synthetic_final_text (design D3, DELEG-FR-003). The command path
+    // sharpens the no-resume assertion — no limit ended the run, so the
+    // envelope carries neither timeout nor resume.
+    const commandAbs = resolve(FAKE_CWD, "cmd.md")
+    const summaryText = "<system-reminder>\n## Objective\n- keep working\n</system-reminder>"
+    const fake = fakeClient({ parts: [textPart(summaryText)] })
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: fakeReadText({ [commandAbs]: "Run the pipeline." }).readText,
+      fileExists: fakeFileExists([]).fileExists,
+    }
+    const result = (await invokeDelegate(recordingExec().exec, deps, {
+      command_path: "cmd.md",
+    })) as unknown as Record<string, unknown>
+
+    expect(result.status).toBe("error")
+    expect(result.code).toBe("DELEGATE_FAILED")
+    expect(result.retryable).toBe(true)
+    expect(result.child_session_id).toBe("child-session")
+    expect(result.message).toContain("synthetic_final_text: ")
+    expect(result.message).toContain("compaction-summary wrapper")
+    expect(result.message).toContain(summaryText)
+    // No limit ended the run: both keys are omitted — there is no storm
+    // window to report and no durable state to thread, even on a
+    // command-path delegation.
+    expect(result.timeout).toBeUndefined()
+    expect("resume" in result).toBe(false)
+  })
+
+  // Shared fixture for the storm-knob threading rows: the headroom
+  // row's matrix shape (every gated candidate tight, so selection
+  // terminates at host through static resolution with the classifier
+  // dark) carrying a delegation.storm_threshold knob — the knob's
+  // value is the only variable under test.
+  const stormKnobMatrix = (threshold: number): string =>
+    JSON.stringify({
+      version: 1,
+      profiles: {
+        "pin-capability": { model: "tight-provider/pin-model" },
+        "plan-capability": { model: "tight-provider/plan-model" },
+      },
+      defaults: { plan: "plan-capability" },
+      agents: { "cobalt-crush-dev": "pin-capability" },
+      delegation: { storm_threshold: threshold },
+    })
+
+  const stormKnobDeps = (
+    fake: ReturnType<typeof fakeClient>,
+    files: Record<string, string>,
+  ): DelegateCommandDependencies => ({
+    client: fake.client,
+    modelMatrix: {
+      parseYaml: testParseYaml,
+      classifierFetch: (() => {
+        throw new Error("classifier fetch must not run — plan resolves statically")
+      }) as typeof fetch,
+      classifierReadEnv: () => undefined,
+      spawnClassifierAgent: async () => {
+        throw new Error("classifier spawn must not run — plan resolves statically")
+      },
+      footprint: fakeFootprintSeam(files),
+      modelLimits: async () => ({
+        "tight-provider/pin-model": { context: 60_000, output: 8_000 },
+        "tight-provider/plan-model": { context: 64_000, output: 8_000 },
+      }),
+    },
+    readText: fakeReadText(files).readText,
+    fileExists: fakeFileExists([]).fileExists,
+  })
+
+  it("threads a configured storm threshold into the audit surfaces (envelope and checkpoint)", async () => {
+    // DELEG-FR-002 design D4: the knob must configure, not just validate.
+    // A valid configured value reaches BOTH caller-facing audit
+    // surfaces — the success envelope (always) and the auto-checkpoint
+    // (the write side of the config-key round-trip seam).
+    const commandAbs = resolve(FAKE_CWD, "cmd.md")
+    const files: Record<string, string> = {
+      [commandAbs]: "Run the pipeline.",
+      [MATRIX_PROBE]: stormKnobMatrix(2),
+    }
+    const fake = fakeClient()
+    const deps = stormKnobDeps(fake, files)
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      command_path: "cmd.md",
+      checkpoint_step: "plan",
+    })
+
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      expect(result.data.storm_threshold).toBe(2)
+      expect(result.data.storm_threshold_warning).toBeNull()
+    }
+    expect(writeFileSync).toHaveBeenCalledTimes(1)
+    const [, stateRaw] = vi.mocked(writeFileSync).mock.calls[0]
+    const written = JSON.parse(stateRaw as string) as ProgressState
+    expect(written.data).toMatchObject({
+      agent: "cobalt-crush-dev",
+      command_path: "cmd.md",
+      selection_source: "host",
+      storm_threshold: 2,
+    })
+  })
+
+  it("aborts at a configured storm threshold below the default", async () => {
+    // The detector-side proof of threading: with the knob at 2, the
+    // abort fires one 30 s probe poll earlier than the default-3 row —
+    // only a threshold that actually reached the executor can produce
+    // this timing and message.
+    vi.useFakeTimers()
+    try {
+      const commandAbs = resolve(FAKE_CWD, ".opencode/commands/uf.unleash.md")
+      const files: Record<string, string> = {
+        [commandAbs]: "Run the pipeline.",
+        [MATRIX_PROBE]: stormKnobMatrix(2),
+      }
+      const fake = fakeClient({ hangPrompt: true, compactionProbe: true })
+      const state: ProgressState = {
+        command: "uf.unleash",
+        branch: "opsx-unleash-deterministic-tools",
+        key: "opsx-unleash-deterministic-tools",
+        current_step: "plan",
+        completed_steps: ["spec-review", "plan"],
+        data: {},
+        created_at: "2026-11-03T00:00:00.000Z",
+        updated_at: "2026-11-03T00:00:00.000Z",
+      }
+      vi.mocked(lstatSync).mockImplementation(
+        () => ({ isSymbolicLink: () => false }) as unknown as ReturnType<typeof lstatSync>,
+      )
+      vi.mocked(readFileSync).mockImplementation(() => JSON.stringify(state))
+
+      const deps = stormKnobDeps(fake, files)
+      const pending = invokeDelegate(recordingExec().exec, deps, {
+        command_path: ".opencode/commands/uf.unleash.md",
+      })
+      await vi.advanceTimersByTimeAsync(70_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.status).toBe("error")
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.message).toBe(
+        "context_thrash: invoke_agent run recorded 2 consecutive compaction events " +
+          "with no substantive progress between them (storm threshold 2); " +
+          "aborting so the caller can resume from durable state",
+      )
+      expect(result.timeout).toMatchObject({ kind: "storm", elapsed_ms: 60_000 })
+      expect(fake.calls.aborts).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("substitutes an invalid configured storm threshold with the default and surfaces the warning", async () => {
+    // D4 substitution on the command path: 99 is outside the documented
+    // 2-10 range, so the documented default applies and the warning
+    // names the key and the rejected value — a bad value can never
+    // disable the detector.
+    const commandAbs = resolve(FAKE_CWD, "cmd.md")
+    const files: Record<string, string> = {
+      [commandAbs]: "Run the pipeline.",
+      [MATRIX_PROBE]: stormKnobMatrix(99),
+    }
+    const fake = fakeClient()
+    const deps = stormKnobDeps(fake, files)
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      command_path: "cmd.md",
+      checkpoint_step: "plan",
+    })
+
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      expect(result.data.storm_threshold).toBe(DEFAULT_STORM_THRESHOLD)
+      expect(result.data.storm_threshold_warning).toContain(
+        "delegation.storm_threshold is invalid (99)",
+      )
+    }
+    const [, stateRaw] = vi.mocked(writeFileSync).mock.calls[0]
+    const written = JSON.parse(stateRaw as string) as ProgressState
+    expect(written.data).toMatchObject({
+      storm_threshold: DEFAULT_STORM_THRESHOLD,
+      storm_threshold_warning: expect.stringContaining(
+        "delegation.storm_threshold is invalid (99)",
+      ),
+    })
   })
 })

@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer"
 import { execFileSync } from "node:child_process"
 import {
   existsSync,
@@ -28,6 +29,7 @@ import {
 import UfWorkflowPlugin from "../plugins/uf-workflow/index.js"
 import { withBun } from "./helpers/bun-runtime.js"
 import {
+  CONSERVATIVE_COMMAND_BODY_TOKENS,
   createCheckpointTool,
   createClearProgressTool,
   createGitCommitNoEditTool,
@@ -44,6 +46,10 @@ import {
   createRelaySpecReviewGateTool,
   createPersistUnleashSummaryTool,
   createPreflightDeclaredChecksTool,
+  DELEGATION_BYTES_PER_TOKEN,
+  DELEGATION_CACHED_PREFIX_TOKENS,
+  estimateDelegationFootprint,
+  type FootprintEstimatorDependencies,
   processResultFromExecFile,
   createResolveBaseRefTool,
   type GitExec,
@@ -2479,5 +2485,175 @@ describe("tool args schema exposure", () => {
       "tier",
       "whatWasBuilt",
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// estimateDelegationFootprint guard paths (DELEG-FR-001, compaction-storm
+// task 3.1). The guarded command-body read is fail-closed: a rejection or
+// read failure can never understate the delegation's prompt material,
+// because every guard path returns the conservative default (cached
+// prefix + the 1 MiB command-file cap over the byte-per-token divisor +
+// material tokens). The seam is fully faked (no filesystem) — the
+// fakeFootprintSeam pattern from unleash-delegate.test.ts extended with a
+// configurable realpath and call recording, so tests can also assert
+// which guard fired before the read was attempted.
+// ---------------------------------------------------------------------------
+
+describe("estimateDelegationFootprint guard paths (DELEG-FR-001, compaction-storm task 3.1)", () => {
+  /** Fake repository root — the faked seams keep every path fictional. */
+  const CWD = "/fake/project"
+
+  /** Independent oracle for the documented 4-bytes-per-token estimate. */
+  const tokensFor = (text: string): number =>
+    Math.ceil(Buffer.byteLength(text, "utf8") / DELEGATION_BYTES_PER_TOKEN)
+
+  /** Conservative default for the given material — what every guard path returns. */
+  const conservativeFor = (material: string): number =>
+    DELEGATION_CACHED_PREFIX_TOKENS + CONSERVATIVE_COMMAND_BODY_TOKENS + tokensFor(material)
+
+  /**
+   * Configurable footprint-estimator seam: serves reads from a files map
+   * (ENOENT on misses, mirroring fakeFootprintSeam), delegates realpath to
+   * an injectable resolver (identity by default — the fake root is already
+   * symlink-free), and records every call so tests can pin guard ordering.
+   */
+  function recordingSeam(options: {
+    readonly files?: Readonly<Record<string, string>>
+    readonly resolveReal?: (path: string) => string | null
+  } = {}): {
+    readonly seams: FootprintEstimatorDependencies
+    readonly readCalls: string[]
+    readonly realpathCalls: string[]
+  } {
+    const readCalls: string[] = []
+    const realpathCalls: string[] = []
+    const files = options.files ?? {}
+    const resolveReal = options.resolveReal ?? ((path: string) => path)
+    const seams: FootprintEstimatorDependencies = {
+      readText: async (path) => {
+        readCalls.push(path)
+        if (!(path in files)) {
+          throw Object.assign(new Error(`ENOENT: no such file or directory, ${path}`), { code: "ENOENT" })
+        }
+        return files[path]
+      },
+      realpath: (path) => {
+        realpathCalls.push(path)
+        return resolveReal(path)
+      },
+    }
+    return { seams, readCalls, realpathCalls }
+  }
+
+  // "Run the deploy." is 15 bytes = 4 tokens at 4 bytes/token.
+  const MATERIAL = "Run the deploy."
+  const COMMAND_PATH = "commands/deploy.md"
+  const COMMAND_ABS = join(CWD, COMMAND_PATH)
+  // 37 bytes = 10 tokens — small enough that the conservative default
+  // (262,144 tokens) dwarfs the measured body, which is what makes the
+  // fail-closed comparison in the read-failure test meaningful.
+  const COMMAND_BODY = "# Deploy command\n\nRun the deployment."
+
+  it("returns the conservative default and names the path when the command path escapes the root lexically", async () => {
+    const { seams, readCalls, realpathCalls } = recordingSeam()
+
+    const result = await estimateDelegationFootprint(CWD, "../outside.md", MATERIAL, seams)
+
+    expect(result.tokens).toBe(conservativeFor(MATERIAL))
+    expect(result.fallback).toBe(
+      'command path "../outside.md" escapes the repository root; using the conservative default command-body footprint',
+    )
+    // The lexical guard rejects before any filesystem seam is consulted.
+    expect(readCalls).toEqual([])
+    expect(realpathCalls).toEqual([])
+  })
+
+  it("returns the conservative default when realpath resolves the target outside the real root (symlink escape)", async () => {
+    const outside = "/elsewhere/deploy.md"
+    const { seams, readCalls } = recordingSeam({
+      resolveReal: (path) => (path === COMMAND_ABS ? outside : path),
+    })
+
+    const result = await estimateDelegationFootprint(CWD, COMMAND_PATH, MATERIAL, seams)
+
+    expect(result.tokens).toBe(conservativeFor(MATERIAL))
+    expect(result.fallback).toBe(
+      `command path "${COMMAND_PATH}" resolves outside the repository root (symlink or unresolvable path); using the conservative default command-body footprint`,
+    )
+    // The symlink guard rejects before the command body is read.
+    expect(readCalls).toEqual([])
+  })
+
+  it("returns the conservative default when realpath is unresolvable (null root or null target)", async () => {
+    const nullRoot = recordingSeam({ resolveReal: () => null })
+    const nullRootResult = await estimateDelegationFootprint(CWD, COMMAND_PATH, MATERIAL, nullRoot.seams)
+
+    expect(nullRootResult.tokens).toBe(conservativeFor(MATERIAL))
+    expect(nullRootResult.fallback).toBe(
+      `command path "${COMMAND_PATH}" resolves outside the repository root (symlink or unresolvable path); using the conservative default command-body footprint`,
+    )
+
+    const nullTarget = recordingSeam({
+      resolveReal: (path) => (path === CWD ? path : null),
+    })
+    const nullTargetResult = await estimateDelegationFootprint(CWD, COMMAND_PATH, MATERIAL, nullTarget.seams)
+
+    expect(nullTargetResult.tokens).toBe(conservativeFor(MATERIAL))
+    expect(nullTargetResult.fallback).toBe(
+      `command path "${COMMAND_PATH}" resolves outside the repository root (symlink or unresolvable path); using the conservative default command-body footprint`,
+    )
+  })
+
+  it("returns the conservative default carrying the error message on a read failure, never understating the measured footprint", async () => {
+    const failed = await estimateDelegationFootprint(
+      CWD,
+      COMMAND_PATH,
+      MATERIAL,
+      recordingSeam().seams, // no files — the read throws ENOENT
+    )
+
+    expect(failed.tokens).toBe(conservativeFor(MATERIAL))
+    expect(failed.fallback).toBe(
+      `cannot read command body for footprint estimation: ENOENT: no such file or directory, ${COMMAND_ABS}; using the conservative default command-body footprint`,
+    )
+    // DE-001 fail-closed property: the guarded result equals the
+    // conservative default for the same material and is never smaller —
+    // neither than the default nor than a successful measurement of the
+    // same command body would have been.
+    expect(failed.tokens).toBeGreaterThanOrEqual(conservativeFor(MATERIAL))
+    const measured = await estimateDelegationFootprint(
+      CWD,
+      COMMAND_PATH,
+      MATERIAL,
+      recordingSeam({ files: { [COMMAND_ABS]: COMMAND_BODY } }).seams,
+    )
+    expect(failed.tokens).toBeGreaterThanOrEqual(measured.tokens)
+  })
+
+  it("measures the command body from disk on the happy path", async () => {
+    const { seams, readCalls, realpathCalls } = recordingSeam({ files: { [COMMAND_ABS]: COMMAND_BODY } })
+
+    const result = await estimateDelegationFootprint(CWD, COMMAND_PATH, MATERIAL, seams)
+
+    // Cached prefix (56,000) + command body (37 bytes = 10 tokens) +
+    // material (15 bytes = 4 tokens), each measured directly.
+    expect(result.tokens).toBe(DELEGATION_CACHED_PREFIX_TOKENS + tokensFor(COMMAND_BODY) + tokensFor(MATERIAL))
+    expect(result.fallback).toBeNull()
+    // The symlink guard runs before the read: root first, then the target.
+    expect(realpathCalls).toEqual([CWD, COMMAND_ABS])
+    expect(readCalls).toEqual([COMMAND_ABS])
+  })
+
+  it("counts only the cached prefix and material for prompt-only delegations", async () => {
+    const { seams, readCalls, realpathCalls } = recordingSeam()
+
+    const result = await estimateDelegationFootprint(CWD, undefined, MATERIAL, seams)
+
+    expect(result.tokens).toBe(DELEGATION_CACHED_PREFIX_TOKENS + tokensFor(MATERIAL))
+    expect(result.fallback).toBeNull()
+    // Prompt-only delegations never touch the filesystem.
+    expect(readCalls).toEqual([])
+    expect(realpathCalls).toEqual([])
   })
 })
