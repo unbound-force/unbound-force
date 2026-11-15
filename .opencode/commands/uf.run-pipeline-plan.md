@@ -322,6 +322,12 @@ delegations add `resume` (`last_checkpoint_step`,
 - `timeout.kind: "budget"` — not expected at the
   orchestrator (it has no budgeted parent); treat it
   as `wall_clock`.
+- `timeout.kind: "storm"` — a retryable `context_thrash`
+  failure carrying a resume envelope; treat it as
+  `idle`: re-delegate the same command once from the
+  envelope's durable progress state (`command`, `key`,
+  `last_checkpoint_step`, `completed_steps`) rather than
+  routing to the blocked-item protocol.
 
 When `resume.last_checkpoint_step` is non-null, NEVER
 restart the item fresh on `main`: durable progress

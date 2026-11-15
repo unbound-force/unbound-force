@@ -191,12 +191,31 @@ describe("parsing", () => {
   })
 
   it("classifies test files by seam layer", () => {
-    expect(classifyTest(".opencode/test/registration-surface.test.ts", "", "t")).toBe("registration")
-    expect(classifyTest(".opencode/test/golden-output-shape.test.ts", "", "t")).toBe("output-shape")
-    expect(classifyTest(".opencode/test/x-roundtrip.test.ts", "", "t")).toBe("round-trip")
-    expect(classifyTest(".opencode/test/x.test.ts", 'describe("my_tool round trip", () => {})', "my_tool")).toBe("round-trip")
-    expect(classifyTest(".opencode/test/x.test.ts", 'it("round-trips through my_tool")', "my_tool")).toBe("round-trip")
-    expect(classifyTest(".opencode/test/x.test.ts", 'it("round trip of other_tool")', "my_tool")).toBe("other")
+    expect(classifyTest(".opencode/test/registration-surface.test.ts", "", "t")).toEqual(["registration"])
+    expect(classifyTest(".opencode/test/golden-output-shape.test.ts", "", "t")).toEqual(["output-shape"])
+    expect(classifyTest(".opencode/test/x-roundtrip.test.ts", "", "t")).toEqual(["round-trip"])
+    expect(classifyTest(".opencode/test/x.test.ts", 'describe("my_tool round trip", () => {})', "my_tool")).toEqual(["round-trip"])
+    expect(classifyTest(".opencode/test/x.test.ts", 'it("round-trips through my_tool")', "my_tool")).toEqual(["round-trip"])
+    expect(classifyTest(".opencode/test/x.test.ts", 'it("round trip of other_tool")', "my_tool")).toEqual(["other"])
+  })
+
+  it("classifies describe-scoped layer titles, one file covering several layers", () => {
+    // A tool-naming describe scopes its suite to a layer, in either
+    // word order; titles naming another tool never credit this one.
+    expect(classifyTest(".opencode/test/x.test.ts", 'describe("my_tool seam verification", () => {})', "my_tool")).toEqual(["output-shape"])
+    expect(classifyTest(".opencode/test/x.test.ts", 'it("seam verification of my_tool")', "my_tool")).toEqual(["output-shape"])
+    expect(classifyTest(".opencode/test/x.test.ts", 'describe("my_tool compaction-storm surfacing", () => {})', "my_tool")).toEqual(["round-trip"])
+    expect(classifyTest(".opencode/test/x.test.ts", 'it("seam verification of other_tool")', "my_tool")).toEqual(["other"])
+    // One file, two tool-naming describes: both layers, DE-007 order.
+    const both = 'describe("my_tool seam verification", () => {})\ndescribe("my_tool compaction-storm surfacing", () => {})'
+    expect(classifyTest(".opencode/test/x.test.ts", both, "my_tool")).toEqual(["output-shape", "round-trip"])
+    // Real-repo pins (DE-007 discoverability): the live suites that
+    // verify uf_delegate_command's seams must read as covered layers,
+    // not "other" -- the evidence command feeds the seam report.
+    const live = readFileSync(join(REPO, ".opencode/test/unleash-delegate.test.ts"), "utf8")
+    expect(classifyTest(".opencode/test/unleash-delegate.test.ts", live, "uf_delegate_command")).toEqual(["output-shape", "round-trip"])
+    const matrix = readFileSync(join(REPO, ".opencode/test/model-matrix-integration.test.ts"), "utf8")
+    expect(classifyTest(".opencode/test/model-matrix-integration.test.ts", matrix, "uf_delegate_command")).toEqual(["output-shape"])
   })
 
   it("finds the registry only in code, ignoring comment and string decoys", () => {
@@ -242,7 +261,7 @@ describe("parsing", () => {
     expect(locateFactory(".opencode/plugins/p/index.ts", "create$Tool", memReader(files))).toEqual({
       file: ".opencode/lib/d.ts", line: 1, endLine: 3, description: "dollar",
     })
-    expect(classifyTest(".opencode/test/x.test.ts", 'it("round-trips through my$tool")', "my$tool")).toBe("round-trip")
+    expect(classifyTest(".opencode/test/x.test.ts", 'it("round-trips through my$tool")', "my$tool")).toEqual(["round-trip"])
   })
 
   it("collects lib CLIs by entry guard and .uf scripts with their first comment line", () => {
@@ -345,6 +364,32 @@ describe("seam report", () => {
     expect(text).toContain("registration  generic: .opencode/test/registration-surface.test.ts")
     expect(text).toMatch(/round-trip\s+\.opencode\/test\/new-roundtrip\.test\.ts {2}\(changed\)/)
     expect(text).toContain("missing: round-trip")
+  })
+
+  it("credits several seam layers when one test file carries several tool-naming describes", { timeout: 30000 }, () => {
+    const root = scratch()
+    // edit_tool's factory description changes, so edit_tool is modified.
+    writeFileSync(
+      join(root, ".opencode/plugins/alpha/index.ts"),
+      plugin(
+        ["keep_tool: createKeep()", "edit_tool: createEdit()", "drop_tool: createDrop()"],
+        factory("createKeep", "keep") + factory("createEdit", "edit v2") + factory("createDrop", "drop"),
+      ),
+    )
+    // One test file, two tool-naming describes: the report carries one
+    // row per credited layer, so no layer stays missing.
+    writeFileSync(
+      join(root, ".opencode/test/unit.test.ts"),
+      'describe("edit_tool seam verification", () => {})\ndescribe("edit_tool compaction-storm surfacing", () => {})\n',
+    )
+    const parsed = JSON.parse(cli(["--seams", "--base", "main", "--json"], root).out) as SeamReport
+    expect(parsed.seams.map((s) => s.tool)).toEqual(["edit_tool"])
+    expect(parsed.seams[0]?.tests).toEqual([
+      { file: ".opencode/test/golden-output-shape.test.ts", layer: "output-shape", changed: false },
+      { file: ".opencode/test/unit.test.ts", layer: "output-shape", changed: true },
+      { file: ".opencode/test/unit.test.ts", layer: "round-trip", changed: true },
+    ])
+    expect(parsed.seams[0]?.missing).toEqual([])
   })
 
   it("treats an untracked plugin as all-new and reports nothing for an unchanged tree", { timeout: 30000 }, () => {

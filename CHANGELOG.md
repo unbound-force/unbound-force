@@ -6,6 +6,30 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- compaction-storm-on-a-tight-context-mode: delegation
+  now refuses tight-context models and aborts compaction
+  storms. A selection headroom gate (DELEG-FR-001) skips
+  matrix candidates whose usable window cannot hold the
+  estimated prompt footprint plus a working margin
+  (`selection.footprint_margin_tokens`, valid range
+  1,000--256,000, default 24,000), recording every
+  rejection in the `selection_fallback_reason` audit
+  field before falling through to the host model. Every
+  child run arms a compaction-storm detector (DELEG-FR-002):
+  `delegation.storm_threshold` (valid range 2--10, default
+  3) consecutive compactions with no substantive progress
+  abort the child as a retryable `context_thrash` failure
+  carrying the `storm` timeout kind and a durable resume
+  envelope, and a final-text success guard (DELEG-FR-003)
+  reclassifies compaction-summary final messages as the
+  retryable `synthetic_final_text` code so a thrashed run
+  is never reported as success. Compaction events no longer
+  count as idle-probe progress (DT-FR-002), so a compaction
+  loop cannot masquerade as activity against the idle
+  timeout. Knobs, failure codes, and the resume envelope
+  are documented in docs/configuration.md. (Spec:
+  openspec/changes/compaction-storm-on-a-tight-context-mode/proposal.md)
+  (Fixes: #1079, Docs: #1099)
 - nightly-command-evals: end-to-end evals of uf commands under
   `.eval/`. Five `/uf.review-council` fixtures (three
   argument-rejection fixtures and two council fixtures with a
