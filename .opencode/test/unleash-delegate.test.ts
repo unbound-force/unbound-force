@@ -3459,7 +3459,12 @@ describe("uf_delegate_command timeout budgets", () => {
         task_classification: "judgment",
         timeout: 1_800_000,
       })
-      await vi.advanceTimersByTimeAsync(700_000)
+      // The running question tool call is a running part, so DT-FR-014
+      // defers the idle abort until idle_timeout (600 s) plus the
+      // IDLE_DEFERRAL_CAP_MS bound measured from the first probe's
+      // fingerprint change (30 s + 600 s + 900 s = 1,530 s) -- still
+      // before the 1,800 s wall clock.
+      await vi.advanceTimersByTimeAsync(1_540_000)
       const result = (await pending) as unknown as Record<string, unknown>
 
       expect(result.code).toBe("DELEGATE_FAILED")
@@ -3467,6 +3472,7 @@ describe("uf_delegate_command timeout budgets", () => {
         kind: "idle",
         idle_timeout_ms: 600_000,
         pending_question: true,
+        running_tool: "question",
       })
     } finally {
       vi.useRealTimers()

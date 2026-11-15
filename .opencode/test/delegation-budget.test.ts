@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { executeAgentSession, type InvocationProvenance } from "../lib/agent-executor.js"
 import {
   BUDGET_RESERVE_MS,
+  IDLE_DEFERRAL_CAP_MS,
+  IDLE_TOOL_GRACE_MS,
   MAX_ANCESTRY_DEPTH,
   MAX_CONTINUATION_PROMPT_LENGTH,
   MAX_PROBE_SESSIONS,
@@ -12,6 +14,8 @@ import {
   READ_ONLY_TOOLS,
   clampToBudget,
   classifySyntheticText,
+  collectRunningTools,
+  idleDeferralExpired,
   isCompactionMarker,
   isSubstantiveProgress,
   messageFingerprint,
@@ -20,6 +24,7 @@ import {
   registeredDeadline,
   registeredProbeCounters,
   resolveInheritedDeadline,
+  selectRunningTool,
   unregisterDeadline,
   unregisterProbeState,
 } from "../lib/delegation-budget.js"
@@ -216,7 +221,39 @@ describe("messageFingerprint", () => {
     circular.self = circular
     expect(
       messageFingerprint("s", message("m", [{ id: "t", type: "tool", state: { status: "running", metadata: circular } }])),
-    ).toBe("s:m:::1:t:tool:running::0")
+    ).toBe("s:m:::1:t:tool:running::0~t:running:")
+  })
+
+  it("folds the sorted running triples into the hash (DT-FR-013)", () => {
+    // A quiet running bash -- constant metadata, no new messages -- has a
+    // stable fingerprint; the running set itself is part of the hash, so
+    // set changes still read as progress.
+    const quiet = () =>
+      messageFingerprint("s", message("m", [{ id: "p2", type: "tool", tool: "bash", state: { status: "running", metadata: { output: "same" } } }]))
+    expect(messageFingerprint("s", quiet())).toBe(messageFingerprint("s", quiet()))
+    // A tool swap on the same partId changes the triple set.
+    const swap = messageFingerprint("s", message("m", [{ id: "p2", type: "tool", tool: "read", state: { status: "running" } }]))
+    expect(messageFingerprint("s", quiet())).not.toBe(swap)
+    // A new bash part (the old one completed, partId changed) is progress.
+    const next = messageFingerprint("s", message("m", [{ id: "p3", type: "tool", tool: "bash", state: { status: "running" } }]))
+    expect(messageFingerprint("s", quiet())).not.toBe(next)
+    // Completing the part drops the suffix, which is also a change.
+    const done = messageFingerprint("s", message("m", [{ id: "p2", type: "tool", tool: "bash", state: { status: "completed" } }]))
+    expect(messageFingerprint("s", quiet())).not.toBe(done)
+  })
+
+  it("sorts multiple running parts by partId and omits the suffix when none run", () => {
+    const two = messageFingerprint(
+      "s",
+      message("m", [
+        { id: "done", type: "tool", tool: "bash", state: { status: "completed" } },
+        { id: "b2", type: "tool", tool: "bash", state: { status: "running" } },
+        { id: "a1", type: "tool", tool: "read", state: { status: "running" } },
+      ]),
+    )
+    expect(two).toContain("~a1:running:read,b2:running:bash")
+    expect(two).not.toContain("done")
+    expect(messageFingerprint("s", message("m", [{ id: "done", type: "tool", tool: "bash", state: { status: "completed" } }]))).not.toContain("~")
   })
 
   it("records completion and error presence", () => {
@@ -243,6 +280,97 @@ describe("messageFingerprint", () => {
     expect(trigger).toBe("s:synthetic")
     expect(summary).toBe("s:synthetic")
     expect(continuation).toBe("s:synthetic")
+  })
+
+  it("keeps running parts out of marker fingerprints (DT-FR-002 + DT-FR-013)", () => {
+    // A marker message carrying a running part still collapses to the
+    // synthetic constant: markers never count as fingerprint progress,
+    // whatever parts ride them.
+    const marker = message("m", [{ id: "p1", type: "tool", tool: "bash", state: { status: "running" } }], { mode: "compaction" })
+    expect(messageFingerprint("s", marker)).toBe("s:synthetic")
+  })
+})
+
+describe("collectRunningTools", () => {
+  it("collects running parts sorted by partId with tool default and deadline contingency", () => {
+    const parts = [
+      { id: "b", type: "tool", tool: "bash", state: { status: "running", metadata: { deadline_ms: 123 } } },
+      { id: "a", type: "tool", state: { status: "running", metadata: { deadline_ms: "not-a-number" } } },
+      { id: "c", type: "tool", tool: "read", state: { status: "completed" } },
+      { id: "d", type: "text", text: "idle" },
+    ]
+    expect(collectRunningTools(message("m", parts))).toEqual([
+      { partId: "a", status: "running", tool: "", deadlineMs: null },
+      { partId: "b", status: "running", tool: "bash", deadlineMs: 123 },
+    ])
+    expect(collectRunningTools(undefined)).toEqual([])
+  })
+})
+
+describe("selectRunningTool (DT-FR-015)", () => {
+  const part = (partId: string, tool: string) => ({ partId, status: "running" as const, tool, deadlineMs: null })
+
+  it("returns null when no part is running", () => {
+    expect(selectRunningTool([])).toBeNull()
+  })
+
+  it("selects the running part with the lexicographically smallest partId", () => {
+    expect(selectRunningTool([part("z9", "bash"), part("a1", "gaze"), part("m5", "read")])).toBe("gaze")
+  })
+
+  it("breaks partId ties deterministically by tool name", () => {
+    expect(selectRunningTool([part("p1", "read"), part("p1", "bash")])).toBe("bash")
+  })
+
+  it("reports null when the selected name fails validation, without falling through", () => {
+    // The smallest-partId part's name is adversarial model input: it
+    // must report null rather than skipping to the next part, and the
+    // raw value never leaves this call to be logged.
+    expect(selectRunningTool([part("z9", "bash"), part("a1", "bash; rm -rf /")])).toBeNull()
+    expect(selectRunningTool([part("a1", "tool with spaces")])).toBeNull()
+    expect(selectRunningTool([part("a1", "")])).toBeNull()
+    expect(selectRunningTool([part("a1", `x`.repeat(129))])).toBeNull()
+    expect(selectRunningTool([part("a1", "mcp__server.tool:v2")])).toBe("mcp__server.tool:v2")
+  })
+})
+
+describe("idleDeferralExpired (DT-FR-014)", () => {
+  const part = (partId: string, deadlineMs: number | null) => ({ partId, status: "running" as const, tool: "bash", deadlineMs })
+  const anchor = 1_000
+  const idle = 600_000
+
+  it("treats the deferral as vacuous with no running parts", () => {
+    expect(idleDeferralExpired([], idle, anchor, anchor + 10 * idle)).toBe(true)
+  })
+
+  it("never reports expiry while the idle watchdog is disabled", () => {
+    expect(idleDeferralExpired([part("p", null)], undefined, anchor, anchor + 10 * idle)).toBe(false)
+  })
+
+  it("holds until idle_timeout plus the cap since the last fingerprint change", () => {
+    const bound = anchor + idle + IDLE_DEFERRAL_CAP_MS
+    expect(idleDeferralExpired([part("p", null)], idle, anchor, bound - 1)).toBe(false)
+    expect(idleDeferralExpired([part("p", null)], idle, anchor, bound)).toBe(true)
+  })
+
+  it("holds until the earliest observable deadline plus grace", () => {
+    const deadline = anchor + 720_000
+    expect(idleDeferralExpired([part("p", deadline)], idle, anchor, deadline + IDLE_TOOL_GRACE_MS - 1)).toBe(false)
+    expect(idleDeferralExpired([part("p", deadline)], idle, anchor, deadline + IDLE_TOOL_GRACE_MS)).toBe(true)
+  })
+
+  it("covers the earliest of multiple deadlines", () => {
+    const early = anchor + 60_000
+    const late = anchor + 3_600_000
+    expect(idleDeferralExpired([part("late", late), part("early", early)], idle, anchor, early + IDLE_TOOL_GRACE_MS)).toBe(true)
+    expect(idleDeferralExpired([part("late", late)], idle, anchor, early + IDLE_TOOL_GRACE_MS)).toBe(false)
+  })
+
+  it("uses the deadline path when any running part exposes a deadline", () => {
+    // A mixed set (one deadline-bearing, one not) follows the earliest
+    // observable deadline, per DT-FR-014, not the cap.
+    const deadline = anchor + 3_600_000
+    expect(idleDeferralExpired([part("no-deadline", null), part("deadline", deadline)], idle, anchor, anchor + idle + IDLE_DEFERRAL_CAP_MS)).toBe(false)
   })
 })
 
@@ -305,6 +433,72 @@ describe("probeSubtreeActivity", () => {
     expect(await probeSubtreeActivity(treeClient({ failMessages: true }).client, "r", DIRECTORY, signal)).toBeNull()
     expect(await probeSubtreeActivity(treeClient({ undefinedMessages: true }).client, "r", DIRECTORY, signal)).toBeNull()
     expect(await probeSubtreeActivity(treeClient({ undefinedChildren: true }).client, "r", DIRECTORY, signal)).toBeNull()
+  })
+})
+
+describe("probeSubtreeActivity running tools (DT-FR-013)", () => {
+  const roots: string[] = []
+  /** Register a probe root id that afterEach cleans up. */
+  const root = (id: string): string => {
+    roots.push(id)
+    return id
+  }
+
+  afterEach(() => {
+    for (const id of roots.splice(0)) {
+      unregisterProbeState(id)
+    }
+  })
+
+  it("carries a quiet running bash on the sample with a stable fingerprint", async () => {
+    const probeRoot = root("r-running")
+    const sessions: Record<string, FakeSession> = {
+      [probeRoot]: { children: ["kid"] },
+      kid: {
+        created: 1,
+        latest: message("m", [{ id: "p1", type: "tool", tool: "bash", state: { status: "running", metadata: { output: "steady" } } }]),
+      },
+    }
+    const fake = treeClient({ sessions })
+    const first = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    const second = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    // Quiet bash, no new messages: the fingerprint is stable (the old
+    // behavior that misread this as idle), but the running part rides
+    // the sample so the watcher can defer within the DT-FR-014 bound.
+    expect(second?.fingerprint).toBe(first?.fingerprint)
+    expect(first?.runningTools).toEqual([{ partId: "p1", status: "running", tool: "bash", deadlineMs: null }])
+    expect(second?.runningTools).toEqual(first?.runningTools)
+  })
+
+  it("unions and sorts running parts across sessions by partId", async () => {
+    const probeRoot = root("r-union")
+    const sessions: Record<string, FakeSession> = {
+      [probeRoot]: { children: ["zKid", "aKid"] },
+      zKid: { created: 1, latest: message("mz", [{ id: "z1", type: "tool", tool: "bash", state: { status: "running" } }]) },
+      aKid: { created: 2, latest: message("ma", [{ id: "a1", type: "tool", tool: "gaze", state: { status: "running" } }]) },
+    }
+    const fake = treeClient({ sessions })
+    const sample = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    expect(sample?.runningTools.map((part) => part.partId)).toEqual(["a1", "z1"])
+  })
+
+  it("collects running parts from a marker latest message without fingerprint progress", async () => {
+    const probeRoot = root("r-marker-running")
+    const sessions: Record<string, FakeSession> = {
+      [probeRoot]: { latest: message("m1", [{ id: "p1", type: "text", text: "working" }]) },
+    }
+    const fake = treeClient({ sessions })
+    const first = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    // A marker arrives carrying a running part: the print stays the
+    // remembered pre-marker print (no fingerprint progress, DT-FR-002)
+    // while the running part still rides the sample because DT-FR-014's
+    // deferral keys off any running tool in the subtree.
+    sessions[probeRoot] = {
+      latest: message("c1", [{ id: "r1", type: "tool", tool: "bash", state: { status: "running" } }], { mode: "compaction" }),
+    }
+    const second = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    expect(second?.fingerprint).toBe(first?.fingerprint)
+    expect(second?.runningTools).toEqual([{ partId: "r1", status: "running", tool: "bash", deadlineMs: null }])
   })
 })
 
@@ -723,7 +917,9 @@ describe("executeAgentSession budgets and idle watchdog", () => {
     expect(result.error?.code).toBe("idle_timeout")
     expect(result.error?.retryable).toBe(true)
     expect(result.error?.message).toBe("invoke_agent run made no progress for 10000 ms")
-    expect(result.timeout).toMatchObject({ kind: "idle", child_active: false, idle_timeout_ms: 10_000 })
+    // DT-FR-014/015: a true stall has no running parts, so the deferral
+    // is vacuous and the envelope discriminates it with running_tool null.
+    expect(result.timeout).toMatchObject({ kind: "idle", child_active: false, idle_timeout_ms: 10_000, running_tool: null })
     // First probe at 1 s records the baseline; the unchanged probe at 11 s ends the run.
     expect(result.timeout?.elapsed_ms).toBe(11_000)
     expect(result.childSessionID).toBe("exec-child")
@@ -763,6 +959,138 @@ describe("executeAgentSession budgets and idle watchdog", () => {
     const result = await pending
     expect(result.error?.code).toBe("timeout")
     expect(result.timeout?.child_active).toBe(true)
+  })
+
+  it("defers idle while a quiet bash runs and reports it on the wall-clock abort (DT-FR-014/015)", async () => {
+    // No fingerprint change after the baseline: under the old rule the
+    // quiet running bash would idle-abort at 2 s; the deferral holds
+    // idle until the wall clock fires at 5 s, and the envelope names
+    // the tool that was running.
+    const fake = executorClient({
+      latest: () => message("m", [{ id: "b1", type: "tool", tool: "bash", state: { status: "running", metadata: { output: "steady" } } }]),
+    })
+    const pending = run(fake.client, { timeoutMilliseconds: 5_000, idleTimeoutMilliseconds: 2_000 })
+    await vi.advanceTimersByTimeAsync(5_000)
+    const result = await pending
+    expect(result.error?.code).toBe("timeout")
+    expect(result.timeout).toMatchObject({ kind: "wall_clock", running_tool: "bash" })
+    // DT-FR-013: the running part counts as activity within the bound,
+    // so progress reads at the polling interval, not the idle window.
+    expect(result.timeout?.last_progress_ms_ago).toBe(1_000)
+    expect(result.timeout?.child_active).toBe(true)
+  })
+
+  it("does not promote a tool timeout error to an idle abort (DT-FR-014)", async () => {
+    // The quiet bash survives the 3 s idle window under the deferral;
+    // at 5 s the part's status flips to error -- the tool's own
+    // timeout returned -- which is a fingerprint change that resets
+    // the idle clock, so the model gets a full idle window to handle
+    // the error instead of an immediate idle kill.
+    let phase: "running" | "error" = "running"
+    const fake = executorClient({
+      latest: () =>
+        phase === "running"
+          ? message("m", [{ id: "b1", type: "tool", tool: "bash", state: { status: "running", metadata: { output: "steady" } } }])
+          : message("m", [{ id: "b1", type: "tool", tool: "bash", state: { status: "error", error: "command timed out" } }]),
+    })
+    const pending = run(fake.client, { timeoutMilliseconds: 60_000, idleTimeoutMilliseconds: 3_000 })
+    await vi.advanceTimersByTimeAsync(4_000)
+    phase = "error"
+    await vi.advanceTimersByTimeAsync(10_000)
+    const result = await pending
+    expect(result.error?.code).toBe("idle_timeout")
+    // Baseline at 1 s; the flip lands on the 5 s probe, so the idle
+    // clock restarts at 5 s and fires at 8 s with no running part.
+    expect(result.timeout).toMatchObject({ kind: "idle", running_tool: null, elapsed_ms: 8_000 })
+  })
+
+  it("aborts a never-returned dispatch_review_runs wait as idle with no running parts (DT-FR-014)", async () => {
+    // The #1117 evidence: the model called dispatch_review_runs, it
+    // never returned, and no part in the subtree carries a running
+    // state -- stalling between tool calls stays subject to the plain
+    // idle window.
+    const fake = executorClient({
+      latest: () => message("m", [{ id: "dr", type: "tool", tool: "dispatch_review_runs" }]),
+    })
+    const pending = run(fake.client, { timeoutMilliseconds: 60_000, idleTimeoutMilliseconds: 10_000 })
+    await vi.advanceTimersByTimeAsync(15_000)
+    const result = await pending
+    expect(result.error?.code).toBe("idle_timeout")
+    expect(result.timeout).toMatchObject({ kind: "idle", running_tool: null, idle_timeout_ms: 10_000 })
+  })
+
+  it("aborts a stuck running part at idle_timeout plus IDLE_DEFERRAL_CAP_MS (DT-FR-014)", async () => {
+    // A running bash with no observable deadline and no fingerprint
+    // change holds idle exactly until idle_timeout plus the cap,
+    // measured from the baseline probe's fingerprint change.
+    const fake = executorClient({
+      latest: () => message("m", [{ id: "b1", type: "tool", tool: "bash", state: { status: "running", metadata: { output: "steady" } } }]),
+    })
+    const pending = run(fake.client, { timeoutMilliseconds: 2_000_000, idleTimeoutMilliseconds: 600_000 })
+    await vi.advanceTimersByTimeAsync(1_501_000)
+    const result = await pending
+    expect(result.error?.code).toBe("idle_timeout")
+    expect(result.timeout).toMatchObject({ kind: "idle", running_tool: "bash", idle_timeout_ms: 600_000 })
+    // Baseline at 1 s: 1 s + 600 s idle + 900 s cap = 1,501 s.
+    expect(result.timeout?.elapsed_ms).toBe(1_501_000)
+  })
+
+  it("reports running_tool null for an adversarial tool name without echoing it (DT-FR-015)", async () => {
+    // The smallest-partId running part carries a name that fails
+    // validation: the envelope reports null and the raw value never
+    // reaches the result (Constitution V: untrusted input is never
+    // echoed).
+    const fake = executorClient({
+      latest: () => message("m", [{ id: "evil", type: "tool", tool: "bash; rm -rf /", state: { status: "running" } }]),
+    })
+    const pending = run(fake.client, { timeoutMilliseconds: 5_000, idleTimeoutMilliseconds: 2_000 })
+    await vi.advanceTimersByTimeAsync(5_000)
+    const result = await pending
+    expect(result.error?.code).toBe("timeout")
+    expect(result.timeout?.running_tool).toBeNull()
+    expect(JSON.stringify(result.timeout)).not.toContain("rm -rf")
+    expect(JSON.stringify(result)).not.toContain("rm -rf")
+  })
+
+  it("keeps a 15-minute quiet bash alive under a 10-minute idle timeout (DT-FR-013 scenario 1)", async () => {
+    // Timer-controlled #1117 scenario, no real 15-minute sleep: the
+    // quiet running bash holds the idle abort past the 10-minute idle
+    // deadline; the wall clock (16 minutes) ends the run, and the
+    // envelope names the tool with progress at the polling interval.
+    const fake = executorClient({
+      latest: () => message("m", [{ id: "b1", type: "tool", tool: "bash", state: { status: "running", metadata: { output: "steady" } } }]),
+    })
+    const pending = run(fake.client, { timeoutMilliseconds: 960_000, idleTimeoutMilliseconds: 600_000 })
+    await vi.advanceTimersByTimeAsync(900_000)
+    let settled = false
+    void pending.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    // 15 minutes in -- five minutes past the idle deadline -- the run
+    // is still alive.
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(60_000)
+    const result = await pending
+    expect(result.error?.code).toBe("timeout")
+    expect(result.timeout).toMatchObject({ kind: "wall_clock", running_tool: "bash", child_active: true })
+    expect(result.timeout?.last_progress_ms_ago).toBe(1_000)
+  })
+
+  it("aborts the same 10-minute idle window with no running parts (DT-FR-014 true stall)", async () => {
+    const fake = executorClient({ latest: () => message("m", [{ id: "p", type: "text", text: "same" }]) })
+    const pending = run(fake.client, { timeoutMilliseconds: 960_000, idleTimeoutMilliseconds: 600_000 })
+    await vi.advanceTimersByTimeAsync(700_000)
+    const result = await pending
+    expect(result.error?.code).toBe("idle_timeout")
+    expect(result.timeout).toMatchObject({ kind: "idle", running_tool: null, idle_timeout_ms: 600_000 })
+    // Baseline probe at 1 s: the idle window completes at 601 s.
+    expect(result.timeout?.elapsed_ms).toBe(601_000)
   })
 
   it("never idle-aborts when every probe fails", async () => {

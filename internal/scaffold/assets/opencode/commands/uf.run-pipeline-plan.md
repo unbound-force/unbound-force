@@ -294,8 +294,8 @@ without clearing the gate re-hangs at the same gate.
 
 **Delegation timeout recovery**: a `DELEGATE_FAILED`
 envelope that ended by a limit carries a `timeout`
-object (`kind`, `child_active`, `pending_question`)
-beside `child_session_id`, and command-path
+object (`kind`, `child_active`, `pending_question`,
+`running_tool`) beside `child_session_id`, and command-path
 delegations add `resume` (`last_checkpoint_step`,
 `completed_steps`). Branch on those fields:
 
@@ -303,7 +303,12 @@ delegations add `resume` (`last_checkpoint_step`,
   at a question gate: apply gate-timeout recovery
   above.
 - `timeout.kind: "idle"` without a pending question —
-  the child stalled (typically provider latency):
+  the child stalled (typically provider latency).
+  Idle defers while a tool runs (DT-FR-014), so
+  `running_tool: null` marks a stall between tool
+  calls while a non-null value names a stuck tool
+  that outlived the deferral bound (its deadline plus
+  grace, else `idle_timeout` plus a 15-minute cap):
   re-delegate the same command once as a resume (for
   `/uf.unleash`, the mid-pipeline re-run class in
   Unleash Paused-Exit Handling step 4), with the prompt

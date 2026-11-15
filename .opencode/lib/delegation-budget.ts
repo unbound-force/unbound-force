@@ -3,7 +3,12 @@
  * shared by every executeAgentSession caller (OpenSpec change
  * delegation-timeout-budgets, design D1/D2, issue #930). Compaction
  * accounting per compaction-storm-on-a-tight-context-mode design D2
- * (DT-FR-002 / DELEG-FR-002, issue #1079).
+ * (DT-FR-002 / DELEG-FR-002, issue #1079). Running tool-call parts
+ * fold into the progress fingerprint and ride the sample per
+ * idle-timeout-aborts-children-waiting-on (DT-FR-013, issue #1117):
+ * a quiet-but-healthy long tool call counts as activity within the
+ * DT-FR-014 deferral bound, and the collected parts select the abort
+ * envelope's running_tool (DT-FR-015).
  *
  * A child session created by the executor records its absolute
  * deadline here; a nested executor call made from inside that child
@@ -41,6 +46,26 @@ export const ACTIVE_WINDOW_MS = 120_000
 export const DEFAULT_IDLE_POLL_MS = 30_000
 
 /**
+ * Fixed deferral cap for the idle watcher while a tool part is running
+ * (DT-FR-014): with no observable tool deadline, the idle abort fires
+ * no later than idle_timeout plus this cap, measured from the last
+ * fingerprint change. Pinned at 15 minutes, inside the spec's
+ * 5-15 minute (300,000-900,000 ms) range.
+ */
+export const IDLE_DEFERRAL_CAP_MS = 900_000
+
+/**
+ * Grace period added to an observable tool deadline before the idle
+ * watcher may abort (DT-FR-014): the tool's own timeout is
+ * model-handled -- the model receives the tool error and reacts -- so
+ * idle evaluation waits this long past the deadline. Fixed at 30
+ * seconds, under the spec's 60,000 ms cap. Applies only to the
+ * deadline path; the cap path is already measured from the last
+ * fingerprint change and needs no grace.
+ */
+export const IDLE_TOOL_GRACE_MS = 30_000
+
+/**
  * Maximum length of a text that may still match the system-reminder
  * compaction-summary wrapper. Real compaction summaries measure in the
  * tens of thousands of characters, so the bound only exists to keep a
@@ -57,6 +82,14 @@ export const MAX_SYNTHETIC_WRAPPER_LENGTH = 65_536
  * characters total); anything longer cannot be the injected prompt.
  */
 export const MAX_CONTINUATION_PROMPT_LENGTH = 4_096
+
+/**
+ * Validation pattern for a running part's tool name (DT-FR-015,
+ * Constitution V): the name originates from model-controlled message
+ * parts, so it only reaches envelopes and logs when it matches. A
+ * failing value reports as null and is never logged verbatim.
+ */
+export const RUNNING_TOOL_NAME_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
 
 /**
  * Tool names whose completion is read-only inspection and therefore
@@ -180,12 +213,37 @@ export interface ProbeCounters {
   readonly compactionCount: number
 }
 
+/** One tool-call part observed with `state.status === "running"` (DT-FR-013). */
+export interface RunningToolPart {
+  /** Part identity; partId-keyed changes in the running set are progress. */
+  readonly partId: string
+  /** Always "running"; carried so the hashed triple matches the spec. */
+  readonly status: "running"
+  /** The part's tool name, empty string when the part carries none. */
+  readonly tool: string
+  /**
+   * Observable tool deadline (epoch ms) read from the running state's
+   * `metadata.deadline_ms`, or null when none. The session store
+   * exposes no tool deadline today (design D2), so this is a
+   * contingency key: when a host begins populating it, DT-FR-014's
+   * deadline path activates without further probe changes.
+   */
+  readonly deadlineMs: number | null
+}
+
 /** One activity sample of a child's session subtree. */
 export interface ActivitySample extends ProbeCounters {
   /** Opaque fingerprint; any change between samples is progress. */
   readonly fingerprint: string
   /** The latest part of some subtree session is a running question tool call. */
   readonly pendingQuestion: boolean
+  /**
+   * Running tool-call parts observed across the subtree (DT-FR-013),
+   * sorted by (partId, tool). A non-empty set defers the idle abort
+   * within the DT-FR-014 bound and selects the abort envelope's
+   * running_tool (DT-FR-015).
+   */
+  readonly runningTools: readonly RunningToolPart[]
 }
 
 /** Structural kind of a host-injected synthetic text shape (design D3). */
@@ -342,6 +400,120 @@ export function isSubstantiveProgress(message: MessageLike | undefined): boolean
   return last.state?.status === "completed"
 }
 
+/** Deterministic order for running parts: by partId, then tool name. */
+function compareRunningTools(a: RunningToolPart, b: RunningToolPart): number {
+  if (a.partId !== b.partId) {
+    return a.partId < b.partId ? -1 : 1
+  }
+  return a.tool === b.tool ? 0 : a.tool < b.tool ? -1 : 1
+}
+
+/**
+ * Read an observable tool deadline (epoch ms) from a running state's
+ * metadata. The session store exposes no tool deadline today (design
+ * D2), so `metadata.deadline_ms` is a contingency key: only a finite
+ * number is honored; anything else reads as no deadline observable.
+ */
+function observableToolDeadline(metadata: unknown): number | null {
+  if (typeof metadata !== "object" || metadata === null) {
+    return null
+  }
+  const deadline = (metadata as Record<string, unknown>).deadline_ms
+  return typeof deadline === "number" && Number.isFinite(deadline) ? deadline : null
+}
+
+/**
+ * Collect a message's running tool-call parts (DT-FR-013): every part
+ * whose `state.status` is `"running"`, sorted by (partId, tool) so the
+ * hashed triple set and the envelope's deterministic selection stay
+ * stable. The latest message of each walked session is the observable
+ * surface -- a running part lives on the message being streamed, and a
+ * new message appears only after the current one settles.
+ *
+ * @param message - The latest message of a subtree session, if any.
+ * @returns The sorted running parts; empty when none or no message.
+ */
+export function collectRunningTools(message: MessageLike | undefined): RunningToolPart[] {
+  const running: RunningToolPart[] = []
+  for (const part of message?.parts ?? []) {
+    if (part?.state?.status !== "running") {
+      continue
+    }
+    running.push({
+      partId: String(part.id ?? ""),
+      status: "running",
+      tool: typeof part.tool === "string" ? part.tool : "",
+      deadlineMs: observableToolDeadline(part.state.metadata),
+    })
+  }
+  return running.sort(compareRunningTools)
+}
+
+/**
+ * Select the abort envelope's running_tool (DT-FR-015): the tool name
+ * of the running part with the lexicographically smallest partId,
+ * null when no part is running. The name is model-controlled input,
+ * so the selected value is validated against
+ * RUNNING_TOOL_NAME_PATTERN before it is returned; a failure reports
+ * null -- no fall-through to another part, keeping the selection rule
+ * deterministic -- and the raw value never reaches the caller to be
+ * logged.
+ *
+ * @param runningTools - The running parts observed at abort time.
+ * @returns The validated tool name, or null when none or invalid.
+ */
+export function selectRunningTool(runningTools: readonly RunningToolPart[]): string | null {
+  let selected: RunningToolPart | undefined
+  for (const part of runningTools) {
+    if (selected === undefined || compareRunningTools(part, selected) < 0) {
+      selected = part
+    }
+  }
+  if (selected === undefined) {
+    return null
+  }
+  return RUNNING_TOOL_NAME_PATTERN.test(selected.tool) ? selected.tool : null
+}
+
+/**
+ * Whether the DT-FR-014 idle-deferral bound has expired at `at`. With
+ * no running parts the deferral is vacuous -- a true stall between
+ * tool calls stays subject to the plain idle window. While a tool
+ * runs, the bound is the earliest observable tool deadline plus
+ * IDLE_TOOL_GRACE_MS, or -- when no running part exposes a deadline --
+ * idle_timeout plus IDLE_DEFERRAL_CAP_MS measured from the last
+ * fingerprint change, so a wedged tool can never hold idle forever.
+ * The wall clock remains the absolute backstop either way.
+ *
+ * @param runningTools - The running parts observed in the latest sample.
+ * @param idleMilliseconds - The configured idle window; undefined when the idle watchdog is disabled.
+ * @param lastFingerprintChangeAt - When the fingerprint last changed (epoch ms).
+ * @param at - The evaluation time (epoch ms).
+ * @returns True when the idle watcher may abort past the idle window.
+ */
+export function idleDeferralExpired(
+  runningTools: readonly RunningToolPart[],
+  idleMilliseconds: number | undefined,
+  lastFingerprintChangeAt: number,
+  at: number,
+): boolean {
+  if (runningTools.length === 0) {
+    return true
+  }
+  if (idleMilliseconds === undefined) {
+    return false
+  }
+  let earliestDeadline: number | null = null
+  for (const part of runningTools) {
+    if (part.deadlineMs !== null && (earliestDeadline === null || part.deadlineMs < earliestDeadline)) {
+      earliestDeadline = part.deadlineMs
+    }
+  }
+  return earliestDeadline === null
+    ? at - lastFingerprintChangeAt >= idleMilliseconds + IDLE_DEFERRAL_CAP_MS
+    : at >= earliestDeadline + IDLE_TOOL_GRACE_MS
+}
+
 /**
  * Stable identity of a marker message: message id, part count, and
  * last part id. Deliberately excludes streamed text length so a
@@ -362,11 +534,15 @@ function markerKey(message: MessageLike): string {
  * text length, and a running tool streams through its state metadata
  * (bash keeps live output in `state.metadata.output`; the running
  * state has no `output` field), so a long command that keeps printing
- * counts as progress. Compaction markers collapse to one constant per
- * session so marker-to-marker churn leaves the fingerprint unchanged
- * (DT-FR-002); probeSubtreeActivity additionally substitutes the
- * session's remembered pre-marker print so a marker's arrival after a
- * real message also reads as no change.
+ * counts as progress. The sorted set of running `(partId, status,
+ * tool)` triples is appended with a `~` separator (DT-FR-013), so a
+ * completion, a new running part, or a tool swap on the same partId
+ * reads as progress while messages without running parts keep their
+ * historical fingerprint. Compaction markers collapse to one constant
+ * per session so marker-to-marker churn leaves the fingerprint
+ * unchanged (DT-FR-002); probeSubtreeActivity additionally substitutes
+ * the session's remembered pre-marker print so a marker's arrival
+ * after a real message also reads as no change.
  */
 export function messageFingerprint(sessionID: string, message: MessageLike | undefined): string {
   if (message === undefined) {
@@ -380,7 +556,7 @@ export function messageFingerprint(sessionID: string, message: MessageLike | und
   const textLength = typeof last?.text === "string" ? last.text.length : 0
   const outputLength = typeof last?.state?.output === "string" ? last.state.output.length : 0
   const streamedLength = textLength + outputLength + metadataLength(last?.state?.metadata)
-  return [
+  const base = [
     sessionID,
     String(message.info?.id ?? ""),
     String(message.info?.time?.completed ?? ""),
@@ -392,6 +568,14 @@ export function messageFingerprint(sessionID: string, message: MessageLike | und
     typeof last?.state?.title === "string" ? last.state.title : "",
     String(streamedLength),
   ].join(":")
+  // The `~` prefix cannot collide with the base fields (colon-joined)
+  // or the subtree-level `|` join of per-session prints, and sorted,
+  // comma-joined triples keep the hash deterministic (DT-FR-013).
+  const running = collectRunningTools(message)
+  if (running.length === 0) {
+    return base
+  }
+  return `${base}~${running.map((part) => `${part.partId}:${part.status}:${part.tool}`).join(",")}`
 }
 
 function isPendingQuestion(message: MessageLike | undefined): boolean {
@@ -466,19 +650,29 @@ export function unregisterProbeState(rootID: string): void {
   probeRegistry().delete(rootID)
 }
 
+/** Fingerprint contribution and running parts from one session's latest message. */
+interface ProbeContribution {
+  readonly print: string
+  readonly runningTools: RunningToolPart[]
+}
+
 /**
  * Fingerprint contribution of one session's latest message. A marker
  * contributes the session's remembered pre-marker print (or the
  * absent-message placeholder when no real message was ever observed),
  * so neither a marker's arrival nor marker-to-marker churn reads as
  * subtree progress (DT-FR-002: compaction events MUST NOT count as
- * activity changes for the idle clock).
+ * activity changes for the idle clock). Running tool parts are
+ * collected from whatever message is latest, marker or not, because
+ * DT-FR-014's deferral keys off any running tool in the subtree while
+ * the print keeps markers excluded.
  */
-function probeContribution(state: ProbeState | undefined, sessionID: string, latest: MessageLike | undefined): string {
+function probeContribution(state: ProbeState | undefined, sessionID: string, latest: MessageLike | undefined): ProbeContribution {
+  const runningTools = collectRunningTools(latest)
   if (!isCompactionMarker(latest)) {
-    return messageFingerprint(sessionID, latest)
+    return { print: messageFingerprint(sessionID, latest), runningTools }
   }
-  return state?.sessions.get(sessionID)?.lastPrint ?? `${sessionID}:-`
+  return { print: state?.sessions.get(sessionID)?.lastPrint ?? `${sessionID}:-`, runningTools }
 }
 
 /**
@@ -545,8 +739,13 @@ function foldProbeObservations(rootID: string, observations: readonly ProbeObser
  * markers never change the fingerprint, and the counters expose how
  * many markers accrued since the last substantive progress for the
  * idle watchdog and the storm detector to share (DT-FR-002 /
- * DELEG-FR-002). Accounting persists across probes per root id;
- * callers drop it with unregisterProbeState when the run ends.
+ * DELEG-FR-002). It also carries the subtree's running tool-call
+ * parts (DT-FR-013): the triples are already folded into each
+ * session's fingerprint print, and the collected set feeds the idle
+ * watcher's bounded deferral (DT-FR-014) and the abort envelope's
+ * running_tool selection (DT-FR-015). Accounting persists across
+ * probes per root id; callers drop it with unregisterProbeState when
+ * the run ends.
  */
 export async function probeSubtreeActivity(
   client: Client,
@@ -561,6 +760,7 @@ export async function probeSubtreeActivity(
     const stack = [rootID]
     const seen = new Set<string>()
     const prints: string[] = []
+    const runningTools: RunningToolPart[] = []
     const observations: ProbeObservation[] = []
     let pendingQuestion = false
     // Read-only during the walk: foldProbeObservations is the only
@@ -578,7 +778,9 @@ export async function probeSubtreeActivity(
       }
       const latest = messages.data[messages.data.length - 1] as MessageLike | undefined
       observations.push({ id, latest })
-      prints.push(probeContribution(state, id, latest))
+      const contribution = probeContribution(state, id, latest)
+      prints.push(contribution.print)
+      runningTools.push(...contribution.runningTools)
       pendingQuestion ||= isPendingQuestion(latest)
       const children = await client.session.children({ path: { id }, query: { directory }, signal })
       if (children.data === undefined) {
@@ -593,7 +795,12 @@ export async function probeSubtreeActivity(
         stack.push(child.id)
       }
     }
-    return { fingerprint: prints.join("|"), pendingQuestion, ...foldProbeObservations(rootID, observations) }
+    return {
+      fingerprint: prints.join("|"),
+      pendingQuestion,
+      runningTools: runningTools.sort(compareRunningTools),
+      ...foldProbeObservations(rootID, observations),
+    }
   } catch {
     return null
   }

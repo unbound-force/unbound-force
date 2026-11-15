@@ -6,10 +6,13 @@ import {
   DEFAULT_IDLE_POLL_MS,
   clampToBudget,
   classifySyntheticText,
+  idleDeferralExpired,
   probeSubtreeActivity,
   registerDeadline,
   registeredProbeCounters,
   resolveInheritedDeadline,
+  selectRunningTool,
+  type RunningToolPart,
   type SyntheticTextKind,
   unregisterDeadline,
   unregisterProbeState,
@@ -136,6 +139,14 @@ export interface TimeoutDetails {
   readonly child_active: boolean | null
   /** A question tool call was pending in the subtree at the last probe. */
   readonly pending_question: boolean
+  /**
+   * Tool name of the running part with the lexicographically smallest
+   * partId at abort time (DT-FR-015), validated against
+   * RUNNING_TOOL_NAME_PATTERN; null when no part was running or the
+   * selected name failed validation (invalid names are never carried
+   * verbatim, Constitution V).
+   */
+  readonly running_tool: string | null
 }
 
 /**
@@ -462,8 +473,13 @@ export async function resolveHostModel(
  * and cleanup, plus the delegation-timeout-budgets limits: the wall
  * clock is clamped to any inherited parent budget (D1), the child's
  * deadline is registered for nested runs, the optional idle watchdog
- * aborts a child whose session subtree stops changing (D2), and
- * limit-ended results carry `timeout` details (D4). Also owns the
+ * aborts a child whose session subtree stops changing (D2) -- deferred
+ * while any tool part is running, within the DT-FR-014 bound (the
+ * earliest observable tool deadline plus grace, else the fixed
+ * IDLE_DEFERRAL_CAP_MS from the last fingerprint change), with the
+ * wall clock as the absolute backstop -- and limit-ended results
+ * carry `timeout` details (D4) including the validated running_tool
+ * (DT-FR-015). Also owns the
  * compaction-storm detector (compaction-storm design D2, DELEG-FR-002):
  * the always-armed activity probe aborts a child whose subtree accrues
  * the configured number of consecutive compactions without substantive
@@ -519,10 +535,18 @@ export async function executeAgentSession(
   const budget = clampToBudget(deps.timeoutMilliseconds, inheritedDeadline, startedAt)
   const effectiveMilliseconds = budget.effectiveMs
 
+  // Two progress anchors (DT-FR-013/014): lastFingerprintChangeAt feeds
+  // the idle and deferral math (only a fingerprint change moves it),
+  // while lastProgressAt additionally counts a running tool part as
+  // activity within the deferral bound so the envelope's
+  // last_progress_ms_ago and child_active reflect a quiet-but-healthy
+  // long tool call.
   let lastProgressAt = startedAt
+  let lastFingerprintChangeAt = startedAt
   let lastFingerprint: string | null = null
   let probed = false
   let pendingQuestion = false
+  let runningTools: readonly RunningToolPart[] = []
   const timeoutDetails = (kind: TimeoutKind): TimeoutDetails => {
     const at = now()
     return {
@@ -535,6 +559,7 @@ export async function executeAgentSession(
       last_progress_ms_ago: probed ? at - lastProgressAt : null,
       child_active: !probed ? null : kind !== "idle" && at - lastProgressAt <= ACTIVE_WINDOW_MS,
       pending_question: pendingQuestion,
+      running_tool: selectRunningTool(runningTools),
     }
   }
 
@@ -618,6 +643,10 @@ export async function executeAgentSession(
       }
       probed = true
       pendingQuestion = activity.pendingQuestion
+      // Running parts ride the executor state before any early return
+      // so every abort path reports the tools observed at the last
+      // probe (DT-FR-015: running_tool for every kind).
+      runningTools = activity.runningTools
       // Compaction-storm detector (DELEG-FR-002, design D2): N consecutive
       // compaction markers with no intervening substantive progress — reads
       // and failed non-read calls never reset the accounting — abort the
@@ -634,9 +663,26 @@ export async function executeAgentSession(
       if (activity.fingerprint !== lastFingerprint) {
         lastFingerprint = activity.fingerprint
         lastProgressAt = at
+        lastFingerprintChangeAt = at
         return
       }
-      if (idleMilliseconds !== undefined && at - lastProgressAt >= idleMilliseconds) {
+      const deferralExpired = idleDeferralExpired(activity.runningTools, idleMilliseconds, lastFingerprintChangeAt, at)
+      // DT-FR-013: a running tool part counts as activity for the
+      // envelope's progress fields even with an unchanged fingerprint,
+      // within the DT-FR-014 deferral bound (deferral only ever holds
+      // while a tool runs), so last_progress_ms_ago stays at the
+      // polling interval while a quiet long tool call is deferred.
+      if (!deferralExpired) {
+        lastProgressAt = at
+      }
+      // Idle abort (DT-FR-002/DT-FR-014): no fingerprint change for the
+      // idle window AND the running-tool deferral bound expired. A true
+      // stall between tool calls has no running parts and defers
+      // nothing; a quiet long tool call holds idle until its deferral
+      // bound (earliest observable deadline + grace, else the fixed cap
+      // from the last fingerprint change). Wall clock remains the
+      // absolute backstop either way.
+      if (idleMilliseconds !== undefined && at - lastFingerprintChangeAt >= idleMilliseconds && deferralExpired) {
         abortCause = "idle"
         linkedAbort.abort(new Error("invoke_agent run made no progress"))
         abortChild()

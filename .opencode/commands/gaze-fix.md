@@ -46,6 +46,14 @@ gaze crap --format=json [pattern] > /tmp/gaze-fix-crap.json
 gaze quality --format=json [pattern] > /tmp/gaze-fix-quality.json
 ```
 
+> **Long analysis note:** For repository-wide analysis that may run
+> several minutes, consider whether to run `gaze crap` in the background
+> and poll the output file rather than blocking the turn. This is an
+> applicability judgment based on expected runtime and scope, not a
+> required step; prefer backgrounding when holding the turn is wasteful
+> and keep short scoped runs synchronous. If a launch-and-poll tool is
+> later registered, migrate this guidance to invoke it.
+
 Parse the CRAP JSON for `scores` array — each score has `function`,
 `package`, `file`, `line`, `fix_strategy`, `crap`, `gaze_crap`,
 `quadrant`, `contract_coverage`, `contract_coverage_reason`,
