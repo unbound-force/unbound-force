@@ -3,8 +3,8 @@
 The model matrix is the canonical configuration for capability-driven
 content-agent model selection in `uf_delegate_command`. Version 1
 defines capability profiles, convention-pack mappings, task-kind
-defaults, agent pins, the classifier configuration block, and the
-selection headroom knob. The
+defaults, agent pins, the classifier configuration block, the
+selection headroom knob, and the delegation storm knob. The
 tracked file (`.uf/model-matrix.yaml`) carries structure only;
 per-developer model identities arrive via the gitignored override.
 
@@ -25,12 +25,18 @@ verdicts, so the two representations cannot drift.
 - `samples/valid-starter-matrix.json` mirrors the tracked starter
   matrix: the four starter capabilities with structure-only profiles,
   the starter pack mappings, task-kind defaults, an empty
-  classifier, and the starter selection headroom knob.
+  classifier, and the starter selection headroom and delegation
+  storm knobs.
 - `samples/valid-selection-margin.json` proves the optional
   `selection.footprint_margin_tokens` knob parses on both surfaces
   with a valid integer value.
 - `samples/invalid-unknown-selection-key.json` carries an unknown
   key under `selection` (closed key set).
+- `samples/valid-delegation-storm.json` proves the optional
+  `delegation.storm_threshold` knob parses on both surfaces with a
+  valid integer value.
+- `samples/invalid-unknown-delegation-key.json` carries an unknown
+  key under `delegation` (closed key set).
 - `samples/valid-minimal-matrix.json` proves only `version` and
   `profiles` are required — every other root key is optional.
 - `samples/invalid-unknown-root-field.json` carries an unknown root
@@ -89,6 +95,17 @@ and fail only `loadModelMatrix`; `invalid-override-*` must make
   plus a recorded warning for an invalid value, so the knob can
   never fail the matrix load or silently disable the headroom
   gate.
+- `delegation` — `storm_threshold` (DELEG-FR-002): the number of
+  consecutive context-compaction events with no intervening
+  substantive progress (a successful non-read tool completion)
+  that aborts a delegated child with the retryable
+  `context_thrash` failure. The key set is closed, but the value
+  is intentionally unconstrained on both parse surfaces — the
+  runtime normalizer (`resolveStormThreshold`) substitutes the
+  documented default (3; accepted range 2-10 consecutive
+  compactions) plus a recorded warning for an invalid value, so
+  the knob can never fail the matrix load or silently disable
+  the storm detector.
 
 ## Override File
 
@@ -139,3 +156,4 @@ a tracked-matrix change, never an override concern.
 |---------|------|---------|
 | 1 | 2026-11-01 | Initial closed capability contract: profiles, packs, defaults, agents, classifier. |
 | 1 | 2026-11-15 | Amendment: added the optional `selection.footprint_margin_tokens` headroom knob (DELEG-FR-001). |
+| 1 | 2026-11-15 | Amendment: added the optional `delegation.storm_threshold` compaction-storm knob (DELEG-FR-002). |

@@ -22,5 +22,8 @@
   "classifier": {},
   "selection": {
     "footprint_margin_tokens": 24000
+  },
+  "delegation": {
+    "storm_threshold": 3
   }
 }

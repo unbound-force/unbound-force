@@ -27,6 +27,7 @@ import {
   resolveFootprintMarginTokens,
   resolveSelection,
   type ClassifierCache,
+  type ModelLimits,
   type ModelMatrix,
   type SelectionResult,
   type SelectionSource,
@@ -2836,6 +2837,17 @@ export interface ModelMatrixSelectionDependencies {
    * share the tool-level readText seam, whose failures fail the call.
    */
   readonly footprint?: FootprintEstimatorDependencies
+  /**
+   * Declared model-limits lookup for the selection headroom gate
+   * (DELEG-FR-001, compaction-storm task 2.1). Optional so existing test
+   * sites stay green; production defaults to reading the configured
+   * providers through the OpenCode client and indexing each model's
+   * declared limit block by its combined `provider/model` identity. The
+   * lookup fails OPEN — any failure yields an empty map, so the gate
+   * passes candidates it cannot read limits for and never blocks or
+   * stalls delegation.
+   */
+  readonly modelLimits?: (directory: string) => Promise<Readonly<Record<string, ModelLimits>>>
 }
 
 /**
@@ -3420,6 +3432,50 @@ export async function estimateDelegationFootprint(
 }
 
 /**
+ * Production declared-limits lookup for the selection headroom gate
+ * (DELEG-FR-001, compaction-storm task 2.1): reads the configured
+ * providers through the OpenCode client and indexes each model's
+ * declared limit block by its combined `provider/model` identity — the
+ * same identity construction the selection chain and host introspection
+ * use. Entries with malformed limit values (non-finite, non-positive
+ * context, or negative output) are skipped: a garbage declaration is
+ * treated as no declaration, so the gate passes rather than rejecting on
+ * data it cannot interpret. Any lookup failure fails OPEN (empty map) —
+ * the gate can never block or stall delegation on an unavailable
+ * provider config.
+ * @param client The parent session's OpenCode client.
+ * @param directory The delegation's working directory.
+ * @returns Declared model limits keyed by `provider/model` identity.
+ */
+async function defaultModelLimits(
+  client: PluginInput["client"],
+  directory: string,
+): Promise<Readonly<Record<string, ModelLimits>>> {
+  try {
+    const response = await client.config.providers({ query: { directory } })
+    const limits: Record<string, ModelLimits> = {}
+    for (const provider of response.data?.providers ?? []) {
+      for (const [modelID, model] of Object.entries(provider.models ?? {})) {
+        const limit = model?.limit
+        if (
+          limit === undefined ||
+          !Number.isFinite(limit.context) ||
+          !Number.isFinite(limit.output) ||
+          limit.context <= 0 ||
+          limit.output < 0
+        ) {
+          continue
+        }
+        limits[`${provider.id}/${modelID}`] = { context: limit.context, output: limit.output }
+      }
+    }
+    return limits
+  } catch {
+    return {}
+  }
+}
+
+/**
  * Factory that creates the uf_delegate_command tool with injectable git
  * executor, working directory, and session/I/O dependencies for
  * testability.
@@ -3507,6 +3563,11 @@ export function createDelegateCommandTool(
     readText: (path) => readFile(path, "utf8"),
     realpath: defaultRealpath,
   }
+  // DELEG-FR-001 (compaction-storm task 2.1): declared-limits lookup seam,
+  // optional with the fail-open production default above (client provider
+  // config through the OpenCode client).
+  const fetchModelLimits: (directory: string) => Promise<Readonly<Record<string, ModelLimits>>> =
+    deps.modelMatrix.modelLimits ?? ((directory) => defaultModelLimits(deps.client, directory))
   return tool({
     description:
       "Delegate a command or task to a content agent (default cobalt-crush-dev) in a " +
@@ -3813,6 +3874,17 @@ export function createDelegateCommandTool(
           footprintSeams,
         )
         const margin = resolveFootprintMarginTokens(matrix)
+        // DELEG-FR-001 (compaction-storm task 2.1): declared model limits
+        // for the headroom gate. Fetched only when a gated candidate can
+        // arise — a configured matrix (non-empty profiles) and no explicit
+        // model, which bypasses the gate — so the zero-config and
+        // explicit-model paths never pay the provider round trip. The
+        // lookup itself fails open (empty map), never blocking delegation.
+        const gatePossible =
+          matrix !== null && Object.keys(matrix.profiles).length > 0 && input.model === undefined
+        const modelLimits: Readonly<Record<string, ModelLimits>> = gatePossible
+          ? await fetchModelLimits(context.directory)
+          : {}
         const selectionInputs = {
           model: input.model,
           variant: input.variant,
@@ -3821,6 +3893,7 @@ export function createDelegateCommandTool(
           checkpoint_step: input.checkpoint_step,
           agent: input.agent,
           footprint: footprint.tokens,
+          model_limits: modelLimits,
         }
         const outcome = await cascade.classify(matrix, {
           inputs: selectionInputs,

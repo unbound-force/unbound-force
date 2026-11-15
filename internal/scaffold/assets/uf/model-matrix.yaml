@@ -56,3 +56,15 @@ classifier: {}
 # never disabled by a bad value.
 selection:
   footprint_margin_tokens: 24000
+
+# Compaction-storm detection (DELEG-FR-002, compaction-storm
+# design D4): the number of consecutive context-compaction
+# events with no intervening substantive progress (a successful
+# non-read tool completion) that aborts a delegated child with
+# the retryable context_thrash failure and a resume envelope.
+# Integer, valid range 2-10, default 3. An invalid value is
+# replaced with the default and the substitution is recorded
+# as a warning in the delegation audit — the storm detector is
+# never disabled by a bad value.
+delegation:
+  storm_threshold: 3

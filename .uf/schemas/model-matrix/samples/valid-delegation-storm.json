@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "profiles": {
+    "code-writing": {}
+  },
+  "delegation": {
+    "storm_threshold": 5
+  }
+}

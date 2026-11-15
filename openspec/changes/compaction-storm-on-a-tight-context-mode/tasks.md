@@ -36,7 +36,7 @@
 
 ## 2. Core behaviors
 
-- [ ] 2.1 Implement headroom gate in `resolveSelection`
+- [x] 2.1 Implement headroom gate in `resolveSelection`
   (DELEG-FR-001) — classification: judgment (authorship).
   Compute `usable = limit.context - limit.output`, compare
   to `footprint + margin`, reject/penalize and append to
@@ -47,7 +47,7 @@
   validation order. Files: `.opencode/lib/model-matrix.ts`,
   `.opencode/plugins/uf-workflow/index.ts`.
 
-- [ ] 2.2 Implement compaction-storm detector
+- [x] 2.2 Implement compaction-storm detector
   (DELEG-FR-002) — classification: judgment (authorship).
   Count N=3 consecutive compaction events without
   non-read progress, abort to `code: "context_thrash"`
@@ -57,7 +57,7 @@
   `.opencode/lib/agent-executor.ts`,
   `.opencode/lib/delegation-budget.ts`.
 
-- [ ] 2.3 Implement final-text success guard
+- [x] 2.3 Implement final-text success guard
   (DELEG-FR-003) — classification: judgment (authorship).
   Post-execution structural classification (anchored,
   case-insensitive, length-bounded matchers on wrapper
