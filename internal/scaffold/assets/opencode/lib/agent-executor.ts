@@ -5,15 +5,31 @@ import {
   ACTIVE_WINDOW_MS,
   DEFAULT_IDLE_POLL_MS,
   clampToBudget,
+  classifySyntheticText,
   probeSubtreeActivity,
   registerDeadline,
+  registeredProbeCounters,
   resolveInheritedDeadline,
+  type SyntheticTextKind,
   unregisterDeadline,
+  unregisterProbeState,
 } from "./delegation-budget.js"
+import { normalizeStormThreshold } from "./model-matrix.js"
 
 // ── Constants ────────────────────────────────────────────────
 
 export const MAX_ERROR_LENGTH = 4_096
+/**
+ * Maximum length of final-message text preserved in a final-text guard
+ * error (compaction-storm design D3, DELEG-FR-003). The excerpt exists
+ * only to debug the matched wrapper structure: it is sliced from the
+ * final message text alone -- never the cached prefix or earlier context
+ * that preceded the final message -- and the guard failures route the
+ * whole error through sanitizeInvocationError, so neither secrets nor
+ * prefix content ride the preserved text. The bound keeps a
+ * preamble-plus-excerpt error message inside MAX_ERROR_LENGTH.
+ */
+export const MAX_PRESERVED_FINAL_TEXT_LENGTH = 2_048
 export const CLEANUP_ABORT_TIMEOUT_MS = 5_000
 export const DEFAULT_TIMEOUT_MILLISECONDS = 600_000
 /**
@@ -93,13 +109,15 @@ export interface InvocationProvenance {
 }
 
 /**
- * Which limit ended a run (delegation-timeout-budgets D4): the wall
- * clock, the idle (no-progress) window, or an exhausted inherited
- * budget that prevented the run from starting.
+ * Which limit ended a run (delegation-timeout-budgets D4,
+ * compaction-storm D2): the wall clock, the idle (no-progress) window, an
+ * exhausted inherited budget that prevented the run from starting, or the
+ * compaction-storm threshold (consecutive compactions with no substantive
+ * progress, DELEG-FR-002).
  */
-export type TimeoutKind = "wall_clock" | "idle" | "budget"
+export type TimeoutKind = "wall_clock" | "idle" | "budget" | "storm"
 
-/** Limit details attached to runs that ended by a timeout (design D4). */
+/** Limit details attached to runs that ended by a limit (timeout, storm, or exhausted budget; design D4). */
 export interface TimeoutDetails {
   readonly kind: TimeoutKind
   /** Wall clock actually applied, after any budget clamp. */
@@ -120,6 +138,25 @@ export interface TimeoutDetails {
   readonly pending_question: boolean
 }
 
+/**
+ * Durable resume state carried by `context_thrash` failures (compaction-storm
+ * design D2, DELEG-FR-002). Reuses the DelegateResumeState envelope pattern
+ * (DT-FR-004) at the executor seam: what the executor durably knows about
+ * the aborted run — where the child ran, which agent it was, and the
+ * checkpoint step the caller asked it to record (still pending, because the
+ * run aborted before recording it). The command-keyed resume state
+ * (`command`, `key`, `completed_steps`) is threaded separately by
+ * `uf_delegate_command` for command-path delegations.
+ */
+export interface InvocationResumeState {
+  /** Absolute project directory the child session ran in. */
+  readonly project_path: string
+  /** Manifest-declared agent name the child ran as. */
+  readonly agent_name: string
+  /** Checkpoint step the run was asked to record; null when none applied. */
+  readonly pending_checkpoint_step: string | null
+}
+
 /** Observable result from exactly one policy-free agent invocation. */
 export interface InvokeAgentResult {
   readonly status: "success" | "failed" | "cancelled"
@@ -129,8 +166,18 @@ export interface InvokeAgentResult {
   readonly provenance: InvocationProvenance
   /** Child session ID created by the executor (absent on early validation failures). */
   readonly childSessionID?: string
-  /** Limit details, present only when a timeout or exhausted budget ended the run. */
+  /**
+   * Limit details, present only when a timeout, storm, or exhausted budget
+   * ended or reclassified the run (the final-text guard's context_thrash
+   * reclassification reuses the storm shape, DELEG-FR-003).
+   */
   readonly timeout?: TimeoutDetails
+  /**
+   * Durable resume state, present only on context_thrash failures -- the
+   * storm abort (DELEG-FR-002) and the final-text guard reclassification
+   * at or above the storm threshold (DELEG-FR-003).
+   */
+  readonly resume?: InvocationResumeState
   /**
    * Finish reason reported by the child's final step-finish part, null
    * when unreported. Present on success results so dispatch can apply
@@ -154,6 +201,21 @@ export interface ExecutorDependencies {
   readonly idleTimeoutMilliseconds?: number
   /** Activity probe interval (default DEFAULT_IDLE_POLL_MS). */
   readonly idlePollMilliseconds?: number
+  /**
+   * Compaction-storm threshold (DELEG-FR-002, design D2): consecutive
+   * compaction events with no intervening substantive progress that abort
+   * the child with `context_thrash`. The detector is always armed — an
+   * absent value runs the documented default, and an invalid injected
+   * value normalizes to it, so a bad value can neither disable the
+   * detector nor abort instantly.
+   */
+  readonly stormThreshold?: number
+  /**
+   * Checkpoint step the caller asked this run to record (design D2),
+   * threaded into the context_thrash resume envelope; absent when the
+   * delegation records no checkpoint.
+   */
+  readonly checkpointStep?: string
   /** Clock seam for budget and idle arithmetic (default Date.now). */
   readonly now?: () => number
 }
@@ -279,6 +341,11 @@ export function responseText(parts: readonly PromptPart[]): string {
     .trim()
 }
 
+/** Debugging name of the matched synthetic wrapper shape (design D3). */
+function syntheticTextName(kind: SyntheticTextKind): string {
+  return kind === "compaction-summary" ? "compaction-summary wrapper" : "synthetic continuation prompt"
+}
+
 /**
  * Finish reason from the child's final step-finish part, null when no
  * step-finish part reported one. The last part wins because a
@@ -396,7 +463,18 @@ export async function resolveHostModel(
  * clock is clamped to any inherited parent budget (D1), the child's
  * deadline is registered for nested runs, the optional idle watchdog
  * aborts a child whose session subtree stops changing (D2), and
- * limit-ended results carry `timeout` details (D4). Does NOT own: input validation, manifest checking,
+ * limit-ended results carry `timeout` details (D4). Also owns the
+ * compaction-storm detector (compaction-storm design D2, DELEG-FR-002):
+ * the always-armed activity probe aborts a child whose subtree accrues
+ * the configured number of consecutive compactions without substantive
+ * progress, returning a retryable `context_thrash` failure with a
+ * resume envelope. And owns the final-text success guard
+ * (compaction-storm design D3, DELEG-FR-003): a child whose final
+ * message text structurally matches a compaction-summary wrapper or
+ * the synthetic continuation prompt is reclassified from success to a
+ * retryable `context_thrash` (storm threshold met) or
+ * `synthetic_final_text` failure that preserves sanitized final text.
+ * Does NOT own: input validation, manifest checking,
  * model resolution, host introspection, or prompt file reading.
  *
  * @param deps Injected client, session context, and timeout boundary.
@@ -421,6 +499,14 @@ export async function executeAgentSession(
   const now = deps.now ?? Date.now
   const startedAt = now()
   const idleMilliseconds = deps.idleTimeoutMilliseconds
+  // Compaction-storm threshold (DELEG-FR-002, design D2): the probe's
+  // compactionsSinceProgress accounting is shared with the idle watchdog
+  // (DT-FR-002); N consecutive compactions without intervening substantive
+  // progress abort the child with a retryable context_thrash failure.
+  // Normalized here (not trusted from the caller) so a badly injected value
+  // can neither disable the detector nor fire it instantly.
+  const stormThreshold = normalizeStormThreshold(deps.stormThreshold)
+  let stormCompactions = 0
 
   // Hierarchical budget (delegation-timeout-budgets D1): a nested run
   // never outlives the deadline its parent child session registered.
@@ -466,7 +552,7 @@ export async function executeAgentSession(
   }
 
   const linkedAbort = new AbortController()
-  let abortCause: "cancelled" | "timeout" | "idle" | null = null
+  let abortCause: "cancelled" | "timeout" | "idle" | "storm" | null = null
   let childID: string | null = null
   let cleanupAbort = Promise.resolve()
 
@@ -509,16 +595,19 @@ export async function executeAgentSession(
     abortChild()
   }, effectiveMilliseconds)
 
-  // Idle watchdog (design D2): a changed subtree fingerprint is progress;
-  // a failed probe neither resets nor advances the idle clock, so only a
-  // successful, unchanged sample can end the run.
+  // Activity probe (design D2): a changed subtree fingerprint is progress
+  // for the idle watchdog, and the same probe folds the compaction
+  // accounting the storm detector consumes (DELEG-FR-002). A failed probe
+  // neither resets nor advances the idle clock, so only a successful,
+  // unchanged sample can end the run. The storm detector is always armed,
+  // so the probe runs even when the idle watchdog is disabled.
   // `settled` flips as soon as the child's prompt returns (and again in
   // finally), so a probe still in flight when the run ends can never
-  // abort a finished child or relabel its result as idle_timeout.
+  // abort a finished child or relabel its result.
   let sampling = false
   let settled = false
   const sample = async (): Promise<void> => {
-    if (settled || sampling || childID === null || abortCause !== null || idleMilliseconds === undefined) {
+    if (settled || sampling || childID === null || abortCause !== null) {
       return
     }
     sampling = true
@@ -529,13 +618,25 @@ export async function executeAgentSession(
       }
       probed = true
       pendingQuestion = activity.pendingQuestion
+      // Compaction-storm detector (DELEG-FR-002, design D2): N consecutive
+      // compaction markers with no intervening substantive progress — reads
+      // and failed non-read calls never reset the accounting — abort the
+      // child well before wall-clock exhaustion. Checked before the idle
+      // logic so a storm is diagnosed as a storm, not a generic stall.
+      if (activity.compactionsSinceProgress >= stormThreshold) {
+        stormCompactions = activity.compactionsSinceProgress
+        abortCause = "storm"
+        linkedAbort.abort(new Error("invoke_agent run hit the compaction-storm threshold"))
+        abortChild()
+        return
+      }
       const at = now()
       if (activity.fingerprint !== lastFingerprint) {
         lastFingerprint = activity.fingerprint
         lastProgressAt = at
         return
       }
-      if (at - lastProgressAt >= idleMilliseconds) {
+      if (idleMilliseconds !== undefined && at - lastProgressAt >= idleMilliseconds) {
         abortCause = "idle"
         linkedAbort.abort(new Error("invoke_agent run made no progress"))
         abortChild()
@@ -544,10 +645,7 @@ export async function executeAgentSession(
       sampling = false
     }
   }
-  const idlePoll =
-    idleMilliseconds === undefined
-      ? undefined
-      : setInterval(() => void sample(), deps.idlePollMilliseconds ?? DEFAULT_IDLE_POLL_MS)
+  const probePoll = setInterval(() => void sample(), deps.idlePollMilliseconds ?? DEFAULT_IDLE_POLL_MS)
 
   if (deps.parentAbort.aborted) {
     cancelFromParent()
@@ -657,6 +755,65 @@ export async function executeAgentSession(
       )
     }
 
+    // Final-text success guard (compaction-storm design D3, DELEG-FR-003):
+    // a child whose final message is a compaction summary or the synthetic
+    // continuation prompt is not a real completion, so it MUST NOT map to
+    // success. Classification is structural (classifySyntheticText:
+    // anchored, case-insensitive, length-bounded wrappers), so legitimate
+    // prose that merely mentions compaction stays success. On a match, one
+    // final activity probe folds the subtree's end state -- markers the
+    // interval probes had not yet sampled, including the final message
+    // itself when it is structurally a marker -- so the failure code
+    // reflects whether the storm threshold was actually met; when that
+    // probe cannot run, the accounting the interval probes already folded
+    // is the best available answer.
+    const syntheticKind = classifySyntheticText(text)
+    if (syntheticKind !== null) {
+      const finalSample = await probeSubtreeActivity(deps.client, childID, deps.directory, linkedAbort.signal)
+      const accounting = finalSample ?? registeredProbeCounters(childID)
+      const compactions = accounting?.compactionsSinceProgress ?? 0
+      // The preserved excerpt is the final message text alone -- never the
+      // cached prefix or earlier context -- truncated to the documented
+      // bound; failedResult routes it through sanitizeInvocationError so
+      // secrets and home paths are redacted before it reaches the error.
+      const preserved = text.slice(0, MAX_PRESERVED_FINAL_TEXT_LENGTH)
+      const structure = syntheticTextName(syntheticKind)
+      if (compactions >= stormThreshold) {
+        return withChild({
+          ...failedResult(
+            provenance,
+            "context_thrash",
+            `invoke_agent final text structurally matches a ${structure} and the storm threshold was met ` +
+              `(${compactions} consecutive compaction events with no substantive progress between them, ` +
+              `storm threshold ${stormThreshold}); reclassified from success so the caller can resume ` +
+              `from durable state. Preserved final text: ${preserved}`,
+            true,
+            "failed",
+            "",
+            usage,
+          ),
+          timeout: timeoutDetails("storm"),
+          resume: {
+            project_path: deps.directory,
+            agent_name: agent,
+            pending_checkpoint_step: deps.checkpointStep ?? null,
+          },
+        })
+      }
+      return withChild(
+        failedResult(
+          provenance,
+          "synthetic_final_text",
+          `invoke_agent final text structurally matches a ${structure}, not a real completion; ` +
+            `reclassified from success as retryable. Preserved final text: ${preserved}`,
+          true,
+          "failed",
+          "",
+          usage,
+        ),
+      )
+    }
+
     return withChild({ status: "success", text, usage, error: null, provenance, finish_reason: finishReason })
   } catch (error: unknown) {
     if (abortCause === "timeout") {
@@ -676,6 +833,24 @@ export async function executeAgentSession(
         timeout: timeoutDetails("idle"),
       })
     }
+    if (abortCause === "storm") {
+      return withChild({
+        ...failedResult(
+          provenance,
+          "context_thrash",
+          `invoke_agent run recorded ${stormCompactions} consecutive compaction events ` +
+            `with no substantive progress between them (storm threshold ${stormThreshold}); ` +
+            "aborting so the caller can resume from durable state",
+          true,
+        ),
+        timeout: timeoutDetails("storm"),
+        resume: {
+          project_path: deps.directory,
+          agent_name: agent,
+          pending_checkpoint_step: deps.checkpointStep ?? null,
+        },
+      })
+    }
     if (abortCause === "cancelled") {
       return withChild(failedResult(provenance, "cancelled", "invoke_agent run was cancelled", false, "cancelled"))
     }
@@ -683,11 +858,14 @@ export async function executeAgentSession(
   } finally {
     settled = true
     clearTimeout(timeout)
-    if (idlePoll !== undefined) {
-      clearInterval(idlePoll)
-    }
+    clearInterval(probePoll)
     if (childID !== null) {
       unregisterDeadline(childID)
+      // Drop the probe accounting with the deadline: the registry is keyed
+      // by child session id and every run probes now that the storm
+      // detector is always armed, so finished children must not accumulate
+      // accounting state.
+      unregisterProbeState(childID)
     }
     deps.parentAbort.removeEventListener("abort", cancelFromParent)
     await cleanupAbort

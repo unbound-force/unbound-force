@@ -17,22 +17,35 @@
  * scenario (spec-review iteration-4 advisories 5, 7, 8, and 10). The
  * classifier cascade engine tests live in task 3.3's separate file
  * (model-matrix-classifier.test.ts), not here.
+ * Compaction-storm task 2.1 rows: the selection headroom gate — rejection
+ * chain, fall-through, explicit-model bypass, no-declared-limits pass,
+ * inconsistent-limits rejection, and terminal-host semantics (DELEG-FR-001).
+ * Compaction-storm task 2.2 rows: the delegation.storm_threshold knob —
+ * the closed key set with unconstrained value, the D4 substitution
+ * semantics, and the executor-side normalization (DELEG-FR-002).
  */
 import { describe, expect, it } from "vitest"
 
 import {
+  DEFAULT_STORM_THRESHOLD,
   DEFAULT_TASK_KINDS,
   EMPTY_MODEL_MATRIX,
+  MAX_STORM_THRESHOLD,
+  MIN_STORM_THRESHOLD,
   MODEL_MATRIX_OVERRIDE_PATH,
   MODEL_MATRIX_PATH,
   PACKS_DIRECTORY,
   SELECTION_SOURCE_VALUES,
+  STORM_THRESHOLD_KEY,
   loadModelMatrix,
   mergeOverride,
+  normalizeStormThreshold,
   parseModelMatrix,
   resolveSelection,
+  resolveStormThreshold,
   validateModelMatrixOverride,
   type ClassifierOutcome,
+  type ModelLimits,
   type ModelMatrixDependencies,
 } from "../lib/model-matrix.js"
 
@@ -1220,5 +1233,391 @@ describe("resolveSelection precedence chain (MM-FR-003/MM-FR-004, design D2)", (
       expect(noOpMatrix.selection.selection_source).toBe("host")
       expect(noOpMatrix.selection.fallback_reason).toBeNull()
     }
+  })
+})
+
+describe("resolveSelection headroom gate (DELEG-FR-001, compaction-storm task 2.1)", () => {
+  /**
+   * Selection-chain fixture with three model-bearing profiles, one
+   * model-less profile, an agent pin, and the starter defaults/packs.
+   * Gate arithmetic: no `selection` knob, so the margin defaults to 24000
+   * tokens; a footprint of 80000 therefore requires 104000 usable tokens —
+   * a model declaring 100k context minus 4k output (96000 usable) is
+   * rejected, while 200k minus 8k (192000 usable) passes.
+   */
+  const gateMatrix = parse({
+    ...STARTER_MATRIX,
+    profiles: {
+      "spec-authoring": { model: "provider/spec-model" },
+      "code-writing": { model: "provider/code-model" },
+      "content-writing": { model: "provider/content-model" },
+      mechanical: {},
+    },
+    agents: { "cobalt-crush-dev": "content-writing" },
+  })
+
+  /** Cascade outcome for calls where no classifier participated. */
+  const notRun: ClassifierOutcome = { status: "not-run" }
+
+  it("should fall through a tight-context profile to the next eligible step, recording the rejection chain", () => {
+    const result = resolveSelection(
+      gateMatrix,
+      {
+        profile: "spec-authoring",
+        checkpoint_step: "implement",
+        footprint: 80_000,
+        model_limits: {
+          "provider/spec-model": { context: 100_000, output: 4_000 },
+          "provider/code-model": { context: 200_000, output: 8_000 },
+        },
+      },
+      notRun,
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      // The rejected explicit profile (step 2) falls through pack, pin,
+      // and the plan/tasks gate to the static implement default (step 6),
+      // whose roomy model wins — the chain records why.
+      expect(result.selection.selection_source).toBe("default-kind")
+      expect(result.selection.model).toBe("provider/code-model")
+      expect(result.selection.capability).toBe("code-writing")
+      expect(result.selection.fallback_reason).toBe(
+        'headroom: explicit-profile model "provider/spec-model" usable 96000 < required 104000 ' +
+          "(footprint 80000 + margin 24000); classifier not run — fell back to default-kind model " +
+          '"provider/code-model"',
+      )
+    }
+  })
+
+  it("should terminate at host with the full rejection chain when every candidate is tight", () => {
+    const result = resolveSelection(
+      gateMatrix,
+      {
+        profile: "spec-authoring",
+        checkpoint_step: "implement",
+        footprint: 80_000,
+        model_limits: {
+          "provider/spec-model": { context: 100_000, output: 4_000 },
+          "provider/code-model": { context: 100_000, output: 4_000 },
+        },
+      },
+      notRun,
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("host")
+      expect(result.selection.model).toBeNull()
+      expect(result.selection.fallback_reason).toBe(
+        'headroom: explicit-profile model "provider/spec-model" usable 96000 < required 104000 ' +
+          '(footprint 80000 + margin 24000); headroom: default-kind model "provider/code-model" ' +
+          "usable 96000 < required 104000 (footprint 80000 + margin 24000); classifier not run " +
+          "— fell back to the host model",
+      )
+    }
+  })
+
+  it("should pass candidates without declared limits unchanged (absent map and missing identity)", () => {
+    // An absent model_limits map: byte-identical to the pre-gate chain,
+    // even with a footprint that would reject every declared model.
+    const absentMap = resolveSelection(gateMatrix, { profile: "spec-authoring", footprint: 500_000 }, notRun)
+    expect(absentMap.ok).toBe(true)
+    if (absentMap.ok) {
+      expect(absentMap.selection.selection_source).toBe("explicit-profile")
+      expect(absentMap.selection.model).toBe("provider/spec-model")
+      expect(absentMap.selection.fallback_reason).toBeNull()
+    }
+    // A present map without an entry for the candidate's identity.
+    const missingEntry = resolveSelection(
+      gateMatrix,
+      {
+        profile: "spec-authoring",
+        footprint: 500_000,
+        model_limits: { "provider/other-model": { context: 1, output: 1 } },
+      },
+      notRun,
+    )
+    expect(missingEntry.ok).toBe(true)
+    if (missingEntry.ok) {
+      expect(missingEntry.selection.model).toBe("provider/spec-model")
+      expect(missingEntry.selection.fallback_reason).toBeNull()
+    }
+    // Limits with no matrix: no gated candidates can arise, so the gate
+    // is a no-op and host fallback stays reason-free.
+    const noMatrix = resolveSelection(
+      null,
+      { footprint: 80_000, model_limits: { "provider/spec-model": { context: 100_000, output: 4_000 } } },
+      notRun,
+    )
+    expect(noMatrix.ok).toBe(true)
+    if (noMatrix.ok) {
+      expect(noMatrix.selection.selection_source).toBe("host")
+      expect(noMatrix.selection.fallback_reason).toBeNull()
+    }
+  })
+
+  it("should reject a candidate whose declared output reservation leaves no usable input, even without a footprint", () => {
+    const result = resolveSelection(
+      gateMatrix,
+      {
+        profile: "spec-authoring",
+        checkpoint_step: "implement",
+        model_limits: { "provider/spec-model": { context: 100_000, output: 128_000 } },
+      },
+      notRun,
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      // No footprint was measured and no limits are declared for the
+      // static default's model, so only the inconsistent-limits rejection
+      // fires and the static default passes untouched.
+      expect(result.selection.selection_source).toBe("default-kind")
+      expect(result.selection.model).toBe("provider/code-model")
+      expect(result.selection.fallback_reason).toBe(
+        'headroom: explicit-profile model "provider/spec-model" declares inconsistent limits ' +
+          '(output 128000 >= context 100000, leaving no usable input); classifier not run — ' +
+          'fell back to default-kind model "provider/code-model"',
+      )
+    }
+  })
+
+  it("should never gate an explicit model, preserving the step-1 bypass", () => {
+    const result = resolveSelection(
+      gateMatrix,
+      {
+        model: "provider/tight-model",
+        checkpoint_step: "implement",
+        footprint: 500_000,
+        model_limits: { "provider/tight-model": { context: 100_000, output: 4_000 } },
+      },
+      notRun,
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("explicit-model")
+      expect(result.selection.model).toBe("provider/tight-model")
+      expect(result.selection.fallback_reason).toBeNull()
+    }
+  })
+
+  it("should pass a candidate at exactly the required window (strict less-than rejection)", () => {
+    const result = resolveSelection(
+      gateMatrix,
+      {
+        profile: "spec-authoring",
+        footprint: 100_000,
+        model_limits: { "provider/spec-model": { context: 128_000, output: 4_000 } },
+      },
+      notRun,
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      // usable 124000 === footprint 100000 + margin 24000: the rejection
+      // predicate is strictly less-than, so an exact fit still passes.
+      expect(result.selection.selection_source).toBe("explicit-profile")
+      expect(result.selection.model).toBe("provider/spec-model")
+      expect(result.selection.fallback_reason).toBeNull()
+    }
+  })
+
+  it("should terminate plan/tasks at host when the static default is tight, never consulting the classifier", () => {
+    const result = resolveSelection(
+      gateMatrix,
+      {
+        checkpoint_step: "plan",
+        footprint: 80_000,
+        model_limits: { "provider/spec-model": { context: 100_000, output: 4_000 } },
+      },
+      { status: "selected", engine: "agent", pack: "go", confidence: 0.99 },
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("host")
+      expect(result.selection.model).toBeNull()
+      // The synthetic selected outcome must not leak a pack — plan/tasks
+      // resolve statically (MM-FR-003), so the chain terminated at step
+      // 5's rejected static default, before the classifier.
+      expect(result.selection.pack).toBeNull()
+      expect(result.selection.fallback_reason).toBe(
+        'headroom: default-kind model "provider/spec-model" usable 96000 < required 104000 ' +
+          "(footprint 80000 + margin 24000) — fell back to the host model",
+      )
+    }
+  })
+
+  it("should fall from a rejected classifier selection to the static default, and to host when both are tight", () => {
+    const result = resolveSelection(
+      gateMatrix,
+      {
+        checkpoint_step: "implement",
+        footprint: 80_000,
+        model_limits: {
+          "provider/code-model": { context: 100_000, output: 4_000 },
+          "provider/content-model": { context: 100_000, output: 4_000 },
+        },
+      },
+      { status: "selected", engine: "agent", pack: "content", confidence: 0.9 },
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      // The classifier picked content (content-model, tight); the static
+      // implement default (code-model, also tight) followed — both
+      // rejections land on the chain and the chain terminates at host.
+      expect(result.selection.selection_source).toBe("host")
+      expect(result.selection.model).toBeNull()
+      expect(result.selection.fallback_reason).toBe(
+        'headroom: classifier-agent model "provider/content-model" usable 96000 < required 104000 ' +
+          '(footprint 80000 + margin 24000); headroom: default-kind model "provider/code-model" ' +
+          "usable 96000 < required 104000 (footprint 80000 + margin 24000) — fell back to the host model",
+      )
+      // A static default exists and its rejection is recorded — the
+      // terminal reason must never claim "no static default".
+      expect(result.selection.fallback_reason).not.toContain("no static default")
+    }
+  })
+
+  it("should record the chain when a rejection falls through to a model-less profile", () => {
+    // A pack mapped to the model-less profile: the pre-gate chain would
+    // have returned the profile's model at step 2 and never reached it.
+    const modelLessPackMatrix = parse({
+      ...STARTER_MATRIX,
+      profiles: {
+        "spec-authoring": { model: "provider/spec-model" },
+        "code-writing": { model: "provider/code-model" },
+        "content-writing": { model: "provider/content-model" },
+        mechanical: {},
+      },
+      packs: { content: "mechanical" },
+    })
+    const result = resolveSelection(
+      modelLessPackMatrix,
+      {
+        profile: "spec-authoring",
+        pack: "content",
+        footprint: 80_000,
+        model_limits: { "provider/spec-model": { context: 100_000, output: 4_000 } },
+      },
+      notRun,
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("host")
+      expect(result.selection.model).toBeNull()
+      expect(result.selection.pack).toBe("content")
+      expect(result.selection.capability).toBe("mechanical")
+      expect(result.selection.fallback_reason).toBe(
+        'headroom: explicit-profile model "provider/spec-model" usable 96000 < required 104000 ' +
+          '(footprint 80000 + margin 24000); profile "mechanical" carries no model ' +
+          "— fell back to the host model",
+      )
+    }
+  })
+
+  it("should honor a configured margin knob through the D4 substitution path", () => {
+    const matrix = parse({
+      ...STARTER_MATRIX,
+      profiles: {
+        "spec-authoring": { model: "provider/spec-model" },
+        "code-writing": { model: "provider/code-model" },
+        "content-writing": { model: "provider/content-model" },
+        mechanical: {},
+      },
+      selection: { footprint_margin_tokens: 50_000 },
+    })
+    // usable 80000 vs footprint 50000: the default 24000 margin would
+    // pass (required 74000), but the configured 50000 margin rejects
+    // (required 100000) — the knob reaches the gate.
+    const result = resolveSelection(
+      matrix,
+      {
+        checkpoint_step: "plan",
+        footprint: 50_000,
+        model_limits: { "provider/spec-model": { context: 128_000, output: 48_000 } },
+      },
+      notRun,
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.selection.selection_source).toBe("host")
+      expect(result.selection.fallback_reason).toBe(
+        'headroom: default-kind model "provider/spec-model" usable 80000 < required 100000 ' +
+          "(footprint 50000 + margin 50000) — fell back to the host model",
+      )
+    }
+  })
+
+  it("should pass a candidate whose declared limits are unreadable (fail-open on garbage)", () => {
+    const result = resolveSelection(
+      gateMatrix,
+      {
+        profile: "spec-authoring",
+        footprint: 80_000,
+        model_limits: { "provider/spec-model": { context: Number.NaN, output: 4_000 } },
+      },
+      notRun,
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      // A non-finite declaration is treated as no declaration — the gate
+      // passes rather than rejecting on data it cannot interpret.
+      expect(result.selection.selection_source).toBe("explicit-profile")
+      expect(result.selection.model).toBe("provider/spec-model")
+      expect(result.selection.fallback_reason).toBeNull()
+    }
+  })
+})
+
+describe("delegation storm threshold knob (DELEG-FR-002, compaction-storm task 2.2)", () => {
+  it("should parse a matrix carrying the delegation block with any knob value (closed keys, unconstrained value)", () => {
+    const matrix = parse({ ...STARTER_MATRIX, delegation: { storm_threshold: "not-a-number" } })
+    expect(matrix.delegation).toEqual({ storm_threshold: "not-a-number" })
+  })
+
+  it("should reject an unknown key under delegation (closed key set)", () => {
+    expect(() => parse({ ...STARTER_MATRIX, delegation: { cooling: true } })).toThrow()
+  })
+
+  it("should resolve the documented default when the knob is absent or null", () => {
+    expect(resolveStormThreshold(null)).toEqual({ threshold: DEFAULT_STORM_THRESHOLD, warning: null })
+    expect(resolveStormThreshold(parse(STARTER_MATRIX))).toEqual({
+      threshold: DEFAULT_STORM_THRESHOLD,
+      warning: null,
+    })
+    expect(resolveStormThreshold(parse({ ...STARTER_MATRIX, delegation: { storm_threshold: null } }))).toEqual({
+      threshold: DEFAULT_STORM_THRESHOLD,
+      warning: null,
+    })
+  })
+
+  it("should pass a configured integer inside the documented range through unchanged", () => {
+    for (const threshold of [MIN_STORM_THRESHOLD, 5, MAX_STORM_THRESHOLD]) {
+      expect(resolveStormThreshold(parse({ ...STARTER_MATRIX, delegation: { storm_threshold: threshold } }))).toEqual({
+        threshold,
+        warning: null,
+      })
+    }
+  })
+
+  it("should replace an out-of-range or wrong-type value with the default plus a substitution warning", () => {
+    for (const invalid of [1, 11, 2.5, "3", true]) {
+      const resolution = resolveStormThreshold(parse({ ...STARTER_MATRIX, delegation: { storm_threshold: invalid } }))
+      expect(resolution.threshold).toBe(DEFAULT_STORM_THRESHOLD)
+      expect(resolution.warning).toContain(STORM_THRESHOLD_KEY)
+      expect(resolution.warning).toContain(String(invalid))
+      expect(resolution.warning).toContain(String(DEFAULT_STORM_THRESHOLD))
+      expect(resolution.warning).toContain("the storm detector is not disabled")
+    }
+  })
+
+  it("should normalize any raw value to a safe in-range integer for the executor seam", () => {
+    // The executor consumes injected thresholds through this normalizer:
+    // undefined (unset), zero, and negative values fall back to the
+    // documented default so a bad injection can neither disable the
+    // detector nor abort instantly (DELEG-FR-002).
+    expect(normalizeStormThreshold(undefined)).toBe(DEFAULT_STORM_THRESHOLD)
+    expect(normalizeStormThreshold(0)).toBe(DEFAULT_STORM_THRESHOLD)
+    expect(normalizeStormThreshold(-3)).toBe(DEFAULT_STORM_THRESHOLD)
+    expect(normalizeStormThreshold("3")).toBe(DEFAULT_STORM_THRESHOLD)
+    expect(normalizeStormThreshold(2)).toBe(2)
+    expect(normalizeStormThreshold(10)).toBe(10)
   })
 })
