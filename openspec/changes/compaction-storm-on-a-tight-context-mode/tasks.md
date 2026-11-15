@@ -12,7 +12,7 @@
 
 ## 1. Foundations (selection + activity probe)
 
-- [ ] 1.1 Add headroom config and footprint estimator
+- [x] 1.1 Add headroom config and footprint estimator
   (DELEG-FR-001) — classification: judgment (authorship).
   `.uf/model-matrix.yaml` `selection.footprint_margin_tokens`
   default 24k with range validation; footprint estimator in
@@ -25,7 +25,7 @@
   `.uf/model-matrix.yaml`, `docs/configuration.md`
   tool-owned mirror.
 
-- [ ] 1.2 Extend `ProbeState`/`messageFingerprint` to
+- [x] 1.2 Extend `ProbeState`/`messageFingerprint` to
   exclude compaction/synthetic markers (DT-FR-002
   modification, DELEG-FR-002 accounting) — classification:
   judgment (authorship). Classify `system-reminder`

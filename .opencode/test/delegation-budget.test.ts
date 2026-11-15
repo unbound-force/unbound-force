@@ -5,15 +5,23 @@ import { executeAgentSession, type InvocationProvenance } from "../lib/agent-exe
 import {
   BUDGET_RESERVE_MS,
   MAX_ANCESTRY_DEPTH,
+  MAX_CONTINUATION_PROMPT_LENGTH,
   MAX_PROBE_SESSIONS,
+  MAX_SYNTHETIC_WRAPPER_LENGTH,
   MIN_NESTED_BUDGET_MS,
+  READ_ONLY_TOOLS,
   clampToBudget,
+  classifySyntheticText,
+  isCompactionMarker,
+  isSubstantiveProgress,
   messageFingerprint,
   probeSubtreeActivity,
   registerDeadline,
   registeredDeadline,
+  registeredProbeCounters,
   resolveInheritedDeadline,
   unregisterDeadline,
+  unregisterProbeState,
 } from "../lib/delegation-budget.js"
 
 type Client = PluginInput["client"]
@@ -45,6 +53,7 @@ interface TreeOptions {
   readonly sessions?: Record<string, FakeSession>
   readonly failGet?: boolean
   readonly failMessages?: boolean
+  readonly failMessagesFor?: readonly string[]
   readonly undefinedChildren?: boolean
   readonly undefinedMessages?: boolean
 }
@@ -64,7 +73,7 @@ function treeClient(options: TreeOptions): { readonly client: Client; readonly g
     },
     messages: async (request: { path: { id: string } }) => {
       probed.push(request.path.id)
-      if (options.failMessages === true) {
+      if (options.failMessages === true || options.failMessagesFor?.includes(request.path.id) === true) {
         throw new Error("messages failed")
       }
       if (options.undefinedMessages === true) {
@@ -216,6 +225,25 @@ describe("messageFingerprint", () => {
     expect(open).not.toBe(failed)
     expect(messageFingerprint("s", { parts: [] })).toBe("s::::0:::::0")
   })
+
+  it("collapses compaction markers to one constant fingerprint", () => {
+    // DT-FR-002: compaction-to-compaction churn must not read as
+    // progress, so every marker shape fingerprints identically.
+    const trigger = messageFingerprint("s", message("c1", [{ type: "compaction", auto: true }]))
+    const summary = messageFingerprint(
+      "s",
+      message("c2", [{ id: "p", type: "text", text: "a different, longer summary body" }], { mode: "compaction" }),
+    )
+    const continuation = messageFingerprint(
+      "s",
+      message("c3", [
+        { type: "text", metadata: { compaction_continue: true }, text: "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed." },
+      ]),
+    )
+    expect(trigger).toBe("s:synthetic")
+    expect(summary).toBe("s:synthetic")
+    expect(continuation).toBe("s:synthetic")
+  })
 })
 
 describe("probeSubtreeActivity", () => {
@@ -277,6 +305,246 @@ describe("probeSubtreeActivity", () => {
     expect(await probeSubtreeActivity(treeClient({ failMessages: true }).client, "r", DIRECTORY, signal)).toBeNull()
     expect(await probeSubtreeActivity(treeClient({ undefinedMessages: true }).client, "r", DIRECTORY, signal)).toBeNull()
     expect(await probeSubtreeActivity(treeClient({ undefinedChildren: true }).client, "r", DIRECTORY, signal)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Compaction-marker classification (compaction-storm change D2, DT-FR-002)
+// ---------------------------------------------------------------------------
+
+const CONTINUATION_PROMPT =
+  "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
+
+describe("classifySyntheticText", () => {
+  it("classifies a system-reminder-wrapped summary", () => {
+    expect(classifySyntheticText("<system-reminder>\n## Objective\n- keep working\n</system-reminder>\n")).toBe(
+      "compaction-summary",
+    )
+    expect(classifySyntheticText("<SYSTEM-REMINDER>summary body</SYSTEM-REMINDER>")).toBe("compaction-summary")
+  })
+
+  it("classifies the continuation prompt with and without the overflow preamble", () => {
+    expect(classifySyntheticText(CONTINUATION_PROMPT)).toBe("continuation-prompt")
+    expect(
+      classifySyntheticText(
+        "The previous request exceeded the provider's size limit due to large media attachments. " +
+          "The conversation was compacted and media files were removed from context.  " +
+          CONTINUATION_PROMPT,
+      ),
+    ).toBe("continuation-prompt")
+  })
+
+  it("rejects prose that merely mentions compaction or reminders", () => {
+    expect(classifySyntheticText("I compacted the conversation and kept working on the task.")).toBeNull()
+    expect(classifySyntheticText("The system-reminder tags contain useful information, so I followed them.")).toBeNull()
+    expect(classifySyntheticText("")).toBeNull()
+    expect(classifySyntheticText("   ")).toBeNull()
+  })
+
+  it("rejects over-long and unanchored text", () => {
+    expect(classifySyntheticText(`<system-reminder>${"x".repeat(MAX_SYNTHETIC_WRAPPER_LENGTH)}</system-reminder>`)).toBeNull()
+    expect(classifySyntheticText("noise before <system-reminder>summary</system-reminder>")).toBeNull()
+    expect(classifySyntheticText("<system-reminder>summary</system-reminder> trailing")).toBeNull()
+    // A continuation-prompt match at exactly the documented bound still matches.
+    const atBound = `${"y".repeat(MAX_CONTINUATION_PROMPT_LENGTH - CONTINUATION_PROMPT.length)}${CONTINUATION_PROMPT}`
+    expect(atBound.length).toBe(MAX_CONTINUATION_PROMPT_LENGTH)
+    expect(classifySyntheticText(atBound)).toBe("continuation-prompt")
+    expect(classifySyntheticText(`${atBound} and one more word`)).toBeNull()
+  })
+})
+
+describe("isCompactionMarker", () => {
+  it("recognizes the opencode storage shapes", () => {
+    expect(isCompactionMarker(message("m", [{ type: "compaction", auto: true }]))).toBe(true)
+    expect(isCompactionMarker(message("m", [{ type: "text", text: "## Objective" }], { mode: "compaction" }))).toBe(true)
+    expect(isCompactionMarker(message("m", [], { agent: "compaction" }))).toBe(true)
+    expect(
+      isCompactionMarker(
+        message("m", [{ type: "text", metadata: { compaction_continue: true }, text: CONTINUATION_PROMPT }]),
+      ),
+    ).toBe(true)
+  })
+
+  it("recognizes user-role wrapped and continuation texts", () => {
+    expect(
+      isCompactionMarker(message("m", [{ type: "text", text: "<system-reminder>summary body</system-reminder>" }], { role: "user" })),
+    ).toBe(true)
+    expect(isCompactionMarker(message("m", [{ type: "text", text: CONTINUATION_PROMPT }], { role: "user" }))).toBe(true)
+  })
+
+  it("rejects normal messages, non-user wrapped text, and absent messages", () => {
+    expect(isCompactionMarker(undefined)).toBe(false)
+    expect(isCompactionMarker(message("m", [{ type: "text", text: "working" }]))).toBe(false)
+    // Legitimate prose mentioning compaction stays legitimate (D3 negative control).
+    expect(isCompactionMarker(message("m", [{ type: "text", text: "I will now compact the conversation." }], { role: "user" }))).toBe(false)
+    // A wrapped shape on a non-user message is not a host injection.
+    expect(
+      isCompactionMarker(message("m", [{ type: "text", text: "<system-reminder>summary body</system-reminder>" }], { role: "assistant" })),
+    ).toBe(false)
+    // Non-flag metadata is ignored.
+    expect(isCompactionMarker(message("m", [{ type: "text", metadata: "not-an-object", text: "working" }]))).toBe(false)
+    expect(isCompactionMarker(message("m", [{ type: "text", metadata: { other: true }, text: "working" }]))).toBe(false)
+  })
+})
+
+describe("isSubstantiveProgress", () => {
+  it("counts a completed non-read tool call", () => {
+    expect(isSubstantiveProgress(message("m", [{ type: "tool", tool: "write", state: { status: "completed" } }]))).toBe(true)
+    expect(isSubstantiveProgress(message("m", [{ type: "tool", tool: "bash", state: { status: "completed" } }]))).toBe(true)
+  })
+
+  it("rejects read-only tools, running and failed tools, and non-tool messages", () => {
+    for (const tool of READ_ONLY_TOOLS) {
+      expect(isSubstantiveProgress(message("m", [{ type: "tool", tool, state: { status: "completed" } }]))).toBe(false)
+    }
+    expect(isSubstantiveProgress(message("m", [{ type: "tool", tool: "bash", state: { status: "running" } }]))).toBe(false)
+    expect(isSubstantiveProgress(message("m", [{ type: "tool", tool: "bash", state: { status: "error" } }]))).toBe(false)
+    expect(isSubstantiveProgress(message("m", [{ type: "text", text: "done" }]))).toBe(false)
+    expect(isSubstantiveProgress(undefined)).toBe(false)
+  })
+})
+
+describe("probeSubtreeActivity compaction accounting", () => {
+  const roots: string[] = []
+  /** Register a probe root id that afterEach cleans up. */
+  const root = (id: string): string => {
+    roots.push(id)
+    return id
+  }
+  /** A compaction-marker message with the given message id. */
+  const compactionMessage = (id: string) => message(id, [{ type: "compaction", auto: true }])
+
+  afterEach(() => {
+    for (const id of roots.splice(0)) {
+      unregisterProbeState(id)
+    }
+  })
+
+  it("excludes compaction markers from fingerprint progress", async () => {
+    const probeRoot = root("r-fingerprint")
+    const sessions: Record<string, FakeSession> = {
+      [probeRoot]: { latest: message("m1", [{ id: "p1", type: "text", text: "working" }]) },
+    }
+    const fake = treeClient({ sessions })
+    const first = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    expect(first?.fingerprint).toContain(probeRoot)
+    expect(first?.compactionsSinceProgress).toBe(0)
+
+    // Neither a marker's arrival nor marker-to-marker churn changes the
+    // fingerprint (DT-FR-002 compaction-only-child scenario).
+    sessions[probeRoot] = { latest: compactionMessage("c1") }
+    const second = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    expect(second?.fingerprint).toBe(first?.fingerprint)
+    expect(second?.compactionsSinceProgress).toBe(1)
+    expect(second?.compactionCount).toBe(1)
+
+    sessions[probeRoot] = { latest: compactionMessage("c2") }
+    const third = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    expect(third?.fingerprint).toBe(first?.fingerprint)
+    expect(third?.compactionsSinceProgress).toBe(2)
+
+    // A real message after the markers is progress again.
+    sessions[probeRoot] = { latest: message("m2", [{ id: "p2", type: "text", text: "resumed" }]) }
+    const fourth = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    expect(fourth?.fingerprint).not.toBe(first?.fingerprint)
+  })
+
+  it("increments per new marker and resets only on substantive non-read progress", async () => {
+    const probeRoot = root("r-reset")
+    const sessions: Record<string, FakeSession> = { [probeRoot]: {} }
+    const fake = treeClient({ sessions })
+    const probe = () => probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+
+    sessions[probeRoot] = { latest: compactionMessage("c1") }
+    await probe()
+    // Re-observing the same marker is not a new compaction.
+    await probe()
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      compactionsSinceProgress: 1,
+      nonReadProgressCount: 0,
+      compactionCount: 1,
+    })
+
+    sessions[probeRoot] = { latest: compactionMessage("c2") }
+    await probe()
+    expect(registeredProbeCounters(probeRoot)?.compactionsSinceProgress).toBe(2)
+
+    // A completed write resets the storm window and counts as progress.
+    sessions[probeRoot] = { latest: message("w1", [{ id: "t1", type: "tool", tool: "write", state: { status: "completed" } }]) }
+    await probe()
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      compactionsSinceProgress: 0,
+      nonReadProgressCount: 1,
+      compactionCount: 2,
+    })
+
+    // Read-only completions between compactions do not reset the window
+    // (the storm fires through read-only activity; DELEG-FR-002).
+    sessions[probeRoot] = { latest: message("r1", [{ id: "t2", type: "tool", tool: "read", state: { status: "completed" } }]) }
+    await probe()
+    sessions[probeRoot] = { latest: compactionMessage("c3") }
+    await probe()
+    expect(registeredProbeCounters(probeRoot)).toMatchObject({ compactionsSinceProgress: 1, compactionCount: 3 })
+    expect(registeredProbeCounters(probeRoot)?.nonReadProgressCount).toBe(1)
+  })
+
+  it("keeps a quiet session's completed tool from masking a storm elsewhere", async () => {
+    // quiet's stale completed write stays its latest message; without
+    // identity-gated resets it would reset the window on every probe
+    // and hide stormy's compaction loop.
+    const probeRoot = root("r-masking")
+    const sessions: Record<string, FakeSession> = {
+      [probeRoot]: { children: ["quiet", "stormy"] },
+      quiet: { created: 1, latest: message("w1", [{ id: "t1", type: "tool", tool: "write", state: { status: "completed" } }]) },
+      stormy: { created: 2, latest: compactionMessage("c1") },
+    }
+    const fake = treeClient({ sessions })
+    // The first walk observes stormy's marker and then quiet's write
+    // (newest child first), so the write's reset lands last and the
+    // window opens at zero -- but the write is counted exactly once.
+    await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      compactionsSinceProgress: 0,
+      nonReadProgressCount: 1,
+      compactionCount: 1,
+    })
+    // Each further compaction in stormy climbs without further resets:
+    // quiet's write is the same identity, so it cannot mask the storm.
+    for (const id of ["c2", "c3", "c4"]) {
+      sessions.stormy = { created: 2, latest: compactionMessage(id) }
+      await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    }
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      compactionsSinceProgress: 3,
+      nonReadProgressCount: 1,
+      compactionCount: 4,
+    })
+  })
+
+  it("keeps accounting untouched when a probe fails mid-walk", async () => {
+    const probeRoot = root("r-failed")
+    const failFor: string[] = ["child"]
+    const sessions: Record<string, FakeSession> = {
+      [probeRoot]: { children: ["child"] },
+      child: { created: 1, latest: compactionMessage("c1") },
+    }
+    const fake = treeClient({ sessions, failMessagesFor: failFor })
+    expect(await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)).toBeNull()
+    // The fold never ran: no state exists for the root.
+    expect(registeredProbeCounters(probeRoot)).toBeUndefined()
+    failFor.splice(0)
+    const sample = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    expect(sample?.compactionsSinceProgress).toBe(1)
+  })
+
+  it("unregisters a root's probe accounting", async () => {
+    const probeRoot = root("r-unregister")
+    const sessions: Record<string, FakeSession> = { [probeRoot]: { latest: compactionMessage("c1") } }
+    const fake = treeClient({ sessions })
+    await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    expect(registeredProbeCounters(probeRoot)?.compactionCount).toBe(1)
+    unregisterProbeState(probeRoot)
+    expect(registeredProbeCounters(probeRoot)).toBeUndefined()
   })
 })
 
