@@ -196,7 +196,27 @@ describe("fetch_failed_run_logs", () => {
           restore()
         }
       } finally {
-        process.env.TMPDIR = originalTmpdir
+        // process.env coerces an assigned undefined into the literal
+        // string "undefined": on Linux, where TMPDIR normally starts
+        // unset, a plain `process.env.TMPDIR = originalTmpdir` would
+        // leave that poison value behind, make every later os.tmpdir()
+        // in this process return the relative path "undefined", and
+        // route fetch_failed_run_logs log files into
+        // <cwd>/.opencode/undefined/ (issue #1051). delete restores
+        // unset-ness; assignment restores a real saved value.
+        if (originalTmpdir === undefined) {
+          delete process.env.TMPDIR
+        } else {
+          process.env.TMPDIR = originalTmpdir
+        }
+      }
+      // Regression guard (issue #1051): when TMPDIR started unset it
+      // must be unset again after the test. The old plain-assignment
+      // restore left the string "undefined" behind, which this
+      // assertion catches — dormant on macOS (TMPDIR always set),
+      // active on Linux where the regression manifests.
+      if (originalTmpdir === undefined) {
+        expect(process.env.TMPDIR).toBeUndefined()
       }
     })
 
