@@ -3168,6 +3168,68 @@ describe("consolidate_dispatch detail modes and compact finalization (RD-FR-049,
     expect(await artifactFiles(projectRoot)).toEqual([`${correlationId}.failure.json`])
   })
 
+  it("round-trips a failed finalization's record through read_dispatch_artifact section errors (RD-FR-066)", async () => {
+    const projectRoot = await scratchRoot("failure-record")
+    // Seven included plan entries but one run file: the finalizer's
+    // plan/runs cross-check rejects the payload with six distinct "has
+    // no run" errors — one past the preview's five-entry cap — so the
+    // sixth is recoverable only from the persisted failure record. (A
+    // duplicate-key payload would deduplicate to a single error under
+    // uniqueSorted; distinct missing agents keep six distinct strings.)
+    const missingAgents = [
+      "divisor-adversary",
+      "divisor-architect",
+      "divisor-curator",
+      "divisor-linguist",
+      "divisor-sre",
+      "divisor-testing",
+    ]
+    const correlationId = await setupDispatchSession(
+      [runFixture({ agent: "divisor-guard" })],
+      { plan: explicitRunPlan("divisor-guard", ...missingAgents) },
+    )
+    const expectedErrors = missingAgents
+      .map((agent) => `included plan entry ${agent}/1 has no run`)
+      .sort()
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+    const compact = JSON.parse((await tool.execute({ provenance: provenance() }, noopContext())).output)
+
+    // The compact result surfaces the whole-or-absent preview — five
+    // complete entries, errors_truncated flagging the dropped sixth —
+    // and the failure_record locator keyed by the dispatch's correlation.
+    expectKeyOrder(compact, COMPACT_KEY_ORDER)
+    expect(compact.status).toBe("failed")
+    expect(compact.artifact_path).toBeNull()
+    expect(compact.errors).toEqual(expectedErrors.slice(0, 5))
+    expect(compact.errors_truncated).toBe(true)
+    expect(compact.failure_record).toEqual({
+      correlation_id: correlationId,
+      path: join(projectRoot, ".uf", "artifacts", "dispatch", `${correlationId}.failure.json`),
+    })
+
+    // The end-to-end recovery chain (design D5): the locator's
+    // correlation id reads the record back through the reader's errors
+    // section — complete and untruncated, including the entry the
+    // preview's count cap dropped. The hand-built records of
+    // read-dispatch-artifact.test.ts cannot catch a drift between the
+    // writer and the reader (DE-007 writer/reader seam).
+    const record = await readDispatchArtifact(
+      { correlation_id: compact.failure_record.correlation_id, section: "errors" },
+      projectRoot,
+    )
+    expect(record).toMatchObject({
+      status: "ok",
+      correlation_id: correlationId,
+      section: "errors",
+      total: expectedErrors.length,
+    })
+    const recovered = record.errors as string[]
+    expect(recovered).toEqual(expectedErrors)
+    // The preview's five entries are the record's first five, verbatim.
+    expect(recovered.slice(0, 5)).toEqual(compact.errors)
+  })
+
   it("keeps the calculated decision on persistence failure without a payload body", async () => {
     const projectRoot = await scratchRoot()
     await setupDispatchSession([runFixture({ agent: "divisor-guard" })], { plan: explicitRunPlan("divisor-guard") })

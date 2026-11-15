@@ -80,7 +80,7 @@
       budget drops trailing errors whole; the parsed key order
       places `failure_record` after `artifact_path` and `errors`
       last; update the `SUMMARY_LIMITS` literals.
-- [ ] 4.2 [P] In `.opencode/test/finalize-review-dispatch.test.ts`
+- [x] 4.2 [P] In `.opencode/test/finalize-review-dispatch.test.ts`
       and `.opencode/test/finalize-error-boundaries.test.ts`:
       a `review-dispatch-failure` record is written on each of
       the three failure paths with the complete errors verbatim;
@@ -89,16 +89,16 @@
       `EEXIST` appends a new record without overwriting; a
       record-write failure returns `failure_record: null` with
       the write error among the result's `errors`.
-- [ ] 4.3 [P] In `.opencode/test/read-dispatch-artifact.test.ts`:
+- [x] 4.3 [P] In `.opencode/test/read-dispatch-artifact.test.ts`:
       section `errors` returns the complete array for a written
       record; `not_found` for a success-only correlation;
       `invalid_artifact` for a missing, oversized, symlinked,
       unparseable, wrong-type, or schema-failing record.
-- [ ] 4.4 [P] In `.opencode/test/review-dispatch-artifact.test.ts`:
+- [x] 4.4 [P] In `.opencode/test/review-dispatch-artifact.test.ts`:
       `parseReviewDispatchArtifact` returns null for a
       `review-dispatch-failure` envelope (resume detection keeps
       ignoring failure records).
-- [ ] 4.5 [P] In `.opencode/test/consolidate-dispatch.test.ts`:
+- [x] 4.5 [P] In `.opencode/test/consolidate-dispatch.test.ts`:
       end-to-end failed finalization surfaces `failure_record`
       in the compact result and the record is readable through
       `read_dispatch_artifact` section `errors`.
