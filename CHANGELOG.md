@@ -1481,6 +1481,22 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- extend-heredoc-ban-scan (#1047): the heredoc-ban contract test
+  (`TestCommandContracts_RejectShellHeredocPayloads`) now scans
+  `.opencode/agents/` and `.opencode/skills/` — and each
+  directory's scaffold mirror under
+  `internal/scaffold/assets/opencode/` — in addition to the
+  command templates it already covered. Agents and skills carry
+  the same executable bash instruction blocks as commands (41
+  blocks today, including divisor-curator, which composes and
+  posts issue content), so a heredoc payload write reintroduced
+  there previously passed the gate. Markdown enumeration walks
+  each tree recursively (`markdownFilesUnder`) so the nested
+  `<name>/SKILL.md` layout is scanned; the heredoc detection
+  logic is unchanged and the extended scan passes against the
+  current tree (zero heredoc instances repo-wide, verified
+  2026-11-10 — the gap was latent, not live). Coverage extends
+  only; no existing gate is weakened, narrowed, or bypassed.
 - harden-spec-review-gate: closes the spec-review REQUEST CHANGES
   bypass (issue #1078: after a REQUEST CHANGES verdict the child
   session edited spec.md and returned a compaction summary, and

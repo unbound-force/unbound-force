@@ -2,6 +2,7 @@ package scaffold
 
 import (
 	"bytes"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -844,8 +845,12 @@ func TestCommandContracts_RejectIncompatibleGhSlurpFlag(t *testing.T) {
 func TestCommandContracts_RejectShellHeredocPayloads(t *testing.T) {
 	// #1011: a heredoc ends at any line equal to its delimiter, quoted or
 	// not, so composed text (comment bodies, child issue payloads) written
-	// through one could break out and run as shell. Command templates must
-	// write payload files with the host's file-write tool instead.
+	// through one could break out and run as shell. Instruction templates
+	// must write payload files with the host's file-write tool instead.
+	// #1047: agents and skills carry the same executable bash instruction
+	// blocks as commands (divisor-curator composes and posts issue
+	// content), so the ban spans every instruction directory and its
+	// scaffold mirror.
 	root := findProjectRoot(t)
 	if root == "" {
 		t.Fatal("project root not found")
@@ -854,13 +859,14 @@ func TestCommandContracts_RejectShellHeredocPayloads(t *testing.T) {
 	for _, dir := range []string{
 		filepath.Join(root, ".opencode", "commands"),
 		filepath.Join(root, "internal", "scaffold", "assets", "opencode", "commands"),
+		filepath.Join(root, ".opencode", "agents"),
+		filepath.Join(root, "internal", "scaffold", "assets", "opencode", "agents"),
+		filepath.Join(root, ".opencode", "skills"),
+		filepath.Join(root, "internal", "scaffold", "assets", "opencode", "skills"),
 	} {
-		paths, err := filepath.Glob(filepath.Join(dir, "*.md"))
-		if err != nil {
-			t.Fatalf("list command templates in %s: %v", dir, err)
-		}
+		paths := markdownFilesUnder(t, dir)
 		if len(paths) == 0 {
-			t.Fatalf("no command templates found in %s", dir)
+			t.Fatalf("no instruction templates found in %s", dir)
 		}
 		for _, path := range paths {
 			data, err := os.ReadFile(path)
@@ -919,6 +925,31 @@ func loadCommandCopies(t *testing.T, name string, scaffolded bool) []commandCopy
 		t.Fatalf("read embedded command %s: %v", embeddedPath, err)
 	}
 	return append(copies, commandCopy{name: "scaffold", text: string(embedded)})
+}
+
+// markdownFilesUnder returns every markdown file beneath dir,
+// recursively. The heredoc scan uses it instead of a top-level
+// glob because the instruction directories mix layouts: commands
+// and agents sit flat at the top level while skills nest one
+// level down (<name>/SKILL.md), and walking the tree covers both
+// without assuming either.
+func markdownFilesUnder(t *testing.T, dir string) []string {
+	t.Helper()
+
+	var paths []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".md") {
+			paths = append(paths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("list instruction templates in %s: %v", dir, err)
+	}
+	return paths
 }
 
 func normalizeCommandText(text string) string {
