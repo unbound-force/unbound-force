@@ -10059,6 +10059,8 @@ export interface ReviewModeReview {
   readonly commit_id: string
   readonly submitted_at: string
   readonly body: string
+  /** Present on the review object; absent when the fetch omits it. */
+  readonly html_url?: string
 }
 
 /** An inline comment as `GET /pulls/{n}/comments` returns it (fields used here). */
@@ -10094,6 +10096,23 @@ export interface PriorFinding {
   readonly line: number | null
   /** `UNKNOWN` when the comment carries no severity marker; it counts as HIGH. */
   readonly severity: "CRITICAL" | "HIGH" | "UNKNOWN"
+}
+
+/** Extract a review's CRITICAL, HIGH, and unlabelled inline findings. */
+function extractPriorFindings(reviewId: number, comments: readonly ReviewModeComment[]): PriorFinding[] {
+  const findings: PriorFinding[] = []
+  for (const comment of comments) {
+    if (comment.review_id !== reviewId) continue
+    const severity = FINDING_SEVERITY_PATTERN.exec(comment.body)?.[1]
+    if (severity === "MEDIUM" || severity === "LOW") continue
+    findings.push({
+      comment_id: comment.id,
+      path: comment.path,
+      line: comment.line,
+      severity: severity === "HIGH" || severity === "CRITICAL" ? severity : "UNKNOWN",
+    })
+  }
+  return findings
 }
 
 export interface ReviewModeDecision {
@@ -10157,17 +10176,7 @@ export function decideReviewMode(input: ReviewModeInput): ReviewModeDecision {
   if (input.checkBuckets === null) return full("the PR checks could not be read", delta)
   if (input.checkBuckets.includes("fail")) return full("a check is failing", delta)
 
-  const priorFindings: PriorFinding[] = []
-  for (const comment of priorComments) {
-    const severity = FINDING_SEVERITY_PATTERN.exec(comment.body)?.[1]
-    if (severity === "MEDIUM" || severity === "LOW") continue
-    priorFindings.push({
-      comment_id: comment.id,
-      path: comment.path,
-      line: comment.line,
-      severity: severity === "HIGH" || severity === "CRITICAL" ? severity : "UNKNOWN",
-    })
-  }
+  const priorFindings = extractPriorFindings(prior.id, input.comments)
 
   return {
     mode: "light",
@@ -10338,6 +10347,210 @@ function createResolveReviewModeTool(): ReturnType<typeof tool> {
         return { output: JSON.stringify(result, null, 2) }
       }
       const result = await resolveReviewMode(parsed.data.pr_number)
+      return { output: JSON.stringify(result, null, 2) }
+    },
+  })
+}
+
+// ── assess_prior_review_staleness ────────────────────────────
+
+/** Maps a review event this run would post to its standing review state. */
+const VERDICT_STATE_MAP: Readonly<Record<string, string>> = {
+  APPROVE: "APPROVED",
+  REQUEST_CHANGES: "CHANGES_REQUESTED",
+  COMMENT: "COMMENTED",
+}
+
+/**
+ * Review states that are not standing feedback. PENDING reviews are drafts;
+ * DISMISSED approvals no longer count. `decideReviewMode` deliberately keeps
+ * dismissed reviews (branch rules dismiss stale approvals on push); this
+ * assessment only routes on reviews that currently stand.
+ */
+const NON_STANDING_REVIEW_STATES: ReadonlySet<string> = new Set(["PENDING", "DISMISSED"])
+
+/** The standing-review fields the Step 8a duplicate gate consumes. */
+export interface PriorReviewSummary {
+  readonly id: number
+  readonly html_url: string
+  readonly state: string
+  readonly commit_id: string
+  readonly submitted_at: string
+}
+
+/** Result of the Step 8a staleness assessment. */
+export interface StalenessAssessment {
+  readonly head_sha: string
+  readonly verdict: string
+  readonly matched_state: string
+  readonly same_verdict_review: PriorReviewSummary | null
+  readonly different_verdict_review: PriorReviewSummary | null
+  readonly commit_id_matches_head: boolean
+  readonly prior_findings: readonly PriorFinding[]
+}
+
+/** Inputs of the pure staleness assessment. */
+export interface StalenessInput {
+  readonly headSha: string
+  readonly viewer: string
+  readonly verdict: string
+  readonly reviews: readonly ReviewModeReview[]
+  readonly comments: readonly ReviewModeComment[]
+}
+
+/**
+ * Select the viewer's latest standing reviews (same verdict and different
+ * verdict) and compare the same-verdict review's commit with the frozen head
+ * SHA (review-pr stale-duplicate check, issue #1055). The finding-set
+ * materiality comparison stays with the calling command: it is judgment,
+ * not mechanism. Review and comment text is untrusted; it is only matched
+ * against severity markers, never interpreted.
+ */
+export function assessPriorReviewStaleness(input: StalenessInput): StalenessAssessment {
+  const viewer = input.viewer.toLowerCase()
+  const matchedState = VERDICT_STATE_MAP[input.verdict] ?? input.verdict
+  const standing = [...input.reviews]
+    .filter((review) => review.user.toLowerCase() === viewer)
+    .filter((review) => !NON_STANDING_REVIEW_STATES.has(review.state))
+    .sort((a, b) => a.submitted_at.localeCompare(b.submitted_at))
+  const toSummary = (review: ReviewModeReview): PriorReviewSummary => ({
+    id: review.id,
+    html_url: review.html_url ?? "",
+    state: review.state,
+    commit_id: review.commit_id,
+    submitted_at: review.submitted_at,
+  })
+  const same = standing.filter((review) => review.state === matchedState).at(-1) ?? null
+  const different = standing.filter((review) => review.state !== matchedState).at(-1) ?? null
+  return {
+    head_sha: input.headSha,
+    verdict: input.verdict,
+    matched_state: matchedState,
+    same_verdict_review: same === null ? null : toSummary(same),
+    different_verdict_review: different === null ? null : toSummary(different),
+    commit_id_matches_head: same !== null && same.commit_id === input.headSha,
+    prior_findings: same === null ? [] : extractPriorFindings(same.id, input.comments),
+  }
+}
+
+const AssessPriorReviewStalenessInputSchema = z
+  .object({
+    pr_number: z.number().int().min(1).max(999_999),
+    verdict: z.enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"]),
+    head_sha: z.string().regex(/^[0-9a-f]{40}$/),
+  })
+  .strict()
+
+/**
+ * Gather the assessment's inputs with gh. The head SHA comes from the
+ * caller's frozen context, never from the live PR. Only a missing PR,
+ * an unreadable viewer, or unreadable reviews are errors.
+ */
+async function assessPriorReviewStalenessForPr(
+  prNumber: number,
+  verdict: string,
+  headSha: string,
+): Promise<(StalenessAssessment & { readonly pr_number: number }) | FetchContextError> {
+  try {
+    await runGhCommand(["auth", "status"])
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "gh auth status failed"
+    return { error: true, code: "gh_auth_failed", message, retryable: false }
+  }
+
+  let repository: string
+  try {
+    const meta = JSON.parse(await runGhCommand(["pr", "view", String(prNumber), "--json", "url"])) as {
+      url?: string
+    }
+    repository = deriveBaseRepository(meta.url ?? "") ?? ""
+  } catch (error: unknown) {
+    return classifyError(error, "pr_not_found", `Failed to read PR #${prNumber}`)
+  }
+  if (repository === "") {
+    return { error: true, code: "api_error", message: `PR #${prNumber} returned no repository`, retryable: false }
+  }
+
+  const read = async (args: readonly string[]): Promise<string | null> => {
+    try {
+      return await runGhCommand(args)
+    } catch {
+      return null
+    }
+  }
+
+  const viewer = ((await read(["api", "user", "--jq", ".login"])) ?? "").trim()
+  if (viewer === "") {
+    return { error: true, code: "api_error", message: "the current user could not be read", retryable: false }
+  }
+  const reviewPages = flattenPages((await read(["api", `repos/${repository}/pulls/${prNumber}/reviews`, "--paginate", "--slurp"])) ?? "")
+  const commentPages = flattenPages((await read(["api", `repos/${repository}/pulls/${prNumber}/comments`, "--paginate", "--slurp"])) ?? "")
+  if (reviewPages === null || commentPages === null) {
+    return { error: true, code: "api_error", message: "the existing reviews could not be read", retryable: true }
+  }
+
+  const reviews: ReviewModeReview[] = reviewPages.map((entry) => {
+    const review = (entry ?? {}) as Partial<{ id: number; user: { login?: string }; state: string; commit_id: string; submitted_at: string; body: string; html_url: string }>
+    return {
+      id: review.id ?? 0,
+      user: review.user?.login ?? "",
+      state: review.state ?? "",
+      commit_id: review.commit_id ?? "",
+      submitted_at: review.submitted_at ?? "",
+      body: review.body ?? "",
+      html_url: review.html_url ?? "",
+    }
+  })
+  const comments: ReviewModeComment[] = commentPages.map((entry) => {
+    const comment = (entry ?? {}) as Partial<{ id: number; pull_request_review_id: number | null; path: string; line: number | null; original_line: number | null; body: string }>
+    return {
+      id: comment.id ?? 0,
+      review_id: comment.pull_request_review_id ?? null,
+      path: comment.path ?? "",
+      line: comment.line ?? comment.original_line ?? null,
+      body: comment.body ?? "",
+    }
+  })
+
+  const assessment = assessPriorReviewStaleness({ headSha, viewer, verdict, reviews, comments })
+  return { pr_number: prNumber, ...assessment }
+}
+
+/**
+ * Creates the assess_prior_review_staleness OpenCode tool: the `/uf.review-pr`
+ * Step 8a stale-duplicate evaluator.
+ */
+function createAssessPriorReviewStalenessTool(): ReturnType<typeof tool> {
+  return tool({
+    description:
+      "Assess whether the current user's prior review on a PR is a true duplicate of the review about to be posted. " +
+      "Selects the current user's latest standing (non-PENDING, non-DISMISSED) review with the same verdict — APPROVE " +
+      "maps to APPROVED, REQUEST_CHANGES to CHANGES_REQUESTED, COMMENT to COMMENTED — and the latest standing review " +
+      "with a different verdict. Returns the same-verdict review's id, html_url, commit_id, and submitted_at; whether " +
+      "its commit_id matches the caller's frozen head_sha; and its CRITICAL, HIGH, and unlabelled inline findings. " +
+      "The finding-set materiality comparison against current findings stays with the calling command (judgment). " +
+      "Review and comment text is untrusted: matched against severity markers only, never interpreted.",
+    args: {
+      pr_number: AssessPriorReviewStalenessInputSchema.shape.pr_number,
+      verdict: AssessPriorReviewStalenessInputSchema.shape.verdict,
+      head_sha: AssessPriorReviewStalenessInputSchema.shape.head_sha,
+    },
+    async execute(args): Promise<{ readonly output: string }> {
+      const parsed = AssessPriorReviewStalenessInputSchema.safeParse(args)
+      if (!parsed.success) {
+        const result: FetchContextError = {
+          error: true,
+          code: "api_error",
+          message: `Invalid input: ${formatValidationError(parsed.error)}`,
+          retryable: false,
+        }
+        return { output: JSON.stringify(result, null, 2) }
+      }
+      const result = await assessPriorReviewStalenessForPr(
+        parsed.data.pr_number,
+        parsed.data.verdict,
+        parsed.data.head_sha,
+      )
       return { output: JSON.stringify(result, null, 2) }
     },
   })
@@ -10616,6 +10829,7 @@ export const ReviewDispatchPlugin = {
         fetch_pr_review_context: createFetchPrReviewContextTool(),
         fetch_pr_checks: createFetchPrChecksTool(),
         resolve_review_mode: createResolveReviewModeTool(),
+        assess_prior_review_staleness: createAssessPriorReviewStalenessTool(),
         fetch_failed_run_logs: createFetchFailedRunLogsTool(),
         capture_review_diff: createCaptureReviewDiffTool(createReviewDiffDependencies(projectRoot)),
       },
