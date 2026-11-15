@@ -69,6 +69,7 @@ describe("provider-free scratch-repository smoke test", () => {
       expect(Object.keys(invokeHooks.tool)).toEqual(["invoke_agent"])
       expect(Object.keys(dispatchHooks.tool).sort()).toEqual([
         "acquire_sibling_evidence",
+        "assess_prior_review_staleness",
         "build_review_prompts",
         "capture_review_diff",
         "consolidate_dispatch",
