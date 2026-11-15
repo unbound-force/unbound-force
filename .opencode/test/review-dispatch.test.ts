@@ -801,6 +801,268 @@ describe("optional profile models", () => {
   })
 })
 
+describe("planner tier resolvability (RD-FR-063/064)", () => {
+  // D1 (RD-FR-063) advisories carry a signature phrase no other advisory
+  // shares; stale-manifest and tier-cap advisories share the array.
+  const inheritanceAdvisories = (plan: DispatchPlan): DispatchPlan["advisories"] =>
+    plan.advisories.filter((advisory) => advisory.description.includes("has no model configured"))
+
+  // Matrix version 3 allows profiles with no model; the planner treats
+  // them as host-model inheritance destinations for advisor runs.
+  const matrixWithoutModel = (...profiles: string[]): MutableMatrixFixture => {
+    const matrix = cloneFixture(matrixFixture) as MutableMatrixFixture
+    const profileRecords = matrix.profiles as Record<string, { model?: string }>
+    for (const profile of profiles) {
+      delete profileRecords[profile]!.model
+    }
+    return matrix
+  }
+
+  it("signals host-model inheritance for an advisor run on a model-less profile", async () => {
+    const plan = await planReviewDispatch(
+      {
+        mode: "code",
+        discovered_agents: ["divisor-guard"],
+        changed_files: [changedFile("src/feature.ts", 5)],
+      },
+      dependencies(matrixWithoutModel("standard")),
+    )
+
+    expect(plan.status).toBe("ready")
+    const entry = included(plan, "divisor-guard")[0]
+    expect(entry).toBeDefined()
+    expect(entry).toMatchObject({ source: "advisor", model: null })
+
+    const advisories = inheritanceAdvisories(plan)
+    expect(advisories).toHaveLength(1)
+    expect(advisories[0]!.severity).toBe("LOW")
+    expect(advisories[0]!.description).toContain('profile "standard"')
+    expect(advisories[0]!.description).toContain("divisor-guard")
+    expect(advisories[0]!.description).toContain("advisor host-model fallback")
+    expect(advisories[0]!.description).toContain("configure profiles.standard.model")
+  })
+
+  it("emits one advisory for a full panel on a model-less standard profile", async () => {
+    const plan = await planReviewDispatch(
+      {
+        mode: "code",
+        full: true,
+        discovered_agents: manifestFixture.reviewers.map((reviewer) => reviewer.agent),
+        changed_files: [changedFile("src/feature.ts", 5)],
+      },
+      dependencies(matrixWithoutModel("standard")),
+    )
+
+    expect(plan.status).toBe("ready")
+    const includedEntries = plan.entries.filter((entry) => entry.decision === "include")
+    expect(includedEntries).toHaveLength(6)
+    expect(
+      includedEntries.every((entry) => entry.source === "advisor" && entry.model === null),
+    ).toBe(true)
+
+    // One advisory for the profile names the review-capable agents in plan
+    // order — not one advisory per entry.
+    const advisories = inheritanceAdvisories(plan)
+    expect(advisories).toHaveLength(1)
+    expect(advisories[0]!.description).toContain('profile "standard"')
+    expect(advisories[0]!.description).toContain(
+      "advisor-destination runs (divisor-adversary, divisor-architect, divisor-curator, " +
+        "divisor-guard, divisor-sre, divisor-testing)",
+    )
+  })
+
+  it("emits an advisory when opt-in augmentation selects a model-less adjacent profile", async () => {
+    const matrix = matrixWithoutModel("standard")
+    // Drop adversary's explicit runs so its base run resolves through the
+    // advisor branch (always-pinned heavy) and only the augmentation run
+    // lands on the model-less adjacent profile.
+    delete matrix.runs.code["divisor-adversary"]
+    const plan = await planReviewDispatch(
+      {
+        mode: "code",
+        augment: true,
+        discovered_agents: ["divisor-adversary"],
+        changed_files: [changedFile("api/auth.ts", 10)],
+      },
+      dependencies(matrix),
+    )
+
+    expect(plan.status).toBe("ready")
+    const entries = included(plan, "divisor-adversary")
+    expect(entries).toHaveLength(2)
+    expect(entries[0]).toMatchObject({ source: "advisor", model: "provider/heavy" })
+    expect(entries[1]).toMatchObject({
+      source: "advisor",
+      model: null,
+      tier: "standard",
+      reason_code: "risk-augmentation",
+    })
+
+    const advisories = inheritanceAdvisories(plan)
+    expect(advisories).toHaveLength(1)
+    expect(advisories[0]!.description).toContain('profile "standard"')
+    expect(advisories[0]!.description).toContain("advisor host-model fallback")
+  })
+
+  it("emits no advisory when every profile referenced by the plan has a model", async () => {
+    const plan = await planReviewDispatch(
+      {
+        mode: "code",
+        discovered_agents: ["divisor-architect", "divisor-guard"],
+        changed_files: [changedFile("src/feature.ts", 5)],
+      },
+      dependencies(),
+    )
+
+    expect(plan.status).toBe("ready")
+    const architectEntry = included(plan, "divisor-architect")[0]
+    const guardEntry = included(plan, "divisor-guard")[0]
+    expect(architectEntry).toBeDefined()
+    expect(guardEntry).toBeDefined()
+    expect(architectEntry!.model).toBe("provider/standard")
+    expect(guardEntry!.model).toBe("provider/standard")
+    expect(inheritanceAdvisories(plan)).toHaveLength(0)
+  })
+
+  it("emits no advisory for host-fallback entries on a model-less matrix", async () => {
+    const plan = await planReviewDispatch(
+      {
+        mode: "code",
+        discovered_agents: ["divisor-guard", "divisor-sre"],
+        changed_files: [changedFile(".github/workflows/ci.yml", 5)],
+      },
+      dependencies(matrixWithoutModel("standard")),
+    )
+
+    expect(plan.status).toBe("ready")
+    // divisor-sre is absent from runs and advisor.code for code mode, so it
+    // takes the host fallback — model null with its existing self-describing
+    // reason, and no advisory of its own.
+    const sreEntry = included(plan, "divisor-sre")[0]
+    expect(sreEntry).toBeDefined()
+    expect(sreEntry).toMatchObject({ source: "host", model: null })
+    expect(sreEntry!.reason).toContain("active host model")
+
+    const advisories = inheritanceAdvisories(plan)
+    expect(advisories).toHaveLength(1)
+    expect(advisories[0]!.description).toContain("divisor-guard")
+    expect(advisories[0]!.description).not.toContain("divisor-sre")
+  })
+
+  it("produces identical advisory arrays across identical plans, sorted by profile name", async () => {
+    const matrix = matrixWithoutModel("standard", "heavy")
+    delete matrix.runs.code["divisor-adversary"]
+    const input = {
+      mode: "code" as const,
+      discovered_agents: ["divisor-adversary", "divisor-guard"],
+      changed_files: [changedFile("src/feature.ts", 5)],
+    }
+    const first = await planReviewDispatch(input, dependencies(matrix))
+    const second = await planReviewDispatch(input, dependencies(matrix))
+
+    expect(first.status).toBe("ready")
+    expect(first.advisories).toEqual(second.advisories)
+
+    const advisories = inheritanceAdvisories(first)
+    expect(advisories).toHaveLength(2)
+    // one advisory per distinct model-less profile, sorted by profile name
+    expect(advisories[0]!.description).toContain('profile "heavy"')
+    expect(advisories[0]!.description).toContain("divisor-adversary")
+    expect(advisories[1]!.description).toContain('profile "standard"')
+    expect(advisories[1]!.description).toContain("divisor-guard")
+  })
+
+  it("fails closed on an explicit profile run against a model-less profile", async () => {
+    const matrix = matrixWithoutModel("heavy")
+    matrix.runs.code["divisor-architect"] = [{ profile: "heavy" }]
+    const plan = await planReviewDispatch(
+      {
+        mode: "code",
+        discovered_agents: ["divisor-architect"],
+        changed_files: [changedFile("src/feature.ts", 60)],
+      },
+      dependencies(matrix),
+    )
+
+    expect(plan.status).toBe("inconclusive")
+    expect(plan.workflow_result).toBe("INCONCLUSIVE")
+
+    const entry = plan.entries.find((e) => e.agent === "divisor-architect")
+    expect(entry).toBeDefined()
+    expect(entry!.decision).toBe("skip")
+    expect(entry!.reason_code).toBe("invalid-explicit-run")
+    expect(entry!.validation_errors).toHaveLength(1)
+    expect(entry!.validation_errors[0]).toContain('profile "heavy" has no model configured')
+    expect(entry!.validation_errors[0]).toContain(
+      "explicit-source runs cannot inherit the host model",
+    )
+    expect(entry!.validation_errors[0]).toContain("configure profiles.heavy.model")
+
+    const error = plan.errors.find((e) => e.includes("divisor-architect"))
+    expect(error).toBeDefined()
+    expect(error).toContain("divisor-architect run 1")
+    expect(error).toContain('profile "heavy"')
+    expect(error).toContain("configure profiles.heavy.model")
+
+    // The fail-closed rejection rides the error channel, not an advisory.
+    expect(inheritanceAdvisories(plan)).toHaveLength(0)
+  })
+
+  it("keeps direct-model explicit runs unaffected", async () => {
+    const matrix = cloneFixture(matrixFixture) as MutableMatrixFixture
+    matrix.runs.code["divisor-architect"] = [{ model: "provider/direct-model" }]
+    const plan = await planReviewDispatch(
+      {
+        mode: "code",
+        discovered_agents: ["divisor-architect"],
+        changed_files: [changedFile("src/feature.ts", 60)],
+      },
+      dependencies(matrix),
+    )
+
+    expect(plan.status).toBe("ready")
+    const entry = included(plan, "divisor-architect")[0]
+    expect(entry).toBeDefined()
+    expect(entry).toMatchObject({
+      source: "explicit",
+      model: "provider/direct-model",
+      reason_code: "explicit-run",
+    })
+    expect(entry!.validation_errors).toHaveLength(0)
+    expect(inheritanceAdvisories(plan)).toHaveLength(0)
+  })
+
+  it("keeps advisor runs on the same model-less profile includable per RD-FR-063", async () => {
+    const matrix = matrixWithoutModel("heavy")
+    delete matrix.runs.code["divisor-adversary"]
+    const plan = await planReviewDispatch(
+      {
+        mode: "code",
+        discovered_agents: ["divisor-adversary"],
+        changed_files: [changedFile("src/feature.ts", 5)],
+      },
+      dependencies(matrix),
+    )
+
+    expect(plan.status).toBe("ready")
+    expect(plan.workflow_result).toBeNull()
+    const entry = included(plan, "divisor-adversary")[0]
+    expect(entry).toBeDefined()
+    expect(entry).toMatchObject({
+      source: "advisor",
+      model: null,
+      reason_code: "advisor-run",
+    })
+
+    const advisories = inheritanceAdvisories(plan)
+    expect(advisories).toHaveLength(1)
+    expect(advisories[0]!.severity).toBe("LOW")
+    expect(advisories[0]!.description).toContain('profile "heavy"')
+    expect(advisories[0]!.description).toContain("divisor-adversary")
+    expect(advisories[0]!.description).toContain("advisor host-model fallback")
+  })
+})
+
 describe("override file loading and merging", () => {
   it("uses base matrix when no override file exists", async () => {
     const plan = await planReviewDispatch(

@@ -1457,6 +1457,25 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- dispatch-tier-resolvability (#1009): the dispatch planner now
+  signals advisor host-model inheritance — when an include-entry's
+  resolved profile has no configured `model`, the plan carries one
+  non-truncating LOW advisory per distinct profile naming the
+  host-model fallback and the `profiles.<name>.model` remediation
+  while the plan stays `ready` — and fails closed on explicit
+  profile runs against model-less profiles (validation error, the
+  entry flips to skip, plan `INCONCLUSIVE`). The all-failed
+  `dispatch_review_runs` summary carries the first run-failure
+  cause — including pre-execution early exits such as
+  `tier_model_unavailable`, `host_model_structural`,
+  `host_model_unavailable`, and `unknown_agent` — captured in
+  `warnings` as `run failed:` entries and folded into the visible
+  one-line summary instead of `no failure message reported`;
+  partial failure keeps the `ok` status with causes in
+  `warnings`. Planner tests cover the advisory and fail-closed
+  paths; five end-to-end tests cover the summary cause fold.
+  (Spec: openspec/changes/dispatch-tier-resolvability/,
+  Fixes: #1009)
 - effect-security-override: pin `effect` 4.0.0-beta.83 →
   4.0.0-beta.103 with a tool-owned `overrides` entry after the CI
   throwaway-lock OSV scan surfaced GHSA-chp3-j5qr-2vfr
