@@ -2799,6 +2799,17 @@ Each entry follows the format: `- <change-name>: <summary>`.
   unbound-force/website#368; structural-vs-transient failure-class
   follow-up filed as #914. (Spec:
   openspec/changes/host-fallback-provenance/, Fixes: #901)
+- finalize-review-dispatch-rejects-success: verified issue #1010's
+  repro against main. The fix from PR #898 (commit e974e9e2) is an
+  ancestor of the verified branch; validateRunModel rejects
+  successful host and host-resolved advisor runs only when
+  resolved_parent_model is null, never for a missing variant.
+  Regression coverage pins the contract: null-variant acceptance
+  for host and host-resolved advisor runs in the finalize
+  error-boundary suite, and variant-less finalization in the
+  consolidate-dispatch suite (all 171 tests green). Issue closed
+  by this verification. (Spec:
+  openspec/changes/accept-variantless-parent-model/, Fixes: #1010)
 
 ## Recent Changes
 
