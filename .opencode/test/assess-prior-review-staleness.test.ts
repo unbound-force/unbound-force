@@ -106,6 +106,37 @@ describe("assessPriorReviewStaleness", () => {
     const comment = assessPriorReviewStaleness(input({ verdict: "COMMENT" }))
     expect(comment.matched_state).toBe("COMMENTED")
   })
+
+  it("matches the viewer case-insensitively", () => {
+    const result = assessPriorReviewStaleness(input({ viewer: "UF-DIVISOR" }))
+    expect(result.same_verdict_review?.id).toBe(1)
+    expect(result.different_verdict_review).toBeNull()
+  })
+
+  it("falls back to an empty html_url when the review carries none", () => {
+    const result = assessPriorReviewStaleness(
+      input({
+        reviews: [
+          { id: 8, user: "uf-divisor", state: "CHANGES_REQUESTED", commit_id: PRIOR, submitted_at: "2026-11-09T10:00:00Z", body: "" },
+        ],
+      }),
+    )
+    expect(result.same_verdict_review).toEqual({
+      id: 8,
+      html_url: "",
+      state: "CHANGES_REQUESTED",
+      commit_id: PRIOR,
+      submitted_at: "2026-11-09T10:00:00Z",
+    })
+  })
+
+  it("returns empty summaries when no reviews exist", () => {
+    const result = assessPriorReviewStaleness(input({ reviews: [] }))
+    expect(result.same_verdict_review).toBeNull()
+    expect(result.different_verdict_review).toBeNull()
+    expect(result.commit_id_matches_head).toBe(false)
+    expect(result.prior_findings).toEqual([])
+  })
 })
 
 // ── assess_prior_review_staleness tool (gh mocked) ───────────
@@ -161,27 +192,86 @@ describe("assess_prior_review_staleness tool", () => {
     const result = await run({ "api reviews": { stdout: "", stderr: "HTTP 403", exitCode: 1 } })
     expect(result.error).toBe(true)
     expect(result.code).toBe("api_error")
+    expect(result.message).toBe("the existing reviews could not be read")
+    expect(result.retryable).toBe(true)
+  })
+
+  it("errors when the comments cannot be read", async () => {
+    const result = await run({ "api comments": { stdout: "", stderr: "HTTP 403", exitCode: 1 } })
+    expect(result.error).toBe(true)
+    expect(result.code).toBe("api_error")
+    expect(result.message).toBe("the existing reviews could not be read")
     expect(result.retryable).toBe(true)
   })
 
   it("errors when the viewer cannot be read", async () => {
     const result = await run({ "api user": { stdout: "", stderr: "HTTP 401", exitCode: 1 } })
     expect(result.error).toBe(true)
+    expect(result.code).toBe("api_error")
     expect(result.message).toBe("the current user could not be read")
+    expect(result.retryable).toBe(false)
   })
 
   it("returns a structured error when the PR cannot be read", async () => {
     const result = await run({ "pr view": { stdout: "", stderr: "Could not resolve to a PullRequest", exitCode: 1 } })
     expect(result.error).toBe(true)
+    expect(result.code).toBe("api_error")
+    expect(result.message).toBe("gh CLI failed (exit 1): Could not resolve to a PullRequest")
+    expect(result.retryable).toBe(false)
+  })
+
+  it("errors when gh auth status fails", async () => {
+    const result = await run({ "auth status": { stdout: "", stderr: "HTTP 401", exitCode: 1 } })
+    expect(result.error).toBe(true)
+    expect(result.code).toBe("gh_auth_failed")
+    expect(result.message).toBe("gh CLI failed (exit 1): HTTP 401")
+    expect(result.retryable).toBe(false)
+  })
+
+  it("errors when pr view returns no repository", async () => {
+    const result = await run({ "pr view": ok({}) })
+    expect(result.error).toBe(true)
+    expect(result.code).toBe("api_error")
+    expect(result.message).toBe("PR #7 returned no repository")
+    expect(result.retryable).toBe(false)
+  })
+
+  it("reports pr_not_found when pr view returns unparseable metadata", async () => {
+    const result = await run({ "pr view": { stdout: "", stderr: "", exitCode: 0 } })
+    expect(result.error).toBe(true)
+    expect(result.code).toBe("pr_not_found")
+    expect(result.message).toContain("Unexpected end of JSON input")
+    expect(result.retryable).toBe(false)
+  })
+
+  it("succeeds with zero standing reviews", async () => {
+    const result = await run({ "api reviews": ok([[]]) })
+    expect(result.error).toBeUndefined()
+    expect(result.pr_number).toBe(7)
+    expect(result.matched_state).toBe("CHANGES_REQUESTED")
+    expect(result.same_verdict_review).toBeNull()
+    expect(result.different_verdict_review).toBeNull()
+    expect(result.commit_id_matches_head).toBe(false)
+    expect(result.prior_findings).toEqual([])
   })
 
   it("rejects an invalid verdict and head SHA", async () => {
     const { hooks, restore } = await setupGhMockedPlugin({ spawnDefaults: FIXTURES, cleanupRegistry: scratchDirectories })
     try {
       const bad = await hooks.tool.assess_prior_review_staleness.execute({ pr_number: 7, verdict: "APPROVE_WITH_ADVISORIES", head_sha: HEAD }, {} as never)
-      expect(JSON.parse(bad.output)).toMatchObject({ error: true, code: "api_error" })
+      expect(JSON.parse(bad.output)).toEqual({
+        error: true,
+        code: "api_error",
+        message: 'Invalid input: verdict: Invalid option: expected one of "APPROVE"|"REQUEST_CHANGES"|"COMMENT"',
+        retryable: false,
+      })
       const badSha = await hooks.tool.assess_prior_review_staleness.execute({ pr_number: 7, verdict: "APPROVE", head_sha: "zzz" }, {} as never)
-      expect(JSON.parse(badSha.output)).toMatchObject({ error: true, code: "api_error" })
+      expect(JSON.parse(badSha.output)).toEqual({
+        error: true,
+        code: "api_error",
+        message: "Invalid input: head_sha: Invalid string: must match pattern /^[0-9a-f]{40}$/",
+        retryable: false,
+      })
     } finally {
       restore()
     }
