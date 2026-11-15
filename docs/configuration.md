@@ -408,6 +408,74 @@ non-retryable error naming the remediation. When any matrix profile
 model resolves, host-model introspection is skipped entirely --
 delegation no longer depends on `HOST_MODEL_UNAVAILABLE`.
 
+### Context-headroom gate
+
+Before a matrix profile model is accepted, the selection chain
+checks context headroom: the candidate's usable window --
+declared `limit.context` minus `limit.output` -- must hold the
+delegation's estimated prompt footprint plus a working margin.
+A candidate whose usable window falls short is skipped and its
+rejection is appended to `selection_fallback_reason` as a chain
+entry naming the model, its usable window, and the required
+footprint plus margin. When every gated candidate is tight, the
+chain falls through to the host model with the full chain
+recorded -- a tight-context model can no longer accept a
+delegation it cannot hold. The gate never applies to an
+explicit `model` parameter (step 1 bypass); candidates without
+declared limits pass unchanged, and a limits-lookup failure
+fails open (empty map) so the gate can never block delegation
+on an unavailable provider config.
+
+The footprint is estimated before selection: a cached-prefix
+constant (56,000 tokens -- the shared delegation prompt
+scaffold) plus measured command-body or prompt-material tokens
+at 4 bytes per token. A command path that escapes the
+repository root (lexical traversal or symlink), or a command
+body that cannot be read, resolves to a conservative
+command-body allowance derived from the 1 MiB command-file
+bound (262,144 tokens) -- the estimate can never understate the
+delegation's prompt material (fail-closed).
+
+The working margin is configurable in the tracked matrix:
+
+```yaml
+selection:
+  footprint_margin_tokens: 24000
+```
+
+Integer, valid range 1,000--256,000, default 24,000. An absent
+value resolves to the default; an invalid value is replaced
+with the default plus a substitution warning
+(`selection_margin_warning`) naming the key, the invalid value,
+and the default applied.
+
+### Compaction-storm threshold
+
+Every child run arms a compaction-storm detector: the
+configured number of consecutive context-compaction events with
+no intervening substantive progress (a successful non-read tool
+completion) aborts the child with the retryable error code
+`context_thrash` and a resume envelope. Read-only tool calls
+and failed non-read calls never count as progress, and
+compaction events are excluded from the idle-probe progress
+fingerprint -- a compaction loop can no longer masquerade as
+activity against the idle timeout.
+
+```yaml
+delegation:
+  storm_threshold: 3
+```
+
+Integer, valid range 2--10, default 3. Both matrix knobs follow
+the same validation pattern: closed key sets, documented
+ranges, and invalid values replaced with the default plus a
+substitution warning naming the key, the invalid value, and the
+default applied -- a misconfigured knob can neither disable
+the headroom gate nor the storm detector. The effective
+threshold (`storm_threshold`) and substitution warning
+(`storm_threshold_warning`) surface in the success envelope,
+and in the checkpoint data when the knob is configured.
+
 ### Classifier
 
 For `implement` and unknown task kinds, selection runs a two-engine
@@ -468,6 +536,13 @@ Every delegation records `selection_source` (one of
 selected pack, the resolved capability and model, and classifier
 confidence when applicable -- in the success envelope and the
 checkpoint data, so model selection is auditable after the fact.
+The same surfaces carry the headroom provenance --
+`selection_footprint` (estimated prompt tokens),
+`selection_footprint_fallback` (why the estimator fell back to
+the conservative allowance), `selection_margin_tokens`, and
+`selection_margin_warning` -- and the storm provenance
+(`storm_threshold`, `storm_threshold_warning`), so context-fit
+decisions are auditable after the fact too.
 
 ### Scaffold deployment
 
@@ -590,7 +665,7 @@ carries a `timeout` object:
 
 | Field | Meaning |
 |-------|---------|
-| `kind` | `wall_clock`, `idle`, or `budget` |
+| `kind` | `wall_clock`, `idle`, `budget`, or `storm` |
 | `effective_ms` | Wall-clock timeout actually applied (post-clamp) |
 | `requested_ms` | Timeout the caller requested |
 | `budget_clamped` | `true` when an inherited budget reduced `effective_ms` |
@@ -613,6 +688,27 @@ single resume re-delegation on an idle timeout, blocked-item
 handling on wall-clock and budget timeouts) is specified in the
 `run-plan-command` capability (requirement RPC-FR-001, change
 `delegation-timeout-budgets`).
+
+### Compaction-storm and final-text failures
+
+Two additional failure classes end or reclassify a run through
+the same `DELEGATE_FAILED` envelope:
+
+- `context_thrash` (retryable) -- the compaction-storm detector
+  aborted the child after the configured threshold of
+  consecutive compaction events with no substantive progress
+  (see `### Compaction-storm threshold` under `## Delegation
+  Model Matrix`), or the final-text guard reclassified a
+  compaction-summary result at or above the threshold. The
+  envelope carries the `storm` timeout kind and, on the command
+  path, the durable resume state.
+- `synthetic_final_text` (retryable) -- the child's final
+  message was a compaction summary or the synthetic
+  continuation prompt rather than authored output, so the run
+  is never reported as success. The error message preserves the
+  offending text with secrets redacted and length truncated to
+  a documented maximum of 2,048 characters. No limit ended the
+  run, so the envelope carries neither `timeout` nor `resume`.
 
 ---
 

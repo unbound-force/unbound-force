@@ -127,7 +127,7 @@
 
 ## 4. Wiring and verification
 
-- [ ] 4.1 Wire checkpoint/provenance — classification:
+- [x] 4.1 Wire checkpoint/provenance — classification:
   judgment (authorship). `uf_delegate_command` checkpoint
   `selection_fallback_reason`; `InvokeAgentResult`
   `timeout.details`/`resume` fields documented;
@@ -138,7 +138,7 @@
   `.opencode/plugins/uf-workflow/index.ts`,
   `docs/configuration.md`.
 
-- [ ] 4.2 Verification: constitution alignment and repo
+- [x] 4.2 Verification: constitution alignment and repo
   checks — classification: deterministic (exact-command
   verification; skill/script reference: repo-root
   `Makefile`, targets `check` and `lint-instructions`).
