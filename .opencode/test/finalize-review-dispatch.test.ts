@@ -17,6 +17,7 @@ const INITIAL_CORRELATION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const TEMPORARY_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const COLLISION_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 const SECOND_TEMPORARY_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+const RETRY_RECORD_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 const COMMIT = "2222222222222222222222222222222222222222"
 
 const scratchDirectories: string[] = []
@@ -142,6 +143,31 @@ function failedRun(
     limit_skipped: 0,
     cancelled: status === "cancelled" ? 1 : 0,
   }
+}
+
+/** Parsed shape of a persisted review-dispatch-failure record (RD-FR-066 D3). */
+interface WrittenFailureRecord {
+  readonly hero: string
+  readonly artifact_type: string
+  readonly context: {
+    readonly branch: string
+    readonly commit: string
+    readonly correlation_id: string
+    readonly workflow_id: string
+  }
+  readonly payload: {
+    readonly dispatch_correlation_id: string | null
+    readonly command?: string
+    readonly mode?: string
+    readonly status: string
+    readonly operation_verdict: string
+    readonly errors: readonly string[]
+  }
+}
+
+/** Reads and parses one persisted failure record from its published path. */
+async function readFailureRecord(path: string): Promise<WrittenFailureRecord> {
+  return JSON.parse(await readFile(path, "utf8")) as WrittenFailureRecord
 }
 
 describe("finalize review dispatch mappings", () => {
@@ -632,6 +658,161 @@ describe("finalize review dispatch persistence", () => {
     expect(result.errors.join(" ")).toContain("link denied")
     expect(result.calculated_assessment?.review_verdict.council_decision).toBe("APPROVED")
     expect(await readdir(join(directory, ".uf/artifacts/dispatch"))).toEqual([])
+  })
+})
+
+describe("finalize review dispatch failure records (RD-FR-066)", () => {
+  it("writes a record on structural rejection keyed by the dispatch's usable id, errors verbatim", async () => {
+    const directory = await scratchDirectory()
+    const payload = { ...payloadFixture(), unexpected: true }
+
+    const result = await finalizeReviewDispatch(
+      { payload, provenance: provenance() } as unknown as Parameters<typeof finalizeReviewDispatch>[0],
+      dependencies(directory),
+    )
+
+    expect(result.status).toBe("failed")
+    expect(result.correlation_id).toBeNull()
+    expect(result.errors).toHaveLength(1)
+    // The record is keyed by the dispatch's UUID-usable correlation id even
+    // though the rejected result itself surfaces none (design D3).
+    const recordPath = join(directory, ".uf/artifacts/dispatch", `${INITIAL_CORRELATION_ID}.failure.json`)
+    expect(result.failure_record).toEqual({ correlation_id: INITIAL_CORRELATION_ID, path: recordPath })
+    const record = await readFailureRecord(recordPath)
+    expect(record.hero).toBe("the-divisor")
+    // The distinct artifact_type keeps resume detection ignoring the record.
+    expect(record.artifact_type).toBe("review-dispatch-failure")
+    expect(record.context).toEqual({
+      branch: "feature/review-fanout",
+      commit: COMMIT,
+      correlation_id: INITIAL_CORRELATION_ID,
+      workflow_id: "review-council-pr-42",
+    })
+    expect(record.payload).toEqual({
+      dispatch_correlation_id: INITIAL_CORRELATION_ID,
+      command: "review-council",
+      mode: "code",
+      status: "failed",
+      operation_verdict: "INCONCLUSIVE",
+      // Complete errors verbatim: the composed structural error rides whole.
+      errors: result.errors,
+    })
+    // The rejected input persisted no success artifact — only the record.
+    expect(await readdir(join(directory, ".uf/artifacts/dispatch"))).toEqual([
+      `${INITIAL_CORRELATION_ID}.failure.json`,
+    ])
+  })
+
+  it("writes a record on semantic rejection carrying every rejected error verbatim", async () => {
+    const directory = await scratchDirectory()
+    const payload = payloadFixture()
+    payload.findings.push(structuredClone(payload.findings[0]!))
+    payload.advisories = [
+      { severity: "LOW", description: "Same advisory", run_ids: [payload.runs[0]!.run_id] },
+      { severity: "MEDIUM", description: " same   advisory ", run_ids: [payload.runs[0]!.run_id] },
+    ]
+
+    const result = await finalize(payload, dependencies(directory))
+
+    expect(result.status).toBe("failed")
+    expect(result.correlation_id).toBe(INITIAL_CORRELATION_ID)
+    // Two distinct semantic violations, so the errors array is multi-entry.
+    expect(result.errors).toContain("duplicate consolidated finding for normalized file and root cause")
+    expect(result.errors).toContain("duplicate advisory description")
+    expect(result.failure_record).toEqual({
+      correlation_id: INITIAL_CORRELATION_ID,
+      path: join(directory, ".uf/artifacts/dispatch", `${INITIAL_CORRELATION_ID}.failure.json`),
+    })
+    const record = await readFailureRecord(result.failure_record!.path)
+    expect(record.artifact_type).toBe("review-dispatch-failure")
+    expect(record.payload).toEqual({
+      dispatch_correlation_id: INITIAL_CORRELATION_ID,
+      command: "review-council",
+      mode: "code",
+      status: "failed",
+      operation_verdict: "INCONCLUSIVE",
+      // The record keeps every rejected error, whole.
+      errors: result.errors,
+    })
+    expect(await readdir(join(directory, ".uf/artifacts/dispatch"))).toEqual([
+      `${INITIAL_CORRELATION_ID}.failure.json`,
+    ])
+  })
+
+  it("writes a record on artifact persistence failure with the persistence error verbatim", async () => {
+    const directory = await scratchDirectory()
+    const base = dependencies(directory)
+    // Fail only the success artifact's publication; the record's own link
+    // target (<id>.failure.json) stays writable, so the persistence-failure
+    // path is exercised with a surviving record (design D4's dual-write
+    // window where the two writes do not share a cause).
+    const artifactOnly: FinalizationDependencies = {
+      ...base,
+      link: async (existingPath, newPath): Promise<void> => {
+        if (!newPath.endsWith(".failure.json")) {
+          throw new Error("artifact link denied")
+        }
+        await base.link(existingPath, newPath)
+      },
+    }
+
+    const result = await finalize(payloadFixture(), artifactOnly)
+
+    expect(result.status).toBe("failed")
+    expect(result.operation_verdict).toBe("INCONCLUSIVE")
+    expect(result.artifact_path).toBeNull()
+    expect(result.calculated_assessment?.authoritative).toBe(false)
+    // The surviving record write adds no error and loses nothing: exactly
+    // the persistence error, once.
+    expect(result.errors).toEqual(["persist review dispatch artifact: artifact link denied"])
+    expect(result.failure_record).toEqual({
+      correlation_id: INITIAL_CORRELATION_ID,
+      path: join(directory, ".uf/artifacts/dispatch", `${INITIAL_CORRELATION_ID}.failure.json`),
+    })
+    const record = await readFailureRecord(result.failure_record!.path)
+    expect(record.artifact_type).toBe("review-dispatch-failure")
+    expect(record.payload.dispatch_correlation_id).toBe(INITIAL_CORRELATION_ID)
+    expect(record.payload.errors).toEqual(result.errors)
+    // The failed artifact write left no success artifact — only the record.
+    expect(await readdir(join(directory, ".uf/artifacts/dispatch"))).toEqual([
+      `${INITIAL_CORRELATION_ID}.failure.json`,
+    ])
+  })
+
+  it("appends a new record on an EEXIST collision without overwriting the first", async () => {
+    const directory = await scratchDirectory()
+    const artifactDirectory = join(directory, ".uf/artifacts/dispatch")
+    await mkdir(artifactDirectory, { recursive: true })
+    const existingRecordPath = join(artifactDirectory, `${INITIAL_CORRELATION_ID}.failure.json`)
+    await writeFile(existingRecordPath, "existing record\n", "utf8")
+
+    const payload = payloadFixture()
+    payload.runs[0]!.status = "running"
+    payload.runs[0]!.finished_at = null
+
+    // A re-failed dispatch appends: the collision on the dispatch-keyed
+    // record path mints a fresh record correlation id (design D3), so both
+    // records stay discoverable from their respective compact results.
+    const result = await finalize(
+      payload,
+      dependencies(directory, [TEMPORARY_ID, RETRY_RECORD_ID, SECOND_TEMPORARY_ID]),
+    )
+
+    expect(result.status).toBe("failed")
+    expect(result.failure_record).toEqual({
+      correlation_id: RETRY_RECORD_ID,
+      path: join(artifactDirectory, `${RETRY_RECORD_ID}.failure.json`),
+    })
+    // The colliding record survives untouched.
+    expect(await readFile(existingRecordPath, "utf8")).toBe("existing record\n")
+    expect((await readdir(artifactDirectory)).sort()).toEqual([
+      `${INITIAL_CORRELATION_ID}.failure.json`,
+      `${RETRY_RECORD_ID}.failure.json`,
+    ])
+    // The dispatch identity is unchanged by the re-mint.
+    const record = await readFailureRecord(result.failure_record!.path)
+    expect(record.payload.dispatch_correlation_id).toBe(INITIAL_CORRELATION_ID)
+    expect(record.payload.errors).toEqual(result.errors)
   })
 })
 

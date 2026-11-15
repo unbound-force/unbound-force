@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises"
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -44,6 +44,30 @@ async function errorsFor(payload: ReviewDispatchPayload): Promise<string[]> {
   const result = await finalizeReviewDispatch({ payload, provenance: provenance() }, dependencies(await scratchDirectory()))
   expect(result.status).toBe("failed")
   return result.errors
+}
+
+/** Parsed shape of a persisted review-dispatch-failure record (RD-FR-066 D3). */
+interface WrittenFailureRecord {
+  readonly artifact_type: string
+  readonly context: {
+    readonly branch: string
+    readonly commit: string
+    readonly correlation_id: string
+    readonly workflow_id: string
+  }
+  readonly payload: {
+    readonly dispatch_correlation_id: string | null
+    readonly command?: string
+    readonly mode?: string
+    readonly status: string
+    readonly operation_verdict: string
+    readonly errors: readonly string[]
+  }
+}
+
+/** Reads and parses one persisted failure record from its published path. */
+async function readFailureRecord(path: string): Promise<WrittenFailureRecord> {
+  return JSON.parse(await readFile(path, "utf8")) as WrittenFailureRecord
 }
 
 describe("finalize run-state semantic boundaries", () => {
@@ -390,6 +414,82 @@ describe("finalize zero-success fail-closed boundary (RD-FR-007)", () => {
     expect(await readdir(join(projectRoot, DISPATCH_ARTIFACT_DIRECTORY))).toEqual([
       `${data.correlation_id}.failure.json`,
     ])
+  })
+})
+
+describe("finalize failure record identity and degradation (RD-FR-066)", () => {
+  it("mints a record correlation id for a garbage input with no usable dispatch id", async () => {
+    const projectRoot = await scratchDirectory()
+    const MINTED_ID = "99999999-9999-4999-8999-999999999999"
+    const minting: FinalizationDependencies = { ...dependencies(projectRoot), uuid: (): string => MINTED_ID }
+
+    const result = await finalizeReviewDispatch(
+      {
+        // Structurally rejected garbage: no usable correlation id, and
+        // neither command nor mode is known (design D3).
+        payload: { correlation_id: "not-a-uuid" },
+        provenance: provenance(),
+      } as unknown as Parameters<typeof finalizeReviewDispatch>[0],
+      minting,
+    )
+
+    expect(result.status).toBe("failed")
+    expect(result.correlation_id).toBeNull()
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]).toContain("validate review dispatch input: ")
+    // The record is keyed by a freshly minted id, not the garbage input's.
+    expect(result.failure_record).toEqual({
+      correlation_id: MINTED_ID,
+      path: join(projectRoot, DISPATCH_ARTIFACT_DIRECTORY, `${MINTED_ID}.failure.json`),
+    })
+    const record = await readFailureRecord(result.failure_record!.path)
+    expect(record.artifact_type).toBe("review-dispatch-failure")
+    expect(record.context).toEqual({
+      branch: "feature/review-fanout",
+      commit: COMMIT,
+      correlation_id: MINTED_ID,
+      workflow_id: "boundaries",
+    })
+    // The record's own id mints fresh; the dispatch identity it carries is
+    // explicitly null, and best-effort command and mode stay absent.
+    expect(record.payload).toEqual({
+      dispatch_correlation_id: null,
+      status: "failed",
+      operation_verdict: "INCONCLUSIVE",
+      errors: result.errors,
+    })
+    expect(record.payload).not.toHaveProperty("command")
+    expect(record.payload).not.toHaveProperty("mode")
+  })
+
+  it("returns failure_record null with the write error appended when the record write fails", async () => {
+    const projectRoot = await scratchDirectory()
+    const base = dependencies(projectRoot)
+    // The semantic failure is recorded best-effort: failing the record's
+    // exclusive-create open leaves the finalization failure unmasked.
+    const failingRecord: FinalizationDependencies = {
+      ...base,
+      open: async (): Promise<never> => {
+        throw new Error("record write denied")
+      },
+    }
+    const data = payload()
+    data.runs[0]!.status = "running"
+    data.runs[0]!.finished_at = null
+
+    const result = await finalizeReviewDispatch({ payload: data, provenance: provenance() }, failingRecord)
+
+    expect(result.status).toBe("failed")
+    // No record was written (design D4 degradation).
+    expect(result.failure_record).toBeNull()
+    // The semantic failure survives whole and exactly one bounded
+    // record-write error joins it.
+    expect(result.errors.join(" ")).toContain("nonterminal status running")
+    expect(result.errors.filter((error) => error.startsWith("persist failure record: "))).toEqual([
+      "persist failure record: record write denied",
+    ])
+    // Nothing was published: the artifact directory holds no record.
+    expect(await readdir(join(projectRoot, DISPATCH_ARTIFACT_DIRECTORY))).toEqual([])
   })
 })
 

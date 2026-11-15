@@ -14,6 +14,7 @@ import {
   REVIEW_DISPATCH_ARTIFACT_TYPE,
   parseReviewDispatchArtifact,
 } from "../lib/review-dispatch-artifact.js"
+import { buildFailureRecordEnvelope } from "../plugins/review-dispatch/index.js"
 
 /** Minimal valid envelope in the producer's shape (review-dispatch plugin). */
 function envelope(overrides: Record<string, unknown> = {}): string {
@@ -56,6 +57,33 @@ describe("parseReviewDispatchArtifact", () => {
 
   it("returns null for a foreign artifact_type", () => {
     expect(parseReviewDispatchArtifact(envelope({ artifact_type: "issue-triage" }), "a.json")).toBeNull()
+  })
+
+  it("returns null for a review-dispatch-failure envelope (resume detection ignores failure records)", () => {
+    // Built with the producer's own envelope builder so the fixture cannot
+    // drift from the real record shape: failure records share the dispatch
+    // store directory with success artifacts, so resume detection will
+    // actually meet one — the artifact_type discriminator alone keeps it
+    // ignored (RD-FR-066, design D3).
+    const failureRecord = buildFailureRecordEnvelope(
+      {
+        dispatch_correlation_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        command: "review-council",
+        mode: "code",
+        status: "failed",
+        operation_verdict: "INCONCLUSIVE",
+        errors: ["validate review dispatch input: garbage"],
+      },
+      {
+        branch: "opsx/review-dispatch-errors-cap-loses-unrecov",
+        commit: "2222222222222222222222222222222222222222",
+        workflow_id: "uf.review-council",
+      },
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "2026-11-15T12:00:00.000Z",
+    )
+
+    expect(parseReviewDispatchArtifact(JSON.stringify(failureRecord), "a.failure.json")).toBeNull()
   })
 
   it("returns null when context is not a record", () => {

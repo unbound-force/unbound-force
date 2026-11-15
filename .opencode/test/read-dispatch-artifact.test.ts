@@ -334,6 +334,44 @@ describe("read_dispatch_artifact section errors (RD-FR-066)", () => {
     })
   })
 
+  it("fails closed on a record absent as a regular file, oversized, or symlinked", async () => {
+    // RD-FR-066 reuses the RD-FR-057 codes: invalid_artifact when "the
+    // file is absent as a regular non-symlink file of at most 64 MiB".
+    // A directory at the record path leaves the regular file absent —
+    // the same stat branch a FIFO hits — while a fully absent record
+    // stays not_found (covered above for the success-only correlation).
+    const missing = await failureRecordWith(failurePayload())
+    const missingPath = join(missing, DISPATCH_ARTIFACT_DIRECTORY, `${RECORD_CORRELATION}.failure.json`)
+    await rm(missingPath)
+    await mkdir(missingPath)
+    expect(await readDispatchArtifact({ correlation_id: RECORD_CORRELATION, section: "errors" }, missing)).toMatchObject({
+      status: "error",
+      code: "invalid_artifact",
+    })
+
+    // A sparse truncate past the bound keeps the test cheap: the stat
+    // size exceeds 64 MiB without 64 MiB ever being written.
+    const oversized = await failureRecordWith(failurePayload())
+    await truncate(join(oversized, DISPATCH_ARTIFACT_DIRECTORY, `${RECORD_CORRELATION}.failure.json`), 64 * 1024 * 1024 + 1)
+    expect(await readDispatchArtifact({ correlation_id: RECORD_CORRELATION, section: "errors" }, oversized)).toMatchObject({
+      status: "error",
+      code: "invalid_artifact",
+    })
+
+    // O_NOFOLLOW rejects a symlinked final component at the open,
+    // before any content is read.
+    const linked = await failureRecordWith(failurePayload())
+    const linkedPath = join(linked, DISPATCH_ARTIFACT_DIRECTORY, `${RECORD_CORRELATION}.failure.json`)
+    const target = join(linked, "elsewhere.json")
+    await writeFile(target, "{}", "utf8")
+    await rm(linkedPath)
+    await symlink(target, linkedPath)
+    expect(await readDispatchArtifact({ correlation_id: RECORD_CORRELATION, section: "errors" }, linked)).toMatchObject({
+      status: "error",
+      code: "invalid_artifact",
+    })
+  })
+
   it("documents the errors section in the description and the section parameter (RD-FR-066 D7)", async () => {
     await withBun(async () => {
       const hooks = await ReviewDispatchPlugin.server({
