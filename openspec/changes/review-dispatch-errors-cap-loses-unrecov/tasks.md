@@ -125,7 +125,7 @@
 
 - [x] 6.1 Add a CHANGELOG.md entry describing the
       whole-or-absent error preview and the failure record.
-- [ ] 6.2 File the in-repo documentation issue for the
+- [x] 6.2 File the in-repo documentation issue for the
       user-facing tool-description changes (documentation gate;
       `uf init` deploys the mirrored plugin).
 - [ ] 6.3 Run `make check` (lint, test, build, coverage gate,
