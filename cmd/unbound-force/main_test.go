@@ -68,8 +68,8 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected 'N files processed' line in output, got:\n%s", output)
-	} else if fileCount < 83 || fileCount > 87 {
-		t.Errorf("expected files processed in [83-87], got %d:\n%s", fileCount, output)
+	} else if fileCount < 84 || fileCount > 88 {
+		t.Errorf("expected files processed in [84-88], got %d:\n%s", fileCount, output)
 	}
 
 	// Verify a user-owned file was created

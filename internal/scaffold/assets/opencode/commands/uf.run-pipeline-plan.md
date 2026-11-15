@@ -3,8 +3,9 @@ description: >
   Execute a prioritized work plan through the full Unbound
   Force pipeline. Each work item is executed through two
   uf_delegate_command delegations (/uf.unleash, then
-  /uf.finale) with paused-exit handling and per-item
-  todowrite tracking.
+  /uf.finale) with paused-exit handling, one unconditional
+  relay_spec_review_gate call after every /uf.unleash
+  return, and per-item todowrite tracking.
 ---
 <!-- scaffolded by uf vdev -->
 
@@ -39,8 +40,12 @@ delegations:
    interactively.
 
 `/uf.unleash` paused exits are recognized, relayed
-verbatim, and block the work item.
-Progress is tracked per item via `todowrite`.
+verbatim, and block the work item. After every
+`/uf.unleash` return the orchestrator makes one
+unconditional `relay_spec_review_gate` call; a held
+spec-review gate blocks the item until the human records
+per-finding decisions. Progress is tracked per item via
+`todowrite`.
 
 Supports two input modes: a plan file path or space-
 separated GitHub issue references (`#NNN` or URLs).
@@ -206,6 +211,38 @@ parented child sessions:
    Omit
    `task_classification`, `checkpoint_step`, and
    `expected_artifact` as above.
+
+**Spec-review gate relay (unconditional)**: after the
+`/uf.unleash` child returns — `success`, a paused exit, or a
+failure envelope — CALL `relay_spec_review_gate` with
+`{command: "uf.unleash"}` exactly once, before any other
+post-return action (including Delegation 2, disk handoff
+verification, and Unleash Paused-Exit Handling). The call is
+unconditional and intent-level: no prose-evaluated condition
+sits between the child's return and the call, and the child's
+returned text is never decision input. The tool — not command
+prose — reads progress state and the dispatch artifact
+(`.uf/artifacts/dispatch/<correlation>.json`) and computes the
+pause state. Branch on the tool's `gate_paused` output only:
+
+- `gate_paused: true` — the recorded spec-review iteration is
+  undecided or human-paused. PRESENT the rendered relay to the
+  human verbatim (every finding's severity, description,
+  file:line, and the correlation id — tool-rendered from the
+  artifact, never child-text sourced) and route the item
+  through the blocked-item protocol. The human records an
+  apply/override/pause decision for every finding through the
+  checkpoint tool's `spec_review_decisions` argument —
+  directly on the feature branch, or through a pause-relay
+  question whose consented decisions the orchestrator records
+  mechanically. The recorded iteration is sealed: NEVER
+  re-dispatch it to seek a different verdict (re-dispatch is
+  refused with `iteration_already_recorded`).
+- `gate_paused: false` — no gate holds (no spec-review record,
+  a decided gate, or an approved gate). PROCEED by the other
+  state checks: the demo block gates Delegation 2; paused
+  exits and failures route through Unleash Paused-Exit
+  Handling.
 
 **Disk handoff verification**: VERIFY outcomes on disk
 at each boundary:

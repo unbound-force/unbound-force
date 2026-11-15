@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer"
 import { execFile, execFileSync } from "node:child_process"
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, statSync, writeFileSync } from "node:fs"
 import { lstat, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, resolve } from "node:path"
@@ -33,7 +33,9 @@ import {
 import {
   DISPATCH_ARTIFACT_DIRECTORY,
   parseReviewDispatchArtifact,
+  parseReviewDispatchArtifactDetail,
   type ReviewDispatchArtifactSummary,
+  type ReviewDispatchFindingSummary,
 } from "../../lib/review-dispatch-artifact.js"
 import {
   PREFLIGHT_MODES,
@@ -65,12 +67,31 @@ import {
   type BaseRefResolution,
 } from "../../lib/review-diff.js"
 import {
+  deleteState,
+  isEnoent,
+  readSpecReviewGateRecord,
+  readState,
+  reconcileSpecReviewGateState,
+  recordSpecReviewDecisionsToState,
+  writeState,
+  type PhaseCheckpointInput,
+  type ProgressState,
+} from "../../lib/progress-state.js"
+import {
+  approvalFollowsApplyDecisions,
+  decisionsForLatestIteration,
   defaultGitExec,
+  evaluateSpecReviewGate,
   failure,
+  latestSpecReviewIteration,
   normalizeModelName,
   sanitizeSlug,
   success,
+  SPEC_REVIEW_GATE_STEP_ALLOWLIST,
+  SPEC_REVIEW_STATE_COMMAND,
   type GitExec,
+  type SpecReviewDecision,
+  type SpecReviewGateStatus,
 } from "../../lib/uf-workflow-types.js"
 import {
   UNLEASH_EXIT_VARIANTS,
@@ -83,6 +104,17 @@ import {
 export { defaultGitExec, failure, normalizeModelName, sanitizeSlug, success } from "../../lib/uf-workflow-types.js"
 export type { GitExec, ToolFailure, ToolResult, ToolSuccess } from "../../lib/uf-workflow-types.js"
 export type { BaseRefSource } from "../../lib/review-diff.js"
+// Progress-state shape moved to the shared lib (harden-spec-review-gate,
+// HARDEN-001): review-dispatch persists the spec-review gate record through
+// the same primitives. Re-exported here so existing consumers of the plugin
+// module's public surface are unaffected.
+export type {
+  PhaseCheckpointInput,
+  PhaseCheckpointRecord,
+  PhaseFailureClassification,
+  PhaseFailureEntry,
+  ProgressState,
+} from "../../lib/progress-state.js"
 
 // ---------------------------------------------------------------------------
 // resolve_base_ref tool
@@ -127,55 +159,8 @@ export function createResolveBaseRefTool(exec: GitExec, cwd: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Checkpoint types
+// Key resolution
 // ---------------------------------------------------------------------------
-
-/** Failure classification for a phase pre-flight checkpoint. */
-export type PhaseFailureClassification =
-  | "pre-existing"
-  | "environmental"
-  | "change-caused"
-
-/** One classified failure in a phase checkpoint inventory. */
-export interface PhaseFailureEntry {
-  name: string
-  classification: PhaseFailureClassification
-}
-
-/** Phase-scoped checkpoint input accepted by the checkpoint tool. */
-export interface PhaseCheckpointInput {
-  number: number
-  verdict: "green" | "failed"
-  inventory: PhaseFailureEntry[]
-}
-
-/** Durable record of one phase's pre-flight checkpoint, keyed by phase number. */
-export interface PhaseCheckpointRecord {
-  verdict: "green" | "failed"
-  inventory: PhaseFailureEntry[]
-  recorded_at: string
-}
-
-/** Persistent workflow progress state (FR-001, FR-007). */
-export interface ProgressState {
-  command: string
-  branch: string
-  key: string
-  current_step: string
-  completed_steps: string[]
-  data: Record<string, unknown>
-  /** Phase-scoped checkpoint records keyed by phase number string. */
-  phases?: Record<string, PhaseCheckpointRecord>
-  created_at: string
-  updated_at: string
-}
-
-// ---------------------------------------------------------------------------
-// Checkpoint helpers
-// ---------------------------------------------------------------------------
-
-/** Progress state directory relative to project root. */
-const PROGRESS_DIR = ".uf/progress"
 
 /**
  * Resolve the state key from an explicit key or auto-detected git
@@ -196,109 +181,6 @@ export function resolveKey(
     )
   }
   return sanitizeSlug(branch)
-}
-
-/**
- * Compute state file path with path traversal protection (FR-005).
- * Both key and sanitizedCommand MUST be pre-sanitized by the caller.
- */
-function statePath(
-  cwd: string,
-  key: string,
-  sanitizedCommand: string,
-): string {
-  const progressRoot = resolve(cwd, PROGRESS_DIR)
-  const filePath = resolve(
-    progressRoot,
-    key,
-    `${sanitizedCommand}.json`,
-  )
-  if (!filePath.startsWith(progressRoot + "/")) {
-    throw new Error(
-      "Path traversal blocked: resolved path escapes .uf/progress/",
-    )
-  }
-  return filePath
-}
-
-/** Type guard for ENOENT filesystem errors. */
-function isEnoent(err: unknown): boolean {
-  return (
-    err instanceof Error &&
-    "code" in err &&
-    (err as NodeJS.ErrnoException).code === "ENOENT"
-  )
-}
-
-/**
- * Read state from disk. Returns null if file does not exist.
- * FR-005: Does not follow symlinks; reports I/O errors.
- */
-function readState(
-  cwd: string,
-  key: string,
-  sanitizedCommand: string,
-): ProgressState | null {
-  const fp = statePath(cwd, key, sanitizedCommand)
-  try {
-    const stats = lstatSync(fp)
-    if (stats.isSymbolicLink()) {
-      throw new Error("Refusing to read symlinked state file")
-    }
-    const raw = readFileSync(fp, "utf-8")
-    return JSON.parse(raw) as ProgressState
-  } catch (err: unknown) {
-    if (isEnoent(err)) return null
-    throw err
-  }
-}
-
-/**
- * Write state to disk with restricted permissions (FR-005).
- * Creates directories with 0o700, files with 0o600.
- * Does not follow symlinks.
- */
-function writeState(
-  cwd: string,
-  key: string,
-  sanitizedCommand: string,
-  state: ProgressState,
-): void {
-  const fp = statePath(cwd, key, sanitizedCommand)
-  const dir = resolve(fp, "..")
-  try {
-    const dirStats = lstatSync(dir)
-    if (dirStats.isSymbolicLink()) {
-      throw new Error("Refusing to write into symlinked directory")
-    }
-  } catch (err: unknown) {
-    if (!isEnoent(err)) throw err
-    // Directory does not exist yet — will be created below.
-  }
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
-  writeFileSync(fp, JSON.stringify(state, null, 2) + "\n", { mode: 0o600 })
-}
-
-/**
- * Delete state file. Idempotent — succeeds silently when no file
- * exists (FR-003).
- */
-function deleteState(
-  cwd: string,
-  key: string,
-  sanitizedCommand: string,
-): void {
-  const fp = statePath(cwd, key, sanitizedCommand)
-  try {
-    const stat = lstatSync(fp)
-    if (stat.isSymbolicLink()) {
-      throw new Error(`Refusing to delete symlinked state file: ${fp}`)
-    }
-    rmSync(fp)
-  } catch (err: unknown) {
-    if (isEnoent(err)) return
-    throw err
-  }
 }
 
 /**
@@ -416,6 +298,42 @@ const PhaseCheckpointArgSchema = z.object({
  */
 const CheckpointPhaseInputSchema = z.object({ phase: PhaseCheckpointArgSchema.optional() })
 
+/**
+ * Render the spec-review gate refusal (HARDEN-002, task 3.1). The message
+ * names the holding iteration, its verdict, and — for missing decisions —
+ * the undecided finding ids, so the orchestrator can re-present exactly the
+ * unresolved findings.
+ */
+function specReviewGateMessage(status: SpecReviewGateStatus): string {
+  if (status.kind === "missing_decisions") {
+    return (
+      `spec-review gate holds: iteration ${status.iteration} (${status.verdict}) has ` +
+      `undecided findings [${status.undecided.join(", ")}]; record an ` +
+      "apply/override/pause decision for every finding via the checkpoint " +
+      "spec_review_decisions argument before advancing"
+    )
+  }
+  if (status.kind === "pending_approving_iteration") {
+    return (
+      `spec-review gate holds: iteration ${status.iteration} (${status.verdict}) has ` +
+      "apply decisions; a subsequent iteration must consolidate to APPROVE " +
+      "before advancing"
+    )
+  }
+  return (
+    `spec-review gate held by pause decision on findings [${status.paused.join(", ")}] ` +
+    `(iteration ${status.iteration}, ${status.verdict}); exit through the ` +
+    "spec-review paused exit path"
+  )
+}
+
+/** Refusal code for a holding gate status (lowercase per the spec's names). */
+function specReviewGateRefusalCode(status: SpecReviewGateStatus): string {
+  if (status.kind === "missing_decisions") return "missing_per_finding_decisions"
+  if (status.kind === "pending_approving_iteration") return "pending_approving_iteration"
+  return "spec_review_gate_paused"
+}
+
 /** Factory for the checkpoint tool (FR-001). */
 export function createCheckpointTool(exec: GitExec, cwd: string) {
   return tool({
@@ -425,7 +343,10 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
       "merges optional data via shallow merge, and returns the updated state. " +
       "Pass `phase` with step `implement-phase-<number>` to record a phase " +
       "pre-flight checkpoint (verdict + classified failure inventory) that " +
-      "get_progress returns under `phases`.",
+      "get_progress returns under `phases`. While the latest spec-review " +
+      "iteration consolidated to REQUEST CHANGES, only gate-machinery steps " +
+      "may be recorded until per-finding decisions adjudicate it via " +
+      "spec_review_decisions (HARDEN-002).",
     args: {
       command: z.string().describe("Command identifier (e.g. uf.unleash)"),
       step: z.string().describe("Step name to record as completed"),
@@ -442,6 +363,29 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
             "verdict is the phase pre-flight outcome; inventory lists classified " +
             "failures (pre-existing, environmental, or change-caused)",
         ),
+      spec_review_decisions: z
+        .array(
+          z.object({
+            finding_id: z.string().describe(
+              "Finding identity from the latest iteration's finding_ids",
+            ),
+            decision: z.enum(["apply", "override", "pause"]),
+            fix_reference: z.string().optional().describe(
+              "Required with apply: reference to the applied fix",
+            ),
+            reason: z.string().optional().describe(
+              "Required with override: non-empty audit reason",
+            ),
+          }),
+        )
+        .optional()
+        .describe(
+          "Per-finding decisions adjudicating the latest spec-review iteration " +
+            "(HARDEN-002): apply requires fix_reference, override a non-empty " +
+            "reason, pause holds the gate. Validated against the latest " +
+            "iteration's finding_ids and recorded with derived overrides " +
+            "before the step is recorded.",
+        ),
     },
     execute: async (args: {
       command: string
@@ -449,9 +393,11 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
       data?: string
       key?: string
       phase?: { number: number; verdict: "green" | "failed"; inventory?: PhaseFailureEntry[] }
+      spec_review_decisions?: SpecReviewDecision[]
     }) => {
       try {
         const key = resolveKey(exec, cwd, args.key)
+        const cmd = sanitizeSlug(args.command)
 
         let dataToMerge: Record<string, unknown> | undefined
         if (args.data) {
@@ -463,6 +409,52 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
           return { output: parsedPhase.failureOutput }
         }
         const phaseRecord = parsedPhase.value.phase
+
+        // HARDEN-002 (harden-spec-review-gate, task 3.1): decisions are
+        // recorded before the gate evaluation, so one call can adjudicate
+        // and advance (the all-override path) while apply decisions persist
+        // even when the advancement they authorize still awaits its
+        // approving iteration.
+        if (args.spec_review_decisions !== undefined) {
+          if (cmd !== SPEC_REVIEW_STATE_COMMAND) {
+            return {
+              output: JSON.stringify(
+                failure(
+                  `spec_review_decisions requires command ${SPEC_REVIEW_STATE_COMMAND}`,
+                  { retryable: false, code: "invalid_spec_review_decisions" },
+                ),
+              ),
+            }
+          }
+          try {
+            recordSpecReviewDecisionsToState(cwd, key, args.spec_review_decisions)
+          } catch (err: unknown) {
+            return { output: failureFromError(err, "invalid_spec_review_decisions") }
+          }
+        }
+
+        // HARDEN-002: while the latest REQUEST CHANGES iteration is not yet
+        // adjudicated (or is held by a pause, or awaits its approving
+        // iteration), only gate-machinery steps may be recorded — every
+        // other step would advance the pipeline past spec-review.
+        if (cmd === SPEC_REVIEW_STATE_COMMAND) {
+          const status = evaluateSpecReviewGate(readSpecReviewGateRecord(cwd, key))
+          if (
+            (status.kind === "missing_decisions" ||
+              status.kind === "pending_approving_iteration" ||
+              status.kind === "paused") &&
+            !SPEC_REVIEW_GATE_STEP_ALLOWLIST.includes(args.step)
+          ) {
+            return {
+              output: JSON.stringify(
+                failure(specReviewGateMessage(status), {
+                  retryable: false,
+                  code: specReviewGateRefusalCode(status),
+                }),
+              ),
+            }
+          }
+        }
 
         const state = upsertCheckpointStep(
           cwd,
@@ -496,7 +488,16 @@ export function createGetProgressTool(exec: GitExec, cwd: string) {
       try {
         const key = resolveKey(exec, cwd, args.key)
         const cmd = sanitizeSlug(args.command)
-        const state = readState(cwd, key, cmd)
+        // HARDEN-001 (harden-spec-review-gate, task 2.2): the uf.unleash
+        // state is reconciled against the dispatch artifact store before it
+        // is returned — get_progress must never report iteration N-1 while
+        // artifact N is persisted on disk. The healed record is written
+        // back so the two-store window closes durably. Other commands read
+        // their state directly.
+        const state =
+          cmd === SPEC_REVIEW_STATE_COMMAND
+            ? reconcileSpecReviewGateState(cwd, key)
+            : readState(cwd, key, cmd)
         return { output: JSON.stringify(success(state)) }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -543,6 +544,264 @@ export function createClearProgressTool(exec: GitExec, cwd: string) {
               retryable: false,
               code: "CLEAR_PROGRESS_ERROR",
             }),
+          ),
+        }
+      }
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// relay_spec_review_gate tool (HARDEN-004)
+// ---------------------------------------------------------------------------
+
+/**
+ * Structured output from relay_spec_review_gate (HARDEN-004).
+ */
+export interface RelaySpecReviewGateData {
+  /**
+   * True only while the human's gate decision is pending presentation: the
+   * latest recorded iteration is REQUEST CHANGES with undecided findings,
+   * or a pause decision holds it. A decided gate (including apply decisions
+   * awaiting the next iteration), an approved gate, or no spec-review
+   * record reports false.
+   */
+  readonly gate_paused: boolean
+  /** Deterministic artifact-sourced relay text; null when not paused. */
+  readonly relay: string | null
+  /** Latest recorded iteration number; null when no spec-review record. */
+  readonly iteration: number | null
+  /** Latest recorded iteration verdict; null when no spec-review record. */
+  readonly verdict: string | null
+  /**
+   * Correlation ID of the dispatch artifact backing the latest iteration;
+   * null when no spec-review record.
+   */
+  readonly correlation_id: string | null
+  /** Findings the latest iteration consolidated; null when no record. */
+  readonly finding_count: number | null
+  /** Finding ids still needing a decision; empty when none or not paused. */
+  readonly undecided_finding_ids: readonly string[]
+}
+
+/** Injected filesystem dependency for relay_spec_review_gate. */
+export interface RelaySpecReviewGateDependencies {
+  /** Reads UTF-8 text from an absolute path (the dispatch artifact). */
+  readonly readText: (path: string) => Promise<string>
+}
+
+/** Input to the pure gate-relay renderer. */
+export interface SpecReviewRelayInput {
+  /** The holding gate status: undecided findings or a pause decision. */
+  readonly status: Extract<SpecReviewGateStatus, { kind: "missing_decisions" | "paused" }>
+  /** Correlation ID of the artifact backing the latest iteration. */
+  readonly correlationId: string
+  /** Findings the latest iteration consolidated. */
+  readonly findingCount: number
+  /** Recorded decision set for the latest iteration; empty while undecided. */
+  readonly decisions: readonly SpecReviewDecision[]
+  /** Parsed artifact findings; null when the artifact is unreadable. */
+  readonly findings: readonly ReviewDispatchFindingSummary[] | null
+}
+
+/**
+ * Deterministic relay text for a holding spec-review gate (HARDEN-004).
+ *
+ * The relay is artifact-sourced by construction: `findings` comes from the
+ * parsed dispatch artifact (parseReviewDispatchArtifactDetail), never from
+ * child session text, so a compaction summary, empty text, or an
+ * "addressed" claim cannot change it. A null `findings` (unreadable or
+ * malformed artifact) renders the fail-safe relay from the record's own
+ * metadata — a missing artifact can never silently un-pause the gate.
+ * Finding identity is the 1-based index into the artifact's findings
+ * array, the same identity the gate record's finding_ids and per-finding
+ * decisions carry.
+ */
+export function renderSpecReviewGateRelay(input: SpecReviewRelayInput): string {
+  const { status, correlationId, findingCount, decisions, findings } = input
+  const lines: string[] = []
+  if (status.kind === "paused") {
+    lines.push(
+      `Spec-review gate paused: iteration ${status.iteration} (${status.verdict}), correlation ${correlationId}.`,
+    )
+    lines.push(
+      `The human paused findings [${status.paused.join(", ")}]. Exit through the spec-review paused exit path; the gate re-opens only through recorded decisions (checkpoint spec_review_decisions) — the recorded iteration is sealed (re-dispatch refused with iteration_already_recorded).`,
+    )
+  } else {
+    lines.push(
+      `Spec-review gate holds: iteration ${status.iteration} (${status.verdict}), correlation ${correlationId}.`,
+    )
+    lines.push(
+      `${findingCount} findings consolidated; undecided finding ids: [${status.undecided.join(", ")}]. Record an apply/override/pause decision for every finding via the checkpoint tool's spec_review_decisions argument; the recorded iteration is sealed (re-dispatch refused with iteration_already_recorded).`,
+    )
+  }
+  if (findings === null) {
+    lines.push(
+      `The dispatch artifact ${DISPATCH_ARTIFACT_DIRECTORY}/${correlationId}.json could not be read — finding details are unavailable; decide from the recorded finding ids.`,
+    )
+    return lines.join("\n")
+  }
+  lines.push(`Findings from the dispatch artifact:`)
+  const decisionById = new Map(decisions.map((decision) => [decision.finding_id, decision.decision]))
+  findings.forEach((finding, index) => {
+    const id = String(index + 1)
+    const loc =
+      finding.file === null
+        ? ""
+        : finding.line === null
+          ? ` (${finding.file})`
+          : ` (${finding.file}:${finding.line})`
+    const mark = decisionById.get(id) ?? "undecided"
+    lines.push(`${id}. [${finding.severity}] ${finding.description}${loc} — ${mark}`)
+  })
+  return lines.join("\n")
+}
+
+/**
+ * Factory that creates the relay_spec_review_gate tool with injectable git
+ * executor, working directory, and artifact reader for testability.
+ *
+ * HARDEN-004 (harden-spec-review-gate): the orchestrator
+ * (/uf.run-pipeline-plan) calls this tool unconditionally after a
+ * /uf.unleash child returns. The tool — not command prose — reads the
+ * healed spec-review gate record (same path get_progress uses) and the
+ * dispatch artifact and computes the pause state: an undecided
+ * non-APPROVE iteration or a pause decision returns {gate_paused: true}
+ * with the rendered relay; a decided gate, an approved gate, or no
+ * spec-review record returns {gate_paused: false}. The orchestrator
+ * presents the relay when paused and proceeds only when not — the child's
+ * returned text is never decision input.
+ *
+ * @param exec Git executor used for the state-key branch read.
+ * @param cwd Repository root used to resolve the state store and the
+ *   dispatch artifact store.
+ * @param deps Dispatch-artifact reader.
+ * @returns The relay_spec_review_gate tool.
+ */
+export function createRelaySpecReviewGateTool(
+  exec: GitExec,
+  cwd: string,
+  deps: RelaySpecReviewGateDependencies,
+): ReturnType<typeof tool> {
+  return tool({
+    description:
+      "Spec-review gate relay for /uf.run-pipeline-plan (HARDEN-004): reads the " +
+      "healed uf.unleash spec-review gate record and the dispatch artifact " +
+      "(.uf/artifacts/dispatch/<correlation>.json) and computes the pause state — " +
+      "an undecided non-APPROVE spec-review iteration or a pause decision returns " +
+      "{gate_paused: true, relay} with the deterministic artifact-sourced finding " +
+      "list (severity, description, file:line, correlation id); a decided gate, an " +
+      "approved gate, or no spec-review record returns {gate_paused: false}. Call " +
+      "unconditionally after a /uf.unleash child returns; present the relay when " +
+      "paused, proceed only when not. Returns {gate_paused, relay, iteration, " +
+      "verdict, correlation_id, finding_count, undecided_finding_ids}.",
+    args: {
+      command: z.string().describe("Command identifier (e.g. uf.unleash)"),
+      key: z.string().optional().describe(
+        "Optional state key override; defaults to sanitized current git branch",
+      ),
+    },
+    execute: async (args: { command: string; key?: string }) => {
+      try {
+        // The spec-review gate record lives in the uf.unleash state only;
+        // any other command carries none.
+        if (sanitizeSlug(args.command) !== SPEC_REVIEW_STATE_COMMAND) {
+          return {
+            output: JSON.stringify(
+              failure(
+                `relay_spec_review_gate reads the ${SPEC_REVIEW_STATE_COMMAND} spec-review gate record; command '${args.command}' carries none`,
+                { retryable: false, code: "RELAY_SPEC_REVIEW_COMMAND" },
+              ),
+            ),
+          }
+        }
+        const key = resolveKey(exec, cwd, args.key)
+        const record = readSpecReviewGateRecord(cwd, key)
+        const latest = record === null ? null : latestSpecReviewIteration(record)
+        if (record === null || latest === null) {
+          // No spec-review record: nothing holds the pipeline (HARDEN-004
+          // no-record scenario) — the orchestrator proceeds by its other
+          // state checks.
+          return {
+            output: JSON.stringify(
+              success({
+                gate_paused: false,
+                relay: null,
+                iteration: null,
+                verdict: null,
+                correlation_id: null,
+                finding_count: null,
+                undecided_finding_ids: [],
+              } satisfies RelaySpecReviewGateData),
+            ),
+          }
+        }
+        const status = evaluateSpecReviewGate(record)
+        if (status.kind !== "missing_decisions" && status.kind !== "paused") {
+          // A decided or approved gate does not pause the orchestrator
+          // (HARDEN-004): apply decisions continue the fix loop inside the
+          // child, and an all-override or approving outcome closed the
+          // gate. Step completeness is the resume probe's job (HARDEN-006).
+          return {
+            output: JSON.stringify(
+              success({
+                gate_paused: false,
+                relay: null,
+                iteration: latest.iteration,
+                verdict: latest.entry.verdict,
+                correlation_id: latest.entry.correlation_id,
+                finding_count: latest.entry.finding_count,
+                undecided_finding_ids: [],
+              } satisfies RelaySpecReviewGateData),
+            ),
+          }
+        }
+        // gate_paused: render the relay from the dispatch artifact —
+        // artifact-sourced, never child-text sourced (HARDEN-004).
+        let findings: readonly ReviewDispatchFindingSummary[] | null = null
+        const correlationId = latest.entry.correlation_id
+        // Defense-in-depth: the record is tool-written, but a crafted
+        // correlation id containing a path separator would resolve outside
+        // the artifact store (same guard readDispatchArtifacts applies to
+        // store entry names).
+        const artifactNameSafe = !correlationId.includes("/") && !correlationId.includes("\\")
+        if (artifactNameSafe) {
+          try {
+            const raw = await deps.readText(
+              resolve(cwd, DISPATCH_ARTIFACT_DIRECTORY, `${correlationId}.json`),
+            )
+            const detail = parseReviewDispatchArtifactDetail(raw, `${correlationId}.json`)
+            if (detail !== null) findings = detail.findings
+          } catch {
+            // Unreadable artifact — the fail-safe relay below renders from
+            // the record metadata; a missing artifact never un-pauses.
+          }
+        }
+        const relay = renderSpecReviewGateRelay({
+          status,
+          correlationId,
+          findingCount: latest.entry.finding_count,
+          decisions: decisionsForLatestIteration(record),
+          findings,
+        })
+        return {
+          output: JSON.stringify(
+            success({
+              gate_paused: true,
+              relay,
+              iteration: latest.iteration,
+              verdict: latest.entry.verdict,
+              correlation_id: correlationId,
+              finding_count: latest.entry.finding_count,
+              undecided_finding_ids: status.kind === "missing_decisions" ? status.undecided : [],
+            } satisfies RelaySpecReviewGateData),
+          ),
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return {
+          output: JSON.stringify(
+            failure(msg, { retryable: false, code: "RELAY_SPEC_REVIEW_GATE_ERROR" }),
           ),
         }
       }
@@ -3672,6 +3931,19 @@ export interface UnleashDetectResumeData {
     readonly implement?: boolean
     readonly quick_pre_flight?: boolean
   }
+  /**
+   * HARDEN-006 (Decision 6): present when the recorded spec-review gate
+   * holds the step open — undecided findings, a pause decision, or apply
+   * decisions awaiting the subsequent APPROVE iteration. Names the
+   * iteration and verdict so a resumed run re-enters the gate instead of
+   * re-dispatching a sealed iteration. Absent when no record exists or
+   * the gate does not hold.
+   */
+  readonly spec_review_gate_holds?: {
+    readonly status: "missing_decisions" | "paused" | "pending_approving_iteration"
+    readonly iteration: number
+    readonly verdict: string
+  }
 }
 
 /**
@@ -3949,7 +4221,12 @@ function specArtifactsDirty(exec: GitExec, cwd: string, featureDir: string): boo
  *   dispatch artifact under .uf/artifacts/dispatch/ records an approving
  *   verdict AND its recorded head SHA is an ancestor of or equal to the
  *   current HEAD AND the spec artifacts have no uncommitted modifications
- *   (tasks.md checkbox edits excluded)
+ *   (tasks.md checkbox edits excluded) — except under a recorded
+ *   adjudication (HARDEN-006): all-override decisions complete the step
+ *   with no approving artifact; apply decisions complete it once the
+ *   subsequent APPROVE iteration is recorded, with the spec-artifact dirt
+ *   the applied fixes caused waived; undecided findings hold it open
+ *   (reported as spec_review_gate_holds)
  * - code_review: done only when the most recent current-branch code-mode
  *   dispatch artifact records an approving verdict AND its recorded head
  *   SHA equals the current HEAD — the review must cover the exact code
@@ -3986,6 +4263,11 @@ export function createUnleashDetectResumeTool(
       "freshness (code requires the recorded head SHA to equal current HEAD; specs " +
       "accepts ancestor-or-equal when the spec artifacts are clean, tasks.md checkbox " +
       "edits excluded) — reconciled with checkpoint state (artifacts authoritative). " +
+      "Spec-review completion honors the recorded adjudication (HARDEN-006): " +
+      "all-override decisions complete the step; apply decisions complete only " +
+      "with the subsequent APPROVE iteration recorded (spec-artifact dirt from " +
+      "applied fixes does not re-fail); undecided findings hold the step open, " +
+      "reported as spec_review_gate_holds naming the iteration. " +
       "Returns {step_statuses, resume_from, all_complete, unchecked_count, " +
       "checkpoint_claims}. OpenSpec forces clarify, plan, and tasks done. " +
       "Quick forces clarify, plan, tasks, and spec review done (no spec " +
@@ -4126,13 +4408,52 @@ export function createUnleashDetectResumeTool(
         // The quick tier skips the spec review by definition (D2) — no
         // spec artifacts exist to review. The code review stays
         // artifact-authoritative for every tier.
+        //
+        // HARDEN-006 (Decision 6): the recorded decision set is the latest
+        // iteration's adjudication — checkpoint data is authoritative for
+        // adjudication while artifacts stay authoritative for verdicts. The
+        // record is read through the same healing path get_progress uses,
+        // so a crash-window artifact is visible here too. The quick tier
+        // carries no spec review, so it never reads one.
+        const gateRecord =
+          input.workflow_tier === "quick" ? null : readSpecReviewGateRecord(cwd, key)
+        const gateStatus = evaluateSpecReviewGate(gateRecord)
+        let specReviewGateHolds: UnleashDetectResumeData["spec_review_gate_holds"]
+        if (
+          gateStatus.kind === "missing_decisions" ||
+          gateStatus.kind === "paused" ||
+          gateStatus.kind === "pending_approving_iteration"
+        ) {
+          specReviewGateHolds = {
+            status: gateStatus.kind,
+            iteration: gateStatus.iteration,
+            verdict: gateStatus.verdict,
+          }
+        }
         let specReviewDone = input.workflow_tier === "quick"
         if (!specReviewDone) {
-          const specArtifact = mostRecentArtifact(artifacts, "specs", branch)
-          if (specArtifact !== null && isApprovingVerdict(specArtifact.verdict)) {
-            specReviewDone =
-              isAncestorOrEqual(exec, cwd, specArtifact.headSha, headSha) &&
-              !specArtifactsDirty(exec, cwd, featureDir)
+          if (specReviewGateHolds !== undefined) {
+            // Undecided findings, a pause decision, or apply decisions
+            // awaiting the subsequent APPROVE iteration: the gate holds —
+            // a resumed run re-enters it (the recorded iteration is
+            // sealed; re-dispatch is refused).
+            specReviewDone = false
+          } else if (gateStatus.kind === "advanceable") {
+            // All-override adjudication closed the gate without an
+            // approving artifact — the record is authoritative (Decision 6).
+            specReviewDone = true
+          } else {
+            // open: the artifact-authoritative path (D4). HARDEN-006: when
+            // the approving iteration was reached through applied fixes,
+            // the spec-artifact dirt those fixes caused must not re-fail
+            // the probe — only the ancestry rule still applies.
+            const specArtifact = mostRecentArtifact(artifacts, "specs", branch)
+            if (specArtifact !== null && isApprovingVerdict(specArtifact.verdict)) {
+              specReviewDone =
+                isAncestorOrEqual(exec, cwd, specArtifact.headSha, headSha) &&
+                (approvalFollowsApplyDecisions(gateRecord) ||
+                  !specArtifactsDirty(exec, cwd, featureDir))
+            }
           }
         }
 
@@ -4181,6 +4502,9 @@ export function createUnleashDetectResumeTool(
           all_complete: allComplete,
           unchecked_count: uncheckedCount,
           checkpoint_claims: checkpointClaims,
+          ...(specReviewGateHolds === undefined
+            ? {}
+            : { spec_review_gate_holds: specReviewGateHolds }),
         }
         return { output: JSON.stringify(success(data)) }
       } catch (err: unknown) {
@@ -6375,6 +6699,9 @@ const UfWorkflowPlugin = {
           readText: (path: string) => readFile(path, "utf8"),
           fileExists: defaultFileExists,
           readDir: (path: string) => readdir(path),
+        }),
+        relay_spec_review_gate: createRelaySpecReviewGateTool(defaultGitExec, cwd, {
+          readText: (path: string) => readFile(path, "utf8"),
         }),
         scan_clarifications: createScanClarificationsTool(cwd, {
           readText: (path: string) => readFile(path, "utf8"),

@@ -616,6 +616,31 @@ describe("golden output shapes -- uf-workflow registry (24 documented sites)", (
     expect(data.checkpoint_claims).toEqual({ spec_review: false, code_review: false })
   })
 
+  it("relay_spec_review_gate [harden-spec-review-gate HARDEN-004] returns gate_paused false with null status fields when no spec-review record exists", async () => {
+    const directory = await makeScratch()
+    const registry = await loadRegistry(UfWorkflowPlugin, directory)
+    mockGit({ [GIT_BRANCH]: "opsx/golden", [GIT_HEAD]: SHA_A })
+
+    const data = expectOk(
+      await callEnvelopeTool<{
+        gate_paused: boolean
+        relay: string | null
+        iteration: number | null
+        verdict: string | null
+        correlation_id: string | null
+        finding_count: number | null
+        undecided_finding_ids: string[]
+      }>(registry, "relay_spec_review_gate", { command: "uf.unleash" }),
+    )
+    expect(data.gate_paused).toBe(false)
+    expect(data.relay).toBe(null)
+    expect(data.iteration).toBe(null)
+    expect(data.verdict).toBe(null)
+    expect(data.correlation_id).toBe(null)
+    expect(data.finding_count).toBe(null)
+    expect(data.undecided_finding_ids).toEqual([])
+  })
+
   it("scan_clarifications [uf.unleash.md:374] returns questions with question, context, and line plus count", async () => {
     const directory = await makeScratch()
     await writeProjectFile(

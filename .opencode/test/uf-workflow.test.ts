@@ -41,6 +41,7 @@ import {
   createGitRebaseTool,
   createGetProgressTool,
   createNormalizeModelNameTool,
+  createRelaySpecReviewGateTool,
   createPersistUnleashSummaryTool,
   createPreflightDeclaredChecksTool,
   processResultFromExecFile,
@@ -163,6 +164,7 @@ describe("UfWorkflowPlugin", () => {
       "parse_tasks",
       "post_feedback_replies",
       "post_issue_comment",
+      "relay_spec_review_gate",
       "resolve_base_ref",
       "resolve_clarification",
       "scan_clarifications",
@@ -2397,6 +2399,7 @@ describe("tool args schema exposure", () => {
       "data",
       "key",
       "phase",
+      "spec_review_decisions",
       "step",
     ])
   })
@@ -2409,6 +2412,18 @@ describe("tool args schema exposure", () => {
 
   it("exposes clear_progress as a zod-args tool definition", () => {
     const definition = createClearProgressTool(branchExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual(["command", "key"])
+  })
+
+  it("exposes relay_spec_review_gate as a zod-args tool definition", () => {
+    // DE-007 Layer 1 (harden-spec-review-gate task 5.6): the registered
+    // argument set matches the documented {command, key} contract.
+    const definition = createRelaySpecReviewGateTool(branchExec, "/fake", {
+      readText: async () => {
+        throw new Error("unused in definition construction")
+      },
+    })
 
     expect(Object.keys(definition.args).sort()).toEqual(["command", "key"])
   })

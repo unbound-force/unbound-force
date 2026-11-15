@@ -744,7 +744,11 @@ sections instead of embedding their text.
   verdicts never trigger the decision gate below.
 
 - If `operation_verdict` is REQUEST CHANGES: present the
-  per-finding spec review decision gate. The council's
+  per-finding spec review decision gate. The findings
+  presented are the artifact's findings -- the
+  `read_dispatch_artifact` results above, keyed by the
+  iteration's recorded `finding_ids` -- never
+  session-memory or child-text sourced. The council's
   "Spec Review Mode" MANDATORY GATE in
   `.opencode/commands/uf.review-council.md` governs the
   protocol -- present each finding one at a time, in
@@ -762,17 +766,25 @@ sections instead of embedding their text.
     command itself applies the suggested fix for this
     one finding. Available for every severity -- a
     human-directed fix is a consented edit, not an
-    autonomous auto-fix.
+    autonomous auto-fix. The choice is recorded as
+    `{"finding_id": N, "decision": "apply",
+    "fix_reference": <fix reference>}` in the checkpoint
+    call below.
   - **"Override & continue"** (waive): obtain a recorded
-    justification, then record the override (severity,
-    description, justification) in the checkpoint data
-    below and as a final-report advisory, and continue.
+    justification, then record the decision
+    `{"finding_id": N, "decision": "override", "reason":
+    <justification>}` in the checkpoint call below and
+    the override (severity, description, justification)
+    as a final-report advisory, and continue.
   - **"Show more context"**: print the full finding
     context, then re-present the same options. No spec
     edit occurs.
   - **"Pause & exit"**: stop the review, making no
-    further spec edits -- exit through the tool-rendered
-    `spec-review` exit path below.
+    further spec edits -- record pause decisions for the
+    unresolved findings (alongside the decisions already
+    collected) in the checkpoint call below, then exit
+    through the tool-rendered `spec-review` exit path
+    below.
   - **"Apply all remaining LOW/MEDIUM fixes"** (bulk
     shortcut, offered only when the current finding is
     LOW/MEDIUM): apply the remaining LOW/MEDIUM
@@ -801,9 +813,13 @@ sections instead of embedding their text.
   recorded override (same file and root cause)
   carry forward as resolved on re-runs and are not
   re-presented unless materially new information emerges;
-  the overrides array below carries all overrides recorded
-  across iterations. After applied fixes (per-finding
-  choices or the bulk shortcut), re-run the review:
+  the checkpoint tool derives the overrides array
+  mechanically from the recorded override decisions --
+  never hand-write `overrides`, an empty adjudication, or
+  `overrides: []` in place of decided findings. After
+  applied fixes (per-finding choices or the bulk
+  shortcut), record the decisions (checkpoint call
+  below), then re-run the review:
   re-resolve the immutable
   input, re-validate the full plan, and rerun every
   included reviewer (not just failing or
@@ -812,7 +828,12 @@ sections instead of embedding their text.
   Each re-dispatch reports a fresh `correlation_id` in
   its one-line counts summary — capture it and pass it
   on every `consolidate_dispatch` call for that
-  re-dispatch. Keep the iteration counter. Each re-run verdict is
+  re-dispatch. Keep the iteration counter, always
+  dispatching the next iteration number: the dispatch
+  layer refuses re-rolling a recorded iteration
+  (`iteration_already_recorded`) and refuses a dispatch
+  while the recorded iteration's findings remain
+  undecided or paused. Each re-run verdict is
   processed through these same rules -- the gate
   re-presents on every REQUEST CHANGES verdict. Cap at
   3 iterations: if REQUEST CHANGES persists to a fourth
@@ -822,20 +843,41 @@ sections instead of embedding their text.
 
   > CHECKPOINT: Call `checkpoint` with `command:
   > "uf.unleash"`, `step: "spec-review"`, and
-  > `data: '{"iteration": N, "overrides": [...]}'` -- the
-  > overrides array carries each waived finding's
-  > severity, description, and justification (an empty
-  > array when none).
+  > `spec_review_decisions` carrying one entry per
+  > finding of the recorded iteration: `{"finding_id":
+  > N, "decision": "apply", "fix_reference": <fix
+  > reference>}`, `{"finding_id": N, "decision":
+  > "override", "reason": <justification>}`, or
+  > `{"finding_id": N, "decision": "pause"}`. The tool
+  > validates the set against the iteration's recorded
+  > `finding_ids` and derives the overrides array
+  > mechanically. Never write `overrides: []`, an empty
+  > decision set, or a partial set in place of
+  > adjudication: the tool refuses advancement while any
+  > finding lacks a decision
+  > (`missing_per_finding_decisions`). The refusal
+  > outcomes are the expected control flow: an
+  > all-override set advances; any `apply` decision
+  > refuses with `pending_approving_iteration` (proceed
+  > to the re-run above); any `pause` decision refuses
+  > with `spec_review_gate_paused` (exit below).
 
 - If the human chooses "Pause & exit", or the 3 iteration
   cap is reached with findings unresolved: **EXIT** by
-  calling `format_unleash_exit` with:
+  first calling `relay_spec_review_gate` with `{command:
+  "uf.unleash"}` -- when it returns `gate_paused: true`,
+  emit its rendered relay verbatim (every finding's
+  severity, description, file:line, and the correlation
+  id, rendered from the dispatch artifact -- never
+  session-memory or child-text sourced) -- then calling
+  `format_unleash_exit` with:
 
   ```
   format_unleash_exit
     variant: "spec-review"
     tier: WORKFLOW_TIER
-    findings: [unresolved findings with context]
+    findings: [unresolved artifact-sourced findings with
+    context]
     change_name: [change name]
   ```
 

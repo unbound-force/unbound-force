@@ -1457,6 +1457,32 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- harden-spec-review-gate: closes the spec-review REQUEST CHANGES
+  bypass (issue #1078: after a REQUEST CHANGES verdict the child
+  session edited spec.md and returned a compaction summary, and
+  the pipeline advanced past a HIGH finding). The dispatch
+  artifact is now the single source of the verdict:
+  `consolidate_dispatch` persists the spec-review iteration
+  (verdict, correlation_id, finding count/ids) to the
+  `/uf.unleash` progress state in the same finalization step
+  that writes the artifact, idempotent by correlation, with
+  crash-window healing on every read (HARDEN-001);
+  `checkpoint` refuses to advance past REQUEST CHANGES until a
+  per-finding apply/override/pause decision set is recorded via
+  the new `spec_review_decisions` argument (HARDEN-002);
+  re-dispatch of a recorded iteration is refused with
+  `iteration_already_recorded`, capped at three re-reviews
+  (HARDEN-003); the new `relay_spec_review_gate` tool renders
+  the hold from the artifact and `/uf.unleash` and
+  `/uf.run-pipeline-plan` call it unconditionally after every
+  child return (HARDEN-004); `detect_resume` reports the hold so
+  a resumed session cannot skip adjudication (HARDEN-006);
+  regression fixtures replay the original incident end-to-end
+  (HARDEN-005). New `.opencode/lib/progress-state.ts`, mirrored
+  to the scaffold. Instruction delta (DE-004): uf.unleash.md
+  +42 lines (+518 tokens), uf.run-pipeline-plan.md +37 lines
+  (+497 tokens); total +79 lines, +1015 tokens. (Spec:
+  openspec/changes/harden-spec-review-gate/) (Docs: #1091)
 - dispatch-tier-resolvability (#1009): the dispatch planner now
   signals advisor host-model inheritance — when an include-entry's
   resolved profile has no configured `model`, the plan carries one

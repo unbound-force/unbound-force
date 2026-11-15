@@ -302,9 +302,21 @@ func TestSpecReviewPerFindingGateContracts(t *testing.T) {
 		}
 	})
 
-	t.Run("override recording contract pinned", func(t *testing.T) {
-		if !strings.Contains(unleash, `"overrides": [...]`) {
-			t.Error("unleash command missing overrides checkpoint payload")
+	t.Run("per-finding decision recording contract pinned", func(t *testing.T) {
+		if !strings.Contains(unleash, "spec_review_decisions") {
+			t.Error("unleash command missing spec_review_decisions checkpoint argument")
+		}
+		if !strings.Contains(unleash, `"decision": "apply"`) {
+			t.Error("unleash command missing apply decision entry shape")
+		}
+		if !strings.Contains(unleash, `"decision": "override"`) {
+			t.Error("unleash command missing override decision entry shape")
+		}
+		// HARDEN-002 (harden-spec-review-gate): the checkpoint tool
+		// derives overrides mechanically from the per-finding decision
+		// set — the flat overrides payload must not return.
+		if strings.Contains(unleash, `"overrides": [...]`) {
+			t.Error("unleash command retains flat overrides checkpoint payload")
 		}
 		if !strings.Contains(council, `step: "spec-review-fix-loop"`) {
 			t.Error("review-council command missing spec-review-fix-loop checkpoint marker")
@@ -2314,13 +2326,14 @@ var expectedAssetPaths = []string{
 	"opencode/lib/uf-workflow-types.ts",
 	// UF finale plugin (1)
 	"opencode/plugins/uf-finale/index.ts",
-	// Shared lib modules (14)
+	// Shared lib modules (15)
 	"opencode/lib/agent-executor.ts",
 	"opencode/lib/branch-classification.ts",
 	"opencode/lib/delegation-budget.ts",
 	"opencode/lib/feedback-replies.ts",
 	"opencode/lib/model-matrix.ts",
 	"opencode/lib/preflight-declared.ts",
+	"opencode/lib/progress-state.ts",
 	"opencode/lib/review-dispatch-artifact.ts",
 	"opencode/lib/review-dispatch-lesson-proposal.ts",
 	"opencode/lib/review-dispatch-sibling-evidence.ts",
@@ -2374,6 +2387,7 @@ var task42CanonicalAssets = []struct {
 	{asset: "opencode/lib/feedback-replies.ts", source: ".opencode/lib/feedback-replies.ts"},
 	{asset: "opencode/lib/model-matrix.ts", source: ".opencode/lib/model-matrix.ts"},
 	{asset: "opencode/lib/preflight-declared.ts", source: ".opencode/lib/preflight-declared.ts"},
+	{asset: "opencode/lib/progress-state.ts", source: ".opencode/lib/progress-state.ts"},
 	{asset: "opencode/lib/review-dispatch-artifact.ts", source: ".opencode/lib/review-dispatch-artifact.ts"},
 	{asset: "opencode/lib/review-dispatch-lesson-proposal.ts", source: ".opencode/lib/review-dispatch-lesson-proposal.ts"},
 	{asset: "opencode/lib/review-dispatch-sibling-evidence.ts", source: ".opencode/lib/review-dispatch-sibling-evidence.ts"},
@@ -4515,6 +4529,7 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/lib/run-timeout.ts", true},
 		{"opencode/lib/uf-workflow-types.ts", true},
 		{"opencode/lib/preflight-declared.ts", true},
+		{"opencode/lib/progress-state.ts", true},
 		{"opencode/lib/unleash-templates.ts", true},
 		// User-owned: reviewer eligibility pairs with uf/review-matrix.yaml as a project extension point
 		{"uf/reviewer-capabilities.yaml", false},
@@ -5207,6 +5222,7 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/lib/run-timeout.ts", true},
 		{"opencode/lib/uf-workflow-types.ts", true},
 		{"opencode/lib/preflight-declared.ts", true},
+		{"opencode/lib/progress-state.ts", true},
 		{"opencode/lib/unleash-templates.ts", true},
 		// Divisor review eligibility policy
 		{"uf/reviewer-capabilities.yaml", true},

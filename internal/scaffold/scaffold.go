@@ -737,6 +737,7 @@ func isToolOwned(relPath string) bool {
 		relPath == "opencode/lib/feedback-replies.ts" ||
 		relPath == "opencode/lib/model-matrix.ts" ||
 		relPath == "opencode/lib/preflight-declared.ts" ||
+		relPath == "opencode/lib/progress-state.ts" ||
 		relPath == "opencode/lib/review-dispatch-artifact.ts" ||
 		relPath == "opencode/lib/review-dispatch-sibling-evidence.ts" ||
 		relPath == "opencode/lib/review-dispatch-lesson-proposal.ts" ||
@@ -834,6 +835,7 @@ func isDivisorAsset(relPath string) bool {
 		relPath == "opencode/lib/feedback-replies.ts" ||
 		relPath == "opencode/lib/model-matrix.ts" ||
 		relPath == "opencode/lib/preflight-declared.ts" ||
+		relPath == "opencode/lib/progress-state.ts" ||
 		relPath == "opencode/lib/review-dispatch-artifact.ts" ||
 		relPath == "opencode/lib/review-dispatch-sibling-evidence.ts" ||
 		relPath == "opencode/lib/review-dispatch-lesson-proposal.ts" ||

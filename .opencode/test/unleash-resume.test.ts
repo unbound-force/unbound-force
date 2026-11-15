@@ -2309,3 +2309,214 @@ describe("uf_unleash_detect_resume quick tier", () => {
     expect(envelope.message).toContain("feature_dir")
   })
 })
+
+// ---------------------------------------------------------------------------
+// uf_unleash_detect_resume — recorded adjudication (HARDEN-006, Decision 6)
+// ---------------------------------------------------------------------------
+
+describe("uf_unleash_detect_resume recorded adjudication (HARDEN-006)", () => {
+  /** One spec-review gate iteration entry for record fixtures. */
+  function gateIteration(
+    overrides: Partial<{
+      verdict: string
+      correlation_id: string
+      finding_count: number
+      finding_ids: string[]
+    }> = {},
+  ) {
+    return {
+      verdict: "REQUEST CHANGES",
+      correlation_id: "gate-cid-rc",
+      finding_count: 2,
+      finding_ids: ["1", "2"],
+      recorded_at: "2026-11-14T00:00:00.000Z",
+      ...overrides,
+    }
+  }
+
+  /** A uf.unleash state carrying a spec-review gate record. */
+  function gateRecordState(record: unknown): ProgressState {
+    return {
+      command: "uf.unleash",
+      branch: STATE_KEY,
+      key: STATE_KEY,
+      current_step: "spec-review",
+      completed_steps: ["branch-safety-gate"],
+      data: { "spec-review": record },
+      created_at: "2026-10-14T00:00:00.000Z",
+      updated_at: "2026-10-14T00:00:00.000Z",
+    }
+  }
+
+  it("holds spec_review open on an undecided iteration, naming it as spec_review_gate_holds", async () => {
+    simulateExistingState(gateRecordState({ iterations: { "1": gateIteration() } }))
+    const { exec } = fakeGit()
+    const { deps } = fakeDeps({ featureDir: FEATURE_DIR, tasks: TASKS_COMPLETE })
+
+    const data = okData(
+      await invokeDetectResume(exec, deps, { feature_dir: FEATURE_DIR, workflow_tier: "openspec" }),
+    )
+
+    expect(data.step_statuses.spec_review).toBe(false)
+    expect(data.resume_from).toBe("spec_review")
+    expect(data.spec_review_gate_holds).toEqual({
+      status: "missing_decisions",
+      iteration: 1,
+      verdict: "REQUEST CHANGES",
+    })
+  })
+
+  it("holds spec_review open on a pause decision", async () => {
+    simulateExistingState(
+      gateRecordState({
+        iterations: { "1": gateIteration() },
+        decisions: {
+          iteration: "1",
+          decisions: [
+            { finding_id: "1", decision: "pause" },
+            { finding_id: "2", decision: "override", reason: "accepted risk" },
+          ],
+        },
+      }),
+    )
+    const { exec } = fakeGit()
+    const { deps } = fakeDeps({ featureDir: FEATURE_DIR, tasks: TASKS_COMPLETE })
+
+    const data = okData(
+      await invokeDetectResume(exec, deps, { feature_dir: FEATURE_DIR, workflow_tier: "openspec" }),
+    )
+
+    expect(data.step_statuses.spec_review).toBe(false)
+    expect(data.spec_review_gate_holds).toEqual({
+      status: "paused",
+      iteration: 1,
+      verdict: "REQUEST CHANGES",
+    })
+  })
+
+  it("holds spec_review open on apply decisions awaiting the subsequent APPROVE iteration", async () => {
+    simulateExistingState(
+      gateRecordState({
+        iterations: { "1": gateIteration() },
+        decisions: {
+          iteration: "1",
+          decisions: [
+            { finding_id: "1", decision: "apply", fix_reference: "deadbeef" },
+            { finding_id: "2", decision: "apply", fix_reference: "feedface" },
+          ],
+        },
+      }),
+    )
+    const { exec } = fakeGit()
+    const { deps } = fakeDeps({ featureDir: FEATURE_DIR, tasks: TASKS_COMPLETE })
+
+    const data = okData(
+      await invokeDetectResume(exec, deps, { feature_dir: FEATURE_DIR, workflow_tier: "openspec" }),
+    )
+
+    expect(data.step_statuses.spec_review).toBe(false)
+    expect(data.spec_review_gate_holds).toEqual({
+      status: "pending_approving_iteration",
+      iteration: 1,
+      verdict: "REQUEST CHANGES",
+    })
+  })
+
+  it("completes spec_review on an all-override decision set with no approving artifact", async () => {
+    simulateExistingState(
+      gateRecordState({
+        iterations: { "1": gateIteration() },
+        decisions: {
+          iteration: "1",
+          decisions: [
+            { finding_id: "1", decision: "override", reason: "accepted risk" },
+            { finding_id: "2", decision: "override", reason: "accepted risk" },
+          ],
+        },
+      }),
+    )
+    const { exec, calls } = fakeGit()
+    const { deps } = fakeDeps({ featureDir: FEATURE_DIR, tasks: TASKS_COMPLETE })
+
+    const data = okData(
+      await invokeDetectResume(exec, deps, { feature_dir: FEATURE_DIR, workflow_tier: "openspec" }),
+    )
+
+    // Decision 6: the all-override adjudication is authoritative — the
+    // artifact-only probe would re-dispatch a gate the human closed.
+    expect(data.step_statuses.spec_review).toBe(true)
+    expect(data.spec_review_gate_holds).toBeUndefined()
+    // Record-authoritative completion: no ancestry or dirtiness probe runs.
+    expect(
+      gitCommands(calls).filter((command) => command.startsWith("merge-base") || command.startsWith("status")),
+    ).toEqual([])
+  })
+
+  it("waives the spec-artifact dirt re-fail when the approving iteration followed applied fixes", async () => {
+    simulateExistingState(
+      gateRecordState({
+        iterations: {
+          "1": gateIteration(),
+          "2": gateIteration({ verdict: "APPROVE", correlation_id: "gate-cid-ok", finding_count: 0, finding_ids: [] }),
+        },
+        decisions: {
+          iteration: "1",
+          decisions: [
+            { finding_id: "1", decision: "apply", fix_reference: "deadbeef" },
+            { finding_id: "2", decision: "apply", fix_reference: "feedface" },
+          ],
+        },
+      }),
+    )
+    const { exec, calls } = fakeGit({ porcelain: PORCELAIN_DESIGN_DIRTY })
+    const { deps } = fakeDeps({
+      featureDir: FEATURE_DIR,
+      tasks: TASKS_COMPLETE,
+      artifacts: {
+        "specs-approve.json": artifactJson({ mode: "specs", headSha: ANCESTOR_SHA, verdict: "APPROVE" }),
+      },
+    })
+
+    const data = okData(
+      await invokeDetectResume(exec, deps, { feature_dir: FEATURE_DIR, workflow_tier: "openspec" }),
+    )
+
+    // Decision 6: the applied fixes dirtied the spec artifacts, but the
+    // recorded adjudication plus the subsequent APPROVE carry the verdict.
+    expect(data.step_statuses.spec_review).toBe(true)
+    expect(data.spec_review_gate_holds).toBeUndefined()
+    // Ancestry still applies; the waiver short-circuits the dirty probe.
+    expect(gitCommands(calls)).toContain(`merge-base --is-ancestor ${ANCESTOR_SHA} ${HEAD_SHA}`)
+    expect(gitCommands(calls).filter((command) => command.startsWith("status"))).toEqual([])
+  })
+
+  it("still re-fails dirty spec artifacts without a recorded adjudication (the waiver is record-gated)", async () => {
+    const { exec } = fakeGit({ porcelain: PORCELAIN_DESIGN_DIRTY })
+    const { deps } = fakeDeps({
+      featureDir: FEATURE_DIR,
+      tasks: TASKS_COMPLETE,
+      artifacts: {
+        "specs-approve.json": artifactJson({ mode: "specs", headSha: ANCESTOR_SHA, verdict: "APPROVE" }),
+      },
+    })
+
+    // No simulated state: no record exists, so the pre-HARDEN-006
+    // artifact-authoritative behavior holds — dirt still re-fails.
+    const data = okData(
+      await invokeDetectResume(exec, deps, { feature_dir: FEATURE_DIR, workflow_tier: "openspec" }),
+    )
+
+    expect(data.step_statuses.spec_review).toBe(false)
+  })
+
+  it("ignores the gate record for the quick tier (no spec review by definition)", async () => {
+    simulateExistingState(gateRecordState({ iterations: { "1": gateIteration() } }))
+    const { exec } = fakeGit()
+    const { deps } = fakeDeps({ featureDir: FEATURE_DIR, tasks: TASKS_COMPLETE })
+
+    const data = okData(await invokeDetectResume(exec, deps, { workflow_tier: "quick" }))
+
+    expect(data.step_statuses.spec_review).toBe(true)
+    expect(data.spec_review_gate_holds).toBeUndefined()
+  })
+})
