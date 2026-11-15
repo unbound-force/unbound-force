@@ -2396,9 +2396,10 @@ var expectedAssetPaths = []string{
 	"uf/review-matrix.yaml",
 	"uf/reviewer-capabilities.yaml",
 	"uf/sibling-repos.yaml",
-	// Multi-model review schemas (8)
+	// Multi-model review schemas (9)
 	"uf/schemas/lesson-proposal/v1.0.0.schema.json",
 	"uf/schemas/model-matrix/v1.schema.json",
+	"uf/schemas/review-dispatch-failure/v1.0.0.schema.json",
 	"uf/schemas/review-dispatch/v1.0.0.schema.json",
 	"uf/schemas/review-matrix/v2.schema.json",
 	"uf/schemas/review-matrix/v3.schema.json",
@@ -2448,6 +2449,7 @@ var task42CanonicalAssets = []struct {
 	{asset: "uf/reviewer-capabilities.yaml", source: ".uf/reviewer-capabilities.yaml"},
 	{asset: "uf/schemas/lesson-proposal/v1.0.0.schema.json", source: ".uf/schemas/lesson-proposal/v1.0.0.schema.json"},
 	{asset: "uf/schemas/model-matrix/v1.schema.json", source: ".uf/schemas/model-matrix/v1.schema.json"},
+	{asset: "uf/schemas/review-dispatch-failure/v1.0.0.schema.json", source: ".uf/schemas/review-dispatch-failure/v1.0.0.schema.json"},
 	{asset: "uf/schemas/review-dispatch/v1.0.0.schema.json", source: ".uf/schemas/review-dispatch/v1.0.0.schema.json"},
 	{asset: "uf/schemas/review-matrix/v2.schema.json", source: ".uf/schemas/review-matrix/v2.schema.json"},
 	{asset: "uf/schemas/review-matrix/v3.schema.json", source: ".uf/schemas/review-matrix/v3.schema.json"},
@@ -2789,6 +2791,7 @@ func TestRun_CreatesFiles(t *testing.T) {
 		"openspec/changes",
 		".uf/schemas/lesson-proposal",
 		".uf/schemas/review-dispatch",
+		".uf/schemas/review-dispatch-failure",
 		".uf/schemas/review-matrix",
 		".uf/schemas/review-verdict",
 		".uf/schemas/reviewer-capabilities",
