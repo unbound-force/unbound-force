@@ -105,7 +105,7 @@
 
 ## 5. Schema registry and scaffold mirrors (design D6)
 
-- [ ] 5.1 [P] Author `schemas/review-dispatch-failure/v1.0.0.schema.json`
+- [x] 5.1 [P] Author `schemas/review-dispatch-failure/v1.0.0.schema.json`
       declaring the record payload (strict, sanity bounds
       matching task 2.1), following the hand-authored schema
       conventions of `schemas/review-dispatch/v1.0.0.schema.json`.
