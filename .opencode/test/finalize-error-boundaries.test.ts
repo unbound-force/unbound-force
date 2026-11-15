@@ -379,8 +379,17 @@ describe("finalize zero-success fail-closed boundary (RD-FR-007)", () => {
       "verdict is APPROVE; expected INCONCLUSIVE",
       "workflow_result.value is APPROVE; expected INCONCLUSIVE",
     ])
-    // Fail-closed is fail-persisted: no artifact directory is created.
-    expect(await readdir(join(projectRoot, DISPATCH_ARTIFACT_DIRECTORY)).catch(() => null)).toBeNull()
+    // Fail-closed is fail-persisted: no success artifact exists. Since
+    // RD-FR-066 the semantic failure instead leaves a failure record keyed
+    // by the dispatch's correlation id, recoverable through
+    // read_dispatch_artifact's errors section.
+    expect(result.failure_record).toEqual({
+      correlation_id: data.correlation_id,
+      path: join(projectRoot, DISPATCH_ARTIFACT_DIRECTORY, `${data.correlation_id}.failure.json`),
+    })
+    expect(await readdir(join(projectRoot, DISPATCH_ARTIFACT_DIRECTORY))).toEqual([
+      `${data.correlation_id}.failure.json`,
+    ])
   })
 })
 

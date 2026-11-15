@@ -2954,17 +2954,22 @@ describe("consolidate_dispatch detail modes and compact finalization (RD-FR-049,
     "proposals_truncated",
     "warnings_truncated",
   ]
+  // RD-FR-066 amends RD-FR-051's compact order: failure_record (when a
+  // record was persisted) follows artifact_path, errors_truncated rides
+  // with the other observability flags, and errors stays the final key.
   const COMPACT_KEY_ORDER = [
     "status",
     "operation_verdict",
     "correlation_id",
     "artifact_path",
+    "failure_record",
     "review_verdict",
     "run_counts",
     "proposals",
     "warnings",
     "proposals_truncated",
     "warnings_truncated",
+    "errors_truncated",
     "calculated_assessment",
     "errors",
   ]
@@ -2992,6 +2997,19 @@ describe("consolidate_dispatch detail modes and compact finalization (RD-FR-049,
     expect(tool.description).toContain("detail")
     expect(tool.description).toContain("artifact_path")
     expect(tool.description).not.toContain("When omitted, returns the payload JSON")
+  })
+
+  it("documents the whole-or-absent errors preview and failure_record (RD-FR-066 D7)", () => {
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    // The errors-cap sentence now describes complete-or-dropped entries and
+    // the failure_record locator, not per-string truncation: a regression to
+    // the stale "capped at 5 strings of 256 characters" claim must fail.
+    expect(tool.description).not.toContain("capped at 5 strings of 256 characters")
+    expect(tool.description).toContain("failure_record")
+    expect(tool.description).toContain("immediately after artifact_path")
+    expect(tool.description).toContain("complete or dropped whole")
+    expect(tool.description).toContain("errors_truncated")
+    expect(tool.description).toContain("read_dispatch_artifact section errors")
   })
 
   it("returns only the summary field set, omitting empty optional keys", async () => {
@@ -3125,7 +3143,10 @@ describe("consolidate_dispatch detail modes and compact finalization (RD-FR-049,
 
   it("returns a null calculated_assessment on validation rejection", async () => {
     const projectRoot = await scratchRoot()
-    await setupDispatchSession([runFixture({ agent: "divisor-guard" })], { plan: explicitRunPlan("divisor-guard") })
+    const correlationId = await setupDispatchSession(
+      [runFixture({ agent: "divisor-guard" })],
+      { plan: explicitRunPlan("divisor-guard") },
+    )
 
     const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
     // The commit does not match input_context.head_sha: semantic rejection.
@@ -3138,7 +3159,13 @@ describe("consolidate_dispatch detail modes and compact finalization (RD-FR-049,
     expect(compact.calculated_assessment).toBeNull()
     expect(compact.review_verdict).toBeNull()
     expect(compact.errors.length).toBeGreaterThan(0)
-    expect(await artifactFiles(projectRoot)).toEqual([])
+    // RD-FR-066: the semantic failure persists a failure record keyed by
+    // the dispatch's correlation id (design D3) instead of an artifact.
+    expect(compact.failure_record).toEqual({
+      correlation_id: correlationId,
+      path: join(projectRoot, ".uf", "artifacts", "dispatch", `${correlationId}.failure.json`),
+    })
+    expect(await artifactFiles(projectRoot)).toEqual([`${correlationId}.failure.json`])
   })
 
   it("keeps the calculated decision on persistence failure without a payload body", async () => {

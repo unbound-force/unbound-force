@@ -122,6 +122,12 @@ const MANIFEST_PATH = ".uf/reviewer-capabilities.yaml"
 const PLAN_VERSION = 1
 const REVIEW_DISPATCH_SCHEMA_VERSION = "1.0.0"
 const REVIEW_VERDICT_SCHEMA_VERSION = "2.0.0"
+const REVIEW_DISPATCH_FAILURE_SCHEMA_VERSION = "1.0.0"
+// Distinct from REVIEW_DISPATCH_ARTIFACT_TYPE ("review-dispatch") so
+// consumers that select success envelopes — resume detection's
+// parseReviewDispatchArtifact is fail-open on foreign types — keep
+// ignoring failure records (RD-FR-066, design D3).
+const REVIEW_DISPATCH_FAILURE_ARTIFACT_TYPE = "review-dispatch-failure"
 const PRODUCER_VERSION = "1.0.0"
 const MAX_CORRELATION_ATTEMPTS = 32
 
@@ -963,6 +969,43 @@ const FinalizeInputSchema = z
   })
   .strict()
 
+// Sanity bounds of the failure-record payload (RD-FR-066, design D3),
+// sized above the natural error-composition ceilings so no real failure is
+// refused: the structural ceiling is roughly 100 KiB of composed
+// formatValidationError text (one issue per invalid field path over a
+// schema of bounded arrays, each Zod message short), the semantic ceiling
+// is roughly 34,000 short strings (contributor/consolidated cross-checks
+// at the payload's 64-run/512-finding maxima). The bounds fail closed and
+// never truncate: a composition beyond them leaves no record (design D4
+// degradation) rather than a silently damaged one.
+const FAILURE_RECORD_ERROR_CHARS = 131_072
+const FAILURE_RECORD_ERROR_ENTRIES = 65_536
+
+/**
+ * Strict payload persisted inside a review-dispatch-failure record
+ * (RD-FR-066, design D3). `dispatch_correlation_id` is the dispatch's
+ * correlation id when one was UUID-usable at failure time and null
+ * otherwise (a structural rejection of a garbage input has no usable id);
+ * `command` and `mode` ride along only when the failed input knew them.
+ * `errors` carries the finalizer's complete array verbatim, bounded by the
+ * sanity limits above. `status` is fixed to "failed" — the record exists
+ * only on failure paths — and unknown keys are rejected so a tampered
+ * record fails closed when read back.
+ */
+export const ReviewDispatchFailurePayloadSchema = z
+  .object({
+    dispatch_correlation_id: UUIDSchema.nullable(),
+    command: ReviewDispatchPayloadSchema.shape.command.optional(),
+    mode: ReviewDispatchPayloadSchema.shape.mode.optional(),
+    status: z.literal("failed"),
+    operation_verdict: GenericVerdictSchema,
+    errors: z
+      .array(z.string().min(1).max(FAILURE_RECORD_ERROR_CHARS))
+      .min(1)
+      .max(FAILURE_RECORD_ERROR_ENTRIES),
+  })
+  .strict()
+
 type ReviewMatrix = z.infer<typeof ReviewMatrixSchema>
 type Tier = z.infer<typeof TierSchema>
 type Source = (typeof SOURCE_VALUES)[number]
@@ -1051,6 +1094,34 @@ export interface ReviewDispatchEnvelope {
   readonly payload: ReviewDispatchPayload
 }
 
+/** Payload of a review-dispatch-failure record (RD-FR-066, design D3). */
+export type ReviewDispatchFailurePayload = z.output<typeof ReviewDispatchFailurePayloadSchema>
+
+/**
+ * Hero Interface Contract envelope emitted for a failed finalization
+ * (RD-FR-066, design D3): the same shape as the success artifact's
+ * envelope, distinguished by `artifact_type` `review-dispatch-failure` so
+ * consumers that select `review-dispatch` envelopes keep ignoring it. The
+ * context carries best-effort provenance — a field the failed input could
+ * not supply reads as "unknown" — keyed by the record's own correlation
+ * id, which is the dispatch's when UUID-usable and freshly minted
+ * otherwise.
+ */
+export interface ReviewDispatchFailureEnvelope {
+  readonly hero: "the-divisor"
+  readonly version: "1.0.0"
+  readonly timestamp: string
+  readonly artifact_type: "review-dispatch-failure"
+  readonly schema_version: "1.0.0"
+  readonly context: {
+    readonly branch: string
+    readonly commit: string
+    readonly correlation_id: string
+    readonly workflow_id: string
+  }
+  readonly payload: ReviewDispatchFailurePayload
+}
+
 /** Canonical review-verdict version 2 decision projection returned for dual emission. */
 export interface ReviewVerdictDecisionData {
   readonly schema_version: "2.0.0"
@@ -1083,12 +1154,28 @@ export interface CalculatedAssessment {
   readonly review_verdict: ReviewVerdictDecisionData
 }
 
+/**
+ * Locator of the failure record persisted for a failed finalization
+ * (RD-FR-066, design D3). The record's correlation id is its own — a
+ * re-failed dispatch appends a new record rather than overwriting, so
+ * it can differ from the dispatch's — and the path points under
+ * `.uf/artifacts/dispatch/`. Null when no record was written: success
+ * results persist none, and a record write that itself failed must not
+ * mask the finalization failure (design D4).
+ */
+export interface FailureRecordReference {
+  readonly correlation_id: string
+  readonly path: string
+}
+
 /** Deterministic structured response returned by finalize_review_dispatch. */
 export interface FinalizeReviewDispatchResult {
   readonly status: "success" | "failed"
   readonly operation_verdict: GenericVerdict
   readonly correlation_id: string | null
   readonly artifact_path: string | null
+  /** Failure-record locator (RD-FR-066, design D3); null when none was written. */
+  readonly failure_record: FailureRecordReference | null
   readonly review_dispatch: ReviewDispatchEnvelope | null
   readonly review_verdict: ReviewVerdictDecisionData | null
   readonly calculated_assessment: CalculatedAssessment | null
@@ -2733,6 +2820,113 @@ function envelopeFor(
   }
 }
 
+/** Best-effort provenance context carried by a failure record's envelope. */
+interface FailureRecordProvenance {
+  readonly branch: string
+  readonly commit: string
+  readonly workflow_id: string
+}
+
+/**
+ * Projects one provenance field through its schema, copying it verbatim
+ * when it validates and degrading to "unknown" when it does not.
+ *
+ * @param schema The ArtifactProvenanceSchema field the value must satisfy.
+ * @param value Untrusted candidate value from the failed input.
+ * @returns The validated field, or "unknown" when unusable.
+ */
+function bestEffortProvenanceField(schema: z.ZodType<string>, value: unknown): string {
+  const parsed = schema.safeParse(value)
+  return parsed.success ? parsed.data : "unknown"
+}
+
+/**
+ * Best-effort provenance context for a failure record (RD-FR-066, design
+ * D3). Provenance resolves only from the failed finalization's own input —
+ * never from the local checkout or a mutable ref — so a record cannot
+ * misattribute a failure to a checkout that differs from the reviewed
+ * head. Each field is validated independently: a garbage input may still
+ * carry a usable branch, and a schema-valid input always projects whole.
+ *
+ * @param candidate Untrusted provenance candidate from the failed input.
+ * @returns Per-field provenance, "unknown" wherever unusable.
+ */
+function bestEffortFailureProvenance(candidate: unknown): FailureRecordProvenance {
+  const record = asRecord(candidate)
+  return {
+    branch: bestEffortProvenanceField(ArtifactProvenanceSchema.shape.branch, record.branch),
+    commit: bestEffortProvenanceField(ArtifactProvenanceSchema.shape.commit, record.commit),
+    workflow_id: bestEffortProvenanceField(ArtifactProvenanceSchema.shape.workflow_id, record.workflow_id),
+  }
+}
+
+/**
+ * Builds the Hero Interface Contract envelope for one failed finalization's
+ * record (RD-FR-066, design D3). Pure over its arguments (Constitution IV):
+ * the payload is validated against the strict failure-record schema — the
+ * sanity bounds fail closed and never truncate — the record correlation id
+ * must be a UUID, and the provenance context is projected best-effort from
+ * the failed input. Persistence (the design D3 atomic publish discipline)
+ * is the caller's concern.
+ *
+ * @param payload Failure facts: the dispatch correlation id (null when
+ *   unusable), command and mode when known, status, the operation verdict,
+ *   and the complete errors verbatim.
+ * @param provenance Untrusted provenance candidate from the failed input.
+ * @param recordCorrelationID The record's identity: the dispatch's
+ *   correlation id when UUID-usable, else a freshly minted one.
+ * @param timestamp Envelope timestamp (ISO 8601, from the injected clock).
+ * @returns The schema-valid review-dispatch-failure envelope.
+ * @throws When the payload exceeds its sanity bounds or the record
+ *   correlation id is not a UUID, so the caller degrades per design D4
+ *   (no record, failure_record null, one appended result error).
+ */
+export function buildFailureRecordEnvelope(
+  payload: ReviewDispatchFailurePayload,
+  provenance: unknown,
+  recordCorrelationID: string,
+  timestamp: string,
+): ReviewDispatchFailureEnvelope {
+  const parsedPayload = ReviewDispatchFailurePayloadSchema.safeParse(payload)
+  if (!parsedPayload.success) {
+    // Fail closed, never truncate (RD-FR-066): an over-bound composition
+    // throws so the caller writes no record (design D4 degradation) rather
+    // than a silently damaged one.
+    throw new Error(`validate failure record payload: ${formatValidationError(parsedPayload.error)}`)
+  }
+  const parsedCorrelationID = UUIDSchema.safeParse(recordCorrelationID)
+  if (!parsedCorrelationID.success) {
+    throw new Error("failure record correlation id is not a UUID")
+  }
+  const context = bestEffortFailureProvenance(provenance)
+  const validated = parsedPayload.data
+  return {
+    hero: "the-divisor",
+    version: PRODUCER_VERSION,
+    timestamp,
+    artifact_type: REVIEW_DISPATCH_FAILURE_ARTIFACT_TYPE,
+    schema_version: REVIEW_DISPATCH_FAILURE_SCHEMA_VERSION,
+    context: {
+      branch: context.branch,
+      commit: context.commit,
+      correlation_id: parsedCorrelationID.data,
+      workflow_id: context.workflow_id,
+    },
+    // Canonical key order — dispatch_correlation_id, command, mode, status,
+    // operation_verdict, errors — keeps the persisted record deterministic
+    // no matter how the caller assembled the payload; absent optional keys
+    // stay absent rather than serializing as explicit undefined.
+    payload: {
+      dispatch_correlation_id: validated.dispatch_correlation_id,
+      ...(validated.command === undefined ? {} : { command: validated.command }),
+      ...(validated.mode === undefined ? {} : { mode: validated.mode }),
+      status: validated.status,
+      operation_verdict: validated.operation_verdict,
+      errors: validated.errors,
+    },
+  }
+}
+
 /**
  * Reorders a payload for persistence so a reader that only sees the head of
  * the artifact still gets the decision, findings, advisories, and lesson
@@ -2817,12 +3011,224 @@ async function persistEnvelope(
   }
 }
 
-function structuralFailure(error: z.ZodError): FinalizeReviewDispatchResult {
+/**
+ * Persists one failed finalization's record (RD-FR-066, design D3) to
+ * `.uf/artifacts/dispatch/<record-correlation-id>.failure.json` with the
+ * same atomic discipline as a success artifact: 0o750 directory,
+ * exclusive-create temporary file, rename-by-link publication, cleanup on
+ * failure, and an `EEXIST` collision retry bounded by the shared
+ * correlation-attempt budget that mints a fresh record correlation id — a
+ * re-failed dispatch appends a new record rather than overwriting the old
+ * one, so both stay discoverable from their respective compact results.
+ * The returned locator carries the final record's id, which differs from
+ * the requested one exactly when a collision forced a re-mint. Fails
+ * closed (throws) when the record cannot be built or written — never
+ * truncates; wrapping that throw so it cannot mask the finalization
+ * failure it records is the caller's concern (design D4).
+ *
+ * @param payload Failure facts, validated against the strict
+ *   failure-record schema by the envelope builder.
+ * @param provenance Untrusted provenance candidate from the failed input.
+ * @param recordCorrelationID The record's identity: the dispatch's
+ *   correlation id when UUID-usable, else a freshly minted one.
+ * @param dependencies Injectable filesystem, clock, and UUID operations.
+ * @returns Locator of the published record for the result's failure_record.
+ */
+export async function persistFailureRecord(
+  payload: ReviewDispatchFailurePayload,
+  provenance: unknown,
+  recordCorrelationID: string,
+  dependencies: FinalizationDependencies,
+): Promise<FailureRecordReference> {
+  return writeFailureRecord(payload, provenance, recordCorrelationID, dependencies, 0)
+}
+
+// One atomic publication attempt. The collision attempt bounds the EEXIST
+// retry loop to the same MAX_CORRELATION_ATTEMPTS budget as success
+// artifacts (RD-FR-066: "the same bounded retry count"); it stays internal
+// so the exported contract cannot shrink the budget.
+async function writeFailureRecord(
+  payload: ReviewDispatchFailurePayload,
+  provenance: unknown,
+  recordCorrelationID: string,
+  dependencies: FinalizationDependencies,
+  collisionAttempt: number,
+): Promise<FailureRecordReference> {
+  // The envelope is validated fail-closed before the first filesystem
+  // effect, so an over-bound payload (design D3) leaves not even a freshly
+  // created artifact directory behind — unlike persistEnvelope, whose
+  // input is already schema-validated upstream of the mkdir.
+  const envelope = buildFailureRecordEnvelope(
+    payload,
+    provenance,
+    recordCorrelationID,
+    dependencies.now().toISOString(),
+  )
+  const directory = resolve(dependencies.projectRoot, DISPATCH_ARTIFACT_DIRECTORY)
+  await dependencies.mkdir(directory, { recursive: true, mode: 0o750 })
+  await dependencies.chmod(directory, 0o750)
+  const targetPath = join(directory, `${recordCorrelationID}.failure.json`)
+  let temporaryPath: string | null = null
+  let handle: ArtifactFileHandle | null = null
+  let published = false
+  try {
+    temporaryPath = join(directory, `.${recordCorrelationID}.${nextUUID(dependencies)}.tmp`)
+    handle = await dependencies.open(temporaryPath, "wx", 0o600)
+    await handle.writeFile(`${JSON.stringify(envelope, null, 2)}\n`, "utf8")
+    await handle.sync()
+    await handle.close()
+    handle = null
+    await dependencies.chmod(temporaryPath, 0o600)
+    await dependencies.link(temporaryPath, targetPath)
+    published = true
+    await dependencies.unlink(temporaryPath)
+    temporaryPath = null
+    return { correlation_id: recordCorrelationID, path: targetPath }
+  } catch (error: unknown) {
+    if (handle !== null) {
+      try {
+        await handle.close()
+      } catch {
+        // The original write failure remains the actionable persistence error.
+      }
+    }
+    try {
+      await cleanupTemporary(temporaryPath, dependencies)
+    } catch (cleanupError: unknown) {
+      throw new Error(`${errorMessage(error)}; temporary cleanup failed: ${errorMessage(cleanupError)}`)
+    }
+    if (published) {
+      return { correlation_id: recordCorrelationID, path: targetPath }
+    }
+    if (isErrno(error, "EEXIST") && collisionAttempt + 1 < MAX_CORRELATION_ATTEMPTS) {
+      // The collision mints a fresh record correlation id while the
+      // payload's dispatch identity is unchanged, so the appended record
+      // never overwrites the colliding one (design D3).
+      return writeFailureRecord(payload, provenance, nextUUID(dependencies), dependencies, collisionAttempt + 1)
+    }
+    throw error
+  }
+}
+
+/** A finalization result on one of the three failure paths (RD-FR-066). */
+type FailedFinalizationResult = FinalizeReviewDispatchResult & { readonly status: "failed" }
+
+/**
+ * Identity and provenance facts a failure record carries (RD-FR-066, design
+ * D3): the dispatch's correlation id when one was UUID-usable at failure
+ * time (null otherwise, so the record mints a fresh one), command and mode
+ * when the failed input knew them, and the untrusted provenance candidate
+ * the envelope builder projects best-effort per field.
+ */
+interface FailureRecordIdentity {
+  readonly dispatchCorrelationID: string | null
+  readonly command: ReviewDispatchPayload["command"] | undefined
+  readonly mode: ReviewDispatchPayload["mode"] | undefined
+  readonly provenance: unknown
+}
+
+/**
+ * Failure-record identity for a structurally rejected input (RD-FR-066,
+ * design D3): every fact is best-effort because the input never passed
+ * schema validation. A garbage input has no usable correlation id (null, so
+ * the record is keyed by a freshly minted one) and command and mode ride
+ * along only when the raw input carried schema-valid values — a bogus value
+ * is dropped rather than carried, because the record's payload bounds fail
+ * closed and one bad optional field must not cost the whole record.
+ *
+ * @param rawInput Untrusted finalization input the schema rejected.
+ * @returns Best-effort identity facts for the record.
+ */
+function structuralFailureIdentity(rawInput: unknown): FailureRecordIdentity {
+  const input = asRecord(rawInput)
+  const payload = asRecord(input.payload)
+  const correlationID = UUIDSchema.safeParse(payload.correlation_id)
+  const command = ReviewDispatchPayloadSchema.shape.command.safeParse(payload.command)
+  const mode = ReviewDispatchPayloadSchema.shape.mode.safeParse(payload.mode)
+  return {
+    dispatchCorrelationID: correlationID.success ? correlationID.data : null,
+    command: command.success ? command.data : undefined,
+    mode: mode.success ? mode.data : undefined,
+    provenance: input.provenance,
+  }
+}
+
+/**
+ * Failure-record identity for an input that passed schema validation — the
+ * semantic-rejection and persistence-failure paths (RD-FR-066, design D3):
+ * the dispatch correlation id is UUID-usable by construction, and command,
+ * mode, and provenance are all known from the validated input.
+ *
+ * @param input Schema-validated finalization input.
+ * @returns Complete identity facts for the record.
+ */
+function validatedFailureIdentity(input: z.output<typeof FinalizeInputSchema>): FailureRecordIdentity {
+  return {
+    dispatchCorrelationID: input.payload.correlation_id,
+    command: input.payload.command,
+    mode: input.payload.mode,
+    provenance: input.provenance,
+  }
+}
+
+/**
+ * Folds the best-effort failure-record write into one failed finalization
+ * result (RD-FR-066, designs D3 and D4). The record is keyed by the
+ * dispatch's correlation id when UUID-usable and a freshly minted id
+ * otherwise — minting inside the try keeps even a garbage injected uuid on
+ * the degradation path. A record-write failure MUST NOT mask the
+ * finalization failure it records (design D4): the result keeps
+ * `failure_record` null and gains exactly one appended
+ * `persist failure record: <message>` error, which the compact projection's
+ * byte budget treats like any other entry.
+ *
+ * @param failure The failed finalization result awaiting its record.
+ * @param identity Best-effort facts the record payload carries.
+ * @param dependencies Injectable filesystem, clock, and UUID operations.
+ * @returns The completed failure result with the record locator or the
+ *   record-write degradation folded in.
+ */
+async function completeFailedFinalization(
+  failure: FailedFinalizationResult,
+  identity: FailureRecordIdentity,
+  dependencies: FinalizationDependencies,
+): Promise<FinalizeReviewDispatchResult> {
+  try {
+    const recordCorrelationID = identity.dispatchCorrelationID ?? nextUUID(dependencies)
+    const reference = await persistFailureRecord(
+      {
+        dispatch_correlation_id: identity.dispatchCorrelationID,
+        ...(identity.command === undefined ? {} : { command: identity.command }),
+        ...(identity.mode === undefined ? {} : { mode: identity.mode }),
+        status: "failed",
+        operation_verdict: failure.operation_verdict,
+        errors: [...failure.errors],
+      },
+      identity.provenance,
+      recordCorrelationID,
+      dependencies,
+    )
+    return { ...failure, failure_record: reference }
+  } catch (error: unknown) {
+    return {
+      ...failure,
+      failure_record: null,
+      errors: [...failure.errors, `persist failure record: ${errorMessage(error)}`],
+    }
+  }
+}
+
+/**
+ * Builds the base result for an input rejected at schema validation; the
+ * best-effort failure record (RD-FR-066) is folded in by the caller.
+ */
+function structuralFailure(error: z.ZodError): FailedFinalizationResult {
   return {
     status: "failed",
     operation_verdict: "INCONCLUSIVE",
     correlation_id: null,
     artifact_path: null,
+    failure_record: null,
     review_dispatch: null,
     review_verdict: null,
     calculated_assessment: null,
@@ -2832,6 +3238,10 @@ function structuralFailure(error: z.ZodError): FinalizeReviewDispatchResult {
 
 /**
  * Closed-validates, semantically verifies, and atomically persists one finalized review dispatch.
+ * On every failure path — structural rejection, semantic rejection, or artifact
+ * persistence failure — it best-effort persists a failure record recoverable
+ * through the result's `failure_record` locator (RD-FR-066); a record-write
+ * failure degrades without masking the finalization failure (design D4).
  * @param rawInput Untrusted finalization input containing payload and envelope provenance.
  * @param dependencies Injectable filesystem, clock, UUID, and project-root operations.
  * @returns Structured dispatch and canonical decision output, or a fail-closed result.
@@ -2842,20 +3252,33 @@ export async function finalizeReviewDispatch(
 ): Promise<FinalizeReviewDispatchResult> {
   const parsed = FinalizeInputSchema.safeParse(rawInput)
   if (!parsed.success) {
-    return structuralFailure(parsed.error)
+    // A structural rejection of a garbage input has no schema-usable
+    // correlation id, so the record identity is extracted best-effort from
+    // the raw input and the record mints a fresh id when none is usable
+    // (design D3).
+    return completeFailedFinalization(
+      structuralFailure(parsed.error),
+      structuralFailureIdentity(rawInput),
+      dependencies,
+    )
   }
   const semanticErrors = validatePayloadSemantics(parsed.data.payload, parsed.data.provenance)
   if (semanticErrors.length > 0) {
-    return {
-      status: "failed",
-      operation_verdict: "INCONCLUSIVE",
-      correlation_id: parsed.data.payload.correlation_id,
-      artifact_path: null,
-      review_dispatch: null,
-      review_verdict: null,
-      calculated_assessment: null,
-      errors: semanticErrors,
-    }
+    return completeFailedFinalization(
+      {
+        status: "failed",
+        operation_verdict: "INCONCLUSIVE",
+        correlation_id: parsed.data.payload.correlation_id,
+        artifact_path: null,
+        failure_record: null,
+        review_dispatch: null,
+        review_verdict: null,
+        calculated_assessment: null,
+        errors: semanticErrors,
+      },
+      validatedFailureIdentity(parsed.data),
+      dependencies,
+    )
   }
 
   const reviewVerdict = projectReviewVerdict(parsed.data.payload)
@@ -2867,6 +3290,7 @@ export async function finalizeReviewDispatch(
       operation_verdict: persisted.envelope.payload.verdict,
       correlation_id: persisted.envelope.payload.correlation_id,
       artifact_path: persisted.path,
+      failure_record: null,
       review_dispatch: persisted.envelope,
       review_verdict: persistedVerdict,
       calculated_assessment: {
@@ -2877,20 +3301,28 @@ export async function finalizeReviewDispatch(
       errors: [],
     }
   } catch (error: unknown) {
-    return {
-      status: "failed",
-      operation_verdict: "INCONCLUSIVE",
-      correlation_id: parsed.data.payload.correlation_id,
-      artifact_path: null,
-      review_dispatch: null,
-      review_verdict: null,
-      calculated_assessment: {
-        authoritative: false,
-        payload: parsed.data.payload,
-        review_verdict: reviewVerdict,
+    return completeFailedFinalization(
+      {
+        status: "failed",
+        operation_verdict: "INCONCLUSIVE",
+        correlation_id: parsed.data.payload.correlation_id,
+        artifact_path: null,
+        failure_record: null,
+        review_dispatch: null,
+        review_verdict: null,
+        calculated_assessment: {
+          authoritative: false,
+          payload: parsed.data.payload,
+          review_verdict: reviewVerdict,
+        },
+        errors: [`persist review dispatch artifact: ${errorMessage(error)}`],
       },
-      errors: [`persist review dispatch artifact: ${errorMessage(error)}`],
-    }
+      // The same environmental cause may fail both writes (disk full,
+      // design D4); the record attempt then degrades without masking the
+      // persistence failure it was going to record.
+      validatedFailureIdentity(parsed.data),
+      dependencies,
+    )
   }
 }
 
@@ -4349,6 +4781,11 @@ function buildAdvisories(
  * counted by proposals_truncated, so no retrieval mode can hand a parent a
  * shortened lesson to persist (issue #969). Proposal fields are already
  * bounded by PayloadLessonProposalSchema (information 16,384, tag 128).
+ *
+ * Error strings carry no per-string cap either (RD-FR-066, issue #1039):
+ * a compact finalization result carries each error exactly as the
+ * finalizer produced it or drops it whole; errors_truncated counts
+ * dropped entries, never shortened ones.
  */
 export const SUMMARY_LIMITS = {
   findings: 15,
@@ -4363,7 +4800,6 @@ export const SUMMARY_LIMITS = {
   verdictReasonChars: 512,
   warningKindChars: 64,
   warningDetailChars: 256,
-  errorChars: 256,
   maxBytes: 40 * 1024,
 } as const
 
@@ -4672,9 +5108,17 @@ export function buildFullRetrieval(
  * Build the compact finalization response (RD-FR-051). The persisted artifact
  * remains the only place the full projection (findings, advisories, plan,
  * runs) is echoed; this result carries the outcome, the scalar review verdict,
- * and the bounded observability arrays. Errors are capped like warnings
- * (entry count plus per-string length), so the post-assembly byte budget
- * below stays enforceable on error-heavy paths.
+ * and the bounded observability arrays. Errors are whole or absent
+ * (RD-FR-066): each entry is copied verbatim from the finalizer's result,
+ * the count cap stays, and errors_truncated is true only when whole entries
+ * were dropped — shortening no longer exists. The post-assembly byte budget
+ * (RD-FR-049) keeps the result strictly under 40,960 bytes by dropping
+ * trailing proposals whole first, then trailing errors whole (D2), so an
+ * error-heavy failure result stays bounded while every kept entry remains
+ * complete. The failure-record locator (RD-FR-066 D3) rides immediately
+ * after artifact_path — early keys survive host tail-truncation — and is
+ * omitted when null; errors stay the final key (RD-FR-066 amends the
+ * RD-FR-051 order), with errors_truncated among the observability flags.
  */
 export function buildCompactFinalization(
   result: FinalizeReviewDispatchResult,
@@ -4689,14 +5133,24 @@ export function buildCompactFinalization(
     .slice(0, SUMMARY_LIMITS.warnings)
     .map(projectSummaryWarning)
     .filter((warning): warning is Record<string, unknown> => warning !== null)
-  const projectedErrors = result.errors
-    .slice(0, SUMMARY_LIMITS.errors)
-    .map((error) => truncateText(error, SUMMARY_LIMITS.errorChars))
+  // Whole or absent (RD-FR-066): no per-string cap, no shortening. The
+  // slice copies the finalizer's strings verbatim and caps the entry count;
+  // dropped entries are counted by errors_truncated below.
+  const projectedErrors = result.errors.slice(0, SUMMARY_LIMITS.errors)
+  // Null until a failed finalization persists a record (RD-FR-066 D3). The
+  // nullish default reads a missing key as null so a result shape assembled
+  // without the locator cannot leak an undefined-valued failure_record key.
+  const failureRecord = result.failure_record ?? null
   const compact: Record<string, unknown> = {
     status: result.status,
     operation_verdict: result.operation_verdict,
     correlation_id: result.correlation_id,
     artifact_path: result.artifact_path,
+    // Inserted immediately after artifact_path and omitted when null
+    // (RD-FR-066): the locator is the recovery handle for exactly the
+    // failure paths where nothing else persists, so it must sit among the
+    // early keys a host tail-truncation cannot drop.
+    ...(failureRecord !== null ? { failure_record: failureRecord } : {}),
     // A persistence failure leaves review_verdict null; the calculated
     // (non-authoritative) projection still carries the decision (RD-FR-051).
     review_verdict:
@@ -4707,34 +5161,50 @@ export function buildCompactFinalization(
   }
   let proposalsTruncated = proposals.length > SUMMARY_LIMITS.proposals
   const warningsTruncated = warnings.length > SUMMARY_LIMITS.warnings
-  const errorsTruncated =
-    result.errors.length > SUMMARY_LIMITS.errors ||
-    projectedErrors.some((error) => error.truncated)
+  // Mutated by the byte-budget loop below when it drops whole error entries.
+  let errorsTruncated = result.errors.length > SUMMARY_LIMITS.errors
   const assemble = (): Record<string, unknown> => {
     const assembled: Record<string, unknown> = { ...compact }
     if (projectedProposals.length > 0) assembled.proposals = projectedProposals
     if (projectedWarnings.length > 0) assembled.warnings = projectedWarnings
     if (proposalsTruncated) assembled.proposals_truncated = true
     if (warningsTruncated) assembled.warnings_truncated = true
+    // errors_truncated rides with the other observability flags ahead of
+    // calculated_assessment so errors stays the final key of the result —
+    // RD-FR-066 amends RD-FR-051's order (the flag previously followed
+    // errors).
+    if (errorsTruncated) assembled.errors_truncated = true
     assembled.calculated_assessment = result.calculated_assessment === null
       ? null
       : { authoritative: result.calculated_assessment.authoritative }
-    assembled.errors = projectedErrors.map((error) => error.text)
-    if (errorsTruncated) assembled.errors_truncated = true
+    assembled.errors = projectedErrors
     return assembled
   }
-  // Full-length proposals (RD-FR-058) are the only entries here without a
-  // per-field cap: drop trailing proposals whole until the compact JSON is
-  // strictly under the RD-FR-049 byte budget, flagging every drop. Every
-  // other array is count- and length-capped above, so the budget holds even
-  // once the proposals are gone.
+  // Full-length proposals (RD-FR-058) drop trailing and whole — never
+  // shortened — until the compact JSON is strictly under the RD-FR-049 byte
+  // budget, flagging every drop. Error strings carry no per-string cap
+  // either (RD-FR-066): each is copied verbatim, and errors_truncated is
+  // set only by whole-entry drops. Once the proposals are exhausted the
+  // loop drops trailing errors whole (RD-FR-066 D2): proposals are
+  // recoverable from the success artifact, while errors are the diagnostic
+  // payload of exactly the failure paths where nothing else is persisted,
+  // so errors drop last. Warnings never drop here — their per-entry caps
+  // bound them by construction.
   let assembled = assemble()
-  while (
-    projectedProposals.length > 0 &&
-    byteSize(assembled) >= SUMMARY_LIMITS.maxBytes
-  ) {
-    projectedProposals.pop()
-    proposalsTruncated = true
+  while (byteSize(assembled) >= SUMMARY_LIMITS.maxBytes) {
+    if (projectedProposals.length > 0) {
+      projectedProposals.pop()
+      proposalsTruncated = true
+    } else if (projectedErrors.length > 0) {
+      projectedErrors.pop()
+      errorsTruncated = true
+    } else {
+      // Both droppable arrays are exhausted; everything left is scalar or
+      // per-entry capped, so the budget holds by construction. Nothing in
+      // the real pipeline reaches this (run_counts is schema-bounded), but
+      // the loop must terminate rather than spin on a pathological input.
+      break
+    }
     assembled = assemble()
   }
   return assembled
@@ -5179,10 +5649,15 @@ export function createConsolidateDispatchTool(
       "Reads session metadata (command, mode, plan, coverage, etc.) from the file persisted by the first " +
       "dispatch_agent_run call. When provenance is provided, calls finalize_review_dispatch internally " +
       "(no LLM round-trip) and returns a compact finalization result in this key order: status, " +
-      "operation_verdict, correlation_id, artifact_path, review_verdict (scalar canonical decision or null), " +
-      "run_counts, optional proposals / warnings / proposals_truncated / warnings_truncated, " +
-      "calculated_assessment (null on validation rejection, otherwise { authoritative } — false when " +
-      "persistence failed), errors (capped at 5 strings of 256 characters, flagged by errors_truncated). " +
+      "operation_verdict, correlation_id, artifact_path, failure_record (immediately after artifact_path " +
+      "when a failed finalization persisted its failure record: { correlation_id, path }), review_verdict " +
+      "(scalar canonical decision or null), run_counts, optional proposals / warnings / " +
+      "proposals_truncated / warnings_truncated / errors_truncated, calculated_assessment (null on " +
+      "validation rejection, otherwise { authoritative } — false when persistence failed), errors. Error " +
+      "entries are complete or dropped whole: each error string is carried verbatim, the array is capped " +
+      "at 5 entries, and the byte budget drops trailing entries whole after proposals, with " +
+      "errors_truncated flagging every drop. Everything the preview drops is recoverable from the " +
+      "failure record via read_dispatch_artifact section errors. " +
       "The full findings, advisories, plan, and runs live only in the persisted " +
       "artifact at artifact_path. When provenance is omitted, detail selects the retrieval shape: " +
       "\"full\" (default) returns the finalization-ready payload with correlation_id, proposals, and warnings " +
@@ -6819,8 +7294,8 @@ const ReadDispatchArtifactInputSchema = z
   .object({
     correlation_id: UUIDSchema.describe("correlation_id of a finalized dispatch (the compact result's correlation_id)."),
     section: z
-      .enum(["summary", "findings", "advisories", "proposals", "runs"])
-      .describe("summary for scalars and counts, or one array to page through."),
+      .enum(["summary", "findings", "advisories", "proposals", "runs", "errors"])
+      .describe("summary for scalars and counts, one array to page through, or errors — the complete failure-record array, unpaged."),
     offset: z.number().int().nonnegative().optional().describe("Entry offset to start from; pass the previous next_offset."),
   })
   .strict()
@@ -6828,6 +7303,98 @@ const ReadDispatchArtifactInputSchema = z
 /** Fail-closed read_dispatch_artifact result. */
 function artifactReadError(code: "invalid_input" | "not_found" | "invalid_artifact", message: string): Record<string, unknown> {
   return { status: "error", code, message }
+}
+
+/**
+ * One validated artifact load: the schema-valid payload, or a fail-closed
+ * RD-FR-057 error result. Generic over the payload schema so the success
+ * artifact and the failure record (RD-FR-066, design D5) share one chain.
+ */
+type ValidatedArtifact<S extends z.ZodType> =
+  | { readonly ok: true; readonly data: z.output<S> }
+  | { readonly ok: false; readonly error: Record<string, unknown> }
+
+/**
+ * Loads and validates one artifact file from the project's dispatch store
+ * (RD-FR-057, shared by the success-artifact sections and the failure
+ * record's errors section per RD-FR-066 design D5). The path is derived by
+ * the caller from a correlation ID, never caller-supplied; the file is opened
+ * with O_NOFOLLOW and O_NONBLOCK, inspected and read through the same handle,
+ * and bounded at ARTIFACT_MAX_FILE_BYTES against the live stream, so a
+ * symlink, FIFO, or same-path swap cannot redirect, stall, or oversize the
+ * read. The envelope must parse, carry the expected `artifact_type`, and pass
+ * the caller's strict payload schema.
+ * @param options.path Derived artifact path under `.uf/artifacts/dispatch/`.
+ * @param options.notFoundMessage ENOENT message; an absent file is not_found.
+ * @param options.artifactType The Hero Interface Contract artifact_type the
+ *   envelope must carry.
+ * @param options.payloadSchema Strict schema the envelope payload must pass.
+ * @returns The validated payload, or a fail-closed error result.
+ */
+async function loadValidatedArtifact<S extends z.ZodType>(options: {
+  readonly path: string
+  readonly notFoundMessage: string
+  readonly artifactType: string
+  readonly payloadSchema: S
+}): Promise<ValidatedArtifact<S>> {
+  let text: string
+  let handle: FileHandle | undefined
+  try {
+    // Inspect and read through the same handle so a same-path swap
+    // cannot redirect content between stat and read (TOCTOU).
+    // O_NOFOLLOW rejects a symlinked final component (ELOOP) and
+    // O_NONBLOCK keeps the open from blocking on a FIFO or device;
+    // both flags are feature-detected because not every platform
+    // defines them. The stat must then prove a regular file.
+    const openFlags = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0)
+    handle = await open(options.path, openFlags)
+    const info = await handle.stat()
+    if (!info.isFile()) {
+      return { ok: false, error: artifactReadError("invalid_artifact", "artifact is not a regular file") }
+    }
+    if (info.size > ARTIFACT_MAX_FILE_BYTES) {
+      return { ok: false, error: artifactReadError("invalid_artifact", `artifact exceeds ${ARTIFACT_MAX_FILE_BYTES} bytes`) }
+    }
+    // Read bounded against the live stream so growth after the stat
+    // still cannot exceed the byte budget.
+    const chunks: Buffer[] = []
+    const chunk = Buffer.alloc(64 * 1024)
+    let total = 0
+    for (;;) {
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null)
+      if (bytesRead === 0) {
+        break
+      }
+      total += bytesRead
+      if (total > ARTIFACT_MAX_FILE_BYTES) {
+        return { ok: false, error: artifactReadError("invalid_artifact", `artifact exceeds ${ARTIFACT_MAX_FILE_BYTES} bytes`) }
+      }
+      chunks.push(Buffer.from(chunk.subarray(0, bytesRead)))
+    }
+    text = Buffer.concat(chunks).toString("utf8")
+  } catch (error: unknown) {
+    return isErrno(error, "ENOENT")
+      ? { ok: false, error: artifactReadError("not_found", options.notFoundMessage) }
+      : { ok: false, error: artifactReadError("invalid_artifact", `read artifact: ${errorMessage(error)}`) }
+  } finally {
+    if (handle) {
+      await handle.close().catch(() => undefined)
+    }
+  }
+  let envelope: Record<string, unknown>
+  try {
+    envelope = asRecord(JSON.parse(text))
+  } catch (error: unknown) {
+    return { ok: false, error: artifactReadError("invalid_artifact", `parse artifact: ${errorMessage(error)}`) }
+  }
+  if (envelope.artifact_type !== options.artifactType) {
+    return { ok: false, error: artifactReadError("invalid_artifact", `artifact_type is not ${options.artifactType}`) }
+  }
+  const payload = options.payloadSchema.safeParse(envelope.payload)
+  if (!payload.success) {
+    return { ok: false, error: artifactReadError("invalid_artifact", `payload validation failed: ${formatValidationError(payload.error)}`) }
+  }
+  return { ok: true, data: payload.data }
 }
 
 /**
@@ -6842,9 +7409,18 @@ function artifactReadError(code: "invalid_input" | "not_found" | "invalid_artifa
  * ARTIFACT_PAGE_MAX_BYTES of compact JSON; runs omit their findings (each
  * finding lives once in the findings section with its run_ids) and carry a
  * finding_count instead.
+ *
+ * Section `errors` (RD-FR-066, design D5) instead reads the failed
+ * finalization's record — a distinct `review-dispatch-failure` artifact
+ * keyed by the record's own correlation id — validates it against the strict
+ * failure-record schema, and returns the complete, untruncated errors array
+ * without paging: the record exists precisely so nothing the preview's caps
+ * dropped is lost. A dispatch that finalized successfully has no record, so
+ * the section fails closed with not_found; success artifacts carry no errors
+ * by schema, making that answer authoritative rather than a probe ordering.
  * @param rawInput Untrusted tool arguments.
  * @param projectRoot Project worktree holding `.uf/artifacts/dispatch/`.
- * @returns A structured page, summary, or fail-closed error.
+ * @returns A structured page, summary, errors array, or fail-closed error.
  */
 export async function readDispatchArtifact(rawInput: unknown, projectRoot: string): Promise<Record<string, unknown>> {
   const parsed = ReadDispatchArtifactInputSchema.safeParse(rawInput)
@@ -6853,65 +7429,33 @@ export async function readDispatchArtifact(rawInput: unknown, projectRoot: strin
   }
   const { correlation_id: correlationId, section } = parsed.data
   const offset = parsed.data.offset ?? 0
-  const path = join(resolve(projectRoot, DISPATCH_ARTIFACT_DIRECTORY), `${correlationId}.json`)
-  let text: string
-  let handle: FileHandle | undefined
-  try {
-    // Inspect and read through the same handle so a same-path swap
-    // cannot redirect content between stat and read (TOCTOU).
-    // O_NOFOLLOW rejects a symlinked final component (ELOOP) and
-    // O_NONBLOCK keeps the open from blocking on a FIFO or device;
-    // both flags are feature-detected because not every platform
-    // defines them. The stat must then prove a regular file.
-    const openFlags = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0)
-    handle = await open(path, openFlags)
-    const info = await handle.stat()
-    if (!info.isFile()) {
-      return artifactReadError("invalid_artifact", "artifact is not a regular file")
+  if (section === "errors") {
+    // RD-FR-066 (design D5): the errors section reads the failure record,
+    // never the success artifact. The caller's correlation id — the record's
+    // own, surfaced by the compact result's failure_record — derives the
+    // path, and the complete array returns unpaged.
+    const loaded = await loadValidatedArtifact({
+      path: join(resolve(projectRoot, DISPATCH_ARTIFACT_DIRECTORY), `${correlationId}.failure.json`),
+      notFoundMessage: `no failure record for correlation_id ${correlationId}`,
+      artifactType: REVIEW_DISPATCH_FAILURE_ARTIFACT_TYPE,
+      payloadSchema: ReviewDispatchFailurePayloadSchema,
+    })
+    if (!loaded.ok) {
+      return loaded.error
     }
-    if (info.size > ARTIFACT_MAX_FILE_BYTES) {
-      return artifactReadError("invalid_artifact", `artifact exceeds ${ARTIFACT_MAX_FILE_BYTES} bytes`)
-    }
-    // Read bounded against the live stream so growth after the stat
-    // still cannot exceed the byte budget.
-    const chunks: Buffer[] = []
-    const chunk = Buffer.alloc(64 * 1024)
-    let total = 0
-    for (;;) {
-      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null)
-      if (bytesRead === 0) {
-        break
-      }
-      total += bytesRead
-      if (total > ARTIFACT_MAX_FILE_BYTES) {
-        return artifactReadError("invalid_artifact", `artifact exceeds ${ARTIFACT_MAX_FILE_BYTES} bytes`)
-      }
-      chunks.push(Buffer.from(chunk.subarray(0, bytesRead)))
-    }
-    text = Buffer.concat(chunks).toString("utf8")
-  } catch (error: unknown) {
-    return isErrno(error, "ENOENT")
-      ? artifactReadError("not_found", `no finalized artifact for correlation_id ${correlationId}`)
-      : artifactReadError("invalid_artifact", `read artifact: ${errorMessage(error)}`)
-  } finally {
-    if (handle) {
-      await handle.close().catch(() => undefined)
-    }
+    const errors = loaded.data.errors
+    return { status: "ok", correlation_id: correlationId, section, total: errors.length, errors }
   }
-  let envelope: Record<string, unknown>
-  try {
-    envelope = asRecord(JSON.parse(text))
-  } catch (error: unknown) {
-    return artifactReadError("invalid_artifact", `parse artifact: ${errorMessage(error)}`)
+  const loaded = await loadValidatedArtifact({
+    path: join(resolve(projectRoot, DISPATCH_ARTIFACT_DIRECTORY), `${correlationId}.json`),
+    notFoundMessage: `no finalized artifact for correlation_id ${correlationId}`,
+    artifactType: REVIEW_DISPATCH_ARTIFACT_TYPE,
+    payloadSchema: ReviewDispatchPayloadSchema,
+  })
+  if (!loaded.ok) {
+    return loaded.error
   }
-  if (envelope.artifact_type !== REVIEW_DISPATCH_ARTIFACT_TYPE) {
-    return artifactReadError("invalid_artifact", "artifact_type is not review-dispatch")
-  }
-  const payload = ReviewDispatchPayloadSchema.safeParse(envelope.payload)
-  if (!payload.success) {
-    return artifactReadError("invalid_artifact", `payload validation failed: ${formatValidationError(payload.error)}`)
-  }
-  const data = payload.data
+  const data = loaded.data
   const proposals = data.proposals ?? []
   if (section === "summary") {
     return {
@@ -6974,7 +7518,11 @@ function createReadDispatchArtifactTool(projectRoot: string): ReturnType<typeof 
       "the entry counts of findings, advisories, proposals, and runs. section \"findings\", \"advisories\", " +
       "\"proposals\", or \"runs\" returns { total, offset, entries, next_offset } with full, untruncated entries " +
       "under 40,960 bytes of compact JSON per page (at least one entry); call again with offset: next_offset " +
-      "until next_offset is null. runs entries omit findings and carry finding_count. Errors return " +
+      "until next_offset is null. runs entries omit findings and carry finding_count. section \"errors\" " +
+      "instead reads the failure record a failed finalization persisted (derived from the correlation id " +
+      "as <correlation_id>.failure.json) and returns { status: \"ok\", correlation_id, section, total, " +
+      "errors } with the complete, untruncated errors array — no paging; a dispatch that finalized " +
+      "successfully has no failure record, so the section fails closed with not_found. Errors return " +
       "{ status: \"error\", code: invalid_input | not_found | invalid_artifact, message }; fail closed on any error.",
     args: ReadDispatchArtifactInputSchema.shape,
     async execute(args): Promise<{ readonly output: string }> {
