@@ -131,7 +131,7 @@
 - [x] 6.3 Run `make check` (lint, test, build, coverage gate,
       plugin tests) and confirm the 94 percent plugin statements
       floor and the review-dispatch 85 percent branch gate hold.
-- [ ] 6.4 Verify constitution alignment (v1.4.0): the failure
+- [x] 6.4 Verify constitution alignment (v1.4.0): the failure
       record is a self-describing envelope artifact with
       provenance (I, III); no new runtime coupling and scaffold
       mirrors byte-identical (II); writer, reader, and projection
