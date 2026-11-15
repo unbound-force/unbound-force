@@ -1523,6 +1523,41 @@ Each entry follows the format: `- <change-name>: <summary>`.
   +42 lines (+518 tokens), uf.run-pipeline-plan.md +37 lines
   (+497 tokens); total +79 lines, +1015 tokens. (Spec:
   openspec/changes/harden-spec-review-gate/) (Docs: #1091)
+- review-dispatch-errors-cap-loses-unrecov (#1039): compact
+  finalization results now carry error strings whole or not at
+  all. The 256-character per-string cap is removed
+  (`SUMMARY_LIMITS.errorChars` is gone), so a structural
+  rejection's composed Zod issues are no longer cut mid-string
+  and trailing semantic violations are no longer silently
+  dropped; `errors_truncated` is true only when whole entries
+  were dropped — the 5-entry count cap or the 40,960-byte budget
+  dropping trailing errors after proposals — never for
+  shortening. This is the RD-FR-058 whole-or-absent pattern
+  applied to errors, which had no durable home on failure
+  paths: `artifact_path` is null and no reader section existed
+  for them, so whatever the preview cut or dropped was
+  unrecoverable. Every failed `finalize_review_dispatch` —
+  structural rejection, semantic rejection, or persistence
+  failure — now best-effort writes a durable failure record to
+  `.uf/artifacts/dispatch/<correlation-id>.failure.json`
+  carrying the complete errors verbatim (RD-FR-066): a strict,
+  fail-closed payload schema with sanity bounds, published
+  atomically like success artifacts, with an `EEXIST` collision
+  appending a fresh record rather than overwriting and a
+  record-write failure never masking the finalization failure
+  it records. The compact result surfaces the record through
+  the new `failure_record` key (`null` or `{ correlation_id,
+  path }`, immediately after `artifact_path`), and
+  `read_dispatch_artifact` gains section `errors` returning the
+  complete array (`not_found` for a success-only dispatch). The
+  record payload is declared in
+  `schemas/review-dispatch-failure/v1.0.0.schema.json`,
+  registered in `internal/schemas` fixture validation, and
+  mirrored to `.uf/schemas/` and the scaffold assets, so `uf
+  init` deploys it; the plugin fix lands byte-identical in the
+  scaffold mirror. (Spec:
+  openspec/changes/review-dispatch-errors-cap-loses-unrecov/,
+  Fixes: #1039)
 - dispatch-tier-resolvability (#1009): the dispatch planner now
   signals advisor host-model inheritance — when an include-entry's
   resolved profile has no configured `model`, the plan carries one
