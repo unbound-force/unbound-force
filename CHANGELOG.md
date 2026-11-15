@@ -974,6 +974,25 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/remove-mutimind-mxf-orchestration/, Fixes: #565, Fixes: #566)
 
 ### Changed
+- review-dispatch-a-reviewer-with-empty-ou: a reviewer run whose
+  final response is incomplete (empty final text, or finish
+  reason `length`) no longer counts as a successful approving
+  vote. The shared executor fails empty final text as a
+  retryable `child_empty_response` and carries the finish
+  reason on success results; dispatch finalization re-derives
+  the rule (defense-in-depth for executor-bypassing callers and
+  truncated runs): with zero accepted submissions the run is
+  reclassified `failed` (`child_empty_response`, retryable,
+  `workflow_verdict: null`) -- counted in `run_counts.failed`,
+  excluded from successful votes -- and with accepted
+  submissions the run stays `success`, its verdict forced to
+  the kind-native non-approving value (`REQUEST CHANGES` /
+  `NEEDS-CLARIFICATION` / `AUTHOR-DECIDES`). A
+  `child_empty_response` warning with finish-reason and token
+  provenance surfaces in the dispatch artifact and council
+  report. (Spec:
+  openspec/changes/review-dispatch-a-reviewer-with-empty-ou/,
+  Fixes: #1052)
 - merge-plugin-runtime-deps-docs (#1012): the hero-repository
   remediation runbook in `docs/osv-transitive-scan.md` now says
   `uf init` merges `.opencode/package.json` (keeping user-added

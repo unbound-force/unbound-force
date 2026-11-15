@@ -33,6 +33,20 @@ function runFixture(overrides: {
   proposals?: Array<{ information: string; tag: string; category?: string }>
   manifestMode?: boolean
   text?: string
+  /** Structured finish-reason provenance (RD-FR-060); omitted unless set — older run files carry no key. */
+  finishReason?: string | null
+  /**
+   * Post-submission abort audit record (RD-FR-026); omitted unless set —
+   * only runs executeDispatchRun reclassified to success carry the field.
+   */
+  postSubmissionAbort?: {
+    original_status: string
+    error_code: string
+    error_message: string
+    note: string
+  }
+  /** Usage override; pass null to exercise the absent-usage warning shape. */
+  usage?: { cost_usd: number | null; tokens: { input: number; output: number } } | null
 }) {
   return {
     correlation_id: randomUUID(),
@@ -51,7 +65,13 @@ function runFixture(overrides: {
     resolved_parent_variant: null,
     reported_model: "provider/standard",
     model_mismatch: false,
-    usage: { cost_usd: 0.5, tokens: { input: 1000, output: 500 } },
+    // Explicit undefined check (not ??) so a null usage override stays null —
+    // the absent-usage shape child_empty_response warnings must read as
+    // unavailable token counts.
+    usage:
+      overrides.usage !== undefined
+        ? overrides.usage
+        : { cost_usd: 0.5, tokens: { input: 1000, output: 500 } },
     // Failed/cancelled fixtures need a non-null error for the finalizer's
     // validateRunState; success fixtures keep null.
     error: overrides.error ?? null,
@@ -59,6 +79,11 @@ function runFixture(overrides: {
     findings: overrides.findings ?? [],
     proposals: overrides.proposals ?? [],
     text: overrides.text ?? "review output",
+    // Structured finish-reason provenance (RD-FR-060): omitted unless
+    // explicitly requested — run files that predate the field carry no
+    // finish_reason key, which is the pre-change fixture shape.
+    ...(overrides.finishReason === undefined ? {} : { finish_reason: overrides.finishReason }),
+    ...(overrides.postSubmissionAbort === undefined ? {} : { post_submission_abort: overrides.postSubmissionAbort }),
     read_only: true,
     // Delivery-mode work signal (RD-FR-036): omitted unless explicitly
     // requested — run files that predate the field carry no manifest_mode
@@ -967,6 +992,615 @@ describe("consolidate_dispatch", () => {
     const payload = JSON.parse(result.output)
     expect(payload.warnings).toBeUndefined()
     expect(payload.verdict).toBe("APPROVE")
+  })
+
+  // RD-FR-061 warning tests (task 1.3): like the RD-FR-035 advisory tests
+  // above, the warning is consolidate-result observability that never reaches
+  // the finalizer, so the tool-level tests live here beside the precedent
+  // they extend; the {kind, detail} projection tests live in
+  // summary-retrieval.test.ts.
+  it("emits a child_empty_response warning for an executor-failed empty reviewer (RD-FR-061, issue #1052 shape)", async () => {
+    const guardRunId = randomUUID()
+    await setupDispatchSession([
+      // Issue #1052 shape after the task 1.1 executor guard: the child
+      // exhausted its output budget reasoning, returned no final text, and
+      // failed at the executor boundary. Failure results carry no
+      // structured finish_reason (RD-FR-060 scopes that to success), so the
+      // reason survives only in the fixed error-message format.
+      runFixture({
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        status: "failed",
+        error: {
+          code: "child_empty_response",
+          message: "child returned no final text (finish reason: length); model=provider/standard",
+          retryable: true,
+        },
+        text: "",
+        usage: { cost_usd: 0, tokens: { input: 4096, output: 0 } },
+      }),
+      runFixture({ agent: "divisor-adversary" }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    // Exactly one warning with the exact kind string, naming the reviewer
+    // and run id; the finish reason is recovered from the executor's error
+    // message and the token counts come from the preserved usage — zero
+    // output tokens is a meaningful count, not an absent one.
+    expect(payload.warnings).toEqual([
+      {
+        type: "child_empty_response",
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        finish_reason: "length",
+        tokens_input: 4096,
+        tokens_output: 0,
+      },
+    ])
+    expect(payload.run_counts.failed).toBe(1)
+  })
+
+  it("warns for a success run reclassified at dispatch, with unreported provenance reading as null (RD-FR-059/061)", async () => {
+    const guardRunId = randomUUID()
+    await setupDispatchSession([
+      // Executor-bypassing caller shape: recorded success with
+      // whitespace-only final text, no structured finish_reason, no usage,
+      // and no submissions — dispatch reclassification applies.
+      runFixture({ agent: "divisor-guard", run_id: guardRunId, text: "   ", usage: null }),
+      runFixture({ agent: "divisor-adversary" }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    expect(payload.warnings).toEqual([
+      {
+        type: "child_empty_response",
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        finish_reason: null,
+        tokens_input: null,
+        tokens_output: null,
+      },
+    ])
+    expect(payload.run_counts.failed).toBe(1)
+  })
+
+  it("carries the structured finish reason for a length-terminated run whose truncated text kept the attestation advisory (RD-FR-061)", async () => {
+    const guardRunId = randomUUID()
+    await setupDispatchSession([
+      // Length-terminated with truncated non-empty text and accepted
+      // submissions: verdict-forced success (RD-FR-059), warned with the
+      // structured finish reason; the manifest-mode attestation advisory
+      // still fires independently because the text is non-empty.
+      runFixture({
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        manifestMode: true,
+        finishReason: "length",
+        text: "Truncated review text",
+        findings: [
+          { severity: "MEDIUM", category: "style", description: "Docs gap", root_cause: "No jsdoc", file: "lib.ts", line: 5 },
+        ],
+      }),
+      runFixture({ agent: "divisor-architect" }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    expect(payload.warnings).toEqual([
+      {
+        type: "child_empty_response",
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        finish_reason: "length",
+        tokens_input: 1000,
+        tokens_output: 500,
+      },
+      { type: "empty_coverage_attestation", agent: "divisor-guard", run_id: guardRunId },
+    ])
+  })
+
+  it("suppresses empty_coverage_attestation for an empty-final-text run regardless of delivery mode (RD-FR-061)", async () => {
+    const guardRunId = randomUUID()
+    const architectRunId = randomUUID()
+    await setupDispatchSession([
+      // Executor-failed empty reviewer whose submissions were accepted:
+      // restored to success with a forced non-approving verdict (RD-FR-059
+      // restore branch), so it sits inside the success-scoped attestation
+      // check — the more specific child_empty_response warning replaces
+      // the advisory its empty text would otherwise trigger in manifest
+      // mode.
+      runFixture({
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        manifestMode: true,
+        status: "failed",
+        error: {
+          code: "child_empty_response",
+          message: "child returned no final text; model=provider/standard",
+          retryable: true,
+        },
+        text: "",
+        findings: [
+          { severity: "MEDIUM", category: "style", description: "Docs gap", root_cause: "No jsdoc", file: "lib.ts", line: 5 },
+        ],
+      }),
+      // Sibling manifest-mode run with non-empty text and a missing
+      // attestation: the advisory still fires for it.
+      runFixture({ agent: "divisor-architect", run_id: architectRunId, manifestMode: true }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    expect(payload.warnings).toEqual([
+      {
+        type: "child_empty_response",
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        finish_reason: null,
+        tokens_input: 1000,
+        tokens_output: 500,
+      },
+      { type: "empty_coverage_attestation", agent: "divisor-architect", run_id: architectRunId },
+    ])
+    // The suppressed advisory's premise: the restored run IS success-scoped
+    // (RD-FR-026 precedence), so without the suppression its empty text
+    // would have produced an attestation advisory.
+    const guardRun = payload.runs.find((run: { run_id: string }) => run.run_id === guardRunId)
+    expect(guardRun.status).toBe("success")
+    expect(guardRun.workflow_verdict).toBe("REQUEST CHANGES")
+  })
+
+  it("emits exactly one child_empty_response warning for a run id repeated across run files (RD-FR-061)", async () => {
+    const sharedRunId = randomUUID()
+    await setupDispatchSession([
+      // Foreign-written duplicate: two run files repeating one run id, both
+      // executor-failed empty reviewers.
+      runFixture({
+        agent: "divisor-adversary",
+        run_id: sharedRunId,
+        status: "failed",
+        error: {
+          code: "child_empty_response",
+          message: "child returned no final text; model=provider/standard",
+          retryable: true,
+        },
+        text: "",
+      }),
+      runFixture({
+        agent: "divisor-guard",
+        run_id: sharedRunId,
+        status: "failed",
+        error: {
+          code: "child_empty_response",
+          message: "child returned no final text; model=provider/standard",
+          retryable: true,
+        },
+        text: "",
+      }),
+      runFixture({ agent: "divisor-architect" }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    // One warning for the shared run id, naming the first file's agent
+    // (readRunFiles sorts by filename: adversary before guard).
+    const emptyWarnings = payload.warnings.filter(
+      (warning: { type: string }) => warning.type === "child_empty_response",
+    )
+    expect(emptyWarnings).toHaveLength(1)
+    expect(emptyWarnings[0].run_id).toBe(sharedRunId)
+    expect(emptyWarnings[0].agent).toBe("divisor-adversary")
+    expect(payload.run_counts.failed).toBe(2)
+  })
+
+  it("reclassifies a length-terminated run with truncated text and zero submissions to a retryable failure with no vote (RD-FR-059)", async () => {
+    const guardRunId = randomUUID()
+    await setupDispatchSession([
+      // Executor-bypassing caller shape the executor guard cannot catch:
+      // recorded success, non-empty truncated text, finish reason length,
+      // and zero accepted submissions — dispatch reclassification applies.
+      runFixture({ agent: "divisor-guard", run_id: guardRunId, finishReason: "length", text: "Truncated review text" }),
+      runFixture({ agent: "divisor-adversary" }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    // The classification contract (task 2.2): failed, retryable
+    // child_empty_response, workflow_verdict null, excluded from
+    // successfulPersonaVotes, counted in run_counts.failed.
+    const guardRun = payload.runs.find((run: { run_id: string }) => run.run_id === guardRunId)
+    expect(guardRun.status).toBe("failed")
+    expect(guardRun.error).toEqual({
+      code: "child_empty_response",
+      message: expect.stringContaining("finish reason length"),
+      retryable: true,
+    })
+    expect(guardRun.workflow_verdict).toBeNull()
+    expect(guardRun.findings).toEqual([])
+    expect(payload.run_counts).toMatchObject({ total: 2, success: 1, failed: 1 })
+    // The incomplete reviewer contributes no vote: the council value is
+    // the real reviewer's genuine approval alone.
+    expect(payload.workflow_result).toEqual({ kind: "council", value: "APPROVE" })
+    expect(payload.warnings).toEqual([
+      {
+        type: "child_empty_response",
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        finish_reason: "length",
+        tokens_input: 1000,
+        tokens_output: 500,
+      },
+    ])
+  })
+
+  it("fails closed as INCONCLUSIVE when every reviewer is incomplete with zero submissions (RD-FR-059/RD-FR-007)", async () => {
+    await setupDispatchSession([
+      // Issue #1052 shape: one reviewer the executor failed as empty, one
+      // length-terminated run with truncated text recorded as success —
+      // both land failed after reclassification, so no vote exists.
+      runFixture({
+        agent: "divisor-guard",
+        status: "failed",
+        error: {
+          code: "child_empty_response",
+          message: "child returned no final text (finish reason: length); model=provider/standard",
+          retryable: true,
+        },
+        text: "",
+      }),
+      runFixture({ agent: "divisor-adversary", finishReason: "length", text: "Truncated review text" }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    // All-failed exhaustion lands on the RD-FR-007 zero-success path:
+    // child_empty_response is not an availability error, so the verdict
+    // is INCONCLUSIVE — never the pre-fix zero-findings APPROVE.
+    expect(payload.verdict).toBe("INCONCLUSIVE")
+    expect(payload.workflow_result).toEqual({ kind: "council", value: "INCONCLUSIVE" })
+    expect(payload.run_counts).toMatchObject({ total: 2, success: 0, failed: 2 })
+    for (const run of payload.runs) {
+      expect(run.status).toBe("failed")
+      expect(run.workflow_verdict).toBeNull()
+    }
+    expect(payload.findings).toHaveLength(0)
+    expect(payload.proposals).toBeUndefined()
+    expect(payload.warnings).toHaveLength(2)
+    expect(payload.warnings.every((warning: { type: string }) => warning.type === "child_empty_response")).toBe(true)
+  })
+
+  it("forces an incomplete council reviewer with accepted submissions to REQUEST CHANGES across both entry shapes (RD-FR-059)", async () => {
+    const projectRoot = join(tmpdir(), `consolidate-forced-council-${randomUUID()}`)
+    await mkdir(projectRoot, { recursive: true })
+    cleanupDirs.push(projectRoot)
+
+    const guardRunId = randomUUID()
+    const adversaryRunId = randomUUID()
+    await setupDispatchSession(
+      [
+        // Entry shape 1: executor-failed child_empty_response whose
+        // submissions were accepted — restored to success (RD-FR-026
+        // precedence for the incomplete rule).
+        runFixture({
+          agent: "divisor-guard",
+          run_id: guardRunId,
+          status: "failed",
+          error: {
+            code: "child_empty_response",
+            message: "child returned no final text; model=provider/standard",
+            retryable: true,
+          },
+          text: "",
+          findings: [
+            { severity: "MEDIUM", category: "style", description: "Guard docs gap", root_cause: "No jsdoc", file: "guard.ts", line: 5 },
+          ],
+        }),
+        // Entry shape 2: length-terminated success run with truncated
+        // text and accepted submissions — kept success, verdict forced.
+        runFixture({
+          agent: "divisor-adversary",
+          run_id: adversaryRunId,
+          finishReason: "length",
+          text: "Truncated review text",
+          findings: [
+            { severity: "MEDIUM", category: "style", description: "Adversary docs gap", root_cause: "No jsdoc", file: "adversary.ts", line: 9 },
+          ],
+        }),
+      ],
+      { plan: explicitRunPlan("divisor-guard", "divisor-adversary") },
+    )
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+    const result = await tool.execute(
+      {
+        provenance: {
+          branch: "opsx/review-dispatch-a-reviewer-with-empty-ou",
+          commit: "b".repeat(40), // Must match input_context.head_sha
+          workflow_id: "uf.review-council",
+        },
+      },
+      noopContext(),
+    )
+
+    const finalizationResult = JSON.parse(result.output)
+    expect(finalizationResult.status).toBe("success")
+    // The forced kind-native verdict passes the finalizer's semantic
+    // validation by construction (design D2): a successful run keeps a
+    // non-null workflow_verdict inside allowedRunVerdicts(council).
+    expect(finalizationResult.errors).toHaveLength(0)
+    expect(finalizationResult.operation_verdict).toBe("REQUEST CHANGES")
+
+    const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
+    expect(persistedPayload.run_counts).toMatchObject({ total: 2, success: 2, failed: 0 })
+    const guardRun = persistedPayload.runs.find((run: { run_id: string }) => run.run_id === guardRunId)
+    const adversaryRun = persistedPayload.runs.find((run: { run_id: string }) => run.run_id === adversaryRunId)
+    // Both incomplete runs stay successful with the forced non-approving
+    // verdict — the restored executor failure included.
+    expect(guardRun.status).toBe("success")
+    expect(guardRun.workflow_verdict).toBe("REQUEST CHANGES")
+    expect(adversaryRun.status).toBe("success")
+    expect(adversaryRun.workflow_verdict).toBe("REQUEST CHANGES")
+    // Submissions contribute: both runs' findings reach the payload.
+    expect(persistedPayload.findings).toHaveLength(2)
+    expect(persistedPayload.findings.map((finding: { run_ids: string[] }) => finding.run_ids[0]).sort()).toEqual(
+      [guardRunId, adversaryRunId].sort(),
+    )
+    expect(persistedPayload.workflow_result).toEqual({ kind: "council", value: "REQUEST CHANGES" })
+    expect(finalizationResult.warnings).toHaveLength(2)
+    expect(
+      finalizationResult.warnings.every((warning: { kind: string }) => warning.kind === "child_empty_response"),
+    ).toBe(true)
+  })
+
+  it("forces an incomplete triage reviewer with accepted submissions to NEEDS-CLARIFICATION across both entry shapes (RD-FR-059)", async () => {
+    const projectRoot = join(tmpdir(), `consolidate-forced-triage-${randomUUID()}`)
+    await mkdir(projectRoot, { recursive: true })
+    cleanupDirs.push(projectRoot)
+
+    const guardRunId = randomUUID()
+    const scribeRunId = randomUUID()
+    await setupDispatchSession(
+      [
+        runFixture({
+          agent: "divisor-guard",
+          run_id: guardRunId,
+          status: "failed",
+          error: {
+            code: "child_empty_response",
+            message: "child returned no final text; model=provider/standard",
+            retryable: true,
+          },
+          text: "",
+          findings: [
+            { severity: "MEDIUM", category: "clarity", description: "Guard summary ambiguous", root_cause: "No repro", file: "guard.ts", line: 5 },
+          ],
+        }),
+        runFixture({
+          agent: "divisor-scribe",
+          run_id: scribeRunId,
+          finishReason: "length",
+          text: "Truncated review text",
+          findings: [
+            { severity: "MEDIUM", category: "clarity", description: "Scribe summary ambiguous", root_cause: "No repro", file: "scribe.ts", line: 9 },
+          ],
+        }),
+      ],
+      { ...triageIssueMetadata(), plan: explicitRunPlan("divisor-guard", "divisor-scribe") },
+    )
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+    const result = await tool.execute(
+      {
+        provenance: {
+          branch: "opsx/review-dispatch-a-reviewer-with-empty-ou",
+          commit: "c".repeat(40), // Issue kinds carry no head sha to match
+          workflow_id: "uf.triage-issue",
+        },
+      },
+      noopContext(),
+    )
+
+    const finalizationResult = JSON.parse(result.output)
+    expect(finalizationResult.status).toBe("success")
+    expect(finalizationResult.errors).toHaveLength(0)
+
+    const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
+    expect(persistedPayload.run_counts).toMatchObject({ total: 2, success: 2, failed: 0 })
+    const guardRun = persistedPayload.runs.find((run: { run_id: string }) => run.run_id === guardRunId)
+    const scribeRun = persistedPayload.runs.find((run: { run_id: string }) => run.run_id === scribeRunId)
+    // The forced kind-native value for triage is NEEDS-CLARIFICATION —
+    // never VALID — for both the restored and the kept entry shape.
+    expect(guardRun.status).toBe("success")
+    expect(guardRun.workflow_verdict).toBe("NEEDS-CLARIFICATION")
+    expect(scribeRun.status).toBe("success")
+    expect(scribeRun.workflow_verdict).toBe("NEEDS-CLARIFICATION")
+    expect(persistedPayload.findings).toHaveLength(2)
+    expect(persistedPayload.workflow_result).toEqual({ kind: "triage", value: "NEEDS-CLARIFICATION" })
+    expect(finalizationResult.warnings).toHaveLength(2)
+    expect(
+      finalizationResult.warnings.every((warning: { kind: string }) => warning.kind === "child_empty_response"),
+    ).toBe(true)
+  })
+
+  it("forces an incomplete feedback reviewer with accepted submissions to AUTHOR-DECIDES across both entry shapes (RD-FR-059)", async () => {
+    const projectRoot = join(tmpdir(), `consolidate-forced-feedback-${randomUUID()}`)
+    await mkdir(projectRoot, { recursive: true })
+    cleanupDirs.push(projectRoot)
+
+    const guardRunId = randomUUID()
+    const scribeRunId = randomUUID()
+    await setupDispatchSession(
+      [
+        runFixture({
+          agent: "divisor-guard",
+          run_id: guardRunId,
+          status: "failed",
+          error: {
+            code: "child_empty_response",
+            message: "child returned no final text; model=provider/standard",
+            retryable: true,
+          },
+          text: "",
+          findings: [
+            { severity: "MEDIUM", category: "style", description: "Guard suggestion", root_cause: "Reviewer preference", file: "guard.ts", line: 5 },
+          ],
+        }),
+        runFixture({
+          agent: "divisor-scribe",
+          run_id: scribeRunId,
+          finishReason: "length",
+          text: "Truncated review text",
+          findings: [
+            { severity: "MEDIUM", category: "style", description: "Scribe suggestion", root_cause: "Reviewer preference", file: "scribe.ts", line: 9 },
+          ],
+        }),
+      ],
+      { command: "address-feedback" as const, mode: "feedback" as const, plan: explicitRunPlan("divisor-guard", "divisor-scribe") },
+    )
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(projectRoot))
+    const result = await tool.execute(
+      {
+        provenance: {
+          branch: "opsx/review-dispatch-a-reviewer-with-empty-ou",
+          commit: "b".repeat(40), // Must match input_context.head_sha
+          workflow_id: "uf.address-feedback",
+        },
+      },
+      noopContext(),
+    )
+
+    const finalizationResult = JSON.parse(result.output)
+    expect(finalizationResult.status).toBe("success")
+    expect(finalizationResult.errors).toHaveLength(0)
+
+    const persistedPayload = (await readPersistedArtifact(finalizationResult)).payload
+    expect(persistedPayload.run_counts).toMatchObject({ total: 2, success: 2, failed: 0 })
+    const guardRun = persistedPayload.runs.find((run: { run_id: string }) => run.run_id === guardRunId)
+    const scribeRun = persistedPayload.runs.find((run: { run_id: string }) => run.run_id === scribeRunId)
+    // The forced kind-native value for feedback is AUTHOR-DECIDES —
+    // never ACCEPT — for both the restored and the kept entry shape.
+    expect(guardRun.status).toBe("success")
+    expect(guardRun.workflow_verdict).toBe("AUTHOR-DECIDES")
+    expect(scribeRun.status).toBe("success")
+    expect(scribeRun.workflow_verdict).toBe("AUTHOR-DECIDES")
+    expect(persistedPayload.findings).toHaveLength(2)
+    expect(persistedPayload.workflow_result).toEqual({ kind: "feedback", value: "AUTHOR-DECIDES" })
+    expect(finalizationResult.warnings).toHaveLength(2)
+    expect(
+      finalizationResult.warnings.every((warning: { kind: string }) => warning.kind === "child_empty_response"),
+    ).toBe(true)
+  })
+
+  it("keeps a post-submission-abort run's findings-derived verdict untouched by the incomplete-response rule (RD-FR-026)", async () => {
+    await setupDispatchSession([
+      // RD-FR-026 shape: the child's lesson proposal was accepted, then
+      // its session aborted mid-final-message. executeDispatchRun already
+      // reclassified it to success with non-empty partial text and no
+      // finish reason — the incomplete-response rule MUST leave it alone.
+      runFixture({
+        agent: "divisor-guard",
+        text: "Partial final response before the abort",
+        proposals: [{ information: "Aborted reviewer lesson", tag: "aborted" }],
+        postSubmissionAbort: {
+          original_status: "failed",
+          error_code: "child_message_error",
+          error_message: "session aborted during final response generation",
+          note: "Run reclassified from failed to success per RD-FR-026 (fix-review-dispatch-recovery design D2, issue #751).",
+        },
+      }),
+      runFixture({ agent: "divisor-adversary" }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    // The abort run is not incomplete: it keeps success and derives its
+    // verdict from its (zero) findings — APPROVE, not the forced
+    // REQUEST CHANGES an incomplete run with submissions would carry.
+    const guardRun = payload.runs.find((run: { agent: string }) => run.agent === "divisor-guard")
+    expect(guardRun.status).toBe("success")
+    expect(guardRun.workflow_verdict).toBe("APPROVE")
+    expect(payload.workflow_result).toEqual({ kind: "council", value: "APPROVE" })
+    expect(payload.verdict).toBe("APPROVE")
+    expect(payload.run_counts).toMatchObject({ total: 2, success: 2, failed: 0 })
+    // Its accepted proposal still contributes.
+    expect(payload.proposals).toHaveLength(1)
+    expect(payload.proposals[0].information).toBe("Aborted reviewer lesson")
+    // No incomplete signal fires for the abort run.
+    expect(payload.warnings).toBeUndefined()
+  })
+
+  it("yields a non-approving council when an incomplete reviewer's forced vote meets a clean approval (RD-FR-059)", async () => {
+    const guardRunId = randomUUID()
+    await setupDispatchSession([
+      // Issue #1052 outcome shape: one incomplete reviewer whose
+      // submissions were accepted (restored, forced non-approving vote)
+      // plus one real reviewer whose clean review approves.
+      runFixture({
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        status: "failed",
+        error: {
+          code: "child_empty_response",
+          message: "child returned no final text; model=provider/standard",
+          retryable: true,
+        },
+        text: "",
+        findings: [
+          { severity: "MEDIUM", category: "style", description: "Docs gap", root_cause: "No jsdoc", file: "lib.ts", line: 5 },
+        ],
+      }),
+      runFixture({ agent: "divisor-adversary" }),
+    ])
+
+    const tool = createConsolidateDispatchTool(createFinalizationDependencies(tmpdir()))
+    const result = await tool.execute({}, noopContext())
+
+    const payload = JSON.parse(result.output)
+    // The council is non-approving: the incomplete reviewer's forced
+    // REQUEST CHANGES vote drags the outcome away from the real
+    // reviewer's approval — pre-fix this panel returned APPROVE.
+    expect(payload.verdict).toBe("REQUEST CHANGES")
+    expect(payload.workflow_result).toEqual({ kind: "council", value: "REQUEST CHANGES" })
+    const guardRun = payload.runs.find((run: { run_id: string }) => run.run_id === guardRunId)
+    const adversaryRun = payload.runs.find((run: { agent: string }) => run.agent === "divisor-adversary")
+    // The incomplete reviewer's vote did not approve...
+    expect(guardRun.status).toBe("success")
+    expect(guardRun.workflow_verdict).toBe("REQUEST CHANGES")
+    // ...while the real reviewer's own findings-derived vote stands.
+    expect(adversaryRun.workflow_verdict).toBe("APPROVE")
+    // The incomplete reviewer's submissions still contribute.
+    expect(payload.findings).toHaveLength(1)
+    expect(payload.findings[0].run_ids).toEqual([guardRunId])
+    expect(payload.run_counts).toMatchObject({ total: 2, success: 2, failed: 0 })
+    expect(payload.warnings).toEqual([
+      {
+        type: "child_empty_response",
+        agent: "divisor-guard",
+        run_id: guardRunId,
+        finish_reason: null,
+        tokens_input: 1000,
+        tokens_output: 500,
+      },
+    ])
   })
 
   it("finalizes a mixed session whose failed run carried accepted submissions (issue #751)", async () => {

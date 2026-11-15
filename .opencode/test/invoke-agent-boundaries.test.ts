@@ -37,7 +37,16 @@ function fakeClient(options: FakeClientOptions = {}): Client {
         throw options.promptThrows
       }
       void request
-      return { data: { info: { role: "assistant", providerID: "p", modelID: "m" }, parts: [] }, error: undefined }
+      // Non-empty final text: an empty final response is a
+      // child_empty_response failure since RD-FR-059, and this suite's
+      // success-path test exercises variant provenance, not emptiness.
+      return {
+        data: {
+          info: { role: "assistant", providerID: "p", modelID: "m" },
+          parts: [{ id: "t", sessionID: "child-session", messageID: "m", type: "text", text: "review output", ignored: false }],
+        },
+        error: undefined,
+      }
     },
     abort: async (): Promise<unknown> => ({ data: true, error: undefined }),
   }

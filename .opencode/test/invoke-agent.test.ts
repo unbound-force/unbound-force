@@ -75,13 +75,13 @@ function textPart(text: string, ignored = false): Record<string, unknown> {
   }
 }
 
-function finishPart(cost: number, input: number, output: number): Record<string, unknown> {
+function finishPart(cost: number, input: number, output: number, reason = "stop"): Record<string, unknown> {
   return {
-    id: `finish-${cost}`,
+    id: `finish-${cost}-${reason}`,
     sessionID: "child-session",
     messageID: "message-child",
     type: "step-finish",
-    reason: "stop",
+    reason,
     cost,
     tokens: { input, output, reasoning: 0, cache: { read: 0, write: 0 } },
   }
@@ -479,6 +479,83 @@ describe("invoke_agent cancellation, timeout, and responses", () => {
 
     expect(result.error?.code).toBe(code)
     expect(result.error?.message).not.toMatch(/abc|token=value|\/home\/alice/)
+  })
+})
+
+describe("invoke_agent empty final response guard", () => {
+  it("fails a child that returns no final text as retryable child_empty_response with usage preserved", async () => {
+    const fake = fakeClient({ parts: [finishPart(0.5, 120, 0)] })
+    const result = await invokeAgent(explicitInput(), toolContext(), dependencies(fake.client))
+
+    expect(result.status).toBe("failed")
+    expect(result.error).toMatchObject({ code: "child_empty_response", retryable: true })
+    expect(result.error?.message).toContain("no final text")
+    expect(result.text).toBe("")
+    expect(result.usage).toEqual({ cost_usd: 0.5, tokens: { input: 120, output: 0 } })
+  })
+
+  it("fails whitespace-only final text as child_empty_response", async () => {
+    const fake = fakeClient({ parts: [textPart("   \n\t  ")] })
+    const result = await invokeAgent(explicitInput(), toolContext(), dependencies(fake.client))
+
+    expect(result.status).toBe("failed")
+    expect(result.error).toMatchObject({ code: "child_empty_response", retryable: true })
+    expect(result.text).toBe("")
+  })
+
+  it("fails a length-terminated run whose final text is empty, naming the finish reason", async () => {
+    const fake = fakeClient({ parts: [finishPart(0, 500, 0, "length")] })
+    const result = await invokeAgent(explicitInput(), toolContext(), dependencies(fake.client))
+
+    expect(result.status).toBe("failed")
+    expect(result.error).toMatchObject({ code: "child_empty_response", retryable: true })
+    expect(result.error?.message).toContain("finish reason: length")
+    expect(result.usage).toEqual({ cost_usd: 0, tokens: { input: 500, output: 0 } })
+  })
+
+  it("classifies empty text as child_empty_response before a model mismatch", async () => {
+    const fake = fakeClient({ childProvider: "other", childModel: "reported", parts: [] })
+    const result = await invokeAgent(explicitInput(), toolContext(), dependencies(fake.client))
+
+    expect(result.status).toBe("failed")
+    expect(result.error?.code).toBe("child_empty_response")
+    expect(result.provenance.model_mismatch).toBe(true)
+  })
+
+  it("succeeds for non-empty text and carries the reported finish reason", async () => {
+    const fake = fakeClient({ parts: [textPart("review output"), finishPart(0.25, 10, 4)] })
+    const result = await invokeAgent(explicitInput(), toolContext(), dependencies(fake.client))
+
+    expect(result.status).toBe("success")
+    expect(result.text).toBe("review output")
+    expect(result.finish_reason).toBe("stop")
+  })
+
+  it("keeps finish_reason null when no step-finish part was reported", async () => {
+    const fake = fakeClient({ parts: [textPart("only text")] })
+    const result = await invokeAgent(explicitInput(), toolContext(), dependencies(fake.client))
+
+    expect(result.status).toBe("success")
+    expect(result.finish_reason).toBeNull()
+  })
+
+  it("surfaces the finish reason on a length-terminated run that returned truncated text", async () => {
+    const fake = fakeClient({ parts: [textPart("truncated review"), finishPart(0, 500, 400, "length")] })
+    const result = await invokeAgent(explicitInput(), toolContext(), dependencies(fake.client))
+
+    expect(result.status).toBe("success")
+    expect(result.text).toBe("truncated review")
+    expect(result.finish_reason).toBe("length")
+  })
+
+  it("uses the final step-finish part's reason across multi-step runs", async () => {
+    const fake = fakeClient({
+      parts: [finishPart(0.25, 10, 4, "stop"), textPart("step two"), finishPart(0, 5, 2, "length")],
+    })
+    const result = await invokeAgent(explicitInput(), toolContext(), dependencies(fake.client))
+
+    expect(result.status).toBe("success")
+    expect(result.finish_reason).toBe("length")
   })
 })
 

@@ -93,6 +93,15 @@ function makeWarning(type: string): Record<string, unknown> {
       }
     case "consolidated_findings_overflow":
       return { type, kept_findings: 512, dropped_findings: 5 }
+    case "child_empty_response":
+      return {
+        type,
+        agent: "divisor-guard",
+        run_id: "run-guard",
+        finish_reason: "length",
+        tokens_input: 4096,
+        tokens_output: 0,
+      }
     default:
       return { type, agent: "divisor-guard", run_id: "run-guard" }
   }
@@ -422,6 +431,46 @@ describe("summary retrieval", () => {
       }) as Parameters<typeof buildSummaryRetrieval>[0],
     )
     expect(withUnknown).not.toHaveProperty("warnings")
+  })
+
+  it("projects child_empty_response detail with and without reported provenance (RD-FR-061)", () => {
+    // Full provenance: finish reason and token counts ride along — a
+    // reported zero output count is the issue #1052 signature and must
+    // survive as a count, not read as absent.
+    const full = buildSummaryRetrieval(
+      summaryInput({
+        warnings: [makeWarning("child_empty_response")],
+      }) as Parameters<typeof buildSummaryRetrieval>[0],
+    )
+    expect(full.warnings).toEqual([
+      {
+        kind: "child_empty_response",
+        detail:
+          "agent=divisor-guard run=run-guard finish=length tokens.input=4096 tokens.output=0",
+      },
+    ])
+
+    // Unreported provenance reads as absent segments, never as zero counts.
+    const unreported = buildSummaryRetrieval(
+      summaryInput({
+        warnings: [
+          {
+            type: "child_empty_response",
+            agent: "divisor-guard",
+            run_id: "run-guard",
+            finish_reason: null,
+            tokens_input: null,
+            tokens_output: null,
+          },
+        ],
+      }) as Parameters<typeof buildSummaryRetrieval>[0],
+    )
+    expect(unreported.warnings).toEqual([
+      {
+        kind: "child_empty_response",
+        detail: "agent=divisor-guard run=run-guard",
+      },
+    ])
   })
 
   it("projects slim entries and marks field truncation per entry", () => {
