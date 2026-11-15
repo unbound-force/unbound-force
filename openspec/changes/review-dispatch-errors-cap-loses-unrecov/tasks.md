@@ -73,7 +73,7 @@
 
 ## 4. Tests (regression per TC-001, error paths per TC-003)
 
-- [ ] 4.1 In `.opencode/test/summary-retrieval.test.ts`: a
+- [x] 4.1 In `.opencode/test/summary-retrieval.test.ts`: a
       composed validation error longer than 256 characters
       survives whole with no `truncated` key; a 7-error overflow
       keeps five whole entries with `errors_truncated`; the byte
