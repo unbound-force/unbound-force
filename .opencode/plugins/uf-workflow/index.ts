@@ -12,14 +12,18 @@ import {
   PromptSchema,
   directModelIdentity,
   executeAgentSession,
+  executePerTaskDelegation,
   resolveHostModel,
   StructuralHostModelError,
   type InvocationProvenance,
   type InvocationUsage,
   type ModelIdentity,
+  type PerTaskResumeCapture,
+  type PerTaskRetryRecord,
   type TimeoutDetails,
 } from "../../lib/agent-executor.js"
 import { classifyBranch } from "../../lib/branch-classification.js"
+import { resolveInheritedDeadline } from "../../lib/delegation-budget.js"
 import {
   ClassifierCascade,
   createClassifierCache,
@@ -72,6 +76,10 @@ import {
   type BaseRefResolution,
 } from "../../lib/review-diff.js"
 import {
+  derivePerTaskTimeoutMs,
+  type PerTaskTimeoutProvenanceRecord,
+} from "../../lib/run-timeout.js"
+import {
   appendHumanDecisions,
   deleteState,
   isEnoent,
@@ -82,6 +90,7 @@ import {
   recordSpecReviewDecisionsToState,
   writeState,
   type PhaseCheckpointInput,
+  type PhaseFailureEntry,
   type ProgressState,
 } from "../../lib/progress-state.js"
 import {
@@ -257,6 +266,10 @@ function upsertCheckpointStep(
     state.phases[String(phase.number)] = {
       verdict: phase.verdict,
       inventory: phase.inventory,
+      // PTB-FR-004: carry the remaining-budget report through to the
+      // durable record; re-checkpointing without it drops the prior
+      // value (the record is replaced, not merged).
+      ...(phase.remaining_ms !== undefined ? { remaining_ms: phase.remaining_ms } : {}),
       recorded_at: now,
     }
   }
@@ -305,6 +318,30 @@ const PhaseCheckpointArgSchema = z.object({
     .max(200)
     .default([]),
 })
+
+/** Validated phase fields the checkpoint line is rendered from. */
+export interface PhaseCheckpointLineSource {
+  readonly number: number
+  readonly verdict: "green" | "failed"
+  readonly remaining_ms?: number
+}
+
+/**
+ * Render the tool-owned phase checkpoint line (PTB-FR-004, DE-003):
+ * prescribed terminal output is rendered by the tool, never
+ * reconstructed by the executing agent from a prose template. The
+ * budget clause appears only when remaining_ms was recorded; the
+ * number, verdict, and remaining_ms come from the same payload the
+ * tool already validates.
+ */
+export function renderPhaseCheckpointLine(
+  phase: PhaseCheckpointLineSource,
+): string {
+  const base = `Phase ${phase.number} checkpoint: ${phase.verdict}`
+  return phase.remaining_ms !== undefined
+    ? `${base} (remaining budget: ~${phase.remaining_ms}ms)`
+    : base
+}
 
 /**
  * Validation for the checkpoint tool's `phase` argument inside execute: the
@@ -655,7 +692,20 @@ function escalatedAdvisoryHoldMessage(
 }
 
 /** Factory for the checkpoint tool (FR-001). */
-export function createCheckpointTool(exec: GitExec, cwd: string) {
+export function createCheckpointTool(
+  exec: GitExec,
+  cwd: string,
+  deps: {
+    /**
+     * Plugin client for the delegation-budget ancestry walk (PTB-FR-004,
+     * DE-001). Absent in tests that exercise only unbudgeted checkpoints;
+     * production always passes input.client.
+     */
+    readonly client?: PluginInput["client"]
+    /** Clock override for deterministic remaining-budget tests. */
+    readonly now?: () => number
+  } = {},
+) {
   return tool({
     description:
       "Record a completed workflow step to persistent storage. " +
@@ -700,7 +750,12 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
         .describe(
           "Optional phase-scoped record; requires step implement-phase-<number>. " +
             "verdict is the phase pre-flight outcome; inventory lists classified " +
-            "failures (pre-existing, environmental, or change-caused)",
+            "failures (pre-existing, environmental, or change-caused). The tool " +
+            "derives the budgeted ancestor's remaining budget (remaining_ms) from " +
+            "the delegation-budget registry at record time (PTB-FR-004, DE-001) — " +
+            "it is never agent-supplied. With phase recorded, the result data " +
+            "carries the tool-rendered phase_checkpoint_line (budget clause only " +
+            "when the tool derived a positive remaining budget)",
         ),
       spec_review_decisions: z
         .array(
@@ -740,15 +795,22 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
             "place of a reference.",
         ),
     },
-    execute: async (args: {
-      command: string
-      step: string
-      data?: string
-      key?: string
-      phase?: { number: number; verdict: "green" | "failed"; inventory?: PhaseFailureEntry[] }
-      spec_review_decisions?: SpecReviewDecision[]
-      human_decision_ref?: string
-    }) => {
+    execute: async (
+      args: {
+        command: string
+        step: string
+        data?: string
+        key?: string
+        phase?: {
+          number: number
+          verdict: "green" | "failed"
+          inventory?: PhaseFailureEntry[]
+        }
+        spec_review_decisions?: SpecReviewDecision[]
+        human_decision_ref?: string
+      },
+      context: { sessionID: string; abort?: AbortSignal },
+    ) => {
       try {
         // SYNTH-006 input domain (task 4.1): step names are bounded at
         // CHECKPOINT_STEP_NAME_MAX_LENGTH, and the bound is enforced before
@@ -783,6 +845,32 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
           return { output: parsedPhase.failureOutput }
         }
         const phaseRecord = parsedPhase.value.phase
+
+        // PTB-FR-004 (DE-001): the remaining budget is derived inside the
+        // tool from the delegation-budget registry — never an agent-
+        // supplied selection. A phase record under a budgeted ancestor
+        // carries remaining_ms = max(0, deadline - now); a lookup failure
+        // fails open (no field, no budget clause), and a derived 0 is
+        // omitted so the persisted schema stays positive-only.
+        let phaseWithBudget = phaseRecord
+        if (phaseRecord !== undefined && deps.client !== undefined && context.sessionID !== undefined) {
+          try {
+            const deadlineMs = await resolveInheritedDeadline(
+              deps.client,
+              context.sessionID,
+              cwd,
+              context.abort ?? new AbortController().signal,
+            )
+            if (deadlineMs !== null) {
+              const remaining = Math.max(0, deadlineMs - (deps.now?.() ?? Date.now()))
+              if (remaining > 0) {
+                phaseWithBudget = { ...phaseRecord, remaining_ms: remaining }
+              }
+            }
+          } catch {
+            // Fail open: a budget-lookup failure records no budget field.
+          }
+        }
 
         // SYNTH-003 (synthetic-compaction-continue-prompt-rec, task 4.1):
         // the command-keyed declared-step predicate — the authoritative gate
@@ -1046,9 +1134,23 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
           args.command,
           args.step,
           dataToMerge,
-          phaseRecord,
+          phaseWithBudget,
         )
-        return { output: JSON.stringify(success(state)) }
+        // PTB-FR-004 (DE-003): a phase-recorded checkpoint also returns the
+        // tool-rendered line so the command emits it verbatim; the
+        // response-only field never persists to the state file.
+        return {
+          output: JSON.stringify(
+            success(
+              phaseWithBudget !== undefined
+                ? {
+                    ...state,
+                    phase_checkpoint_line: renderPhaseCheckpointLine(phaseWithBudget),
+                  }
+                : state,
+            ),
+          ),
+        }
       } catch (err: unknown) {
         return { output: failureFromError(err, "CHECKPOINT_ERROR") }
       }
@@ -3635,6 +3737,28 @@ export interface DelegateCommandData {
    * valid or absent.
    */
   storm_threshold_warning: string | null
+  /**
+   * Per-task timeout derivation provenance (PTB-FR-001): every
+   * derivation input, the unclamped derived value, the ceiling, and
+   * the clamp outcome — present on every per-task delegation result,
+   * success or failure; null for command-path and other non-per-task
+   * delegations.
+   */
+  timeout_provenance: PerTaskTimeoutProvenanceRecord | null
+  /**
+   * Remaining budgeted-ancestor budget in milliseconds at result time
+   * (PTB-FR-004); null when the delegation ran unbudgeted.
+   */
+  remaining_ms: number | null
+  /**
+   * Executor-owned bounded-retry provenance (PTB-FR-003, DE-005): set
+   * when the per-task executor re-issued a retryable timeout termination
+   * once with the resume context tool-rendered into the retry prompt —
+   * the success envelope only ever carries it after a retry that
+   * finished the task. Null for first-attempt successes, failures that
+   * never retried, and non-per-task delegations.
+   */
+  retry: PerTaskRetryRecord | null
   /** Child session usage, when the executor reported step-finish parts. */
   usage: InvocationUsage | null
   /** Request, host-resolution, and child-report provenance. */
@@ -4211,6 +4335,115 @@ function readDelegateResumeState(exec: GitExec, cwd: string, commandPath: string
 }
 
 /**
+ * Production resume-capture seams for a per-task implement delegation
+ * (per-task-delegation-budgets design D3, PTB-FR-003): the worktree's
+ * modified paths through the injected git executor, and the completed
+ * top-level task ids in feature_dir/tasks.md through the shared
+ * parse_tasks grammar (matchTaskLine) and the injected readText seam.
+ * The per-task executor snapshots both at delegation start and diffs
+ * them at abort time, so the hint reports only what the child changed.
+ *
+ * Both seams fail closed: any error, an absent feature_dir, or a
+ * tasks.md path escaping the repository root yields null, so an
+ * unreadable hint never masks the timeout it annotates (D4 of #950).
+ * The hint carries repository-relative paths and task ids only —
+ * never command output or message content (Constitution V).
+ *
+ * @param exec Git executor used to read the worktree status.
+ * @param cwd Repository root used for repo-relative path resolution.
+ * @param featureDir Optional feature directory holding tasks.md.
+ * @param readText Reads UTF-8 text from an absolute path (tasks.md).
+ * @returns The capture seams the per-task executor diffs.
+ */
+function delegateResumeCapture(
+  exec: GitExec,
+  cwd: string,
+  featureDir: string | undefined,
+  readText: (path: string) => Promise<string>,
+): PerTaskResumeCapture {
+  return {
+    captureModifiedFiles: async (): Promise<readonly string[] | null> => {
+      try {
+        // -z keeps paths NUL-separated: no C-quoting to unescape, and a
+        // rename/copy entry carries its original path in the next field.
+        const fields = exec(["status", "--porcelain", "-z"], cwd).split("\0")
+        const files: string[] = []
+        for (let index = 0; index < fields.length; index++) {
+          const entry = fields[index]
+          if (entry === "") continue
+          const status = entry.slice(0, 2)
+          const path = entry.slice(3)
+          if (path !== "") files.push(path)
+          if (status.includes("R") || status.includes("C")) {
+            index++
+            const original = fields[index]
+            if (original !== undefined && original !== "") files.push(original)
+          }
+        }
+        return files
+      } catch {
+        return null
+      }
+    },
+    captureCompletedTasks: async (): Promise<readonly string[] | null> => {
+      if (featureDir === undefined) return null
+      const tasksAbs = resolveRepoRelative(cwd, `${featureDir}/tasks.md`)
+      if (tasksAbs === null) return null
+      try {
+        const contents = await readText(tasksAbs)
+        const completed: string[] = []
+        for (const line of contents.split("\n")) {
+          const match = matchTaskLine(line)
+          // Top-level checked tasks only: indented checkbox lines are
+          // continuation detail, not tasks — the classification the
+          // parse_tasks tool itself applies.
+          if (match !== null && match.indent === "" && match.checked) {
+            completed.push(match.id)
+          }
+        }
+        return completed
+      } catch {
+        return null
+      }
+    },
+  }
+}
+
+/**
+ * Count the tasks in one `## Phase N` heading of feature_dir/tasks.md
+ * (per-task-delegation-budgets D1, PTB-FR-001): the enclosing phase's
+ * task count is the phase-scope signal the timeout derivation charges
+ * sibling overhead against. Reads through the same injected readText
+ * seam and parse_tasks grammar the resume capture uses, and fails
+ * closed to zero — an unreadable or absent tasks.md, a path escaping
+ * the repository root, or a missing phase heading never blocks the
+ * delegation itself.
+ *
+ * @param readText Reads UTF-8 text from an absolute path (tasks.md).
+ * @param cwd Repository root used for repo-relative path resolution.
+ * @param featureDir Optional feature directory holding tasks.md.
+ * @param phase One-based phase number the delegation targets.
+ * @returns The phase's task count, or zero when unavailable.
+ */
+async function phaseTaskCountForDelegation(
+  readText: (path: string) => Promise<string>,
+  cwd: string,
+  featureDir: string | undefined,
+  phase: number,
+): Promise<number> {
+  if (featureDir === undefined) return 0
+  const tasksAbs = resolveRepoRelative(cwd, `${featureDir}/tasks.md`)
+  if (tasksAbs === null) return 0
+  try {
+    const contents = await readText(tasksAbs)
+    const parsed = parseTasksText(contents)
+    return parsed.phases[phase - 1]?.tasks.length ?? 0
+  } catch {
+    return 0
+  }
+}
+
+/**
  * Production classifier agent-engine spawn (model-matrix-delegation design
  * D5, MM-FR-005): runs the hidden model-matrix-classifier subagent through
  * the shared executeAgentSession session path with the invocation's
@@ -4464,7 +4697,13 @@ async function defaultModelLimits(
  * - limit-ended runs (delegation-timeout-budgets D4) return
  *   DELEGATE_FAILED with the executor's `timeout` details and, for
  *   command-path calls, `resume` (state key, last checkpoint step,
- *   completed steps) so callers resume instead of restarting
+ *   completed steps) so callers resume instead of restarting;
+ *   per-task implement delegations (checkpoint_step "implement" plus
+ *   phase) run through the per-task executor wrapper
+ *   (per-task-delegation-budgets D2/D3), whose wall-clock, idle, and
+ *   budget terminations carry the advisory `timeout.resume` hint —
+ *   files_modified and tasks_completed since delegation start, null
+ *   when unreadable (PTB-FR-003)
  *
  * @param exec Git executor used to derive the auto-checkpoint state key.
  * @param cwd Repository root used for repo-relative path resolution.
@@ -4985,23 +5224,97 @@ export function createDelegateCommandTool(
         }
 
         // Delegate the child session lifecycle to the shared executor.
-        const result = await executeAgentSession(
-          {
-            client: deps.client,
-            sessionID: context.sessionID,
-            directory: context.directory,
-            parentAbort: context.abort,
-            timeoutMilliseconds: input.timeout ?? DEFAULT_TIMEOUT_MILLISECONDS,
-            idleTimeoutMilliseconds: input.idle_timeout ?? DEFAULT_DELEGATE_IDLE_TIMEOUT_MS,
-            stormThreshold: storm.threshold,
-          },
-          input.agent,
-          promptText,
-          childModel,
-          childVariant,
-          false,
-          provenance,
-        )
+        // Per-task implement delegations (checkpoint_step "implement"
+        // plus a phase number — the /uf.unleash implement call shape,
+        // per-task-delegation-budgets D2/D3) route through the per-task
+        // wrapper so a timeout termination carries the advisory resume
+        // hint (PTB-FR-003): it resolves the inherited budget and idle
+        // window through the delegation-budget registry, fails fast
+        // budget_exhausted before spawning (PTB-FR-002), and attaches
+        // files_modified / tasks_completed — diffed from the
+        // delegation-start snapshot through the capture seams — to the
+        // timeout envelope. Unbudgeted callers keep the shared
+        // executor's semantics: an explicit idle_timeout still wins,
+        // and fallbackIdleMs preserves the delegation default.
+        const perTaskDelegation =
+          input.checkpoint_step === "implement" && input.phase !== undefined
+            ? {
+                phase: input.phase,
+                checkpointStep: input.checkpoint_step,
+                fallbackIdleMs: DEFAULT_DELEGATE_IDLE_TIMEOUT_MS,
+                resumeCapture: delegateResumeCapture(exec, cwd, input.feature_dir, deps.readText),
+                // PTB-FR-001 (per-task-delegation-budgets D1): derive the
+                // wall clock from this phase's work signals — the
+                // tasks.md phase task count and the measured prompt
+                // bytes — unless the caller's explicit timeout wins
+                // outright. The configured ceiling is the schema-level
+                // bound for this call's delegation kind, so the
+                // derivation can never request a window validation
+                // would reject.
+                derivation: derivePerTaskTimeoutMs({
+                  baseMs: DEFAULT_TIMEOUT_MILLISECONDS,
+                  phaseTaskCount: await phaseTaskCountForDelegation(
+                    deps.readText,
+                    cwd,
+                    input.feature_dir,
+                    input.phase,
+                  ),
+                  // tasks.md records task ids and descriptions only —
+                  // no per-task file set exists to count, so the file
+                  // term contributes nothing for per-task delegations.
+                  phaseFileCount: 0,
+                  promptBytes: Buffer.byteLength(promptText, "utf8"),
+                  tier: null,
+                  maxParallelRuns: 1,
+                  configuredCeilingMs:
+                    input.command_path !== undefined
+                      ? MAX_COMMAND_DELEGATION_TIMEOUT_MS
+                      : MAX_PROMPT_DELEGATION_TIMEOUT_MS,
+                  explicitTimeoutMs: input.timeout,
+                }),
+              }
+            : null
+        const result = await (perTaskDelegation === null
+          ? executeAgentSession(
+              {
+                client: deps.client,
+                sessionID: context.sessionID,
+                directory: context.directory,
+                parentAbort: context.abort,
+                timeoutMilliseconds: input.timeout ?? DEFAULT_TIMEOUT_MILLISECONDS,
+                idleTimeoutMilliseconds: input.idle_timeout ?? DEFAULT_DELEGATE_IDLE_TIMEOUT_MS,
+                stormThreshold: storm.threshold,
+              },
+              input.agent,
+              promptText,
+              childModel,
+              childVariant,
+              false,
+              provenance,
+            )
+          : executePerTaskDelegation(
+              {
+                client: deps.client,
+                sessionID: context.sessionID,
+                directory: context.directory,
+                parentAbort: context.abort,
+                timeoutMilliseconds: input.timeout ?? DEFAULT_TIMEOUT_MILLISECONDS,
+                // The wrapper owns idle precedence (PTB-FR-002): an
+                // explicit window wins, else the budgeted ancestor's
+                // registered window, else the fallback above — so the
+                // delegation default is passed as fallbackIdleMs, not
+                // baked in here.
+                idleTimeoutMilliseconds: input.idle_timeout,
+                stormThreshold: storm.threshold,
+              },
+              input.agent,
+              promptText,
+              childModel,
+              childVariant,
+              false,
+              provenance,
+              perTaskDelegation,
+            ))
 
         if (result.status !== "success" || result.error !== null) {
           const code = result.status === "cancelled" ? "DELEGATE_CANCELLED" : "DELEGATE_FAILED"
@@ -5017,7 +5330,11 @@ export function createDelegateCommandTool(
           // (the field is omitted when no child session ever existed).
           // Limit-ended runs also carry the timeout classification and,
           // for command-path delegations, the durable resume state
-          // (delegation-timeout-budgets D4).
+          // (delegation-timeout-budgets D4). Per-task implement
+          // delegations carry the executor's advisory hint inside the
+          // timeout details — timeout.resume with files_modified and
+          // tasks_completed, null when unreadable
+          // (per-task-delegation-budgets D3, PTB-FR-003).
           return {
             output: JSON.stringify({
               ...envelope,
@@ -5030,6 +5347,15 @@ export function createDelegateCommandTool(
                       : {}),
                   }
                 : {}),
+              // PTB-FR-001/PTB-FR-004: per-task results carry their
+              // derivation provenance and — under a budgeted ancestor —
+              // the remaining budget, machine-parseably on failure too.
+              ...(result.timeout_provenance !== undefined ? { timeout_provenance: result.timeout_provenance } : {}),
+              ...(result.remaining_ms !== undefined ? { remaining_ms: result.remaining_ms } : {}),
+              // PTB-FR-003 (DE-005): executor-owned bounded-retry
+              // provenance — a failure carrying it already consumed the
+              // single retry, so it is final for that termination kind.
+              ...(result.retry !== undefined ? { retry: result.retry } : {}),
             }),
           }
         }
@@ -5175,6 +5501,15 @@ export function createDelegateCommandTool(
           // of the audit trail.
           storm_threshold: storm.threshold,
           storm_threshold_warning: storm.warning,
+          // PTB-FR-001/PTB-FR-004: per-task derivation provenance and —
+          // under a budgeted ancestor — the remaining budget, surfaced
+          // machine-parseably like the rest of the delegation audit.
+          timeout_provenance: result.timeout_provenance ?? null,
+          remaining_ms: result.remaining_ms ?? null,
+          // PTB-FR-003 (DE-005): retry provenance rides success only
+          // when a retry actually finished the task; first-attempt
+          // successes stay null.
+          retry: result.retry ?? null,
           usage: result.usage,
           provenance: result.provenance,
           text: result.text,
@@ -7975,7 +8310,7 @@ const UfWorkflowPlugin = {
     return {
       tool: {
         resolve_base_ref: createResolveBaseRefTool(defaultGitExec, cwd),
-        checkpoint: createCheckpointTool(defaultGitExec, cwd),
+        checkpoint: createCheckpointTool(defaultGitExec, cwd, { client: input.client }),
         get_progress: createGetProgressTool(defaultGitExec, cwd),
         clear_progress: createClearProgressTool(defaultGitExec, cwd),
         record_human_decision: createRecordHumanDecisionTool(defaultGitExec, cwd),

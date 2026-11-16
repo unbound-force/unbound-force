@@ -27,6 +27,16 @@
  * descendants -- sessions another executor registered a run deadline
  * for -- are excluded because their own detector is always armed,
  * while the probed root stays counted.
+ *
+ * Per-task delegation children inherit idle semantics only through
+ * this registry (OpenSpec change per-task-delegation-budgets,
+ * design D2, PTB-FR-002, issue #1080): a registry entry carries the
+ * idle window alongside the deadline it has always held, a nested
+ * per-task call resolves the nearest registered ancestor's entry in
+ * a single ancestry walk, and the applicability rule combines an
+ * explicit window with the inherited one without introducing any
+ * new global idle default -- top-level callers without a budgeted
+ * ancestor keep their unchanged behavior.
  */
 
 import { type PluginInput } from "@opencode-ai/plugin"
@@ -116,54 +126,100 @@ type Client = PluginInput["client"]
 // ── Deadline registry ────────────────────────────────────────
 
 /**
+ * The budget registered for one child session: the absolute
+ * wall-clock deadline the executor enforces plus the idle window its
+ * run was armed with, when any (per-task-delegation-budgets design
+ * D2). The idle window rides the same entry as the deadline so a
+ * nested per-task call inherits both in one ancestry walk; null
+ * means the registering run had no idle watchdog, which inherits as
+ * "off" rather than as a default.
+ */
+export interface RegisteredBudget {
+  /** Absolute deadline in epoch milliseconds. */
+  readonly deadlineMs: number
+  /** Idle window in milliseconds; null when the run has no idle watchdog. */
+  readonly idleMs: number | null
+}
+
+/**
  * Process-wide deadline registry (design D1). Stored on globalThis
  * under a registered symbol so the separate plugin modules that import
  * this library share one registry even if the host loads the library
- * more than once. Holds only session ids and epoch milliseconds.
+ * more than once. Holds only session ids, epoch milliseconds, and
+ * nullable idle windows.
  */
-function registry(): Map<string, number> {
-  const holder = globalThis as unknown as Record<symbol, Map<string, number> | undefined>
+function registry(): Map<string, RegisteredBudget> {
+  const holder = globalThis as unknown as Record<symbol, Map<string, RegisteredBudget> | undefined>
   let map = holder[REGISTRY_KEY]
   if (map === undefined) {
-    map = new Map<string, number>()
+    map = new Map<string, RegisteredBudget>()
     holder[REGISTRY_KEY] = map
   }
   return map
 }
 
-/** Record a child session's absolute deadline (epoch ms). */
-export function registerDeadline(sessionID: string, deadlineMs: number): void {
-  registry().set(sessionID, deadlineMs)
+/**
+ * Record a child session's absolute deadline (epoch ms). The optional
+ * idle window (per-task-delegation-budgets design D2) rides the same
+ * registry entry so nested per-task children can inherit the
+ * watchdog; omit it for a run with no idle watchdog.
+ *
+ * @param sessionID - The child session id.
+ * @param deadlineMs - Absolute deadline in epoch milliseconds.
+ * @param idleMs - The run's idle window in milliseconds, when it carries one.
+ */
+export function registerDeadline(sessionID: string, deadlineMs: number, idleMs?: number): void {
+  registry().set(sessionID, { deadlineMs, idleMs: idleMs ?? null })
 }
 
-/** Remove a child session's deadline once its run has ended. */
+/** Remove a child session's registered budget once its run has ended. */
 export function unregisterDeadline(sessionID: string): void {
   registry().delete(sessionID)
 }
 
 /** The registered deadline for a session, or undefined. */
 export function registeredDeadline(sessionID: string): number | undefined {
+  return registry().get(sessionID)?.deadlineMs
+}
+
+/**
+ * The full budget registered for a session -- deadline plus idle
+ * window -- without walking any ancestry.
+ *
+ * @param sessionID - The session id to look up.
+ * @returns The registered entry, or undefined when the session has none.
+ */
+export function registeredBudget(sessionID: string): RegisteredBudget | undefined {
   return registry().get(sessionID)
 }
 
 /**
- * Resolve the deadline a nested call inherits: the registered deadline
- * of `sessionID`, else of the nearest registered ancestor found by
- * walking `parentID` links up to MAX_ANCESTRY_DEPTH hops. Any lookup
- * failure (or a client without `session.get`) yields null, which
- * leaves top-level behavior unchanged.
+ * Resolve the budget a nested call inherits: the registered entry of
+ * `sessionID`, else of the nearest registered ancestor found by
+ * walking `parentID` links up to MAX_ANCESTRY_DEPTH hops. The entry
+ * carries the ancestor's deadline and, for per-task children of a
+ * budgeted command-path parent, the idle window that ancestor's run
+ * was armed with (per-task-delegation-budgets design D2, PTB-FR-002).
+ * Any lookup failure (or a client without `session.get`) yields
+ * null, which leaves top-level behavior unchanged.
+ *
+ * @param client - Plugin client used to walk parentID links.
+ * @param sessionID - The session the nested call runs from.
+ * @param directory - Project directory scoping the session lookups.
+ * @param signal - Abort signal relayed to each lookup request.
+ * @returns The inherited budget entry, or null when no ancestor is registered.
  */
-export async function resolveInheritedDeadline(
+export async function resolveInheritedBudget(
   client: Client,
   sessionID: string,
   directory: string,
   signal: AbortSignal,
-): Promise<number | null> {
+): Promise<RegisteredBudget | null> {
   let current: string | undefined = sessionID
   for (let depth = 0; current !== undefined && depth <= MAX_ANCESTRY_DEPTH; depth++) {
-    const deadline = registeredDeadline(current)
-    if (deadline !== undefined) {
-      return deadline
+    const budget = registeredBudget(current)
+    if (budget !== undefined) {
+      return budget
     }
     if (depth === MAX_ANCESTRY_DEPTH || typeof client.session?.get !== "function") {
       return null
@@ -176,6 +232,28 @@ export async function resolveInheritedDeadline(
     }
   }
   return null
+}
+
+/**
+ * Resolve only the deadline a nested call inherits, delegating the
+ * shared ancestry walk to resolveInheritedBudget. Whether the idle
+ * watchdog applies on top of the resolved budget is
+ * resolveIdleApplicability's concern, not this function's.
+ *
+ * @param client - Plugin client used to walk parentID links.
+ * @param sessionID - The session the nested call runs from.
+ * @param directory - Project directory scoping the session lookups.
+ * @param signal - Abort signal relayed to each lookup request.
+ * @returns The inherited deadline, or null when no ancestor is registered.
+ */
+export async function resolveInheritedDeadline(
+  client: Client,
+  sessionID: string,
+  directory: string,
+  signal: AbortSignal,
+): Promise<number | null> {
+  const budget = await resolveInheritedBudget(client, sessionID, directory, signal)
+  return budget === null ? null : budget.deadlineMs
 }
 
 /** Outcome of clamping a requested wall clock to an inherited budget. */
@@ -201,6 +279,50 @@ export function clampToBudget(requestedMs: number, inheritedDeadline: number | n
   return available < requestedMs
     ? { effectiveMs: available, clamped: true, exhausted: false }
     : { effectiveMs: requestedMs, clamped: false, exhausted: false }
+}
+
+// ── Idle applicability (per-task inheritance) ─────────────────
+
+/** Origin of the effective idle window for a delegated run. */
+export type IdleSource = "explicit" | "inherited" | "none"
+
+/** How the idle watchdog applies to one delegated run. */
+export interface IdleApplicability {
+  /** The effective idle window in milliseconds; undefined when the watchdog is off. */
+  readonly idleMs: number | undefined
+  /** Where the effective window came from. */
+  readonly source: IdleSource
+}
+
+/**
+ * Decide how the idle watchdog applies to a delegated run
+ * (per-task-delegation-budgets design D2, PTB-FR-002). Precedence: a
+ * window the caller explicitly passed wins; otherwise a budgeted
+ * ancestor's registered idle window is inherited through the same
+ * registry entry as its deadline; otherwise the watchdog stays off.
+ * Introducing no global default is the point -- a top-level caller
+ * without a budgeted ancestor behaves exactly as before, which is
+ * the alternative design D2 rejects (a per-task idle default outside
+ * the registry would be a second source of truth and would change
+ * top-level behavior). Whether an explicitly passed value is sane is
+ * the tool schema's concern; like the executor's armed check, any
+ * defined value counts as explicit.
+ *
+ * @param explicitIdleMs - The idle window the caller passed, when it passed one.
+ * @param inherited - The budget resolved from the registry, null when unbudgeted.
+ * @returns The effective idle window and where it came from.
+ */
+export function resolveIdleApplicability(
+  explicitIdleMs: number | undefined,
+  inherited: RegisteredBudget | null,
+): IdleApplicability {
+  if (explicitIdleMs !== undefined) {
+    return { idleMs: explicitIdleMs, source: "explicit" }
+  }
+  if (inherited !== null && inherited.idleMs !== null) {
+    return { idleMs: inherited.idleMs, source: "inherited" }
+  }
+  return { idleMs: undefined, source: "none" }
 }
 
 // ── Activity probe ───────────────────────────────────────────

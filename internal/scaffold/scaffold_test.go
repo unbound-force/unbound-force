@@ -1650,6 +1650,218 @@ func TestUnleashCommand_ToolRoutingContracts(t *testing.T) {
 	})
 }
 
+// TestUnleashCommand_PerTaskDelegationBudgets pins the
+// per-task-delegation-budgets contract (issue #1080, OpenSpec change
+// per-task-delegation-budgets) on the /uf.unleash Step 5 implement
+// delegation call site: the per-task uf_delegate_command calls carry
+// checkpoint_step/phase and omit timeout/idle_timeout so the executor
+// derives each wall clock via derivePerTaskTimeoutMs (PTB-FR-001),
+// inherits the parent's idle watchdog through the delegation-budget
+// registry under a budgeted command-path parent (PTB-FR-002), stops at
+// the executor-owned bounded retry's failure decision point (PTB-FR-003,
+// DE-005), and the phase
+// checkpoint emits the tool-rendered phase_checkpoint_line verbatim
+// (PTB-FR-004 / UO-FR-010, DE-003). Both the embedded scaffold asset and the
+// canonical command are asserted -- the #930 delegation-timeout
+// content-gate pattern -- so prose drift in either copy fails; the
+// pre-budget checkpoint rendering and the prose-template checkpoint
+// line are asserted absent. Pinned
+// sentences wrap across the 72-column markdown source, so fragments
+// are matched whitespace-normalized (the question-tool precedent's
+// option-label matching rule).
+func TestUnleashCommand_PerTaskDelegationBudgets(t *testing.T) {
+	content, err := assetContent("opencode/commands/uf.unleash.md")
+	if err != nil {
+		t.Fatalf("read embedded unleash command: %v", err)
+	}
+
+	// The canonical command file is checked alongside the embedded
+	// asset (the stale-sentence precedent in the tool-routing
+	// contract test): a prose drift in either copy fails here.
+	root := findProjectRoot(t)
+	if root == "" {
+		t.Fatalf("project root not found; cannot verify canonical uf.unleash.md")
+	}
+	canonical, readErr := os.ReadFile(filepath.Join(root, ".opencode", "commands", "uf.unleash.md"))
+	if readErr != nil {
+		t.Fatalf("read canonical uf.unleash.md: %v", readErr)
+	}
+
+	copies := []struct {
+		name string
+		text string
+	}{
+		{"embedded", string(content)},
+		{"canonical", string(canonical)},
+	}
+
+	// normalize collapses markdown line wrapping so contract
+	// sentences split across the 72-column wrap still match their
+	// landed wording.
+	normalize := func(s string) string {
+		return strings.Join(strings.Fields(s), " ")
+	}
+
+	// between slices one span between two markers; missing markers
+	// fail closed (the tool-routing contract test's precedent).
+	between := func(t *testing.T, value, start, end string) string {
+		t.Helper()
+		startIndex := strings.Index(value, start)
+		if startIndex == -1 {
+			t.Fatalf("unleash command missing section start %q", start)
+		}
+		value = value[startIndex:]
+		endIndex := strings.Index(value, end)
+		if endIndex == -1 {
+			t.Fatalf("unleash command missing section end %q", end)
+		}
+		return value[:endIndex]
+	}
+
+	for _, copy := range copies {
+		copy := copy
+		t.Run(copy.name, func(t *testing.T) {
+			// The Step 5 implement phase owns every pinned span: the
+			// budget-contract preamble, the sequential per-task
+			// delegation call block with its retry branch, and the
+			// phase checkpoint.
+			budgetContract := between(t, copy.text, "**Per-task delegation budget contract**", "1. Separate the phase's tasks into two groups")
+			sequentialExecution := between(t, copy.text, "2. **Sequential execution**", "3. **Parallel execution**")
+			perTaskCallBlock := between(t, copy.text, "per-task implement calls):", "The tool auto-checkpoints")
+			phaseCheckpoint := between(t, copy.text, "4. **Phase checkpoint**", "Proceed immediately to Step 6 (Code Review)")
+
+			assertFragments := func(t *testing.T, span, scope string, fragments []string) {
+				t.Helper()
+				normalizedSpan := normalize(span)
+				for _, fragment := range fragments {
+					if !strings.Contains(normalizedSpan, normalize(fragment)) {
+						t.Errorf("%s uf.unleash.md: %s missing per-task delegation budget fragment %q", copy.name, scope, fragment)
+					}
+				}
+			}
+
+			t.Run("per-task derivation call site (PTB-FR-001)", func(t *testing.T) {
+				assertFragments(t, budgetContract, "budget contract", []string{
+					"the per-task implement delegations below carry `checkpoint_step: \"implement\"` and `phase`, routing them through the per-task executor wrapper",
+					"Omit `timeout` and `idle_timeout` on these calls -- the budget is tool-owned",
+					"The tool derives each call's wall clock via `derivePerTaskTimeoutMs` from the phase's work signals",
+					"phase task count (from the `parse_tasks` result), files the phase's tasks touch, and the child's resolved throughput tier",
+					"clamped to the `1_800_000` ms ceiling and the inherited parent budget",
+					"derivation and clamp outcome recorded as timeout provenance on the result (PTB-FR-001)",
+					"An explicit `timeout` argument overrides the derivation entirely",
+				})
+				assertFragments(t, perTaskCallBlock, "per-task call block", []string{
+					"prompt: [the task description exactly as parsed]",
+					"task_classification:",
+					"checkpoint_step: \"implement\"",
+					"phase: [phase number]",
+				})
+				// The budget is tool-owned: a hardcoded timeout or
+				// idle_timeout on the call block would override the
+				// derivation (PTB-FR-001) and the registry-inherited
+				// idle window (PTB-FR-002). An operator-instructed
+				// explicit timeout stays a call-time decision, never
+				// a template default.
+				for _, param := range []string{"timeout:", "idle_timeout:"} {
+					if strings.Contains(perTaskCallBlock, param) {
+						t.Errorf("%s uf.unleash.md: per-task call block carries %s; the per-task budget is tool-owned", copy.name, param)
+					}
+				}
+			})
+
+			t.Run("idle semantics under a budgeted parent (PTB-FR-002)", func(t *testing.T) {
+				assertFragments(t, budgetContract, "budget contract", []string{
+					"Under a budgeted command-path parent the wrapper inherits the parent's idle watchdog through the delegation-budget registry",
+					"a progressing child (`child_active: true` or a running tool part) is not aborted by its wall clock while it progresses",
+					"a stalled child aborts with `idle_timeout` (retryable)",
+					"`budget_exhausted` (non-retryable) fails fast when the parent budget is spent",
+					"Wall-clock stays the absolute backstop",
+					"unbudgeted top-level invocations keep the existing delegation defaults",
+				})
+			})
+
+			t.Run("executor-owned bounded retry decision point (PTB-FR-003, DE-005)", func(t *testing.T) {
+				assertFragments(t, sequentialExecution, "sequential execution", []string{
+					"On failure, emit the envelope's error and **STOP** -- the per-task executor already re-issued a retryable timeout termination once, with the resume context tool-rendered into the retry prompt (PTB-FR-003; `retry` provenance on the envelope), so the returned failure is final.",
+					"`error.retryable: false` failures (e.g. `budget_exhausted`) were never retried (MP-024).",
+				})
+				// DE-005: the bounded retry is executor-owned, so the
+				// command's decision point must not route any retry
+				// itself. The pre-change prose routing (branch on
+				// error.retryable, re-issue once, relay resume) is the
+				// stale shape whose reappearance fails this pin.
+				for _, staleRouting := range []string{
+					"when it carries `timeout` and `error.retryable` is true, re-issue the same call once",
+					"The retry MUST NOT start from a blank prompt when `timeout.child_active` is true or `resume` is non-null",
+				} {
+					if strings.Contains(normalize(sequentialExecution), normalize(staleRouting)) {
+						t.Errorf("%s uf.unleash.md: decision point routes the bounded retry in command prose %q", copy.name, staleRouting)
+					}
+				}
+			})
+
+			t.Run("phase checkpoint derives the budget line in the tool (PTB-FR-004, DE-001)", func(t *testing.T) {
+				assertFragments(t, budgetContract, "budget contract", []string{
+					"each result reports the remaining parent budget (`remaining_ms`), and unbudgeted",
+				})
+				assertFragments(t, phaseCheckpoint, "phase checkpoint", []string{
+					"the remaining parent budget (`remaining_ms`) is tool-derived: the checkpoint tool",
+					"resolves the budgeted ancestor from the delegation-budget registry at record time",
+					"never supply it from the envelope",
+					"persists `number`, `verdict`, `inventory`, and the derived `remaining_ms` from the structured `phase` object",
+					"The checkpoint result also carries a tool-rendered `phase_checkpoint_line`, with the remaining-budget clause exactly when the tool derived a positive remaining budget",
+					"Emit it verbatim as the phase checkpoint line -- never reconstruct it",
+					"the value is informational; wall-clock and hierarchical clamping stay authoritative",
+				})
+				// The pre-change checkpoint rendering persisted only
+				// the three non-budget fields; its return would
+				// silently drop remaining_ms. Assert absent both raw
+				// and whitespace-normalized so line-wrapped
+				// reintroductions fail (the question-tool
+				// precedent's legacy-phrasing rule).
+				stale := "persists only `number`, `verdict`, and `inventory` from the structured `phase` object"
+				if strings.Contains(phaseCheckpoint, stale) {
+					t.Errorf("%s uf.unleash.md: phase checkpoint retains pre-budget rendering %q", copy.name, stale)
+				}
+				if strings.Contains(normalize(phaseCheckpoint), normalize(stale)) {
+					t.Errorf("%s uf.unleash.md: phase checkpoint retains pre-budget rendering %q across wrapped lines", copy.name, stale)
+				}
+				// DE-001: the remaining budget is derived inside the
+				// checkpoint tool, so the superseded agent-supplied
+				// fill rule (envelope selection, reach-back, and the
+				// omit-when gate routed in prose) must stay gone.
+				for _, staleFill := range []string{
+					"remaining_ms: [remaining parent budget in ms, from the most recent per-task delegation envelope of THIS phase's own delegations",
+					"never reach back to an earlier phase's envelope",
+					"exactly when `remaining_ms` was recorded",
+				} {
+					if strings.Contains(phaseCheckpoint, staleFill) {
+						t.Errorf("%s uf.unleash.md: phase checkpoint retains the agent-supplied fill rule %q", copy.name, staleFill)
+					}
+					if strings.Contains(normalize(phaseCheckpoint), normalize(staleFill)) {
+						t.Errorf("%s uf.unleash.md: phase checkpoint retains the agent-supplied fill rule %q across wrapped lines", copy.name, staleFill)
+					}
+				}
+				// DE-003: the checkpoint line is tool-rendered and
+				// emitted verbatim; a prose template the agent
+				// reconstructs (or an unobservable no-budgeted-
+				// ancestor omission gate) is the superseded contract.
+				for _, staleTemplate := range []string{
+					"also render the phase checkpoint line -- `Phase [N] checkpoint:",
+					"When no budgeted ancestor exists, emit no budget clause",
+				} {
+					if strings.Contains(phaseCheckpoint, staleTemplate) {
+						t.Errorf("%s uf.unleash.md: phase checkpoint retains prose-template line rendering %q", copy.name, staleTemplate)
+					}
+					if strings.Contains(normalize(phaseCheckpoint), normalize(staleTemplate)) {
+						t.Errorf("%s uf.unleash.md: phase checkpoint retains prose-template line rendering %q across wrapped lines", copy.name, staleTemplate)
+					}
+				}
+			})
+		})
+	}
+}
+
 func TestPluginPackageInputs_ExactVersions(t *testing.T) {
 	root := findProjectRoot(t)
 	if root == "" {

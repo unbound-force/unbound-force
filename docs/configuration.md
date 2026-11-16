@@ -710,13 +710,32 @@ carries a `timeout` object:
 | `child_active` | Whether the subtree showed activity within the last 120 seconds (`null` before the first successful probe) |
 | `pending_question` | `true` when the child's latest part is a running `question` tool call |
 | `storm_session_id` | The counted session holding the highest per-session run of consecutive compactions -- present only on the `storm` kind, `null` for every other kind |
+| `timeout_provenance` | Per-task derivation provenance riding the delegation result beside `timeout`: every derivation input, the unclamped derived value, the ceiling, and the clamp outcome. Present on every per-task delegation result -- success or failure; absent for every non-per-task caller |
+| `remaining_ms` | Remaining budgeted-ancestor budget in milliseconds at result time, floored at zero. Carried by per-task results under a budgeted ancestor -- success, failure, or `budget_exhausted` alike; omitted when unbudgeted |
+| `retry` | Executor-owned bounded-retry provenance (per-task delegations): `first_attempt_kind` and `resume_relayed`. Present when the per-task executor re-issued a retryable timeout termination once with the resume context tool-rendered into the retry prompt -- on the success that retry produced and on the returned failure alike; absent for first-attempt results, never-retried failures, and non-per-task callers |
 
 Command-path delegations additionally carry `resume` -- the
 state `command`, `key`, `last_checkpoint_step`, and
 `completed_steps` read from the progress state store after the
 child stops -- so an orchestrator can re-delegate the same
-command from its last checkpoint. An unreadable state yields
-`resume: null`.
+command from its last checkpoint. Prompt-only per-task
+delegations (`checkpoint_step: "implement"` plus `phase`) carry
+a lighter `timeout.resume` hint: `files_modified` and
+`tasks_completed`, the files the child touched and the tasks.md
+checkboxes it completed since the delegation started. The hint
+is advisory input to the executor-owned bounded retry (the
+retry prompt re-anchors without merging edits), carries
+paths and task ids only -- never message content -- and is
+assembled by diffing delegation-start state at abort time. An
+unreadable state on either path yields `resume: null`. On a
+retryable wall-clock or idle termination, the per-task executor
+re-issues the delegation exactly once with the resume context
+-- the relayed hint, or the tasks.md checkbox state when the
+hint is null -- tool-rendered into the retry prompt, and marks
+the result with `retry` provenance (`first_attempt_kind`,
+`resume_relayed`); a failure carrying it consumed the bound,
+and non-retryable terminations (`budget_exhausted`) are never
+retried.
 
 The recovery protocol that `/uf.run-pipeline-plan` applies to
 this envelope (gate-timeout recovery on `pending_question`, a
