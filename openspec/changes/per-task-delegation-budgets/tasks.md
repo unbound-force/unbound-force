@@ -25,7 +25,7 @@
 
 - [x] 3.1 Update `.opencode/plugins/uf-workflow/index.ts` `uf_delegate_command` failure envelope to carry the optional per-task `resume` hint alongside `timeout` when `checkpoint_step: "implement"` + `phase` are present; keep edits inside the `uf_delegate_command` section as in #930, preserve `TimeoutSchema` `1_800_000` ceiling (PTB-FR-003, gatekeeping).
 - [x] 3.2 Update `.opencode/commands/uf.unleash.md` implementation-phase delegation call site: derive timeout per PTB-FR-001 (phase task count + files touched + tier via `derivePerTaskTimeoutMs`), wire idle semantics under command-path parent per PTB-FR-002, thread `checkpoint_step`/`phase` and relay `resume.files_modified`/`tasks_completed` into retries (must not retry blank when `child_active: true` or resume present) per PTB-FR-003, and amend the phase-checkpoint rendering to include remaining parent budget (`remaining_ms` + human line) per PTB-FR-004/UO-FR-010 (D1–D4). Keep 72-column wrap.
-- [ ] 3.3 [P] Add Go content gate in `internal/scaffold/` asserting the `uf.unleash.md` per-task retrieval / remaining-budget prose (mirrors D4 pattern from #930).
+- [x] 3.3 [P] Add Go content gate in `internal/scaffold/` asserting the `uf.unleash.md` per-task retrieval / remaining-budget prose (mirrors D4 pattern from #930).
 - [ ] 3.4 [P] Extend `.opencode/test/unleash-delegate.test.ts` for per-task schema bounds (retain `1_800_000` ceiling), derived timeout, idle abort vs `budget_exhausted`, resume envelope, and `checkpoint` phase payload `remaining_ms`.
 
 ## 4. Mirrors, docs, and scaffolding
