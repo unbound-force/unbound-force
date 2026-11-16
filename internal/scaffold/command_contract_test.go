@@ -2,6 +2,7 @@ package scaffold
 
 import (
 	"bytes"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -851,11 +852,14 @@ func TestCommandContracts_RejectShellHeredocPayloads(t *testing.T) {
 	// blocks as commands (divisor-curator composes and posts issue
 	// content), so the ban spans every instruction directory and its
 	// scaffold mirror.
+	// #1048: escaped-delimiter (<<\EOF) and ANSI-C-quoted (<<$'EOF')
+	// spellings carry the same breakout vector; the canonical pattern
+	// and its positive/negative table are pinned by SC-FR-016.
 	root := findProjectRoot(t)
 	if root == "" {
 		t.Fatal("project root not found")
 	}
-	heredoc := regexp.MustCompile(`<<-?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?`)
+	heredoc := regexp.MustCompile(`<<-?\s*\$?\\?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?`)
 	for _, dir := range []string{
 		filepath.Join(root, ".opencode", "commands"),
 		filepath.Join(root, "internal", "scaffold", "assets", "opencode", "commands"),
@@ -864,20 +868,151 @@ func TestCommandContracts_RejectShellHeredocPayloads(t *testing.T) {
 		filepath.Join(root, ".opencode", "skills"),
 		filepath.Join(root, "internal", "scaffold", "assets", "opencode", "skills"),
 	} {
-		paths := markdownFilesUnder(t, dir)
-		if len(paths) == 0 {
-			t.Fatalf("no instruction templates found in %s", dir)
+		for _, finding := range scanHeredocLines(t, dir, heredoc) {
+			t.Error(finding.message())
 		}
-		for _, path := range paths {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read %s: %v", path, err)
+	}
+}
+
+// heredocFinding records one heredoc-ban violation: the offending
+// file, its 1-based line number, and the matched text. message is the
+// actionable guidance SC-FR-016 requires -- file, line, matched text,
+// and a direction to write payloads with the host's file-write tool.
+type heredocFinding struct {
+	path    string
+	line    int
+	matched string
+}
+
+func (f heredocFinding) message() string {
+	return fmt.Sprintf("%s:%d: shell heredoc %q; write the payload with the host's file-write tool instead", f.path, f.line, f.matched)
+}
+
+// scanHeredocLines walks every markdown file under dir and returns each
+// line that matches the heredoc pattern. Fail-closed by construction
+// (SC-FR-016): walk and read errors -- missing directory, unreadable
+// file, symlink loop, permission denied -- abort the test rather than
+// silently reducing coverage; an empty directory fails at the caller.
+func scanHeredocLines(t *testing.T, dir string, heredoc *regexp.Regexp) []heredocFinding {
+	t.Helper()
+
+	var findings []heredocFinding
+	paths := markdownFilesUnder(t, dir)
+	if len(paths) == 0 {
+		t.Fatalf("no instruction templates found in %s", dir)
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			if m := heredoc.FindString(line); m != "" {
+				findings = append(findings, heredocFinding{path: path, line: i + 1, matched: m})
 			}
-			for i, line := range strings.Split(string(data), "\n") {
-				if m := heredoc.FindString(line); m != "" {
-					t.Errorf("%s:%d: shell heredoc %q; write the payload with the host's file-write tool instead", path, i+1, m)
-				}
+		}
+	}
+	return findings
+}
+
+func TestCommandContracts_HeredocPattern(t *testing.T) {
+	// SC-FR-016: table-driven pinning of every recognized heredoc spelling
+	// and the non-matches that must remain allowed. This is the source of
+	// truth for the ban -- positives must produce a match, negatives must
+	// produce none. See proposal/design for the breakout vector rationale.
+	heredoc := regexp.MustCompile(`<<-?\s*\$?\\?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?`)
+
+	positives := []string{
+		// unquoted / quoted / double-quoted
+		`<<EOF`,
+		`<<'EOF'`,
+		`<<"EOF"`,
+		// dashed (strip-tab)
+		`<<-EOF`,
+		`<<-'EOF'`,
+		`<<-"EOF"`,
+		// escaped-delimiter (bash treats as quoted, still breakout-vector)
+		`<<\EOF`,
+		`<<\ 'EOF'`,
+		`<<\'EOF'`,
+		// dashed escaped-delimiter variants
+		`<<-\EOF`,
+		`<<-\ 'EOF'`,
+		// ANSI-C-quoted
+		`<<$'EOF'`,
+		`<<-$'EOF'`,
+		// here-string via << prefix (matched as substring << "foo")
+		`<<< "foo"`,
+		`<<< 'bar'`,
+	}
+	// SC-FR-016 pins the case counts (15 positive + 4 negative = 19
+	// total): a deleted table row must fail the count check, not
+	// silently narrow the ban's pinned coverage.
+	if len(positives) != 15 {
+		t.Fatalf("positives table must pin all 15 recognized spellings, got %d", len(positives))
+	}
+	for _, src := range positives {
+		src := src
+		t.Run("match:"+src, func(t *testing.T) {
+			if got := heredoc.FindString(src); got == "" {
+				t.Fatalf("heredoc pattern must match %q, got no match (pattern %q)", src, heredoc.String())
 			}
+		})
+	}
+
+	negatives := []string{
+		`>>> MANDATORY GATE <<<`,
+		`<<<<<<<`,
+		`>>>>`,
+		`>>> MANDATORY GATE: HUMAN CONFIRMATION REQUIRED <<<`,
+	}
+	if len(negatives) != 4 {
+		t.Fatalf("negatives table must pin all 4 non-matches, got %d", len(negatives))
+	}
+	for _, src := range negatives {
+		src := src
+		t.Run("nomatch:"+src, func(t *testing.T) {
+			if got := heredoc.FindString(src); got != "" {
+				t.Fatalf("heredoc pattern must not match %q, got %q", src, got)
+			}
+		})
+	}
+}
+
+func TestCommandContracts_HeredocScanFixture(t *testing.T) {
+	// SC-FR-016: pin the walk-to-message path positively. The repo scan
+	// only ever sees a clean tree (zero violations), so this synthetic
+	// t.TempDir() fixture plants a heredoc-bearing markdown file on a
+	// known line and asserts the scan reports exactly one violation
+	// whose message names the file, line, and matched text and directs
+	// the author to the host's file-write tool. scanHeredocLines fails
+	// closed on walk errors, so coverage cannot be silently reduced.
+	heredoc := regexp.MustCompile(`<<-?\s*\$?\\?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?`)
+
+	dir := t.TempDir()
+	content := "innocuous intro line\nrun: cat <<\\EOF > payload.md\nbody\nEOF\n"
+	if err := os.WriteFile(filepath.Join(dir, "violating.md"), []byte(content), 0o600); err != nil {
+		t.Fatalf("plant fixture: %v", err)
+	}
+
+	findings := scanHeredocLines(t, dir, heredoc)
+	if len(findings) != 1 {
+		t.Fatalf("expected exactly 1 heredoc finding, got %d (%v)", len(findings), findings)
+	}
+	finding := findings[0]
+	if want := `<<\EOF`; finding.matched != want {
+		t.Errorf("matched text = %q, want %q", finding.matched, want)
+	}
+	if finding.line != 2 {
+		t.Errorf("line = %d, want 2 (the planted violation line)", finding.line)
+	}
+	if !strings.HasSuffix(finding.path, "violating.md") {
+		t.Errorf("path = %q, want it to name the planted violating.md", finding.path)
+	}
+	msg := finding.message()
+	for _, want := range []string{"violating.md", ":2:", "shell heredoc", fmt.Sprintf("%q", finding.matched), "file-write tool"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q must contain %q", msg, want)
 		}
 	}
 }
