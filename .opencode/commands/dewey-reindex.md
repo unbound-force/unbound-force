@@ -27,3 +27,4 @@ Call the Dewey MCP tool `reindex` with no parameters.
 Display the returned summary showing pages deleted, sources
 re-indexed, new page counts, and elapsed time.
 </protect>
+<!-- dewey:scaffold dev sha256:a1721e18995444e5dffe1f0df1db2a40d92e215772b1fbc59649b7bac66c7af0 -->

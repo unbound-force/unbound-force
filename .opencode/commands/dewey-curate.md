@@ -25,3 +25,4 @@ knowledge files with quality flags and confidence scores.
 2. If the tool returns extraction prompts (no local LLM), perform synthesis
 3. Report the results: files created, quality flags, confidence distribution
 </protect>
+<!-- dewey:scaffold dev sha256:b816fa596ae726850a0b8d36a612966af827e509fbf8d2c6d56ca86b54a5e36e -->

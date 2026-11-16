@@ -31,3 +31,4 @@ index all configured sources.
 Display the returned summary showing sources processed, pages
 new/changed/deleted, embeddings generated, and elapsed time.
 </protect>
+<!-- dewey:scaffold dev sha256:16819038e3d2d6968404177f7a8d1b7ae4f591606a3ccfdb61c68c0d83e587c5 -->

@@ -27,3 +27,4 @@ mechanical issues (regenerate missing embeddings).
 Display the returned report showing findings and remediation
 suggestions.
 </protect>
+<!-- dewey:scaffold dev sha256:97ceb4de09a3146eaa4f3881586a2f24fb93d45e59611bfd937469c0435d4d45 -->

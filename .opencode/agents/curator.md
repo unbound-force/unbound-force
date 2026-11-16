@@ -105,3 +105,4 @@ pre-answer, or bypass a gate on the human's behalf.
 Any supervisor guard relaxation for this agent belongs in the user's
 global supervisor configuration, keyed to curator — never in this
 repository's committed configuration.
+<!-- dewey:scaffold dev sha256:9443de8d67cb4d57bc4a2b979ff1617c302d0564bae369c0e3a14a5010fc13b5 -->
