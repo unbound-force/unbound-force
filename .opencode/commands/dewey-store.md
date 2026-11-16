@@ -75,3 +75,4 @@ list with tag/category for each. Wait for confirmation.
 
 Display the returned identity and suggest /dewey-compile.
 </protect>
+<!-- dewey:scaffold dev sha256:6c448e8ba38a4de6bc5ebe595856ac7bbddbe7d44067ae1d664eaf7b7c633775 -->
