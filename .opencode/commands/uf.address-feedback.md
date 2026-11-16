@@ -299,7 +299,7 @@ Check local cache at `.uf/feedback/pr-<PR_NUMBER>/state.json`:
 - **Thread resolved on GitHub since last run**: skip entirely
 - **Cache missing**: assess from scratch (correct but slower)
 
-On crash-recovery re-entry: pass items whose replies were already posted to `post_feedback_replies` again unchanged. The tool reads its own per-item record (`replies` in the cache) and skips posted replies and resolved threads, so a re-run never duplicates a comment or an issue and still resolves threads a prior run left open.
+On crash-recovery re-entry: pass the full confirmed item list to `post_feedback_replies` again, unchanged — including items whose replies were already posted. The tool reads its own per-item record (`replies` in the cache) and skips posted replies and resolved threads, so a re-run never duplicates a comment or an issue, still posts the replies a prior run left pending, and still resolves threads a prior run left open.
 
 If no items remain after filtering: report "No unresolved feedback to address" and **STOP**.
 

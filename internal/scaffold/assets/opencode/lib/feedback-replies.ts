@@ -52,6 +52,8 @@ import { tmpdir } from "node:os"
 import { dirname, join, relative, resolve, sep } from "node:path"
 import { z } from "zod"
 
+import { classifyGhFailure } from "./gh-error.js"
+
 // ---------------------------------------------------------------------------
 // Contract constants
 // ---------------------------------------------------------------------------
@@ -752,6 +754,12 @@ function textOf(value: unknown): string {
  * `gh_not_found` (executable missing), `timeout`, `rate_limited`,
  * `gh_auth_failed`, or `api_error`. Timeouts and rate limits are
  * retryable; everything else is not.
+ *
+ * The decision table lives in the shared `classifyGhFailure` module
+ * (`gh-error.ts`) so review-dispatch classifies identical failures
+ * identically (FRR-FR-001, issue #1023 MEDIUM 3); this adapter
+ * extracts the signals from the thrown record and maps the shared
+ * codes onto this module's message templates.
  */
 export function classifyGhError(err: unknown): FeedbackError {
   if (err instanceof FeedbackOperationError) return err.toError()
@@ -759,21 +767,25 @@ export function classifyGhError(err: unknown): FeedbackError {
   const message = err instanceof Error ? err.message : String(err)
   const stderr = textOf(record.stderr).trim()
   const detail = stderr !== "" ? stderr : message
-  const lower = `${message}\n${stderr}`.toLowerCase()
-  if (record.code === "ENOENT") {
-    return { code: "gh_not_found", message: "gh CLI is not installed or not on PATH", retryable: false }
+  const { code, retryable } = classifyGhFailure({
+    stderr,
+    message,
+    // execFileSync reports the gh exit code as `status`.
+    exitCode: typeof record.status === "number" ? record.status : undefined,
+    spawnCode: typeof record.code === "string" ? record.code : undefined,
+    signal: typeof record.signal === "string" ? record.signal : undefined,
+  })
+  switch (code) {
+    case "gh_not_found":
+      return { code, message: "gh CLI is not installed or not on PATH", retryable }
+    case "timeout":
+      return { code, message: `gh CLI timed out: ${detail}`, retryable }
+    case "rate_limited":
+      return { code, message: `GitHub API rate limited: ${detail}`, retryable }
+    case "gh_auth_failed":
+      return { code, message: `gh CLI is not authenticated: ${detail}`, retryable }
   }
-  if (record.code === "ETIMEDOUT" || record.signal === "SIGTERM" || lower.includes("timed out")) {
-    return { code: "timeout", message: `gh CLI timed out: ${detail}`, retryable: true }
-  }
-  if (lower.includes("rate limit")) {
-    return { code: "rate_limited", message: `GitHub API rate limited: ${detail}`, retryable: true }
-  }
-  // gh exits 4 when authentication is required.
-  if (record.status === 4 || lower.includes("gh auth login") || lower.includes("not logged")) {
-    return { code: "gh_auth_failed", message: `gh CLI is not authenticated: ${detail}`, retryable: false }
-  }
-  return { code: "api_error", message: `gh CLI failed: ${detail}`, retryable: false }
+  return { code: "api_error", message: `gh CLI failed: ${detail}`, retryable }
 }
 
 // ---------------------------------------------------------------------------
@@ -1380,8 +1392,12 @@ function withTempFile<T>(name: string, contents: string, fn: (path: string) => T
 }
 
 /**
- * Create one issue, retrying once on failure. Unparseable output is
- * not retried: the issue may exist, and a retry could file it twice.
+ * Create one issue, retrying once on failure. Ambiguous outcomes are
+ * not retried because the issue may exist and a retry could file it
+ * twice: a timeout (the create may have reached GitHub before the
+ * client gave up) and unparseable output (the create succeeded but
+ * the URL was lost) both fail fast and direct the operator to check
+ * the repository first (design D3, issue #1023).
  */
 function createIssue(
   deps: FeedbackReplyDeps,
@@ -1398,6 +1414,17 @@ function createIssue(
       )
     } catch (err: unknown) {
       last = classifyGhError(err)
+      // A timeout is an ambiguous outcome: the issue may have been
+      // created server-side before the client gave up, so a retry
+      // could file it twice. Fail fast and name the ambiguity
+      // instead (FRR-FR-002).
+      if (last.code === "timeout") {
+        throw new FeedbackOperationError(
+          "timeout",
+          `gh issue create timed out; the issue may exist — check ${repo} for it before re-running: ${last.message}`,
+          false,
+        )
+      }
       continue
     }
     const parsed = parseIssueUrl(output)

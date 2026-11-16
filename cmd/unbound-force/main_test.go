@@ -35,8 +35,8 @@ func TestRunInit_FreshDir(t *testing.T) {
 	// The exact count is environment-dependent: review plugin activation
 	// appends the activation-gated plugin sources to the created set only
 	// when Node/npm/OpenCode are present and the install plus probes
-	// succeed. With 89 total embedded assets, minus 1 non-deployed
-	// (devcontainer) and 4 activation-gated plugins, the base count is 84
+	// succeed. With 91 total embedded assets, minus 1 non-deployed
+	// (devcontainer) and 4 activation-gated plugins, the base count is 86
 	// (the meta-prompt pack, its custom template, and the model-matrix
 	// classifier subagent joined the deployed set with the
 	// model-matrix-scaffold-deployment change; .uf/preflight.yaml and
@@ -44,10 +44,13 @@ func TestRunInit_FreshDir(t *testing.T) {
 	// .opencode/package-lock.json left with stop-shipping-plugin-lock;
 	// lib/feedback-replies.ts joined with feedback-reply-tools;
 	// .uf/schemas/review-dispatch-failure/v1.0.0.schema.json joined
-	// with review-dispatch-errors-cap-loses-unrecov).
-	// Each successful activation probe adds one file, yielding [84-88].
-	// The scaffold-level asset inventory and drift tests pin the exact
-	// asset list, so this CLI check asserts any count in that range.
+	// with review-dispatch-errors-cap-loses-unrecov;
+	// lib/progress-state.ts joined with spec-review-gate hardening;
+	// lib/gh-error.ts joined with fix-feedback-reply-followups).
+	// Activation adds all four gated plugin sources at once, yielding
+	// [86-90]. The scaffold-level asset inventory and drift tests pin
+	// the exact asset list, so this CLI check asserts any count in
+	// that range.
 	// (devcontainer excluded — OS-specific, generated per-user by
 	// uf sandbox init.)
 	//
@@ -70,8 +73,8 @@ func TestRunInit_FreshDir(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected 'N files processed' line in output, got:\n%s", output)
-	} else if fileCount < 84 || fileCount > 88 {
-		t.Errorf("expected files processed in [84-88], got %d:\n%s", fileCount, output)
+	} else if fileCount < 86 || fileCount > 90 {
+		t.Errorf("expected files processed in [86-90], got %d:\n%s", fileCount, output)
 	}
 
 	// Verify a user-owned file was created
