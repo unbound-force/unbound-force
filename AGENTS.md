@@ -81,7 +81,7 @@ unbound-force/
 │   ├── model-matrix.override.yaml    # Gitignored override (model identities)
 │   └── scripts/                      # Pre-flight scripts (instruction-lint wrapper)
 ├── .opencode/
-│   ├── agents/                       # Hero persona agents (18 active, model-matrix-classifier hidden)
+│   ├── agents/                       # Hero persona agents (21 active, model-matrix-classifier hidden)
 │   ├── commands/                     # Slash commands (33 files)
 │   ├── plugins/                      # Plugins registered in opencode.json (invoke-agent, review-dispatch, uf-workflow, uf-finale)
 │   ├── lib/                          # Shared TS plugin library (model-matrix.ts; runnable CLIs instruction-lint.ts, tool-inventory.ts)

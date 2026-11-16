@@ -6,6 +6,13 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- toolkit-gaze-2.4.0-reconciliation: the gaze 2.4.0 re-scaffold now
+  preserves the repo-forked `.opencode/commands/speckit.testreview.md`
+  (Divisor dispatch contract) instead of overwriting it with the vanilla
+  gaze template, and `.opencode/agents/divisor-gaze-testing.md` is
+  registered as a repo-local, non-embedded agent in
+  `knownNonEmbeddedFiles` (the embedded canonical testing persona
+  stays `divisor-testing.md`).
 - review-matrix-policy-mirror: `.uf/review-matrix.yaml` is now a
   project-owned policy mirror alongside `.uf/preflight.yaml` and
   `.uf/reviewer-capabilities.yaml`. The repository copy may diverge
