@@ -2371,11 +2371,12 @@ var expectedAssetPaths = []string{
 	"opencode/lib/uf-workflow-types.ts",
 	// UF finale plugin (1)
 	"opencode/plugins/uf-finale/index.ts",
-	// Shared lib modules (15)
+	// Shared lib modules (16)
 	"opencode/lib/agent-executor.ts",
 	"opencode/lib/branch-classification.ts",
 	"opencode/lib/delegation-budget.ts",
 	"opencode/lib/feedback-replies.ts",
+	"opencode/lib/gh-error.ts",
 	"opencode/lib/model-matrix.ts",
 	"opencode/lib/preflight-declared.ts",
 	"opencode/lib/progress-state.ts",
@@ -2431,6 +2432,7 @@ var task42CanonicalAssets = []struct {
 	{asset: "opencode/lib/branch-classification.ts", source: ".opencode/lib/branch-classification.ts"},
 	{asset: "opencode/lib/delegation-budget.ts", source: ".opencode/lib/delegation-budget.ts"},
 	{asset: "opencode/lib/feedback-replies.ts", source: ".opencode/lib/feedback-replies.ts"},
+	{asset: "opencode/lib/gh-error.ts", source: ".opencode/lib/gh-error.ts"},
 	{asset: "opencode/lib/model-matrix.ts", source: ".opencode/lib/model-matrix.ts"},
 	{asset: "opencode/lib/preflight-declared.ts", source: ".opencode/lib/preflight-declared.ts"},
 	{asset: "opencode/lib/progress-state.ts", source: ".opencode/lib/progress-state.ts"},
@@ -4567,6 +4569,7 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/lib/branch-classification.ts", true},
 		{"opencode/lib/delegation-budget.ts", true},
 		{"opencode/lib/feedback-replies.ts", true},
+		{"opencode/lib/gh-error.ts", true},
 		{"opencode/lib/review-dispatch-artifact.ts", true},
 		// Tool-owned: review-dispatch acquisition module
 		{"opencode/lib/review-dispatch-lesson-proposal.ts", true},
@@ -5260,6 +5263,7 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/lib/branch-classification.ts", true},
 		{"opencode/lib/delegation-budget.ts", true},
 		{"opencode/lib/feedback-replies.ts", true},
+		{"opencode/lib/gh-error.ts", true},
 		{"opencode/lib/review-dispatch-artifact.ts", true},
 		// Divisor acquisition implementation
 		{"opencode/lib/review-dispatch-lesson-proposal.ts", true},

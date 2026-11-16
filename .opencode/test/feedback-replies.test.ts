@@ -260,7 +260,11 @@ describe("pure helpers", () => {
     [Object.assign(new Error("spawn gh ENOENT"), { code: "ENOENT" }), "gh_not_found", false],
     [Object.assign(new Error("spawnSync gh ETIMEDOUT"), { code: "ETIMEDOUT" }), "timeout", true],
     [Object.assign(new Error("killed"), { signal: "SIGTERM" }), "timeout", true],
+    [ghError("connection timeout"), "timeout", true],
     [ghError("HTTP 403: API rate limit exceeded"), "rate_limited", true],
+    // Text keys outrank exit code 4 (FRR-FR-001): a rate limit that
+    // gh also reports as exit 4 still classifies rate_limited.
+    [ghError("HTTP 429: API rate limit exceeded", { status: 4 }), "rate_limited", true],
     [ghError("To get started with GitHub CLI, please run:  gh auth login"), "gh_auth_failed", false],
     [ghError("", { status: 4 }), "gh_auth_failed", false],
     [ghError("HTTP 422: Validation Failed"), "api_error", false],
@@ -664,6 +668,22 @@ describe("postFeedbackReplies failure handling", () => {
     )
     expect(calls.filter((call) => isIssueCreate(call.args))).toHaveLength(1)
     expect(data.items[0]?.error?.message).toMatch(/printed no issue URL/)
+  })
+
+  it("does not retry gh issue create on a timeout: the issue may exist (FRR-FR-002)", () => {
+    const { gh, calls } = fakeGh([{ match: isIssueCreate, responses: [{ error: ghError("gh command timed out") }] }])
+    const data = postFeedbackReplies(
+      input({
+        resolve_threads: false,
+        items: [{ comment_kind: "review", comment_id: 41, decision: "file", body: "b", issue: { title: "x", body: "y" } }],
+      }),
+      deps(gh),
+    )
+    expect(calls.filter((call) => isIssueCreate(call.args))).toHaveLength(1)
+    expect(data.items[0]).toMatchObject({ reply: "issue_failed", issue: "failed" })
+    expect(data.items[0]?.error?.code).toBe("timeout")
+    expect(data.items[0]?.error?.retryable).toBe(false)
+    expect(data.items[0]?.error?.message).toMatch(/timed out; the issue may exist — check acme\/widgets for it before re-running/)
   })
 
   it("never files twice: a crash after filing reuses the cached issue", () => {
