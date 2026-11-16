@@ -12,7 +12,7 @@
 
 ## 1. Tool (#1022)
 
-- [ ] 1.1 Extend `.opencode/lib/feedback-replies.ts` (design D1–D7):
+- [x] 1.1 Extend `.opencode/lib/feedback-replies.ts` (design D1–D7):
   retitle the module header to cover the artifact write; add
   `WriteFeedbackTriageArtifactInputSchema` (1.1.0 item fields plus
   `comment_kind`/`comment_id` join identity, artifact context,
@@ -26,13 +26,13 @@
   validate → atomic write → clear progress); the optional
   `clearProgress` hook on `FeedbackReplyDeps`; `artifact_error`
   for artifact I/O.
-- [ ] 1.2 Register `write_feedback_triage_artifact` in
+- [x] 1.2 Register `write_feedback_triage_artifact` in
   `uf-workflow`: `createWriteFeedbackTriageArtifactTool` beside the
   other feedback factories with
   `args: WriteFeedbackTriageArtifactInputSchema.shape`, and the
   plugin-entry registration; wire the production `clearProgress`
   through the same branch-keyed state path `clear_progress` uses.
-- [ ] 1.3 Add `.opencode/test/feedback-replies.test.ts` coverage:
+- [x] 1.3 Add `.opencode/test/feedback-replies.test.ts` coverage:
   round scan (first round, gap tolerance, unparsable names ignored,
   read failure), FILE/REPLY routing (join, issue-number and URL
   passthrough, failed-issue nulls, decision-mismatch fail-closed,
@@ -40,13 +40,13 @@
   sorted agent union), validation-failure writes nothing, atomic
   write with `0o600`/`0o700` and symlink refusal, clear-progress
   success and warning-on-failure, envelopes, injectable clock.
-- [ ] 1.4 Pin the payload zod mirror to the checked-in samples
+- [x] 1.4 Pin the payload zod mirror to the checked-in samples
   (design D4): `samples/v1.1.0/sample-feedback-triage.json` and
   the 1.0.0 sample pass; the `invalid-*` samples under
   `samples/v1.1.0/` and `samples/` fail.
-- [ ] 1.5 Add the tool to the uf-workflow name lists in
+- [x] 1.5 Add the tool to the uf-workflow name lists in
   `uf-workflow.test.ts` and `scratch-smoke.test.ts`.
-- [ ] 1.6 DE-007 seam verification naming the three layers:
+- [x] 1.6 DE-007 seam verification naming the three layers:
   registration surface (the generic `registration-surface.test.ts`
   suite enumerates the tool; `feedback-replies.test.ts` pins
   `args` key parity with
@@ -62,7 +62,7 @@
 
 ## 2. Command and mirrors
 
-- [ ] 2.1 Rewrite Section 4.7 of
+- [x] 2.1 Rewrite Section 4.7 of
   `.opencode/commands/uf.address-feedback.md` (design D9): one
   `write_feedback_triage_artifact` call with the parameter mapping
   (items carrying the Section 4.6 comment identity, the
@@ -73,14 +73,14 @@
   round-scan prose, the atomic-write prose, and the hand-called
   `clear_progress`. Leave Sections 1.2.1, 4.4, 4.5, and 4.6
   untouched.
-- [ ] 2.2 Update the Progress-Tracking `reply-comments` entry:
+- [x] 2.2 Update the Progress-Tracking `reply-comments` entry:
   "cleared after Phase 4.7" becomes "cleared by
   `write_feedback_triage_artifact` after the artifact is written".
-- [ ] 2.3 Copy the command, plugin, and lib to the scaffold
+- [x] 2.3 Copy the command, plugin, and lib to the scaffold
   assets under `internal/scaffold/assets/` byte-identical (no new
   asset-list entries — the lib module is already registered in
   `scaffold.go` and `plugin_activation.go`).
-- [ ] 2.4 Update `internal/scaffold/command_contract_test.go`:
+- [x] 2.4 Update `internal/scaffold/command_contract_test.go`:
   re-pin the `feedback triage artifact` clause of
   `TestCommandContracts_AddressFeedback` and the `checkpoint and
   clear` clause of `TestCommandContracts_FeedbackReplyTools` to
@@ -90,18 +90,18 @@
 
 ## 3. Documentation and verification
 
-- [ ] 3.1 Add the CHANGELOG entry with the DE-004 instruction
+- [x] 3.1 Add the CHANGELOG entry with the DE-004 instruction
   delta measured by `instruction-lint --base`
   (Section 4.7 before/after lines and tokens).
-- [ ] 3.2 File the documentation issue for the user-facing change
+- [x] 3.2 File the documentation issue for the user-facing change
   (the command's terminal step now reports a tool-rendered
   summary line) in unbound-force/unbound-force before PR merge.
-- [ ] 3.3 Run `make check` (plugin suite with the 94 percent
+- [x] 3.3 Run `make check` (plugin suite with the 94 percent
   coverage floor, Go drift and contract gates) and
   `make lint-instructions`.
-- [ ] 3.4 Run `openspec validate extract-feedback-triage-artifact-tool
+- [x] 3.4 Run `openspec validate extract-feedback-triage-artifact-tool
   --strict`.
-- [ ] 3.5 Verify constitution alignment as documented in the
+- [x] 3.5 Verify constitution alignment as documented in the
   proposal: the artifact envelope and provenance metadata are
   unchanged (I, III), no new dependency or asset-list entry (II),
   every behavior is covered by isolated vitest doubles (IV), the

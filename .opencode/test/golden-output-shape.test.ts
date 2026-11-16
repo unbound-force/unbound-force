@@ -13,6 +13,7 @@ import {
   specReviewFindingIds,
   type ToolResult,
 } from "../lib/uf-workflow-types.js"
+import { FeedbackTriagePayloadSchema } from "../lib/feedback-replies.js"
 import { formatUnleashExit, type UnleashExitData, type UnleashExitVariant } from "../lib/unleash-templates.js"
 import {
   LESSON_PROPOSAL_BEGIN,
@@ -1162,6 +1163,159 @@ describe("golden output shapes -- checkout_pr_head (uf.address-feedback.md Secti
     })
     expect(envelope.status).toBe("error")
     expect(envelope.status === "error" ? envelope.code : undefined).toBe("READ_ONLY_MERGE_REF")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// write_feedback_triage_artifact -- uf.address-feedback.md Section 4.7
+// (extract-feedback-triage-artifact-tool, issue #1022; added after the
+// seam-verification site registry, so it sits outside the 24 counted
+// uf-workflow sites above)
+// ---------------------------------------------------------------------------
+
+describe("golden output shapes -- write_feedback_triage_artifact (uf.address-feedback.md Section 4.7)", () => {
+  it("writes the round-1 artifact, clears progress, reads back from disk, and a second call derives round 2", async () => {
+    const directory = await makeScratch()
+    const registry = await loadRegistry(UfWorkflowPlugin, directory)
+    mockFeedbackGh(directory)
+
+    // Section 4.6 ran first: replies posted, the FILE item's issue filed,
+    // and the reply-comments checkpoint recorded against the branch key.
+    // Its structured success data feeds Section 4.7.
+    const replies = expectOk(
+      await callEnvelopeTool<{ items: Array<Record<string, unknown>> }>(registry, "post_feedback_replies", {
+        pr_number: 42,
+        repo: "acme/widgets",
+        resolve_threads: true,
+        items: [
+          { comment_kind: "review", comment_id: 11, decision: "accept", body: "Addressed in `abc1234`." },
+          {
+            comment_kind: "review",
+            comment_id: 12,
+            decision: "file",
+            body: "tracks the retry gap. Not changed in this PR (LOW).",
+            issue: { title: "Retry gap", body: "LOW finding from PR #42" },
+          },
+        ],
+      }),
+    )
+
+    // Section 4.7 as one call: the triage items carrying their Section 4.6
+    // comment identity, plus the post_feedback_replies success data.
+    const artifactInput = {
+      pr_number: 42,
+      pr_url: "https://github.com/acme/widgets/pull/42",
+      branch: "opsx/golden",
+      commit: "abc1234",
+      backlog_item_id: "PR-42",
+      items: [
+        {
+          comment_kind: "review",
+          comment_id: 11,
+          thread_id: "T11",
+          reviewer: "alice",
+          reviewer_role: "maintainer",
+          file: null,
+          line: null,
+          classification: "data-driven",
+          tier: 1,
+          evidence: ["the timeout constant is unnamed"],
+          recommendation: "accept",
+          decision: "accept",
+          decision_reasoning: "named the constant in abc1234",
+          commit_sha: null,
+          divisor_agents_used: ["divisor-guard"],
+          tier2_unavailable: false,
+          conflict_flag: false,
+        },
+        {
+          comment_kind: "review",
+          comment_id: 12,
+          thread_id: "T12",
+          reviewer: "bob",
+          reviewer_role: "contributor",
+          file: "lib/timeout.ts",
+          line: 7,
+          classification: "subjective",
+          tier: 2,
+          evidence: ["the retry gap predates this PR"],
+          recommendation: "author-decides",
+          decision: "file",
+          decision_reasoning: "filed as a follow-up issue",
+          commit_sha: null,
+          divisor_agents_used: ["divisor-adversary", "divisor-guard"],
+          tier2_unavailable: false,
+          conflict_flag: false,
+        },
+      ],
+      replies_result: { items: replies.items },
+    }
+    const data = expectOk(
+      await callEnvelopeTool<{
+        pr_number: number
+        path: string
+        round: number
+        bytes: number
+        counts: Record<string, unknown>
+        progress_cleared: boolean
+        warnings: string[]
+        summary: string
+      }>(registry, "write_feedback_triage_artifact", artifactInput),
+    )
+    // The documented output shape (design D7): identity, placement, size,
+    // derived counts, clear outcome, warnings, and the printed line.
+    expect(data.pr_number).toBe(42)
+    expect(data.path).toBe(join(directory, ".uf", "artifacts", "feedback-triage", "pr-42-round-1.json"))
+    expect(data.round).toBe(1)
+    expect(data.bytes).toBeGreaterThan(0)
+    expect(data.counts).toEqual({
+      total_items: 2,
+      accepted: 1,
+      modified: 0,
+      rejected: 0,
+      asked: 0,
+      filed: 1,
+      replied: 0,
+      tier1_count: 1,
+      tier2_count: 1,
+      divisor_agents_invoked: ["divisor-adversary", "divisor-guard"],
+    })
+    expect(data.progress_cleared).toBe(true)
+    expect(data.warnings).toEqual([])
+    expect(data.summary).toBe(
+      `Wrote feedback-triage round 1 for PR 42: 2 items (1 accepted, 0 modified, 0 rejected, ` +
+        `0 asked, 1 filed, 0 replied) to ${data.path}.`,
+    )
+
+    // Write→read: the artifact reads back from disk as the rendered envelope
+    // and its payload passes the 1.1.0 zod mirror the sample set pins.
+    const written = JSON.parse(await readFile(data.path, "utf8")) as {
+      hero: string
+      artifact_type: string
+      schema_version: string
+      payload: unknown
+    }
+    expect(written.hero).toBe("cobalt-crush")
+    expect(written.artifact_type).toBe("feedback-triage")
+    expect(written.schema_version).toBe("1.1.0")
+    expect(FeedbackTriagePayloadSchema.safeParse(written.payload).success).toBe(true)
+
+    // The cleared progress state reads back through get_progress as absent
+    // (the tool-owned terminal clear, design D6).
+    const progress = await callEnvelopeTool(registry, "get_progress", { command: "uf.address-feedback" })
+    expect(progress.data).toBeNull()
+
+    // A second call derives the next round from the on-disk artifact scan.
+    const second = expectOk(
+      await callEnvelopeTool<{ round: number; path: string; progress_cleared: boolean }>(
+        registry,
+        "write_feedback_triage_artifact",
+        artifactInput,
+      ),
+    )
+    expect(second.round).toBe(2)
+    expect(second.path).toBe(join(directory, ".uf", "artifacts", "feedback-triage", "pr-42-round-2.json"))
+    expect(second.progress_cleared).toBe(true)
   })
 })
 
