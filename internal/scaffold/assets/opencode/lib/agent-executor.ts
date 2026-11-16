@@ -115,8 +115,8 @@ export interface InvocationProvenance {
  * Which limit ended a run (delegation-timeout-budgets D4,
  * compaction-storm D2): the wall clock, the idle (no-progress) window, an
  * exhausted inherited budget that prevented the run from starting, or the
- * compaction-storm threshold (consecutive compactions with no substantive
- * progress, DELEG-FR-002).
+ * compaction-storm threshold (one session's run of consecutive compactions
+ * with no substantive progress, DELEG-FR-002).
  */
 export type TimeoutKind = "wall_clock" | "idle" | "budget" | "storm"
 
@@ -140,6 +140,7 @@ export interface TimeoutDetails {
   /** A question tool call was pending in the subtree at the last probe. */
   readonly pending_question: boolean
   /**
+  /**
    * Tool name of the running part with the lexicographically smallest
    * partId at abort time (DT-FR-015), validated against
    * RUNNING_TOOL_NAME_PATTERN; null when no part was running or the
@@ -147,6 +148,15 @@ export interface TimeoutDetails {
    * verbatim, Constitution V).
    */
   readonly running_tool: string | null
+  /**
+   * The storming session for `kind: "storm"` details — the counted session
+   * holding the highest per-session run of consecutive compactions
+   * (compaction-storm design D3, DELEG-FR-002) — or null for every
+   * non-storm kind. Both storm paths record it at abort: the normalized
+   * threshold is at least 2 and the fold pairs every positive maximum with
+   * its holding session, so the id is present whenever a storm fires.
+   */
+  readonly storm_session_id: string | null
 }
 
 /**
@@ -358,6 +368,18 @@ function syntheticTextName(kind: SyntheticTextKind): string {
 }
 
 /**
+ * Session attribution for `context_thrash` messages (compaction-storm design
+ * D3, DELEG-FR-002): names the session holding the highest per-session run
+ * of consecutive compactions. The fold pairs every positive maximum with
+ * its holding session and the normalized threshold is at least 2, so a
+ * threshold-meeting accounting always names a session; the null arm is a
+ * defensive fallback for the nullable sample field, not a reachable state.
+ */
+function stormSessionClause(sessionID: string | null): string {
+  return sessionID === null ? "in an unidentified session" : `in session ${sessionID}`
+}
+
+/**
  * Finish reason from the child's final step-finish part, null when no
  * step-finish part reported one. The last part wins because a
  * multi-step run reports one finish per step and only the final part
@@ -481,15 +503,18 @@ export async function resolveHostModel(
  * carry `timeout` details (D4) including the validated running_tool
  * (DT-FR-015). Also owns the
  * compaction-storm detector (compaction-storm design D2, DELEG-FR-002):
- * the always-armed activity probe aborts a child whose subtree accrues
- * the configured number of consecutive compactions without substantive
- * progress, returning a retryable `context_thrash` failure with a
- * resume envelope. And owns the final-text success guard
+ * the always-armed activity probe aborts a child once one counted session
+ * in its subtree accrues the configured number of consecutive compactions
+ * without substantive progress (sibling sessions never sum, and
+ * executor-managed descendants carry their own detectors), returning a
+ * retryable `context_thrash` failure with a resume envelope that names
+ * the storming session. And owns the final-text success guard
  * (compaction-storm design D3, DELEG-FR-003): a child whose final
  * message text structurally matches a compaction-summary wrapper or
  * the synthetic continuation prompt is reclassified from success to a
- * retryable `context_thrash` (storm threshold met) or
- * `synthetic_final_text` failure that preserves sanitized final text.
+ * retryable `context_thrash` (storm threshold met, naming the storming
+ * session) or `synthetic_final_text` failure that preserves sanitized
+ * final text.
  * Does NOT own: input validation, manifest checking,
  * model resolution, host introspection, or prompt file reading.
  *
@@ -516,13 +541,18 @@ export async function executeAgentSession(
   const startedAt = now()
   const idleMilliseconds = deps.idleTimeoutMilliseconds
   // Compaction-storm threshold (DELEG-FR-002, design D2): the probe's
-  // compactionsSinceProgress accounting is shared with the idle watchdog
+  // per-session compaction accounting is shared with the idle watchdog
   // (DT-FR-002); N consecutive compactions without intervening substantive
-  // progress abort the child with a retryable context_thrash failure.
-  // Normalized here (not trusted from the caller) so a badly injected value
-  // can neither disable the detector nor fire it instantly.
+  // progress in one counted session abort the child with a retryable
+  // context_thrash failure naming that session. Normalized here (not
+  // trusted from the caller) so a badly injected value can neither
+  // disable the detector nor fire it instantly.
   const stormThreshold = normalizeStormThreshold(deps.stormThreshold)
+  // Recorded the moment the interval detector aborts (design D3): the
+  // per-session maximum and the session holding it, so the failure
+  // envelope names the storming session.
   let stormCompactions = 0
+  let stormSessionID: string | null = null
 
   // Hierarchical budget (delegation-timeout-budgets D1): a nested run
   // never outlives the deadline its parent child session registered.
@@ -547,7 +577,7 @@ export async function executeAgentSession(
   let probed = false
   let pendingQuestion = false
   let runningTools: readonly RunningToolPart[] = []
-  const timeoutDetails = (kind: TimeoutKind): TimeoutDetails => {
+  const timeoutDetails = (kind: TimeoutKind, stormSession: string | null = null): TimeoutDetails => {
     const at = now()
     return {
       kind,
@@ -560,6 +590,10 @@ export async function executeAgentSession(
       child_active: !probed ? null : kind !== "idle" && at - lastProgressAt <= ACTIVE_WINDOW_MS,
       pending_question: pendingQuestion,
       running_tool: selectRunningTool(runningTools),
+      // The storming session rides the envelope only on the storm kind;
+      // every other kind carries null even if a call site passed a value
+      // (design D3: non-null on both storm paths, null otherwise).
+      storm_session_id: kind === "storm" ? stormSession : null,
     }
   }
 
@@ -647,13 +681,18 @@ export async function executeAgentSession(
       // so every abort path reports the tools observed at the last
       // probe (DT-FR-015: running_tool for every kind).
       runningTools = activity.runningTools
-      // Compaction-storm detector (DELEG-FR-002, design D2): N consecutive
-      // compaction markers with no intervening substantive progress — reads
-      // and failed non-read calls never reset the accounting — abort the
-      // child well before wall-clock exhaustion. Checked before the idle
-      // logic so a storm is diagnosed as a storm, not a generic stall.
-      if (activity.compactionsSinceProgress >= stormThreshold) {
-        stormCompactions = activity.compactionsSinceProgress
+      // Compaction-storm detector (DELEG-FR-002, design D2): one counted
+      // session with N consecutive compaction markers and no intervening
+      // substantive progress — reads and failed non-read calls never reset
+      // the accounting — aborts the child well before wall-clock
+      // exhaustion. The signal is the highest per-session run, never a
+      // subtree sum, so parallel read-heavy siblings each below the
+      // threshold cannot abort the delegation (issue #1125). Checked
+      // before the idle logic so a storm is diagnosed as a storm, not a
+      // generic stall.
+      if (activity.maxSessionCompactionsSinceProgress >= stormThreshold) {
+        stormCompactions = activity.maxSessionCompactionsSinceProgress
+        stormSessionID = activity.stormSessionID
         abortCause = "storm"
         linkedAbort.abort(new Error("invoke_agent run hit the compaction-storm threshold"))
         abortChild()
@@ -810,14 +849,16 @@ export async function executeAgentSession(
     // final activity probe folds the subtree's end state -- markers the
     // interval probes had not yet sampled, including the final message
     // itself when it is structurally a marker -- so the failure code
-    // reflects whether the storm threshold was actually met; when that
-    // probe cannot run, the accounting the interval probes already folded
-    // is the best available answer.
+    // reflects whether the storm threshold was actually met in one counted
+    // session, naming that session; when that probe cannot run, the
+    // accounting the interval probes already folded is the best available
+    // answer.
     const syntheticKind = classifySyntheticText(text)
     if (syntheticKind !== null) {
       const finalSample = await probeSubtreeActivity(deps.client, childID, deps.directory, linkedAbort.signal)
       const accounting = finalSample ?? registeredProbeCounters(childID)
-      const compactions = accounting?.compactionsSinceProgress ?? 0
+      const compactions = accounting?.maxSessionCompactionsSinceProgress ?? 0
+      const stormSession = accounting?.stormSessionID ?? null
       // The preserved excerpt is the final message text alone -- never the
       // cached prefix or earlier context -- truncated to the documented
       // bound; failedResult routes it through sanitizeInvocationError so
@@ -830,15 +871,15 @@ export async function executeAgentSession(
             provenance,
             "context_thrash",
             `invoke_agent final text structurally matches a ${structure} and the storm threshold was met ` +
-              `(${compactions} consecutive compaction events with no substantive progress between them, ` +
-              `storm threshold ${stormThreshold}); reclassified from success so the caller can resume ` +
-              `from durable state. Preserved final text: ${preserved}`,
+              `(${compactions} consecutive compaction events with no substantive progress ` +
+              `${stormSessionClause(stormSession)}, storm threshold ${stormThreshold}); reclassified from ` +
+              `success so the caller can resume from durable state. Preserved final text: ${preserved}`,
             true,
             "failed",
             "",
             usage,
           ),
-          timeout: timeoutDetails("storm"),
+          timeout: timeoutDetails("storm", stormSession),
           resume: {
             project_path: deps.directory,
             agent_name: agent,
@@ -885,11 +926,11 @@ export async function executeAgentSession(
           provenance,
           "context_thrash",
           `invoke_agent run recorded ${stormCompactions} consecutive compaction events ` +
-            `with no substantive progress between them (storm threshold ${stormThreshold}); ` +
-            "aborting so the caller can resume from durable state",
+            `with no substantive progress ${stormSessionClause(stormSessionID)} ` +
+            `(storm threshold ${stormThreshold}); aborting so the caller can resume from durable state`,
           true,
         ),
-        timeout: timeoutDetails("storm"),
+        timeout: timeoutDetails("storm", stormSessionID),
         resume: {
           project_path: deps.directory,
           agent_name: agent,

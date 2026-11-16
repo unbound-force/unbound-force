@@ -2,8 +2,9 @@
  * Hierarchical delegation budgets and child-session activity probing
  * shared by every executeAgentSession caller (OpenSpec change
  * delegation-timeout-budgets, design D1/D2, issue #930). Compaction
- * accounting per compaction-storm-on-a-tight-context-mode design D2
- * (DT-FR-002 / DELEG-FR-002, issue #1079). Running tool-call parts
+ * accounting is scoped per session (OpenSpec change
+ * compaction-storm-detector-sums-compactio design D1/D2; DT-FR-002 /
+ * DELEG-FR-002, issues #1079 and #1125). Running tool-call parts
  * fold into the progress fingerprint and ride the sample per
  * idle-timeout-aborts-children-waiting-on (DT-FR-013, issue #1117):
  * a quiet-but-healthy long tool call counts as activity within the
@@ -19,8 +20,13 @@
  * working child from a stalled one. Compaction markers (context
  * compression summaries and synthetic continuation prompts) are
  * structurally classified and excluded from progress, and the probe
- * exposes the compaction-since-progress accounting shared by the
- * idle watchdog and the compaction-storm detector.
+ * exposes the per-session compaction accounting -- the highest
+ * per-session run of consecutive markers and the session holding it
+ * -- shared by the idle watchdog and the compaction-storm detector.
+ * The run accrues only for counted sessions: executor-managed
+ * descendants -- sessions another executor registered a run deadline
+ * for -- are excluded because their own detector is always armed,
+ * while the probed root stays counted.
  */
 
 import { type PluginInput } from "@opencode-ai/plugin"
@@ -201,12 +207,28 @@ export function clampToBudget(requestedMs: number, inheritedDeadline: number | n
 
 /**
  * Compaction-accounting counters shared by the idle watchdog and the
- * compaction-storm detector (compaction-storm change design D2;
- * DT-FR-002 requires one accounting for both consumers).
+ * compaction-storm detector (compaction-storm-detector-sums-compactio
+ * design D1/D2; DT-FR-002 requires one accounting for both
+ * consumers). Accounting accrues per session: markers observed in
+ * different subtree sessions are never summed, and only substantive
+ * progress in the same session resets a session's run. The storm
+ * fields describe counted sessions only -- executor-managed
+ * descendants never accrue (design D2) -- while the observability
+ * totals stay subtree-wide (issue #1125).
  */
 export interface ProbeCounters {
-  /** Compaction markers observed since the last substantive progress. */
-  readonly compactionsSinceProgress: number
+  /**
+   * Highest run of consecutive compaction markers accrued by a single
+   * counted session (the probe root or an unrecognized descendant)
+   * since that session's last substantive progress.
+   */
+  readonly maxSessionCompactionsSinceProgress: number
+  /**
+   * The session holding the highest run; null exactly when the
+   * maximum is zero. Ties resolve to the first session in the fold's
+   * observation order.
+   */
+  readonly stormSessionID: string | null
   /** Substantive non-read progress observations across all probes. */
   readonly nonReadProgressCount: number
   /** Total compaction markers observed across all probes. */
@@ -383,7 +405,7 @@ export function isCompactionMarker(message: MessageLike | undefined): boolean {
  * completed tool calls). Read-only tools never count whatever their
  * outcome, and a non-read tool call that failed or has not completed
  * does not count (DT-FR-002 / DELEG-FR-002: only successful
- * completions reset the storm window).
+ * completions reset a session's storm window).
  *
  * @param message - The latest message of a subtree session, if any.
  * @returns True when the message records completed non-read work.
@@ -590,19 +612,35 @@ interface ProbeObservation {
   readonly latest: MessageLike | undefined
 }
 
-/** Per-session probe memory: the last real print and the last counted marker and progress identities. */
+/**
+ * Per-session probe memory: the last real print, the last observed
+ * marker and progress identities, and the session's count of
+ * consecutive compactions since its last substantive progress. The
+ * count accrues only for counted sessions; a managed descendant's
+ * identities still update -- so nothing is counted retroactively
+ * once its executor run ends -- but its count never grows.
+ */
 interface ProbeSessionState {
   lastPrint: string | undefined
   lastMarkerKey: string | undefined
   lastProgressKey: string | undefined
+  consecutiveCompactions: number
 }
 
-/** Persistent compaction accounting for one probed subtree root (design D2). */
+/**
+ * Persistent compaction accounting for one probed subtree root
+ * (design D1/D2): per-session memories, subtree-wide observability
+ * totals, and the fold-computed storm signal. The max and its holder
+ * are derived at fold time from that fold's observation order so
+ * every reader of the recorded state sees the same tie-break, and
+ * only counted sessions contribute to them.
+ */
 interface ProbeState {
   readonly sessions: Map<string, ProbeSessionState>
-  compactionsSinceProgress: number
   nonReadProgressCount: number
   compactionCount: number
+  maxSessionCompactionsSinceProgress: number
+  stormSessionID: string | null
 }
 
 /**
@@ -622,6 +660,20 @@ function probeRegistry(): Map<string, ProbeState> {
 }
 
 /**
+ * Snapshot a probe state's counters. Shared by the fold and
+ * registeredProbeCounters so both read paths expose one shape and
+ * one tie-break.
+ */
+function snapshotCounters(state: ProbeState): ProbeCounters {
+  return {
+    maxSessionCompactionsSinceProgress: state.maxSessionCompactionsSinceProgress,
+    stormSessionID: state.stormSessionID,
+    nonReadProgressCount: state.nonReadProgressCount,
+    compactionCount: state.compactionCount,
+  }
+}
+
+/**
  * The recorded compaction accounting for a probed subtree root.
  *
  * @param rootID - The root session id to look up.
@@ -632,11 +684,7 @@ export function registeredProbeCounters(rootID: string): ProbeCounters | undefin
   if (state === undefined) {
     return undefined
   }
-  return {
-    compactionsSinceProgress: state.compactionsSinceProgress,
-    nonReadProgressCount: state.nonReadProgressCount,
-    compactionCount: state.compactionCount,
-  }
+  return snapshotCounters(state)
 }
 
 /**
@@ -676,34 +724,83 @@ function probeContribution(state: ProbeState | undefined, sessionID: string, lat
 }
 
 /**
+ * Whether one fold observation accrues toward this probe's storm
+ * count (design D2). The probe root is this executor's direct child
+ * and is counted unconditionally -- this executor registered its
+ * deadline, yet the #1079 root-storm protection must survive the
+ * managed-descendant exclusion. Any other session is
+ * executor-managed when a run deadline is registered for it: another
+ * executeAgentSession run created it and watches it with its own
+ * always-armed detector, so its storms are that run's to abort.
+ * Unrecognized descendants (no visible deadline, for example a
+ * session from another host process) stay counted per session,
+ * failing toward detection rather than silence.
+ */
+function isCountedSession(rootID: string, sessionID: string): boolean {
+  return sessionID === rootID || registeredDeadline(sessionID) === undefined
+}
+
+/**
  * Fold one completed walk's observations into the root's persistent
  * accounting, in walk order (newest session first). Applied only
  * after the walk succeeds so a failed probe advances nothing
  * (DT-FR-002: a failed probe changes no clock). Marker increments
- * and substantive resets are identity-gated per session: re-observing
- * the same marker or the same completed tool is a no-op, which keeps
- * a quiet session's stale latest message from masking a storm
- * elsewhere in the subtree. Substantive progress is a completed
- * non-read tool call (reads and failed calls never reset; DELEG-FR-002).
+ * and substantive resets are identity-gated and scoped per session:
+ * re-observing the same marker or the same completed tool is a no-op,
+ * a new marker grows only its own session's consecutive run, and
+ * substantive progress resets only the session that produced it --
+ * so a quiet session's stale latest message masks nothing, and
+ * parallel read-heavy siblings never sum into one storm signal
+ * (issue #1125). Substantive progress is a completed non-read tool
+ * call (reads and failed calls never reset; DELEG-FR-002).
+ *
+ * Executor-managed descendants accrue nothing toward any storm count
+ * (design D2): their markers update the identity gates and the
+ * subtree-wide observability totals, but only counted sessions grow
+ * a consecutive run, and the probe root is counted unconditionally.
+ * Marker keys are recorded for every observed session, managed or
+ * not, so a marker first seen while managed is never counted
+ * retroactively after that run's deadline is unregistered -- counting
+ * depends on management status at first observation, which is
+ * exactly the run window. The storm signal is the highest
+ * per-session run among counted sessions with its holder, and ties
+ * resolve to the first session in observation order.
  */
 function foldProbeObservations(rootID: string, observations: readonly ProbeObservation[]): ProbeCounters {
   const registry = probeRegistry()
   let state = registry.get(rootID)
   if (state === undefined) {
-    state = { sessions: new Map(), compactionsSinceProgress: 0, nonReadProgressCount: 0, compactionCount: 0 }
+    state = {
+      sessions: new Map(),
+      nonReadProgressCount: 0,
+      compactionCount: 0,
+      maxSessionCompactionsSinceProgress: 0,
+      stormSessionID: null,
+    }
     registry.set(rootID, state)
   }
   for (const observation of observations) {
     let session = state.sessions.get(observation.id)
     if (session === undefined) {
-      session = { lastPrint: undefined, lastMarkerKey: undefined, lastProgressKey: undefined }
+      session = {
+        lastPrint: undefined,
+        lastMarkerKey: undefined,
+        lastProgressKey: undefined,
+        consecutiveCompactions: 0,
+      }
       state.sessions.set(observation.id, session)
     }
     if (isCompactionMarker(observation.latest)) {
       const key = markerKey(observation.latest)
       if (session.lastMarkerKey !== key) {
+        // The key and the observability total are recorded for every
+        // observed session; only the consecutive count is gated on
+        // counted sessions, so a managed run's last marker is never
+        // re-counted after its deadline is unregistered at run end.
         session.lastMarkerKey = key
-        state.compactionsSinceProgress += 1
+        if (isCountedSession(rootID, observation.id)) {
+          session.consecutiveCompactions += 1
+        }
         state.compactionCount += 1
       }
       continue
@@ -712,15 +809,29 @@ function foldProbeObservations(rootID: string, observations: readonly ProbeObser
     session.lastPrint = print
     if (isSubstantiveProgress(observation.latest) && session.lastProgressKey !== print) {
       session.lastProgressKey = print
-      state.compactionsSinceProgress = 0
+      session.consecutiveCompactions = 0
       state.nonReadProgressCount += 1
     }
   }
-  return {
-    compactionsSinceProgress: state.compactionsSinceProgress,
-    nonReadProgressCount: state.nonReadProgressCount,
-    compactionCount: state.compactionCount,
+  let maxSessionCompactions = 0
+  let stormSessionID: string | null = null
+  // The storm signal is the highest per-session run among counted
+  // sessions, never a subtree sum; the strictly-greater comparison
+  // resolves ties to the first session in this fold's observation
+  // order (the newest-first walk).
+  for (const observation of observations) {
+    if (!isCountedSession(rootID, observation.id)) {
+      continue
+    }
+    const consecutive = state.sessions.get(observation.id)?.consecutiveCompactions ?? 0
+    if (consecutive > maxSessionCompactions) {
+      maxSessionCompactions = consecutive
+      stormSessionID = observation.id
+    }
   }
+  state.maxSessionCompactionsSinceProgress = maxSessionCompactions
+  state.stormSessionID = stormSessionID
+  return snapshotCounters(state)
 }
 
 /**
@@ -735,16 +846,19 @@ function foldProbeObservations(rootID: string, observations: readonly ProbeObser
  * stalled child; a failed probe also leaves the compaction accounting
  * untouched because the fold runs only after a successful walk.
  *
- * The sample carries the compaction accounting (design D2): compaction
- * markers never change the fingerprint, and the counters expose how
- * many markers accrued since the last substantive progress for the
- * idle watchdog and the storm detector to share (DT-FR-002 /
- * DELEG-FR-002). It also carries the subtree's running tool-call
- * parts (DT-FR-013): the triples are already folded into each
- * session's fingerprint print, and the collected set feeds the idle
- * watcher's bounded deferral (DT-FR-014) and the abort envelope's
- * running_tool selection (DT-FR-015). Accounting persists across
- * probes per root id; callers drop it with unregisterProbeState when
+ * The sample carries the compaction accounting (design D1/D2):
+ * compaction markers never change the fingerprint, and the counters
+ * expose the highest per-session run of consecutive markers and its
+ * holder for the idle watchdog and the storm detector to share
+ * (DT-FR-002 / DELEG-FR-002). Only counted sessions accrue that run
+ * -- executor-managed descendants are excluded while the probe root
+ * stays counted -- and the observability totals stay subtree-wide.
+ * It also carries the subtree's running tool-call parts (DT-FR-013):
+ * the triples are already folded into each session's fingerprint
+ * print, and the collected set feeds the idle watcher's bounded
+ * deferral (DT-FR-014) and the abort envelope's running_tool
+ * selection (DT-FR-015). Accounting persists across probes per root
+ * id and per session; callers drop it with unregisterProbeState when
  * the run ends.
  */
 export async function probeSubtreeActivity(
