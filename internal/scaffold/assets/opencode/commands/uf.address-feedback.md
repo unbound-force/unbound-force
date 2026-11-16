@@ -68,7 +68,8 @@ Progress steps in order:
 - `push` — Phase 4.4 complete
 - `reply-comments` — Phase 4.6 complete (recorded by
   `post_feedback_replies` once every reply is posted and every
-  approved thread is resolved; cleared after Phase 4.7)
+  approved thread is resolved; cleared by
+  `write_feedback_triage_artifact` after the artifact is written)
 
 ### TodoWrite Progress Tracking
 
@@ -1334,7 +1335,8 @@ reuse an issue already recorded for the same comment.
 
 ### 4.7 Produce Feedback-Triage Artifact
 
-Write the artifact to `.uf/artifacts/feedback-triage/pr-<PR_NUMBER>-round-<M>.json`.
+Call the `write_feedback_triage_artifact` plugin tool once. It writes
+the artifact to `.uf/artifacts/feedback-triage/pr-<PR_NUMBER>-round-<M>.json`.
 This existing feedback-triage artifact uses schema 1.1.0
 (`schemas/feedback-triage/v1.1.0.schema.json`). It is emitted in addition to each Tier 2 `review-dispatch` artifact and returned
 canonical `review-verdict` version 2 decision; it does not replace or embed
@@ -1346,78 +1348,56 @@ as a non-authoritative compatibility value selected only after human handling.
 The separate native `INCONCLUSIVE` or `UNAVAILABLE` dispatch result remains
 authoritative and MUST NOT be interpreted as approval.
 
-**Round number**: scan existing files for the highest round number and add 1 (not a file count — handles gaps from deleted files).
+Build one item per feedback item, in the order shown, each carrying
+the fields the tool's `items` input schema accepts: the triage
+record plus the `comment_kind`/`comment_id` identity Section 4.6
+passed to `post_feedback_replies`. Do not pass `filed_issue_number`
+or `filed_issue_url` — the tool derives both from the
+`replies_result` projection when it joins each FILE item to its
+filed issue, and an item carrying either fails `invalid_input`
+validation with nothing written. The `file`, `line`,
+`decision_reasoning`, and `commit_sha` fields may be `null` (general
+PR comments have null file/line; REJECT/ASK items have null
+commit_sha). Record FILE items with `decision: "file"` and REPLY
+items with `decision: "reply"`, each with
+`recommendation: "author-decides"` and a null `commit_sha`.
 
-**Atomic write**: write to a temp file first, then rename to the final path.
+Then call `write_feedback_triage_artifact` once, with:
 
-**Envelope wrapper** (standard schema):
+- `pr_number`: `<PR_NUMBER>`
+- `pr_url`: the PR URL recorded in Section 1.2
+- `branch`: the PR source branch
+- `commit`: the current HEAD SHA at call time — after the Phase
+  4.1 through 4.4 fixes are committed, or the pre-fix HEAD when no
+  fixes were needed; both are simply the current HEAD. Never reuse
+  the frozen Section 1.2 `head_sha` after fixes have added commits.
+- `backlog_item_id`: the linked issue number, or `PR-<PR_NUMBER>`
+- `items`: the built items, in posting order
+- `replies_result`: the `post_feedback_replies` success data, when
+  Section 4.6 ran; omit it entirely when the author skipped posting
+
+The tool owns the mechanics: it joins each FILE item to its filed
+issue from the replies result by comment identity (cross-checking
+the decisions), derives the summary counts, scans the next round
+number, renders and validates the 1.1.0 envelope, writes it
+atomically, and clears the `uf.address-feedback` progress state —
+a clear failure is a warning, not a failed call, because the
+artifact is already durable. Print the returned `summary` line
+verbatim. A successful call returns:
 
 ```json
-{
-  "hero": "cobalt-crush",
-  "version": "1.0.0",
-  "timestamp": "<ISO 8601>",
-  "artifact_type": "feedback-triage",
-  "schema_version": "1.1.0",
-  "context": {
-    "branch": "<PR source branch>",
-    "commit": "<HEAD SHA after fixes, or pre-fix HEAD>",
-    "backlog_item_id": "<linked issue or PR-N>"
-  },
-  "payload": {
-    "pr_number": 42,
-    "pr_url": "https://github.com/...",
-    "branch": "<PR source branch>",
-    "round": 1,
-    "items": [
-      {
-        "thread_id": "...",
-        "reviewer": "<login>",
-        "reviewer_role": "maintainer|collaborator|contributor|external|bot",
-        "file": "internal/foo/bar.go",
-        "line": 42,
-        "classification": "data-driven|subjective",
-        "tier": 1,
-        "evidence": ["go.md CS-001: ..."],
-        "recommendation": "accept|author-decides",
-        "decision": "accept|modify|reject|ask|file|reply",
-        "decision_reasoning": "...",
-        "commit_sha": "abc1234",
-        "filed_issue_number": null,
-        "filed_issue_url": null,
-        "divisor_agents_used": [],
-        "tier2_unavailable": false,
-        "conflict_flag": false
-      }
-    ],
-    "summary": {
-      "total_items": 6,
-      "accepted": 3,
-      "modified": 1,
-      "rejected": 1,
-      "asked": 1,
-      "filed": 0,
-      "replied": 0,
-      "tier1_count": 4,
-      "tier2_count": 2,
-      "divisor_agents_invoked": ["adversary", "architect"]
-    }
-  }
-}
+{"status": "ok", "data": {"pr_number": 42,
+  "path": "/repo/.uf/artifacts/feedback-triage/pr-42-round-1.json",
+  "round": 1, "bytes": 2871,
+  "counts": {"total_items": 6, "accepted": 3, "modified": 1, "rejected": 1,
+    "asked": 1, "filed": 0, "replied": 0, "tier1_count": 4, "tier2_count": 2,
+    "divisor_agents_invoked": ["adversary", "architect"]},
+  "progress_cleared": true, "warnings": [],
+  "summary": "Wrote feedback-triage round 1 for PR 42: 6 items (3 accepted, 1 modified, 1 rejected, 1 asked, 0 filed, 0 replied) to /repo/.uf/artifacts/feedback-triage/pr-42-round-1.json."}}
 ```
 
-Fields `file`, `line`, `decision_reasoning`, and `commit_sha` may be `null` (general PR comments have null file/line; REJECT/ASK items have null commit_sha).
-
-Record FILE items with `decision: "file"` and REPLY items with
-`decision: "reply"`, each with `recommendation: "author-decides"` and
-a null `commit_sha`. Take a FILE item's `filed_issue_number` and
-`filed_issue_url` from the `issue_number` and `issue_url` that
-`post_feedback_replies` returned for it; every other item has null
-for both. Count FILE items under `filed` and REPLY items under
-`replied`, not under `rejected`.
-
-After the artifact is written, call `clear_progress` with
-`command: "uf.address-feedback"` to clean up progress state.
+On an error envelope (`status: "error"`, with `code`, `message`,
+and `retryable`), report it verbatim and **STOP**.
 
 ---
 
