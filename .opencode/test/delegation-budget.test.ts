@@ -531,7 +531,8 @@ describe("probeSubtreeActivity running tools (DT-FR-013)", () => {
     const second = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
     expect(second?.fingerprint).toBe(first?.fingerprint)
     expect(second?.runningTools).toEqual(first?.runningTools)
-    expect(second?.compactionsSinceProgress).toBe(1)
+    expect(second?.maxSessionCompactionsSinceProgress).toBe(1)
+    expect(second?.stormSessionID).toBe("markerKid")
   })
 })
 
@@ -631,6 +632,12 @@ describe("isSubstantiveProgress", () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// Probe compaction accounting, per session
+// (compaction-storm-detector-sums-compactio design D1/D2; DT-FR-002 /
+// DELEG-FR-002, issue #1125)
+// ---------------------------------------------------------------------------
+
 describe("probeSubtreeActivity compaction accounting", () => {
   const roots: string[] = []
   /** Register a probe root id that afterEach cleans up. */
@@ -640,6 +647,8 @@ describe("probeSubtreeActivity compaction accounting", () => {
   }
   /** A compaction-marker message with the given message id. */
   const compactionMessage = (id: string) => message(id, [{ type: "compaction", auto: true }])
+  /** A completed read-only tool call: activity that never resets a session's window. */
+  const readMessage = (id: string) => message(id, [{ id: `t-${id}`, type: "tool", tool: "read", state: { status: "completed" } }])
 
   afterEach(() => {
     for (const id of roots.splice(0)) {
@@ -655,20 +664,23 @@ describe("probeSubtreeActivity compaction accounting", () => {
     const fake = treeClient({ sessions })
     const first = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
     expect(first?.fingerprint).toContain(probeRoot)
-    expect(first?.compactionsSinceProgress).toBe(0)
+    expect(first?.maxSessionCompactionsSinceProgress).toBe(0)
+    expect(first?.stormSessionID).toBeNull()
 
     // Neither a marker's arrival nor marker-to-marker churn changes the
     // fingerprint (DT-FR-002 compaction-only-child scenario).
     sessions[probeRoot] = { latest: compactionMessage("c1") }
     const second = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
     expect(second?.fingerprint).toBe(first?.fingerprint)
-    expect(second?.compactionsSinceProgress).toBe(1)
+    expect(second?.maxSessionCompactionsSinceProgress).toBe(1)
+    expect(second?.stormSessionID).toBe(probeRoot)
     expect(second?.compactionCount).toBe(1)
 
     sessions[probeRoot] = { latest: compactionMessage("c2") }
     const third = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
     expect(third?.fingerprint).toBe(first?.fingerprint)
-    expect(third?.compactionsSinceProgress).toBe(2)
+    expect(third?.maxSessionCompactionsSinceProgress).toBe(2)
+    expect(third?.stormSessionID).toBe(probeRoot)
 
     // A real message after the markers is progress again.
     sessions[probeRoot] = { latest: message("m2", [{ id: "p2", type: "text", text: "resumed" }]) }
@@ -687,38 +699,50 @@ describe("probeSubtreeActivity compaction accounting", () => {
     // Re-observing the same marker is not a new compaction.
     await probe()
     expect(registeredProbeCounters(probeRoot)).toEqual({
-      compactionsSinceProgress: 1,
+      maxSessionCompactionsSinceProgress: 1,
+      stormSessionID: probeRoot,
       nonReadProgressCount: 0,
       compactionCount: 1,
     })
 
     sessions[probeRoot] = { latest: compactionMessage("c2") }
     await probe()
-    expect(registeredProbeCounters(probeRoot)?.compactionsSinceProgress).toBe(2)
+    expect(registeredProbeCounters(probeRoot)).toMatchObject({
+      maxSessionCompactionsSinceProgress: 2,
+      stormSessionID: probeRoot,
+    })
 
     // A completed write resets the storm window and counts as progress.
     sessions[probeRoot] = { latest: message("w1", [{ id: "t1", type: "tool", tool: "write", state: { status: "completed" } }]) }
     await probe()
     expect(registeredProbeCounters(probeRoot)).toEqual({
-      compactionsSinceProgress: 0,
+      maxSessionCompactionsSinceProgress: 0,
+      stormSessionID: null,
       nonReadProgressCount: 1,
       compactionCount: 2,
     })
 
     // Read-only completions between compactions do not reset the window
     // (the storm fires through read-only activity; DELEG-FR-002).
-    sessions[probeRoot] = { latest: message("r1", [{ id: "t2", type: "tool", tool: "read", state: { status: "completed" } }]) }
+    sessions[probeRoot] = { latest: readMessage("r1") }
     await probe()
     sessions[probeRoot] = { latest: compactionMessage("c3") }
     await probe()
-    expect(registeredProbeCounters(probeRoot)).toMatchObject({ compactionsSinceProgress: 1, compactionCount: 3 })
+    expect(registeredProbeCounters(probeRoot)).toMatchObject({
+      maxSessionCompactionsSinceProgress: 1,
+      stormSessionID: probeRoot,
+      compactionCount: 3,
+    })
     expect(registeredProbeCounters(probeRoot)?.nonReadProgressCount).toBe(1)
   })
 
   it("keeps a quiet session's completed tool from masking a storm elsewhere", async () => {
     // quiet's stale completed write stays its latest message; without
-    // identity-gated resets it would reset the window on every probe
-    // and hide stormy's compaction loop.
+    // identity-gated resets it would count as fresh progress on every
+    // probe. Per-session accounting (issue #1125) makes the masking
+    // impossible outright: a reset lands only in the session that
+    // produced it, so stormy's marker survives quiet's write even
+    // though the same walk observes the write after the marker.
     const probeRoot = root("r-masking")
     const sessions: Record<string, FakeSession> = {
       [probeRoot]: { children: ["quiet", "stormy"] },
@@ -727,23 +751,220 @@ describe("probeSubtreeActivity compaction accounting", () => {
     }
     const fake = treeClient({ sessions })
     // The first walk observes stormy's marker and then quiet's write
-    // (newest child first), so the write's reset lands last and the
-    // window opens at zero -- but the write is counted exactly once.
+    // (newest child first): the write resets only quiet's window, the
+    // marker keeps stormy's run open, and the write is counted once.
     await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
     expect(registeredProbeCounters(probeRoot)).toEqual({
-      compactionsSinceProgress: 0,
+      maxSessionCompactionsSinceProgress: 1,
+      stormSessionID: "stormy",
       nonReadProgressCount: 1,
       compactionCount: 1,
     })
     // Each further compaction in stormy climbs without further resets:
-    // quiet's write is the same identity, so it cannot mask the storm.
+    // quiet's write is the same identity, and another session's
+    // progress could not reset stormy's window anyway. One session
+    // with N consecutive compactions reaches max N, and the signal
+    // names it (issue #1125 acceptance criterion 2).
     for (const id of ["c2", "c3", "c4"]) {
       sessions.stormy = { created: 2, latest: compactionMessage(id) }
       await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
     }
     expect(registeredProbeCounters(probeRoot)).toEqual({
-      compactionsSinceProgress: 3,
+      maxSessionCompactionsSinceProgress: 4,
+      stormSessionID: "stormy",
       nonReadProgressCount: 1,
+      compactionCount: 4,
+    })
+  })
+
+  it("does not sum compactions across sibling sessions", async () => {
+    // Issue #1125 acceptance criterion 1: three reviewer-like siblings,
+    // one compaction each, only read-only calls in between. The removed
+    // subtree-wide sum reached the default threshold of 3 and aborted
+    // healthy dispatches; the per-session max stays at one, so the
+    // storm signal never reaches any threshold (the normalized range
+    // starts at 2) and the executor's detector cannot fire.
+    const probeRoot = root("r-siblings")
+    const sessions: Record<string, FakeSession> = {
+      [probeRoot]: { children: ["slow", "middle", "fast"] },
+      slow: { created: 1, latest: readMessage("slow-read-1") },
+      middle: { created: 2, latest: readMessage("mid-read-1") },
+      fast: { created: 3, latest: readMessage("fast-read-1") },
+    }
+    const fake = treeClient({ sessions })
+    const probe = () => probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+
+    expect((await probe())?.maxSessionCompactionsSinceProgress).toBe(0)
+    sessions.fast = { created: 3, latest: compactionMessage("fast-c1") }
+    expect((await probe())?.maxSessionCompactionsSinceProgress).toBe(1)
+    // Reads between the markers never reset a session's window...
+    sessions.fast = { created: 3, latest: readMessage("fast-read-2") }
+    sessions.middle = { created: 2, latest: compactionMessage("mid-c1") }
+    expect((await probe())?.maxSessionCompactionsSinceProgress).toBe(1)
+    sessions.middle = { created: 2, latest: readMessage("mid-read-2") }
+    sessions.slow = { created: 1, latest: compactionMessage("slow-c1") }
+    expect((await probe())?.maxSessionCompactionsSinceProgress).toBe(1)
+    // ...and the markers never sum: three sessions at one compaction
+    // each are a maximum of one, not a total of three. The newest-first
+    // walk observes fast before its siblings, so the tie names fast.
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      maxSessionCompactionsSinceProgress: 1,
+      stormSessionID: "fast",
+      nonReadProgressCount: 0,
+      compactionCount: 3,
+    })
+  })
+
+  it("resets only the session that produced substantive progress", async () => {
+    // Issue #1125: a reset is scoped to the session that earned it.
+    // looper's completed write clears looper's window while sibling's
+    // untouched run survives -- under the old shared counter one
+    // session's progress masked another session's storm.
+    const probeRoot = root("r-reset-scope")
+    const sessions: Record<string, FakeSession> = {
+      [probeRoot]: { children: ["sibling", "looper"] },
+      sibling: { created: 1, latest: compactionMessage("s-c1") },
+      looper: { created: 2, latest: compactionMessage("l-c1") },
+    }
+    const fake = treeClient({ sessions })
+    const probe = () => probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+
+    await probe()
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      maxSessionCompactionsSinceProgress: 1,
+      stormSessionID: "looper",
+      nonReadProgressCount: 0,
+      compactionCount: 2,
+    })
+    sessions.looper = { created: 2, latest: compactionMessage("l-c2") }
+    await probe()
+    // Both sessions hold a run; looper's is the deeper one.
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      maxSessionCompactionsSinceProgress: 2,
+      stormSessionID: "looper",
+      nonReadProgressCount: 0,
+      compactionCount: 3,
+    })
+
+    // Substantive progress in looper resets only looper: the maximum
+    // falls to sibling's surviving run of one.
+    sessions.looper = { created: 2, latest: message("w1", [{ id: "t1", type: "tool", tool: "write", state: { status: "completed" } }]) }
+    await probe()
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      maxSessionCompactionsSinceProgress: 1,
+      stormSessionID: "sibling",
+      nonReadProgressCount: 1,
+      compactionCount: 3,
+    })
+  })
+
+  it("excludes an executor-managed descendant from the max while totaling its markers", async () => {
+    // Design D2 / DELEG-FR-002: a descendant another executor
+    // registered a run deadline for carries its own always-armed
+    // storm detector, so its markers never accrue toward this probe's
+    // per-session storm signal -- while the subtree-wide
+    // observability total still counts every one of them.
+    const probeRoot = root("r-managed")
+    const sessions: Record<string, FakeSession> = {
+      [probeRoot]: { children: ["managed", "unmanaged"] },
+      managed: { created: 1 },
+      unmanaged: { created: 2, latest: compactionMessage("u-c1") },
+    }
+    register("managed", Date.now() + 60_000)
+    const fake = treeClient({ sessions })
+    const probe = () => probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+
+    // The managed descendant storms past the default threshold of
+    // three; only the unmanaged sibling's single marker moves the max.
+    for (const id of ["m-c1", "m-c2", "m-c3", "m-c4"]) {
+      sessions.managed = { created: 1, latest: compactionMessage(id) }
+      await probe()
+    }
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      maxSessionCompactionsSinceProgress: 1,
+      stormSessionID: "unmanaged",
+      nonReadProgressCount: 0,
+      compactionCount: 5,
+    })
+  })
+
+  it("never counts a managed marker retroactively after its run's deadline drops", async () => {
+    // Design D2: marker keys are recorded for every observed session,
+    // managed or not. A finished reviewer's deadline is unregistered
+    // when its run ends while its last marker stays its latest
+    // message; the seen key keeps that marker out of the count even
+    // though the session is no longer recognized as executor-managed.
+    // A marker first observed with no deadline visible counts per
+    // session as an unrecognized descendant, failing toward detection.
+    const probeRoot = root("r-retroactive")
+    const sessions: Record<string, FakeSession> = {
+      [probeRoot]: { children: ["reviewer"] },
+      reviewer: { created: 1, latest: compactionMessage("rv-c1") },
+    }
+    register("reviewer", Date.now() + 60_000)
+    const fake = treeClient({ sessions })
+    const probe = () => probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+
+    await probe()
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      maxSessionCompactionsSinceProgress: 0,
+      stormSessionID: null,
+      nonReadProgressCount: 0,
+      compactionCount: 1,
+    })
+
+    // The run ends and its deadline drops; the next probe re-observes
+    // the same marker still sitting as the session's latest message.
+    unregisterDeadline("reviewer")
+    await probe()
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      maxSessionCompactionsSinceProgress: 0,
+      stormSessionID: null,
+      nonReadProgressCount: 0,
+      compactionCount: 1,
+    })
+
+    // A new marker first observed after the run ended does count.
+    sessions.reviewer = { created: 1, latest: compactionMessage("rv-c2") }
+    await probe()
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      maxSessionCompactionsSinceProgress: 1,
+      stormSessionID: "reviewer",
+      nonReadProgressCount: 0,
+      compactionCount: 2,
+    })
+  })
+
+  it("counts the probe root even though its own executor registered its deadline", async () => {
+    // The #1079 root-storm protection (dewey#203): the probed root is
+    // this executor's direct child, and this executor registered its
+    // deadline at creation -- yet the root stays counted
+    // unconditionally, so a root compaction loop still trips this
+    // detector. The managed child in the same tree stays excluded.
+    const probeRoot = root("r-root-counted")
+    const sessions: Record<string, FakeSession> = {
+      [probeRoot]: { children: ["managed"], latest: compactionMessage("root-c1") },
+      managed: { created: 1, latest: compactionMessage("m-c1") },
+    }
+    register(probeRoot, Date.now() + 60_000)
+    register("managed", Date.now() + 60_000)
+    const fake = treeClient({ sessions })
+
+    await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      maxSessionCompactionsSinceProgress: 1,
+      stormSessionID: probeRoot,
+      nonReadProgressCount: 0,
+      compactionCount: 2,
+    })
+
+    sessions[probeRoot] = { children: ["managed"], latest: compactionMessage("root-c2") }
+    sessions.managed = { created: 1, latest: compactionMessage("m-c2") }
+    await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
+    expect(registeredProbeCounters(probeRoot)).toEqual({
+      maxSessionCompactionsSinceProgress: 2,
+      stormSessionID: probeRoot,
+      nonReadProgressCount: 0,
       compactionCount: 4,
     })
   })
@@ -761,7 +982,8 @@ describe("probeSubtreeActivity compaction accounting", () => {
     expect(registeredProbeCounters(probeRoot)).toBeUndefined()
     failFor.splice(0)
     const sample = await probeSubtreeActivity(fake.client, probeRoot, DIRECTORY, signal)
-    expect(sample?.compactionsSinceProgress).toBe(1)
+    expect(sample?.maxSessionCompactionsSinceProgress).toBe(1)
+    expect(sample?.stormSessionID).toBe("child")
   })
 
   it("unregisters a root's probe accounting", async () => {

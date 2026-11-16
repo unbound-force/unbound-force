@@ -1481,6 +1481,34 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- compaction-storm-detector-sums-compactio (#1125): the
+  compaction-storm detector now scopes its counting per session
+  (DELEG-FR-002) instead of summing consecutive compactions
+  across the whole delegation subtree. Parallel read-heavy
+  siblings each below `delegation.storm_threshold` -- three
+  spec-review reviewers with one compaction apiece and only
+  read-only calls between them -- no longer abort a healthy
+  dispatch with `child_active: true` (four such false aborts on
+  2026-11-15), and a session's run resets only on substantive
+  progress in that same session. Executor-managed descendants
+  (sessions with a registered run deadline, such as dispatched
+  reviewers and nested delegations) never count toward the
+  parent's detector -- their own always-armed detectors own
+  their storms -- while the probed root stays counted,
+  preserving the #1079 protection; descendants that cannot be
+  recognized as managed are still counted per session, never
+  summed. The `context_thrash` message names the storming
+  session and its consecutive count, and the timeout envelope
+  carries a machine-parseable `storm_session_id` (non-null only
+  on the `storm` kind). The knob is unchanged (range 2--10,
+  default 3, fail-closed validation) but its semantics tighten
+  from a subtree sum to a per-session run, so every
+  configuration aborts strictly less often; operators who
+  raised the threshold to tolerate parallel reviewers may
+  lower it again (docs/configuration.md rewritten for the
+  per-session semantics). (Spec:
+  openspec/changes/compaction-storm-detector-sums-compactio/,
+  Fixes: #1125, Docs: #1134)
 - extend-heredoc-ban-scan (#1047): the heredoc-ban contract test
   (`TestCommandContracts_RejectShellHeredocPayloads`) now scans
   `.opencode/agents/` and `.opencode/skills/` — and each

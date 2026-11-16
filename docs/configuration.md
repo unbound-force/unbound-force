@@ -451,15 +451,42 @@ and the default applied.
 
 ### Compaction-storm threshold
 
-Every child run arms a compaction-storm detector: the
-configured number of consecutive context-compaction events with
-no intervening substantive progress (a successful non-read tool
-completion) aborts the child with the retryable error code
-`context_thrash` and a resume envelope. Read-only tool calls
-and failed non-read calls never count as progress, and
-compaction events are excluded from the idle-probe progress
-fingerprint -- a compaction loop can no longer masquerade as
-activity against the idle timeout.
+Every child run arms a compaction-storm detector: when a single
+session accrues the configured number of consecutive
+context-compaction events with no intervening substantive
+progress (a successful non-read tool completion), the child is
+aborted with the retryable error code `context_thrash` and a
+resume envelope. Read-only tool calls and failed non-read calls
+never count as progress, and compaction events are excluded from
+the idle-probe progress fingerprint -- a compaction loop can no
+longer masquerade as activity against the idle timeout.
+
+The count is scoped per session. Consecutive compactions accrue
+against the session in which they occur, and a session's run
+resets only on substantive progress in that same session.
+Compactions observed in different sessions are never summed:
+parallel sibling sessions each below the threshold -- for
+example three reviewers with one compaction apiece and only
+read-only calls in between -- do not abort the delegation.
+Executor-managed descendants -- sessions another executor
+created and registered a run deadline for, such as dispatched
+reviewers and nested delegations -- never count toward the
+parent's detector, because each carries its own always-armed
+storm detector: a genuinely storming reviewer ends its own run
+through its own detector while the parent delegation continues.
+The probed root -- the delegation's direct child -- is always
+counted, even though its own executor registered its deadline.
+A descendant that cannot be recognized as executor-managed (for
+example a session created in another host process, where the
+deadline registry is not shared) is still counted per session,
+never summed, so the exclusion fails toward detection rather
+than silence.
+
+When the detector fires, the `context_thrash` error message
+names the storming session and its consecutive count, and the
+timeout envelope carries the machine-parseable
+`storm_session_id` (see `### Timeout result envelope` under
+`## Delegation Timeout Budgets`).
 
 ```yaml
 delegation:
@@ -475,6 +502,14 @@ the headroom gate nor the storm detector. The effective
 threshold (`storm_threshold`) and substitution warning
 (`storm_threshold_warning`) surface in the success envelope,
 and in the checkpoint data when the knob is configured.
+
+The threshold's meaning tightened from a subtree-wide sum to a
+per-session run: the highest per-session count never exceeds
+the old subtree total, so every configuration aborts strictly
+less often and no migration is needed. Operators who raised
+the threshold to tolerate parallel reviewers may lower it
+again -- the default of 3 no longer fires on healthy parallel
+read-heavy dispatches.
 
 ### Classifier
 
@@ -674,6 +709,7 @@ carries a `timeout` object:
 | `last_progress_ms_ago` | Time since the last observed subtree activity (after the first successful probe; else `null`) |
 | `child_active` | Whether the subtree showed activity within the last 120 seconds (`null` before the first successful probe) |
 | `pending_question` | `true` when the child's latest part is a running `question` tool call |
+| `storm_session_id` | The counted session holding the highest per-session run of consecutive compactions -- present only on the `storm` kind, `null` for every other kind |
 
 Command-path delegations additionally carry `resume` -- the
 state `command`, `key`, `last_checkpoint_step`, and
@@ -695,13 +731,16 @@ Two additional failure classes end or reclassify a run through
 the same `DELEGATE_FAILED` envelope:
 
 - `context_thrash` (retryable) -- the compaction-storm detector
-  aborted the child after the configured threshold of
-  consecutive compaction events with no substantive progress
-  (see `### Compaction-storm threshold` under `## Delegation
-  Model Matrix`), or the final-text guard reclassified a
-  compaction-summary result at or above the threshold. The
-  envelope carries the `storm` timeout kind and, on the command
-  path, the durable resume state.
+  aborted the child after a single counted session reached the
+  configured threshold of consecutive compaction events with no
+  substantive progress (see `### Compaction-storm threshold`
+  under `## Delegation Model Matrix`), or the final-text guard
+  reclassified a compaction-summary result when one counted
+  session's consecutive count reached the threshold. The error
+  message names the storming session and its consecutive count;
+  the envelope carries the `storm` timeout kind with
+  `storm_session_id` and, on the command path, the durable
+  resume state.
 - `synthetic_final_text` (retryable) -- the child's final
   message was a compaction summary or the synthetic
   continuation prompt rather than authored output, so the run

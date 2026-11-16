@@ -114,6 +114,16 @@ interface FakeClientOptions {
    * no substantive progress between samples.
    */
   readonly compactionProbe?: boolean
+  /**
+   * Expose the activity-probe endpoints with a quiet probe root and one
+   * unmanaged descendant session serving a fresh compaction marker on
+   * every probe (the named-storm surfacing path): the root never
+   * compacts, so the per-session accounting accrues wholly on the
+   * descendant — no registered deadline marks it executor-managed, so it
+   * counts per session — and the storm envelope must name that
+   * descendant rather than the delegation's child session.
+   */
+  readonly descendantStormProbe?: boolean
 }
 
 function fieldsResponse<T>(data: T): T {
@@ -285,6 +295,34 @@ function fakeClient(options: FakeClientOptions = {}): { readonly client: Client;
                 parts: [{ type: "compaction", auto: true }],
               },
             ],
+          }),
+        }
+      : {}),
+    // Named-storm surfacing path: the probe root stays quiet (its latest
+    // message is plain text — neither a marker nor substantive progress)
+    // while one unmanaged descendant serves a fresh marker on every
+    // probe, so the per-session storm signal accrues wholly on the
+    // descendant and the abort envelope names it, distinct from the
+    // child session the delegation created (issue #1125: recovery must
+    // be able to tell which session was thrashing).
+    ...(options.descendantStormProbe === true
+      ? {
+          children: async (request: { path: { id: string } }) => ({
+            data:
+              request.path.id === "child-session"
+                ? [{ id: "looper-session", time: { created: 1 } }]
+                : [],
+          }),
+          messages: async (request: { path: { id: string } }) => ({
+            data:
+              request.path.id === "child-session"
+                ? [{ info: { id: "message-child" }, parts: [textPart("dispatching reviewers")] }]
+                : [
+                    {
+                      info: { id: `compaction-${++probeCount}` },
+                      parts: [{ type: "compaction", auto: true }],
+                    },
+                  ],
           }),
         }
       : {}),
@@ -3336,7 +3374,14 @@ describe("uf_delegate_command timeout budgets", () => {
     expect(result.status).toBe("error")
     expect(result.code).toBe("DELEGATE_FAILED")
     expect(result.child_session_id).toBe("child-session")
-    expect(result.timeout).toMatchObject({ kind: "wall_clock", effective_ms: 5, idle_timeout_ms: 600_000 })
+    // Non-storm kinds carry a null storm identity (design D3), threaded
+    // through the same pass-through as the storm kind.
+    expect(result.timeout).toMatchObject({
+      kind: "wall_clock",
+      effective_ms: 5,
+      idle_timeout_ms: 600_000,
+      storm_session_id: null,
+    })
     expect(result.resume).toEqual({
       command: "uf.unleash",
       key: "opsx-unleash-deterministic-tools",
@@ -3658,7 +3703,7 @@ describe("uf_delegate_command compaction-storm surfacing", () => {
     )
   })
 
-  it("surfaces a compaction-storm abort as DELEGATE_FAILED with the context_thrash code, storm kind, and resume state", async () => {
+  it("surfaces a compaction-storm abort as DELEGATE_FAILED with the context_thrash code, storm kind, storming session, and resume state", async () => {
     vi.useFakeTimers()
     try {
       const commandAbs = resolve(FAKE_CWD, ".opencode/commands/uf.unleash.md")
@@ -3702,14 +3747,18 @@ describe("uf_delegate_command compaction-storm surfacing", () => {
       expect(result.retryable).toBe(true)
       expect(result.child_session_id).toBe("child-session")
       // The executor's failure code prefixes the message so the storm
-      // classification is machine-parseable from the envelope.
+      // classification is machine-parseable from the envelope, and the
+      // message names the storming session — the probe root here — with
+      // its consecutive count (design D3, DELEG-FR-002 "Storm envelope
+      // names the storming session").
       expect(result.message).toBe(
         `context_thrash: invoke_agent run recorded ${DEFAULT_STORM_THRESHOLD} consecutive compaction events ` +
-          `with no substantive progress between them (storm threshold ${DEFAULT_STORM_THRESHOLD}); ` +
+          `with no substantive progress in session child-session (storm threshold ${DEFAULT_STORM_THRESHOLD}); ` +
           "aborting so the caller can resume from durable state",
       )
       expect(result.timeout).toMatchObject({
         kind: "storm",
+        storm_session_id: "child-session",
         effective_ms: 600_000,
         requested_ms: 600_000,
         budget_clamped: false,
@@ -3729,6 +3778,98 @@ describe("uf_delegate_command compaction-storm surfacing", () => {
         resolve(FAKE_CWD, ".uf/progress/opsx-unleash-deterministic-tools/uf.unleash.json"),
       )
       // The storm aborted the wedged child exactly once.
+      expect(fake.calls.aborts).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("names the storming descendant session in the threaded envelope, distinct from the child session", async () => {
+    // Issue #1125's recovery question — which session was thrashing? —
+    // is answerable only when the envelope's storm identity is the
+    // storming session itself, not merely the delegation's child. The
+    // probe root stays quiet while an unmanaged descendant (no
+    // registered deadline, so it is counted per session under
+    // DELEG-FR-002) accrues the threshold of consecutive markers: the
+    // code-prefixed message and the threaded timeout details must both
+    // name that descendant, and the durable resume state threads
+    // exactly as for a root storm (design D3).
+    vi.useFakeTimers()
+    try {
+      const commandAbs = resolve(FAKE_CWD, ".opencode/commands/uf.unleash.md")
+      const fake = fakeClient({ hangPrompt: true, descendantStormProbe: true })
+      const state: ProgressState = {
+        command: "uf.unleash",
+        branch: "opsx-unleash-deterministic-tools",
+        key: "opsx-unleash-deterministic-tools",
+        current_step: "plan",
+        completed_steps: ["spec-review", "plan"],
+        data: {},
+        created_at: "2026-11-03T00:00:00.000Z",
+        updated_at: "2026-11-03T00:00:00.000Z",
+      }
+      vi.mocked(lstatSync).mockImplementation(
+        () => ({ isSymbolicLink: () => false }) as unknown as ReturnType<typeof lstatSync>,
+      )
+      vi.mocked(readFileSync).mockImplementation(() => JSON.stringify(state))
+
+      const deps: DelegateCommandDependencies = {
+        client: fake.client,
+        // Matrix-free selection keeps the row on the failure envelope:
+        // the surface under test is the executor wiring, not model
+        // selection (zero-config host default).
+        modelMatrix: matrixFreeDeps,
+        readText: fakeReadText({ [commandAbs]: "Run the pipeline." }).readText,
+        fileExists: fakeFileExists([]).fileExists,
+      }
+      const pending = invokeDelegate(recordingExec().exec, deps, {
+        command_path: ".opencode/commands/uf.unleash.md",
+      })
+      // Each 30 s probe observes a fresh marker on the descendant only,
+      // so the default storm threshold (3) is reached at the 90 s tick
+      // with the root contributing nothing to the storm signal.
+      await vi.advanceTimersByTimeAsync(100_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.status).toBe("error")
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.retryable).toBe(true)
+      expect(result.child_session_id).toBe("child-session")
+      // The message names the storming descendant and its consecutive
+      // count, not the delegation's child session.
+      expect(result.message).toBe(
+        `context_thrash: invoke_agent run recorded ${DEFAULT_STORM_THRESHOLD} consecutive compaction events ` +
+          `with no substantive progress in session looper-session (storm threshold ${DEFAULT_STORM_THRESHOLD}); ` +
+          "aborting so the caller can resume from durable state",
+      )
+      expect(result.timeout).toMatchObject({
+        kind: "storm",
+        storm_session_id: "looper-session",
+        effective_ms: 600_000,
+        requested_ms: 600_000,
+        budget_clamped: false,
+        idle_timeout_ms: 600_000,
+        elapsed_ms: 90_000,
+        pending_question: false,
+      })
+      // The threaded storm identity is the descendant — recovery can
+      // re-probe exactly the thrashing session, distinguishing it from
+      // the healthy child the delegation created.
+      expect((result.timeout as Record<string, unknown>).storm_session_id).not.toBe(
+        result.child_session_id,
+      )
+      // Resume state threading is unchanged by the named-session
+      // envelope: the command-keyed durable state still rides the
+      // failure.
+      expect(result.resume).toEqual({
+        command: "uf.unleash",
+        key: "opsx-unleash-deterministic-tools",
+        last_checkpoint_step: "plan",
+        completed_steps: ["spec-review", "plan"],
+      })
+      expect(String(vi.mocked(readFileSync).mock.calls[0]?.[0])).toBe(
+        resolve(FAKE_CWD, ".uf/progress/opsx-unleash-deterministic-tools/uf.unleash.json"),
+      )
       expect(fake.calls.aborts).toHaveLength(1)
     } finally {
       vi.useRealTimers()
@@ -3884,10 +4025,10 @@ describe("uf_delegate_command compaction-storm surfacing", () => {
       expect(result.code).toBe("DELEGATE_FAILED")
       expect(result.message).toBe(
         "context_thrash: invoke_agent run recorded 2 consecutive compaction events " +
-          "with no substantive progress between them (storm threshold 2); " +
+          "with no substantive progress in session child-session (storm threshold 2); " +
           "aborting so the caller can resume from durable state",
       )
-      expect(result.timeout).toMatchObject({ kind: "storm", elapsed_ms: 60_000 })
+      expect(result.timeout).toMatchObject({ kind: "storm", storm_session_id: "child-session", elapsed_ms: 60_000 })
       expect(fake.calls.aborts).toHaveLength(1)
     } finally {
       vi.useRealTimers()
