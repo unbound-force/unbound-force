@@ -5326,8 +5326,18 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".opencode/skills/system-design/SKILL.md":      true,
 	".opencode/skills/testing-patterns/SKILL.md":   true,
 	// Dewey-scaffolded commands — created by dewey init
-	".opencode/commands/dewey-index.md":   true,
-	".opencode/commands/dewey-reindex.md": true,
+	".opencode/commands/dewey-index.md":        true,
+	".opencode/commands/dewey-reindex.md":      true,
+	".opencode/commands/dewey-compile.md":      true,
+	".opencode/commands/dewey-curate.md":       true,
+	".opencode/commands/dewey-distill.md":      true,
+	".opencode/commands/dewey-distill-auto.md": true,
+	".opencode/commands/dewey-lint.md":         true,
+	".opencode/commands/dewey-publish.md":      true,
+	".opencode/commands/dewey-store.md":        true,
+	// Dewey-scaffolded agents — knowledge-distillation personas
+	".opencode/agents/curator.md":   true,
+	".opencode/agents/distiller.md": true,
 	// DCP config — generated programmatically by configureDCPConfig(),
 	// not embedded as a scaffold asset
 	".opencode/dcp.jsonc": true,
