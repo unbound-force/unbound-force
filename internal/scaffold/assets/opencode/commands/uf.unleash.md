@@ -1223,6 +1223,36 @@ its spent budget the same way, from its budget-only
 
 **For each phase in tasks.md**:
 
+**Per-task delegation budget contract**: the per-task
+implement delegations below carry `checkpoint_step:
+"implement"` and `phase`, routing them through the
+per-task executor wrapper. Omit `timeout` and
+`idle_timeout` on these calls -- the budget is tool-owned
+(per-task-delegation-budgets PTB-FR-001..002):
+
+- The tool derives each call's wall clock via
+  `derivePerTaskTimeoutMs` from the phase's work signals
+  -- phase task count (from the `parse_tasks` result),
+  files the phase's tasks touch, and the child's resolved
+  throughput tier -- clamped to the `1_800_000` ms
+  ceiling and the inherited parent budget, with the
+  derivation and clamp outcome recorded as timeout
+  provenance on the result (PTB-FR-001). An explicit
+  `timeout` argument overrides the derivation entirely;
+  pass one only when the operator instructs.
+- Under a budgeted command-path parent the wrapper
+  inherits the parent's idle watchdog through the
+  delegation-budget registry: a progressing child
+  (`child_active: true` or a running tool part) is not
+  aborted by its wall clock while it progresses, a
+  stalled child aborts with `idle_timeout` (retryable),
+  and `budget_exhausted` (non-retryable) fails fast when
+  the parent budget is spent (PTB-FR-002). Wall-clock
+  stays the absolute backstop, each result reports the
+  remaining parent budget (`remaining_ms`) for the phase
+  checkpoint below, and unbudgeted top-level invocations
+  keep the existing delegation defaults.
+
 1. Separate the phase's tasks into two groups from the
    parse result:
    - **Sequential** (`parallel: false`): run first, in
@@ -1256,8 +1286,22 @@ its spent budget the same way, from its budget-only
    ```
 
    The tool auto-checkpoints `implement` with the phase
-   data on success. On failure, emit the envelope's error
-   and **STOP**.
+   data on success. On failure, branch on the envelope:
+   when it carries `timeout` of kind `wall_clock` or
+   `idle` (retryable), re-issue the same call once with
+   the resume context appended to the prompt -- relay
+   `timeout.resume.files_modified` (files the timed-out
+   attempt touched) and `timeout.resume.tasks_completed`
+   (task ids it marked complete), telling the child to
+   verify and continue from that state instead of
+   re-deriving it (PTB-FR-003). The retry MUST NOT start
+   from a blank prompt when `timeout.child_active` is
+   true or `resume` is non-null; when `resume` is null
+   (unreadable state), anchor the retry on the tasks.md
+   checkbox state. A second timeout on the same task,
+   kind `budget` (`budget_exhausted`, non-retryable), or
+   any non-timeout failure: emit the envelope's error and
+   **STOP**.
 
    After each successful delegation, mark the task
    complete immediately -- the checkbox is the
@@ -1454,6 +1498,10 @@ its spent budget the same way, from its budget-only
        phase:
          number: [N]
          verdict: "green" | "failed"
+         remaining_ms: [remaining parent budget in ms, as
+           reported by the most recent per-task delegation
+           envelope -- omit when no budgeted ancestor
+           exists]
          inventory:
            - name: [failing check]
              classification: pre-existing | environmental
@@ -1470,13 +1518,24 @@ its spent budget the same way, from its budget-only
      classified failure). The iteration count rides the
      free-form `data` parameter as the gate-distinct
      `fixLoopPhase[N]` key -- the checkpoint tool
-     persists only `number`, `verdict`, and `inventory`
-     from the structured `phase` object, while `data`
-     round-trips through `get_progress` -- so record it
+     persists `number`, `verdict`, `inventory`, and the
+     optional `remaining_ms` from the structured `phase`
+     object, while `data` round-trips through
+     `get_progress` -- so record it
      on every checkpoint, increment it after each
      delegated fix attempt, and read it back on resume
      so the 3-iteration budget spans sessions rather
      than resetting per resume.
+
+     When a budgeted ancestor exists, also render the
+     phase checkpoint line -- `Phase [N] checkpoint:
+     [verdict] (remaining budget: ~[X]ms)` with `[X]` the
+     recorded `remaining_ms` -- so the resume boundary
+     is plannable before the parent budget expires (the
+     value is informational; wall-clock and hierarchical
+     clamping stay authoritative). When no budgeted
+     ancestor exists, emit no budget clause -- top-level
+     behavior is unchanged (PTB-FR-004).
 
    - If green: proceed to the next phase.
    - If failed: run the build/test fix loop (above)

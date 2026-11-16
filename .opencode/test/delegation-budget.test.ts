@@ -1,7 +1,13 @@
 import type { PluginInput } from "@opencode-ai/plugin"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { executeAgentSession, type InvocationProvenance } from "../lib/agent-executor.js"
+import {
+  executeAgentSession,
+  executePerTaskDelegation,
+  type InvocationProvenance,
+  type PerTaskResumeCapture,
+  type PerTaskResumeHint,
+} from "../lib/agent-executor.js"
 import {
   BUDGET_RESERVE_MS,
   IDLE_DEFERRAL_CAP_MS,
@@ -21,13 +27,18 @@ import {
   messageFingerprint,
   probeSubtreeActivity,
   registerDeadline,
+  registeredBudget,
   registeredDeadline,
   registeredProbeCounters,
+  resolveIdleApplicability,
+  resolveInheritedBudget,
   resolveInheritedDeadline,
   selectRunningTool,
+  type RegisteredBudget,
   unregisterDeadline,
   unregisterProbeState,
 } from "../lib/delegation-budget.js"
+import { derivePerTaskTimeoutMs, type DerivedPerTaskTimeout } from "../lib/run-timeout.js"
 
 type Client = PluginInput["client"]
 
@@ -35,10 +46,10 @@ const DIRECTORY = "/fake/project"
 const signal = new AbortController().signal
 const registered: string[] = []
 
-/** Register a deadline that afterEach removes, keeping the shared registry clean. */
-function register(sessionID: string, deadline: number): void {
+/** Register a budget that afterEach removes, keeping the shared registry clean. */
+function register(sessionID: string, deadline: number, idle?: number): void {
   registered.push(sessionID)
-  registerDeadline(sessionID, deadline)
+  registerDeadline(sessionID, deadline, idle)
 }
 
 afterEach(() => {
@@ -116,8 +127,24 @@ describe("deadline registry", () => {
 
   it("shares one registry through the global symbol", () => {
     register("s-global", 42)
-    const holder = globalThis as unknown as Record<symbol, Map<string, number>>
-    expect(holder[Symbol.for("unbound-force.delegation-budget")]?.get("s-global")).toBe(42)
+    const holder = globalThis as unknown as Record<symbol, Map<string, RegisteredBudget>>
+    expect(holder[Symbol.for("unbound-force.delegation-budget")]?.get("s-global")).toEqual({
+      deadlineMs: 42,
+      idleMs: null,
+    })
+  })
+
+  it("registers the idle window alongside the deadline (PTB-FR-002)", () => {
+    register("s-idle", 1_000, 250_000)
+    expect(registeredBudget("s-idle")).toEqual({ deadlineMs: 1_000, idleMs: 250_000 })
+    expect(registeredDeadline("s-idle")).toBe(1_000)
+    unregisterDeadline("s-idle")
+    expect(registeredBudget("s-idle")).toBeUndefined()
+  })
+
+  it("registers no idle window by default", () => {
+    register("s-plain", 2_000)
+    expect(registeredBudget("s-plain")).toEqual({ deadlineMs: 2_000, idleMs: null })
   })
 })
 
@@ -155,6 +182,81 @@ describe("resolveInheritedDeadline", () => {
   it("treats lookup errors and clients without session.get as no budget", async () => {
     expect(await resolveInheritedDeadline(treeClient({ failGet: true }).client, "x", DIRECTORY, signal)).toBeNull()
     expect(await resolveInheritedDeadline({ session: {} } as unknown as Client, "x", DIRECTORY, signal)).toBeNull()
+  })
+})
+
+describe("resolveInheritedBudget", () => {
+  it("returns a direct registry hit with its idle window, without any API call", async () => {
+    register("child", 5_000, 120_000)
+    const fake = treeClient({})
+    expect(await resolveInheritedBudget(fake.client, "child", DIRECTORY, signal)).toEqual({
+      deadlineMs: 5_000,
+      idleMs: 120_000,
+    })
+    expect(fake.gets).toEqual([])
+  })
+
+  it("walks parentID links to the nearest registered ancestor entry", async () => {
+    register("budgeted", 9_000, 600_000)
+    const fake = treeClient({ sessions: { task: { parentID: "mid" }, mid: { parentID: "budgeted" } } })
+    expect(await resolveInheritedBudget(fake.client, "task", DIRECTORY, signal)).toEqual({
+      deadlineMs: 9_000,
+      idleMs: 600_000,
+    })
+    expect(fake.gets).toEqual(["task", "mid"])
+  })
+
+  it("carries a deadline-only ancestor as a null idle window", async () => {
+    register("budgeted", 9_000)
+    const fake = treeClient({ sessions: { task: { parentID: "budgeted" } } })
+    expect(await resolveInheritedBudget(fake.client, "task", DIRECTORY, signal)).toEqual({
+      deadlineMs: 9_000,
+      idleMs: null,
+    })
+  })
+
+  it("returns null for a top-level session", async () => {
+    const fake = treeClient({ sessions: { root: {} } })
+    expect(await resolveInheritedBudget(fake.client, "root", DIRECTORY, signal)).toBeNull()
+  })
+
+  it("treats lookup errors and clients without session.get as no budget", async () => {
+    expect(await resolveInheritedBudget(treeClient({ failGet: true }).client, "x", DIRECTORY, signal)).toBeNull()
+    expect(await resolveInheritedBudget({ session: {} } as unknown as Client, "x", DIRECTORY, signal)).toBeNull()
+  })
+})
+
+describe("resolveIdleApplicability", () => {
+  it("keeps an explicitly passed window with source explicit", () => {
+    expect(resolveIdleApplicability(120_000, { deadlineMs: 9_000, idleMs: 600_000 })).toEqual({
+      idleMs: 120_000,
+      source: "explicit",
+    })
+  })
+
+  it("inherits the ancestor's window when the caller passed none", () => {
+    expect(resolveIdleApplicability(undefined, { deadlineMs: 9_000, idleMs: 600_000 })).toEqual({
+      idleMs: 600_000,
+      source: "inherited",
+    })
+  })
+
+  it("stays off when the ancestor registered no idle window", () => {
+    expect(resolveIdleApplicability(undefined, { deadlineMs: 9_000, idleMs: null })).toEqual({
+      idleMs: undefined,
+      source: "none",
+    })
+  })
+
+  it("stays off without a budgeted ancestor, introducing no global default", () => {
+    expect(resolveIdleApplicability(undefined, null)).toEqual({ idleMs: undefined, source: "none" })
+  })
+
+  it("counts any defined explicit value as explicit, mirroring the executor's armed check", () => {
+    expect(resolveIdleApplicability(0, { deadlineMs: 9_000, idleMs: 600_000 })).toEqual({
+      idleMs: 0,
+      source: "explicit",
+    })
   })
 })
 
@@ -1021,19 +1123,32 @@ interface ExecutorFakeOptions {
   readonly resolveAfterMs?: number
   /** Child prompt rejects this many ms after the abort signal fires (default immediate). */
   readonly rejectAfterAbortMs?: number
+  /** Session ancestry the per-task executor walks: sessionID -> parentID. */
+  readonly parentOf?: Readonly<Record<string, string>>
 }
 
 /** Executor-facing fake: child creation, a hanging prompt, abort, and probe endpoints. */
 function executorClient(options: ExecutorFakeOptions = {}) {
-  const calls = { creates: 0, aborts: 0, probes: 0, deadlineDuringRun: undefined as number | undefined }
+  const calls = {
+    creates: 0,
+    aborts: 0,
+    probes: 0,
+    deadlineDuringRun: undefined as number | undefined,
+    budgetDuringRun: undefined as RegisteredBudget | undefined,
+    gets: [] as string[],
+  }
   const session = {
-    get: async () => ({ data: { id: "parent" } }),
+    get: async (request: { path: { id: string } }) => {
+      calls.gets.push(request.path.id)
+      return { data: { id: request.path.id, parentID: options.parentOf?.[request.path.id] } }
+    },
     create: async () => {
       calls.creates++
       return { data: { id: "exec-child" } }
     },
     prompt: async (request: { signal?: AbortSignal }) => {
       calls.deadlineDuringRun = registeredDeadline("exec-child")
+      calls.budgetDuringRun = registeredBudget("exec-child")
       return await new Promise((resolve, reject) => {
         if (options.resolveAfterMs !== undefined) {
           setTimeout(
@@ -1458,5 +1573,481 @@ describe("executeAgentSession budgets and idle watchdog", () => {
     expect(result.error?.code).toBe("timeout")
     expect(result.timeout).toMatchObject({ kind: "wall_clock", child_active: false })
     expect(result.timeout?.last_progress_ms_ago).toBe(129_000)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Per-task delegation executor (per-task-delegation-budgets D2/D3,
+// PTB-FR-001..003)
+// ---------------------------------------------------------------------------
+
+/** Derived per-task timeout (PTB-FR-001) with a standard-tier profile. */
+function derivedTimeout(baseMs: number): DerivedPerTaskTimeout {
+  return derivePerTaskTimeoutMs({
+    baseMs,
+    phaseTaskCount: 4,
+    phaseFileCount: 8,
+    promptBytes: 0,
+    tier: "standard",
+    maxParallelRuns: 1,
+    configuredCeilingMs: 1_800_000,
+  })
+}
+
+/** Mutable resume-capture seams simulating worktree and tasks.md state over time. */
+function resumeSeams(initialFiles: readonly string[] = [], initialTasks: readonly string[] = []) {
+  let files = initialFiles
+  let tasks = initialTasks
+  let state: "readable" | "null" | "throw" = "readable"
+  const read = async (value: readonly string[]): Promise<readonly string[] | null> => {
+    if (state === "throw") {
+      throw new Error("state read failed")
+    }
+    return state === "null" ? null : value
+  }
+  const capture: PerTaskResumeCapture = {
+    captureModifiedFiles: () => read(files),
+    captureCompletedTasks: () => read(tasks),
+  }
+  return {
+    capture,
+    /** Simulates the child touching files and completing tasks. */
+    progress(filePaths: readonly string[], taskIds: readonly string[]): void {
+      files = [...files, ...filePaths]
+      tasks = [...tasks, ...taskIds]
+    },
+    /** Makes later reads report the state as unreadable or throw. */
+    degrade(mode: "null" | "throw"): void {
+      state = mode
+    },
+  }
+}
+
+/** Run one per-task delegation with implement-phase defaults, mirroring the /uf.unleash call shape. */
+function runPerTask(
+  client: Client,
+  extra: {
+    readonly timeoutMilliseconds?: number
+    readonly idleTimeoutMilliseconds?: number
+    readonly parentAbort?: AbortSignal
+    readonly sessionID?: string
+    readonly phase?: number
+    readonly checkpointStep?: string
+    readonly derivation?: DerivedPerTaskTimeout
+    readonly fallbackIdleMs?: number
+    readonly resumeCapture?: PerTaskResumeCapture
+  } = {},
+) {
+  return executePerTaskDelegation(
+    {
+      client,
+      sessionID: extra.sessionID ?? "parent",
+      directory: DIRECTORY,
+      parentAbort: extra.parentAbort ?? new AbortController().signal,
+      timeoutMilliseconds: extra.timeoutMilliseconds ?? 60_000,
+      idleTimeoutMilliseconds: extra.idleTimeoutMilliseconds,
+      idlePollMilliseconds: POLL_MS,
+    },
+    "cobalt-crush-dev",
+    "prompt",
+    { providerID: "p", modelID: "m", combined: "p/m" },
+    undefined,
+    false,
+    PROVENANCE,
+    {
+      phase: extra.phase ?? 1,
+      checkpointStep: extra.checkpointStep ?? "implement",
+      derivation: extra.derivation,
+      fallbackIdleMs: extra.fallbackIdleMs,
+      resumeCapture: extra.resumeCapture,
+    },
+  )
+}
+
+describe("executePerTaskDelegation budgets, idle inheritance, and resume hints", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("resolves the parent budget by direct registry hit and clamps the derived wall clock", async () => {
+    const start = Date.now()
+    register("parent", start + BUDGET_RESERVE_MS + 120_000)
+    const controller = new AbortController()
+    const fake = executorClient()
+    const derivation = derivedTimeout(600_000)
+    const pending = runPerTask(fake.client, {
+      derivation,
+      timeoutMilliseconds: 60_000,
+      parentAbort: controller.signal,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    // PTB-FR-002: a registry hit on the caller's own session needs no
+    // parentID walk. The derivation's window (>= the 600 s base) is
+    // the request — not the explicit 60 s — and clamps to the
+    // ancestor deadline minus the reserve.
+    expect(fake.calls.gets).toEqual([])
+    expect(fake.calls.budgetDuringRun).toEqual({ deadlineMs: start + 120_000, idleMs: null })
+    controller.abort(new Error("stop"))
+    const result = await pending
+    expect(result.error?.code).toBe("cancelled")
+    // The derivation record rides even a cancelled result (PTB-FR-001).
+    expect(result.timeout_provenance).toBe(derivation.provenance)
+    expect(registeredBudget("exec-child")).toBeUndefined()
+  })
+
+  it("walks parentID links to the nearest budgeted ancestor and inherits its idle window", async () => {
+    const start = Date.now()
+    register("budgeted", start + BUDGET_RESERVE_MS + 300_000, 600_000)
+    const controller = new AbortController()
+    const fake = executorClient({ parentOf: { task: "mid", mid: "budgeted" } })
+    const pending = runPerTask(fake.client, {
+      sessionID: "task",
+      timeoutMilliseconds: 60_000,
+      parentAbort: controller.signal,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    // The registry miss on "task" follows parentID links to the
+    // nearest budgeted ancestor. The walk runs twice — once in the
+    // per-task wrapper, once inside the shared executor, which
+    // re-resolves the same entry before registering the child.
+    expect(fake.calls.gets).toEqual(["task", "mid", "task", "mid"])
+    // The 60 s request fits the ancestor budget, so it passes through
+    // unclamped, and the ancestor's idle window rides the child entry.
+    expect(fake.calls.budgetDuringRun).toEqual({ deadlineMs: start + 60_000, idleMs: 600_000 })
+    controller.abort(new Error("stop"))
+    const result = await pending
+    expect(result.error?.code).toBe("cancelled")
+  })
+
+  it("spawns at the inclusive clamp boundary and fires the budget-clamped wall clock", async () => {
+    const start = Date.now()
+    // Exactly the 30 s minimum remains after the reserve: the clamp
+    // boundary is inclusive, so the child still spawns (one
+    // millisecond less fails fast instead).
+    register("parent", start + BUDGET_RESERVE_MS + MIN_NESTED_BUDGET_MS)
+    const fake = executorClient()
+    const pending = runPerTask(fake.client, { timeoutMilliseconds: 1_800_000 })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fake.calls.creates).toBe(1)
+    expect(fake.calls.deadlineDuringRun).toBe(start + MIN_NESTED_BUDGET_MS)
+    await vi.advanceTimersByTimeAsync(MIN_NESTED_BUDGET_MS)
+    const result = await pending
+    // With no ancestor idle window and no caller fallback, the
+    // per-task run keeps the absolute wall clock: PTB-FR-002
+    // introduces no new global idle default.
+    expect(result.error?.code).toBe("timeout")
+    expect(result.timeout).toMatchObject({
+      kind: "wall_clock",
+      effective_ms: MIN_NESTED_BUDGET_MS,
+      requested_ms: 1_800_000,
+      budget_clamped: true,
+      idle_timeout_ms: null,
+    })
+  })
+
+  it("fails fast with budget_exhausted before spawning a child", async () => {
+    const start = Date.now()
+    // One millisecond under the inclusive 30 s minimum: the wrapper
+    // refuses to spawn and hands the failure back for durable-state
+    // resume.
+    register("parent", start + BUDGET_RESERVE_MS + MIN_NESTED_BUDGET_MS - 1)
+    const derivation = derivedTimeout(600_000)
+    const fake = executorClient()
+    const result = await runPerTask(fake.client, { derivation })
+    expect(result.error?.code).toBe("budget_exhausted")
+    expect(result.error?.retryable).toBe(false)
+    expect(fake.calls.creates).toBe(0)
+    expect(result.timeout).toMatchObject({
+      kind: "budget",
+      budget_clamped: true,
+      effective_ms: MIN_NESTED_BUDGET_MS - 1,
+      child_active: null,
+    })
+    // The derivation record rides the fail-fast verbatim (PTB-FR-001).
+    expect(result.timeout_provenance).toBe(derivation.provenance)
+  })
+
+  it("attaches an empty resume hint to the budget fail-fast when eligible", async () => {
+    const start = Date.now()
+    register("parent", start + BUDGET_RESERVE_MS + MIN_NESTED_BUDGET_MS - 1)
+    const seams = resumeSeams(["internal/a.go"], ["1.1"])
+    const result = await runPerTask(executorClient().client, { resumeCapture: seams.capture })
+    expect(result.error?.code).toBe("budget_exhausted")
+    // The before-state was readable and nothing changed, so the hint
+    // is present but empty: the caller learns the child never started.
+    expect(result.timeout?.resume).toEqual({ files_modified: [], tasks_completed: [] })
+  })
+
+  it("inherits the ancestor's idle watchdog and aborts a stalled child with a resume hint", async () => {
+    register("parent", Date.now() + BUDGET_RESERVE_MS + 300_000, 10_000)
+    const fake = executorClient({ latest: () => message("m", [{ id: "p", type: "text", text: "same" }]) })
+    const seams = resumeSeams()
+    const pending = runPerTask(fake.client, { timeoutMilliseconds: 240_000, resumeCapture: seams.capture })
+    await vi.advanceTimersByTimeAsync(0)
+    // The child made observable progress before stalling.
+    seams.progress(["internal/foo/bar.go"], ["1.2"])
+    await vi.advanceTimersByTimeAsync(15_000)
+    const result = await pending
+    expect(result.error?.code).toBe("idle_timeout")
+    expect(result.error?.retryable).toBe(true)
+    expect(result.timeout).toMatchObject({ kind: "idle", idle_timeout_ms: 10_000 })
+    // PTB-FR-003: the hint names what the child changed even though
+    // the run stalled.
+    expect(result.timeout?.resume).toEqual({
+      files_modified: ["internal/foo/bar.go"],
+      tasks_completed: ["1.2"],
+    })
+  })
+
+  it("holds an expired derived wall clock while the child keeps progressing", async () => {
+    register("parent", Date.now() + BUDGET_RESERVE_MS + 600_000, 10_000)
+    let counter = 0
+    let streaming = true
+    const fake = executorClient({
+      latest: () => message("m", [{ id: "p", type: "text", text: "x".repeat(streaming ? ++counter : counter) }]),
+    })
+    const pending = runPerTask(fake.client, { timeoutMilliseconds: 5_000 })
+    await vi.advanceTimersByTimeAsync(8_000)
+    // t = 8 s: the 5 s derived wall clock expired, but the ancestor
+    // budget carries an idle window and the child streams, so the
+    // per-task deferral holds the clock (PTB-FR-002).
+    let settled = false
+    void pending.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(settled).toBe(false)
+    // The stream stops: the inherited 10 s idle watchdog fires 10 s
+    // after the last fingerprint change (t = 8 s).
+    streaming = false
+    await vi.advanceTimersByTimeAsync(12_000)
+    const result = await pending
+    expect(result.error?.code).toBe("idle_timeout")
+    expect(result.timeout).toMatchObject({ kind: "idle", elapsed_ms: 18_000 })
+  })
+
+  it("counts a running tool part as progress while the wall clock is deferred", async () => {
+    register("parent", Date.now() + BUDGET_RESERVE_MS + 600_000, 10_000)
+    const fake = executorClient({
+      latest: () =>
+        message("m", [
+          { id: "b1", type: "tool", tool: "bash", state: { status: "running", metadata: { output: "steady" } } },
+        ]),
+    })
+    const pending = runPerTask(fake.client, { timeoutMilliseconds: 5_000 })
+    await vi.advanceTimersByTimeAsync(12_000)
+    // t = 12 s: past both the 5 s wall clock and the 10 s idle window,
+    // but the quiet bash holds the idle deferral within its DT-FR-014
+    // cap, and the running part keeps the deferred clock re-arming.
+    let settled = false
+    void pending.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(900_000)
+    const result = await pending
+    expect(result.error?.code).toBe("idle_timeout")
+    // Baseline fingerprint change at t = 1 s: 1 s + 10 s idle + 900 s
+    // deferral cap ends the run.
+    expect(result.timeout).toMatchObject({ kind: "idle", running_tool: "bash", elapsed_ms: 911_000 })
+  })
+
+  it("fires the deferred wall clock once activity stops past the activity window", async () => {
+    register("parent", Date.now() + BUDGET_RESERVE_MS + 600_000, 600_000)
+    let counter = 0
+    let streaming = true
+    const fake = executorClient({
+      latest: () => message("m", [{ id: "p", type: "text", text: "x".repeat(streaming ? ++counter : counter) }]),
+    })
+    const pending = runPerTask(fake.client, { timeoutMilliseconds: 5_000 })
+    await vi.advanceTimersByTimeAsync(2_000)
+    // Last progress at t = 2 s; the 5 s wall clock expired and
+    // re-armed, and the 600 s inherited idle window will not fire
+    // first.
+    streaming = false
+    await vi.advanceTimersByTimeAsync(123_000)
+    const result = await pending
+    expect(result.error?.code).toBe("timeout")
+    // The re-armed clock fires one activity window (120 s) after the
+    // last progress: the budget is the backstop and the envelope
+    // reports the child inactive.
+    expect(result.timeout).toMatchObject({
+      kind: "wall_clock",
+      elapsed_ms: 125_000,
+      child_active: false,
+      last_progress_ms_ago: 123_000,
+    })
+  })
+
+  it("does not defer the wall clock when probes never succeed", async () => {
+    register("parent", Date.now() + BUDGET_RESERVE_MS + 600_000, 10_000)
+    const pending = runPerTask(executorClient({ latest: () => undefined }).client, { timeoutMilliseconds: 5_000 })
+    await vi.advanceTimersByTimeAsync(5_000)
+    const result = await pending
+    // Failing probes cannot confirm activity, so the expired clock
+    // stays absolute — stale activity cannot defer forever.
+    expect(result.error?.code).toBe("timeout")
+    expect(result.timeout).toMatchObject({ kind: "wall_clock", child_active: null })
+  })
+
+  it("reports child_active with files and tasks on an unbudgeted wall-clock timeout (PTB-FR-003 scenario 1)", async () => {
+    let counter = 0
+    const fake = executorClient({
+      latest: () => message("m", [{ id: "p", type: "text", text: "x".repeat(++counter) }]),
+    })
+    const seams = resumeSeams()
+    const pending = runPerTask(fake.client, {
+      timeoutMilliseconds: 5_000,
+      fallbackIdleMs: 60_000,
+      resumeCapture: seams.capture,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    seams.progress(["internal/foo/bar.go"], ["1.1", "1.2"])
+    await vi.advanceTimersByTimeAsync(5_000)
+    const result = await pending
+    // No budgeted ancestor: no deferral — the wall clock fires at 5 s
+    // even though the child streams — the caller's fallback idle
+    // window applies, and the hint reports the observable progress.
+    expect(result.error?.code).toBe("timeout")
+    expect(result.timeout).toMatchObject({ kind: "wall_clock", child_active: true })
+    expect(result.timeout?.resume).toEqual({
+      files_modified: ["internal/foo/bar.go"],
+      tasks_completed: ["1.1", "1.2"],
+    })
+    // No derivation was supplied, so the explicit request passes
+    // through with source "explicit" (PTB-FR-001).
+    expect(result.timeout_provenance).toEqual({ effective_ms: 5_000, source: "explicit" })
+  })
+
+  it("returns an empty resume hint when the child made no observable progress (PTB-FR-003 scenario 2)", async () => {
+    const fake = executorClient({ latest: () => message("m", [{ id: "p", type: "text", text: "same" }]) })
+    const seams = resumeSeams(["internal/existing.go"], ["2.1"])
+    const pending = runPerTask(fake.client, {
+      timeoutMilliseconds: 130_000,
+      fallbackIdleMs: 300_000,
+      resumeCapture: seams.capture,
+    })
+    await vi.advanceTimersByTimeAsync(130_000)
+    const result = await pending
+    expect(result.error?.code).toBe("timeout")
+    // The only probe progress was the baseline at 1 s, 129 s before
+    // the abort: the child is inactive, and the hint is empty rather
+    // than absent.
+    expect(result.timeout).toMatchObject({ kind: "wall_clock", child_active: false })
+    expect(result.timeout?.resume).toEqual({ files_modified: [], tasks_completed: [] })
+    // Constitution V: the hint never carries message content.
+    expect(JSON.stringify(result.timeout)).not.toContain("same")
+  })
+
+  it("fails the resume hint closed when the after-state becomes unreadable", async () => {
+    const fake = executorClient({ latest: () => message("m", [{ id: "p", type: "text", text: "same" }]) })
+    const seams = resumeSeams()
+    const pending = runPerTask(fake.client, {
+      timeoutMilliseconds: 5_000,
+      fallbackIdleMs: 300_000,
+      resumeCapture: seams.capture,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    // The before-snapshot was readable; the after-read at abort time
+    // is not. The executor never synthesizes resume content.
+    seams.degrade("null")
+    await vi.advanceTimersByTimeAsync(5_000)
+    const result = await pending
+    expect(result.error?.code).toBe("timeout")
+    expect(result.timeout?.kind).toBe("wall_clock")
+    expect(result.timeout?.resume).toBeNull()
+  })
+
+  it("fails the resume hint closed when the before-state is unreadable or a seam throws", async () => {
+    const resumeOnTimeout = async (mode: "null" | "throw"): Promise<PerTaskResumeHint | null | undefined> => {
+      const seams = resumeSeams()
+      seams.degrade(mode)
+      const pending = runPerTask(executorClient().client, {
+        timeoutMilliseconds: 5_000,
+        fallbackIdleMs: 300_000,
+        resumeCapture: seams.capture,
+      })
+      await vi.advanceTimersByTimeAsync(5_000)
+      const result = await pending
+      expect(result.error?.code).toBe("timeout")
+      return result.timeout?.resume
+    }
+    // Both unreadable modes take the same fail-closed path: null reads
+    // and throwing reads never yield a synthesized hint.
+    expect(await resumeOnTimeout("null")).toBeNull()
+    expect(await resumeOnTimeout("throw")).toBeNull()
+  })
+
+  it("gates the resume hint on implement-phase eligibility", async () => {
+    const resumeOnTimeout = async (extra: {
+      readonly checkpointStep?: string
+      readonly phase?: number
+      readonly resumeCapture?: PerTaskResumeCapture
+    }): Promise<PerTaskResumeHint | null | undefined> => {
+      const pending = runPerTask(executorClient().client, {
+        timeoutMilliseconds: 5_000,
+        fallbackIdleMs: 300_000,
+        ...extra,
+      })
+      await vi.advanceTimersByTimeAsync(5_000)
+      const result = await pending
+      expect(result.error?.code).toBe("timeout")
+      return result.timeout?.resume
+    }
+    // PTB-FR-003: only implement-phase per-task calls carry the hint.
+    // A non-implement checkpoint step never sees the key.
+    expect(await resumeOnTimeout({ checkpointStep: "quick-pre-flight" })).toBeUndefined()
+    // Neither does a non-positive phase.
+    expect(await resumeOnTimeout({ phase: 0 })).toBeUndefined()
+    // An eligible caller without capture seams reports null, not a
+    // synthesized hint.
+    expect(await resumeOnTimeout({})).toBeNull()
+  })
+
+  it("threads the derivation provenance through a successful run", async () => {
+    const fake = executorClient({
+      resolveAfterMs: 5_000,
+      latest: () => message("m", [{ id: "p", type: "text", text: "same" }]),
+    })
+    const derivation = derivedTimeout(600_000)
+    const pending = runPerTask(fake.client, { derivation })
+    await vi.advanceTimersByTimeAsync(5_000)
+    const result = await pending
+    expect(result.status).toBe("success")
+    expect(result.timeout).toBeUndefined()
+    // PTB-FR-001: the derivation record rides the result verbatim.
+    expect(result.timeout_provenance).toBe(derivation.provenance)
+  })
+
+  it("does not attach the resume hint to a compaction-storm termination", async () => {
+    let markers = 0
+    const fake = executorClient({
+      latest: () => message(`c${++markers}`, [{ type: "compaction", auto: true }]),
+    })
+    const pending = runPerTask(fake.client, { timeoutMilliseconds: 60_000, fallbackIdleMs: 300_000 })
+    await vi.advanceTimersByTimeAsync(3_000)
+    const result = await pending
+    // Three consecutive compaction markers hit the default storm
+    // threshold; the durable context_thrash resume state carries the
+    // pending checkpoint step, and the advisory per-task hint stays
+    // off storm terminations.
+    expect(result.error?.code).toBe("context_thrash")
+    expect(result.timeout?.kind).toBe("storm")
+    expect(result.timeout?.resume).toBeUndefined()
+    expect(result.resume?.pending_checkpoint_step).toBe("implement")
   })
 })
