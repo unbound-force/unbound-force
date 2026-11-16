@@ -991,8 +991,9 @@ repository from the working tree.
 do NOT fall back to a shell write, and do NOT hand-compose the creation.
 Record the failure in `actions_taken`.
 
-Record each created child issue number and title from the tool's
-response.
+Record each created child issue's `issue_number` and `issue_url` from the tool's
+response, and take its title from the confirmed child-issue list produced by the
+step-1 confirmation gate.
 
 4. **Post parent comment**: After all confirmed child issues are created, post a comment on the parent issue listing the created children:
 
