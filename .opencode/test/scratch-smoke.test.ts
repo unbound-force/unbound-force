@@ -177,6 +177,7 @@ describe("provider-free scratch-repository smoke test", () => {
         "uf_unleash_detect_resume",
         "uf_unleash_resolve_issue",
         "uf_unleash_route_decision",
+        "write_feedback_triage_artifact",
         "write_unleash_summary",
       ])
     })

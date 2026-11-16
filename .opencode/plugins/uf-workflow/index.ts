@@ -54,6 +54,7 @@ import {
   FileFeedbackIssueInputSchema,
   PostFeedbackRepliesInputSchema,
   PostIssueCommentInputSchema,
+  WriteFeedbackTriageArtifactInputSchema,
   createChildIssue,
   defaultFeedbackGhExec,
   feedbackFailure,
@@ -61,6 +62,7 @@ import {
   fileFeedbackIssue,
   postFeedbackReplies,
   postIssueComment,
+  writeFeedbackTriageArtifact,
   type FeedbackReplyDeps,
 } from "../../lib/feedback-replies.js"
 import { createBunYamlParser, type YamlParser } from "../../lib/reviewer-manifest.js"
@@ -3342,13 +3344,65 @@ export function createCreateChildIssueTool(deps: FeedbackReplyDeps): ReturnType<
   })
 }
 
-/** Production dependencies for the feedback reply tools. */
+/**
+ * Factory for the write_feedback_triage_artifact tool (issue #1022, the
+ * extract-feedback-triage-artifact-tool change): renders and writes the
+ * feedback-triage 1.1.0 artifact for /uf.address-feedback in one call.
+ * Judgment products (PR identity, artifact context, the per-item triage
+ * records carrying their Section 4.6 comment identity, and the
+ * post_feedback_replies success data when replies were posted) arrive as
+ * validated parameters; the mechanical chain — the FILE/REPLY join, the
+ * summary counts, the round scan, the render, the 1.1.0 payload
+ * validation, the atomic write, and the terminal progress clear — runs
+ * in lib/feedback-replies.ts. Failures use the fetch-tool error contract
+ * (`error: true`, code, message, retryable) alongside `status: "error"`.
+ *
+ * @param deps Repository root, clock, and the clear-progress hook.
+ * @returns The write_feedback_triage_artifact tool.
+ */
+export function createWriteFeedbackTriageArtifactTool(deps: FeedbackReplyDeps): ReturnType<typeof tool> {
+  return tool({
+    description:
+      "Render and write the /uf.address-feedback feedback-triage 1.1.0 artifact in one call. " +
+      "Joins FILE items to their filed issues from the post_feedback_replies success data by " +
+      "comment identity (cross-checking the decisions; a mismatch fails invalid_input with " +
+      "nothing written), derives the summary counts, scans the next round number, renders the " +
+      "envelope, validates the payload against the 1.1.0 shape, and writes it atomically to " +
+      ".uf/artifacts/feedback-triage/pr-<N>-round-<M>.json (0o600 files under 0o700 directories, " +
+      "symlink refusal). On success clears the uf.address-feedback progress state through the " +
+      "same branch-keyed path clear_progress uses — a clear failure is a warning, not a failed " +
+      "call, because the artifact is already durable. Returns pr_number, path, round, bytes, the " +
+      "derived counts, progress_cleared, warnings, and a summary line to print verbatim.",
+    args: WriteFeedbackTriageArtifactInputSchema.shape,
+    async execute(args) {
+      const parsed = WriteFeedbackTriageArtifactInputSchema.safeParse(args)
+      if (!parsed.success) {
+        return { output: feedbackInvalidInput(parsed.error) }
+      }
+      try {
+        return { output: JSON.stringify(feedbackSuccess(writeFeedbackTriageArtifact(parsed.data, deps))) }
+      } catch (err: unknown) {
+        return { output: feedbackErrorOutput(err) }
+      }
+    },
+  })
+}
+
+/**
+ * Production dependencies for the feedback reply tools. The clearProgress
+ * hook (extract-feedback-triage-artifact-tool design D6) removes the
+ * uf.address-feedback progress state through the same branch-keyed state
+ * path the clear_progress tool uses: resolveKey derives the sanitized
+ * branch key, and deleteState is idempotent when no state exists.
+ */
 function feedbackReplyDeps(cwd: string): FeedbackReplyDeps {
   return {
     gh: defaultFeedbackGhExec,
     cwd,
     recordCheckpoint: (step, data) =>
       recordAutoCheckpoint(cwd, resolveKey(defaultGitExec, cwd), "uf.address-feedback", step, data),
+    clearProgress: () =>
+      deleteState(cwd, resolveKey(defaultGitExec, cwd), sanitizeSlug("uf.address-feedback")),
   }
 }
 
@@ -7944,6 +7998,7 @@ const UfWorkflowPlugin = {
         file_feedback_issue: createFileFeedbackIssueTool(feedbackReplyDeps(cwd)),
         post_issue_comment: createPostIssueCommentTool({ gh: defaultFeedbackGhExec, cwd }),
         create_child_issue: createCreateChildIssueTool({ gh: defaultFeedbackGhExec, cwd }),
+        write_feedback_triage_artifact: createWriteFeedbackTriageArtifactTool(feedbackReplyDeps(cwd)),
         uf_delegate_command: createDelegateCommandTool(defaultGitExec, cwd, {
           client: input.client,
           readText: (path: string) => readFile(path, "utf8"),

@@ -290,7 +290,7 @@ func TestCommandContracts_AddressFeedback(t *testing.T) {
 		{name: "failures non-voting", all: []string{"failures are terminal, informational, and non-voting", "create no findings, advisories, or stronger recommendation"}},
 		{name: "planned no-success", all: []string{"availability-only causes produce native, generic, and canonical `unavailable`", "policy, plan, budget, limit, persistence, calculation, or mixed cause", "native, generic, and canonical `inconclusive`", "retain the item for explicit human handling", "must not be converted to `author-decides`"}},
 		{name: "tier two finalization", all: []string{"finalize every tier 2 item, including plan or no-success failures, with a single `consolidate_dispatch` call", "\"workflow_id\": \"uf.address-feedback\"", "never call `finalize_review_dispatch` yourself", "the scalar review verdict (`review_verdict`)"}},
-		{name: "feedback triage artifact", all: []string{".uf/artifacts/feedback-triage/pr-<pr_number>-round-<m>.json", "existing feedback-triage artifact", "emitted in addition to each tier 2 `review-dispatch` artifact"}},
+		{name: "feedback triage artifact", all: []string{"call `write_feedback_triage_artifact` once", ".uf/artifacts/feedback-triage/pr-<pr_number>-round-<m>.json", "existing feedback-triage artifact", "emitted in addition to each tier 2 `review-dispatch` artifact"}},
 		{name: "pr head checkout", all: []string{"### 1.2.1 Check Out the PR Head", "MUST be on the PR head before the first `get_progress` or `checkpoint` call", "Call the `checkout_pr_head` plugin tool", "`{pr_number: <PR_NUMBER>, head_ref: <head_ref>, head_sha: <head_sha>}`", "never resets or discards local commits", "Never call `get_progress` or `checkpoint` from another branch."}},
 		{name: "pr head identity keyed on head sha", all: []string{"keys identity on `HEAD` (equal to or descending from `head_sha`)", "`ahead_of_head_sha: true`", "carries unpushed commits from a prior run", "`branch` may differ from `head_ref`", "Record `head_remote` as `HEAD_REMOTE` and `merge_ref` as `HEAD_MERGE_REF`"}},
 		{name: "tool error stops with specific message", all: []string{"On `status: \"error\"`, **STOP** and report the tool's `message`", "carries the specific git or gh error"}},
@@ -725,7 +725,7 @@ func TestCommandContracts_FeedbackLoopScope(t *testing.T) {
 		{name: "severity scope", all: []string{"a medium or low item never becomes a code change in this run", "counts as high and keeps the matrix above", "medium and low items are always tier 1."}},
 		{name: "medium and low options", all: []string{"`[\"file issue\", \"reply\", \"ask\"]`"}},
 		{name: "issue filing", all: []string{"then call `post_feedback_replies` once, with:", "it files each file item's issue before its reply (one retry; a file item whose issue still fails is not posted or resolved)", "stops posting at the first failed post"}},
-		{name: "artifact decisions", all: []string{"record file items with `decision: \"file\"` and reply items with `decision: \"reply\"`", "count file items under `filed` and reply items under `replied`, not under `rejected`."}},
+		{name: "artifact decisions", all: []string{"record file items with `decision: \"file\"` and reply items with `decision: \"reply\"`", "each with `recommendation: \"author-decides\"` and a null `commit_sha`", "derives the summary counts"}},
 		{name: "one council per cycle", all: []string{"this command does not run `/uf.review-council`.", "run its phases in `hard-gate` mode", "at most 3 attempts in all", "step: \"verify\""}},
 		{name: "learnings off the branch", all: []string{"never stage `.uf/dewey/learnings/`", "never commit `.uf/dewey/learnings/` on the pr branch."}},
 	})
@@ -753,18 +753,50 @@ func TestCommandContracts_FeedbackLoopScope(t *testing.T) {
 // rules (issues #966, #998, #999): replies, issue filing, and thread
 // resolution run through one post_feedback_replies call between the
 // two human gates; the tool records the reply-comments checkpoint;
-// progress is cleared only after the artifact; and the artifact uses
-// feedback-triage schema 1.1.0.
+// write_feedback_triage_artifact clears progress after writing the
+// feedback-triage 1.1.0 artifact (#1022).
 func TestCommandContracts_FeedbackReplyTools(t *testing.T) {
 	assertCommandCopies(t, "uf.address-feedback.md", true, []commandClause{
 		{name: "both gates before the call", all: []string{"ask this before posting, so one tool call does both.", "the question must be answered before posting."}},
 		{name: "judgment products as parameters", all: []string{"`resolve_threads`: `true` when the author chose to resolve the addressed threads", "`body` (the composed reply exactly as confirmed)"}},
 		{name: "tool-rendered summary", all: []string{"print the returned `summary` line verbatim;"}},
 		{name: "no hand retries", all: []string{"do not post, file, or resolve anything by hand: the re-run resumes from the cache."}},
-		{name: "checkpoint and clear", all: []string{"it records the `reply-comments` checkpoint.", "after the artifact is written, call `clear_progress`"}},
-		{name: "schema 1.1.0", all: []string{"\"schema_version\": \"1.1.0\"", "`schemas/feedback-triage/v1.1.0.schema.json`"}},
+		{name: "checkpoint and clear", all: []string{"it records the `reply-comments` checkpoint.", "cleared by `write_feedback_triage_artifact` after the artifact is written"}},
+		{name: "schema 1.1.0", all: []string{"uses schema 1.1.0", "`schemas/feedback-triage/v1.1.0.schema.json`"}},
 		{name: "issue filing tool", all: []string{"`file_feedback_issue`, which takes `pr_number`, `comment_kind`, `comment_id`, `title`, and `body`"}},
 	})
+
+	// The Section 4.7 mechanics that write_feedback_triage_artifact
+	// replaced (#1022) must not return as prose: the tool owns the
+	// envelope render, the round scan, the atomic write, and the
+	// terminal progress clear, so a re-added template or hand-called
+	// clear_progress would reintroduce hand-written artifact bytes.
+	for _, copy := range loadCommandCopies(t, "uf.address-feedback.md", true) {
+		normalized := normalizeCommandText(copy.text)
+		for _, gone := range []string{
+			`"hero": "cobalt-crush",`,
+			`"artifact_type": "feedback-triage",`,
+			`"schema_version": "1.1.0",`,
+			"scan existing files for the highest round number",
+			"write to a temp file first, then rename",
+			"after the artifact is written, call `clear_progress`",
+		} {
+			if strings.Contains(normalized, normalizeCommandText(gone)) {
+				t.Errorf("%s still carries removed text %q", copy.name, gone)
+			}
+		}
+		// The no-success Tier 2 guidance is judgment about what to
+		// pass, so it stays in prose (FTA-FR-006); pin its presence
+		// so an over-trimmed rewrite cannot drop it silently.
+		for _, kept := range []string{
+			"keep `tier2_unavailable: true`",
+			"non-authoritative compatibility value selected only after human handling",
+		} {
+			if !strings.Contains(normalized, normalizeCommandText(kept)) {
+				t.Errorf("%s lost the retained Tier 2 guidance %q", copy.name, kept)
+			}
+		}
+	}
 }
 
 func TestCommandContracts_CanonicalScaffoldParity(t *testing.T) {
