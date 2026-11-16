@@ -233,10 +233,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Verdicts that pass the gate without per-finding decisions (HARDEN-002):
- * any APPROVE-family verdict opens advancement directly.
+ * a plain APPROVE opens advancement directly. APPROVE WITH ADVISORIES is
+ * deliberately excluded — SYNTH-004 reverses the old APPROVE-family
+ * treatment because the review-dispatch finalizer maps every AWA
+ * consolidation to the canonical decision ESCALATED, so those verdicts
+ * are relayed (see isEscalatedAdvisorySpecVerdict) instead of advancing.
  */
 export function isApprovingSpecVerdict(verdict: string): boolean {
-  return verdict === "APPROVE" || verdict === "APPROVE WITH ADVISORIES"
+  return verdict === "APPROVE"
+}
+
+/**
+ * Verdicts the review-dispatch finalizer maps to the canonical decision
+ * ESCALATED (SYNTH-004): every APPROVE WITH ADVISORIES consolidation, so
+ * "marked ESCALATED" is not a distinguishing subset of advisory results.
+ * Relay purposes treat these like REQUEST CHANGES — the widened
+ * relay_spec_review_gate predicate pauses on them — while a plain
+ * APPROVE (canonical decision APPROVED) still advances without relay.
+ */
+export function isEscalatedAdvisorySpecVerdict(verdict: string): boolean {
+  return verdict === "APPROVE WITH ADVISORIES"
 }
 
 /** Parse one iteration entry from untrusted JSON; null when malformed. */
@@ -540,6 +556,12 @@ export type SpecReviewGateStatus =
  * leaves the pipeline open. `advanceable` is the all-override outcome: the
  * human adjudicated every finding without any apply decision, so
  * advancement is permitted with the overrides recorded.
+ *
+ * An escalated-advisory latest (APPROVE WITH ADVISORIES) also evaluates
+ * open (SYNTH-004): its hold is the relay predicate plus the
+ * advancement-step gate, not this per-finding machinery, so checkpoint's
+ * allowlist hold, the resume probe, and the dispatch guard keep their
+ * exact pre-SYNTH-004 behavior for advisory results.
  */
 export function evaluateSpecReviewGate(
   record: SpecReviewGateRecord | null,
@@ -549,6 +571,15 @@ export function evaluateSpecReviewGate(
   if (latest === null) return { kind: "open" }
   const { verdict } = latest.entry
   if (isApprovingSpecVerdict(verdict)) return { kind: "open" }
+  if (isEscalatedAdvisorySpecVerdict(verdict)) {
+    // SYNTH-004: the escalated-advisory hold is relay-purposes-only —
+    // relay_spec_review_gate pauses on the verdict and the advancement
+    // steps are held separately — never this per-finding gate, whose
+    // allowlist hold shape the spec keeps distinct from the advisory
+    // hold ("a hold over advancement steps, not an allowlist of
+    // permitted ones").
+    return { kind: "open" }
+  }
   if (verdict !== "REQUEST CHANGES" || latest.entry.finding_count === 0) {
     // Non-REQUEST-CHANGES outcomes (INCONCLUSIVE, UNAVAILABLE) carry no
     // adjudicable findings — the per-finding gate cannot operate on them,
@@ -593,7 +624,9 @@ export function evaluateSpecReviewGate(
  * those applied fixes caused must not re-fail the resume probe: the
  * adjudication that ordered the fixes plus the recorded subsequent
  * APPROVE already carry the verdict, so only the ancestry rule still
- * applies.
+ * applies. Approving here is the plain APPROVE of isApprovingSpecVerdict:
+ * an APPROVE WITH ADVISORIES latest is escalated (SYNTH-004) and does not
+ * complete the applied-fixes outcome.
  */
 export function approvalFollowsApplyDecisions(
   record: SpecReviewGateRecord | null,
@@ -610,4 +643,207 @@ export function approvalFollowsApplyDecisions(
   const decided = Number(set.iteration)
   if (!Number.isInteger(decided) || decided >= latest.iteration) return false
   return set.decisions.some((decision) => decision.decision === "apply")
+}
+
+// ---------------------------------------------------------------------------
+// Human-decision record (synthetic-compaction-continue-prompt-rec,
+// SYNTH-001/006)
+//
+// Single normative shape for human-decision authorization: a gate-override
+// `checkpoint` call cites a `human_decision_ref` naming a `decision_id`
+// recorded in the append-only human-decision record at
+// `.uf/progress/<key>/human-decisions.json` (SYNTH-006 store contract).
+// Producers and consumers (checkpoint, uf_delegate_command's
+// `human_decisions` envelope, record_human_decision) all import from here
+// so the shape cannot drift between plugins; the record's file I/O is
+// progress-state territory, mirroring the spec-review record layering.
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum length of a `human_decision_ref` checkpoint argument (SYNTH-006).
+ * The ref names a UUID v4 `decision_id`, so the bound guards against
+ * runaway input; length and pattern are both checked before any
+ * security-sensitive operation.
+ */
+export const HUMAN_DECISION_REF_MAX_LENGTH: number = 256
+
+/**
+ * Maximum size of a human-decision entry's question or answer text
+ * (SYNTH-006): at most 16 KiB each, measured in UTF-8 bytes by the
+ * recording surfaces.
+ */
+export const HUMAN_DECISION_TEXT_MAX_BYTES: number = 16 * 1024
+
+/**
+ * UUID v4 pattern a `decision_id` — and the `human_decision_ref` naming it
+ * — MUST match (SYNTH-006): canonical lowercase hex, version nibble `4`,
+ * RFC 4122 variant (`8`, `9`, `a`, or `b`), the shape machine-generated
+ * `crypto.randomUUID()` output produces.
+ */
+export const HUMAN_DECISION_ID_PATTERN: Readonly<RegExp> =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+/**
+ * Reference to a recorded human decision, supplied as the
+ * `human_decision_ref` argument of a gate-override `checkpoint` call
+ * (SYNTH-001). Reference only — `checkpoint` MUST NOT accept an inline
+ * human-decision payload in place of a reference. At run time the value
+ * MUST be at most `HUMAN_DECISION_REF_MAX_LENGTH` characters and match
+ * `HUMAN_DECISION_ID_PATTERN` (the UUID v4 shape of the `decision_id` it
+ * names); violations are rejected with a machine-parseable error before
+ * any security-sensitive operation.
+ */
+export type HumanDecisionRef = string
+
+/**
+ * The write surface that recorded an entry — exactly two exist
+ * (SYNTH-001): the in-session `question`-tool path
+ * (`record_human_decision`) and the orchestrator relay
+ * (`uf_delegate_command`'s typed `human_decisions` envelope, persisted at
+ * spawn time before the delegated child session runs).
+ */
+export type HumanDecisionSource = "question-tool" | "orchestrator-relay"
+
+/**
+ * One entry of the append-only human-decision record (SYNTH-006). Callers
+ * supply only source, question, and answer; `decision_id` (UUID v4) and
+ * `recorded_at` are machine-generated by the recording surface. Question
+ * and answer content MUST NOT be logged at INFO or above — errors and
+ * logs name bounded identifiers only (`decision_id`, step, data key).
+ */
+export interface HumanDecisionEntry {
+  /**
+   * Machine-generated UUID v4 identity; the target a `human_decision_ref`
+   * names. Callers never supply it.
+   */
+  readonly decision_id: string
+  /** The write surface that recorded the entry. */
+  readonly source: HumanDecisionSource
+  /** Question text as presented to the human; at most 16 KiB. */
+  readonly question: string
+  /** Answer text as received from the human; at most 16 KiB. */
+  readonly answer: string
+  /** Machine-generated ISO timestamp of the recording. */
+  readonly recorded_at: string
+}
+
+/**
+ * Check a question or answer text against the SYNTH-006 byte bound
+ * (at most `HUMAN_DECISION_TEXT_MAX_BYTES`, measured in UTF-8 bytes).
+ * Both recording surfaces and the record parser enforce this predicate so
+ * zod's character-counting `.max()` is never the only line of defense —
+ * the bound is a byte bound, and violations are rejected before any
+ * security-sensitive operation.
+ *
+ * @param text Question or answer text to bound-check.
+ * @returns True when the text is within 16 KiB UTF-8 bytes.
+ */
+export function isHumanDecisionTextWithinBounds(text: string): boolean {
+  return Buffer.byteLength(text, "utf8") <= HUMAN_DECISION_TEXT_MAX_BYTES
+}
+
+/**
+ * The synthetic compaction prompt opencode injects after every compaction
+ * (SYNTH-006 deny-list needle). This text is machinery output, never human
+ * input, so a human-decision answer reproducing it is a session quoting
+ * its own context as consent — exactly the incident shape the checkpoint
+ * gate closes. Quoted without a trailing period: the match is substring
+ * containment, so the injected message's period never breaks it.
+ */
+export const SYNTHETIC_COMPACTION_PROMPT: string =
+  "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed"
+
+/**
+ * Normalize text for the SYNTH-006 deny-list comparison: trim the ends,
+ * collapse interior whitespace runs (spaces, tabs, newlines) to single
+ * spaces, and case-fold. Normalization is exactly the three steps the
+ * spec names — no punctuation or quote stripping — because the match is
+ * substring containment, which already covers the prompt wrapped in any
+ * quoting or embedded in a larger justification.
+ *
+ * @param text Question or answer text to normalize.
+ * @returns The trimmed, whitespace-collapsed, case-folded text.
+ */
+export function normalizeHumanDecisionText(text: string): string {
+  return text.trim().replace(/\s+/g, " ").toLowerCase()
+}
+
+/** The deny-list needle under its own normalization (computed once). */
+const NORMALIZED_SYNTHETIC_COMPACTION_PROMPT: string = normalizeHumanDecisionText(
+  SYNTHETIC_COMPACTION_PROMPT,
+)
+
+/**
+ * Whether an answer text, after SYNTH-006 normalization, contains the
+ * normalized synthetic compaction prompt as a substring — the deny-list
+ * match `record_human_decision` refuses. Containment covers the prompt
+ * verbatim, in any case, with any whitespace variation, wrapped in any
+ * quoting, or embedded in a larger justification; a partial quote that
+ * does not contain the full prompt is outside this predicate (SYNTH-001's
+ * reference requirement governs those at checkpoint time, not the
+ * deny-list).
+ *
+ * @param answer Answer text as received from the human.
+ * @returns True when the normalized answer contains the normalized prompt.
+ */
+export function isSyntheticCompactionPromptAnswer(answer: string): boolean {
+  return normalizeHumanDecisionText(answer).includes(NORMALIZED_SYNTHETIC_COMPACTION_PROMPT)
+}
+
+/**
+ * Caller-supplied half of a human-decision append (SYNTH-006): the two
+ * recording surfaces pass exactly source, question, and answer —
+ * `decision_id` and `recorded_at` are machine-stamped by the store, never
+ * accepted from a caller. The orchestrator-relay envelope constrains
+ * `source` to `"orchestrator-relay"` structurally (the surface is the
+ * source), so a caller can never claim question-tool provenance through
+ * the relay.
+ */
+export interface HumanDecisionAppendInput {
+  /** The write surface recording the entry. */
+  readonly source: HumanDecisionSource
+  /** Question text as presented to the human; at most 16 KiB, non-empty. */
+  readonly question: string
+  /** Answer text as received from the human; at most 16 KiB, non-empty. */
+  readonly answer: string
+}
+
+/**
+ * Parse an untrusted value as the persisted human-decision record (SYNTH-006):
+ * a JSON array of `HumanDecisionEntry`. Returns null when the value is not
+ * an array or any entry violates the record contract (UUID v4
+ * `decision_id`, a known `source`, non-empty question and answer within the
+ * 16 KiB byte bound, string `recorded_at`) — a corrupted record must fail
+ * closed at the caller, never silently shrink to the entries that happen to
+ * parse. Mirrors `parseSpecReviewGateRecord`'s pure-strictness layering.
+ *
+ * @param value Untrusted JSON value read from the record file.
+ * @returns The validated entries, or null when the record is malformed.
+ */
+export function parseHumanDecisionRecord(value: unknown): readonly HumanDecisionEntry[] | null {
+  if (!Array.isArray(value)) return null
+  const entries: HumanDecisionEntry[] = []
+  for (const raw of value) {
+    if (typeof raw !== "object" || raw === null) return null
+    const entry = raw as Record<string, unknown>
+    if (typeof entry.decision_id !== "string" || !HUMAN_DECISION_ID_PATTERN.test(entry.decision_id)) {
+      return null
+    }
+    if (entry.source !== "question-tool" && entry.source !== "orchestrator-relay") return null
+    if (typeof entry.question !== "string" || entry.question === "" || !isHumanDecisionTextWithinBounds(entry.question)) {
+      return null
+    }
+    if (typeof entry.answer !== "string" || entry.answer === "" || !isHumanDecisionTextWithinBounds(entry.answer)) {
+      return null
+    }
+    if (typeof entry.recorded_at !== "string" || entry.recorded_at === "") return null
+    entries.push({
+      decision_id: entry.decision_id,
+      source: entry.source,
+      question: entry.question,
+      answer: entry.answer,
+      recorded_at: entry.recorded_at,
+    })
+  }
+  return entries
 }

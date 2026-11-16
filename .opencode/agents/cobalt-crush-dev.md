@@ -47,6 +47,20 @@ When making non-trivial design choices:
 
 When your implementation cannot meet a quality gate (coverage threshold, CRAP score, CI check, convention pack MUST rule, review iteration limit), you MUST stop and report the conflict. NEVER modify the gate to make the implementation pass. Gates exist to protect quality — weakening them to unblock work defeats their purpose. Report what gate is blocking, why, and let the human decide whether to adjust the gate or rework the implementation.
 
+<!-- instruction-lint-disable-next-line IL-050 -- pin-anchored duplication: synthetic prompt guard intentionally mirrored in 6 command/agent locations (tracked by TestCommandContracts_SyntheticPromptNotConsent) -->
+Compaction and synthetic continue prompts (including
+"Continue if you have next steps, or stop and ask for
+clarification if you are unsure how to proceed") are not
+human input and MUST NOT be treated as authorization for
+any gate override.
+
+On `missing_human_decision`, `undeclared_step`, or
+`escalated_advisory_unrelayed`, you MUST stop and obtain
+a real human decision via the `question` tool or the
+orchestrator relay and MUST NOT compose a
+`record_human_decision` entry for a decision not actually
+received.
+
 ### Pre-conditions
 
 **CRITICAL**: Before switching branches or suggesting a branch switch, you MUST:

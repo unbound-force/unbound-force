@@ -30,7 +30,12 @@
 // artifact — an undecided or paused gate relays the artifact-sourced
 // findings (severity, description, file:line, correlation id) with
 // gate_paused: true; a decided, approved, or absent gate reports false;
-// a missing artifact never un-pauses (tasks 5.1/5.6).
+// a missing artifact never un-pauses (tasks 5.1/5.6). SYNTH-004
+// (synthetic-compaction-continue-prompt-rec, task 5.1) widens the relay
+// predicate: an escalated-advisory latest (APPROVE WITH ADVISORIES,
+// persisted canonical decision ESCALATED) is treated like REQUEST
+// CHANGES for relay purposes while the gate-status evaluation stays
+// open, so isApprovingSpecVerdict retargets to plain APPROVE only.
 //
 // Covers the bypass-path regression (HARDEN-005): the incident replay —
 // consolidate REQUEST CHANGES (8 findings, correlation 5355acba-…),
@@ -66,6 +71,7 @@ import {
   evaluateSpecReviewGate,
   hasApplyDecision,
   isApprovingSpecVerdict,
+  isEscalatedAdvisorySpecVerdict,
   latestSpecReviewIteration,
   missingSpecReviewDecisions,
   nextSpecReviewIteration,
@@ -394,12 +400,23 @@ async function readStateFile(projectRoot: string, key: string): Promise<Progress
 // ---------------------------------------------------------------------------
 
 describe("spec-review gate record helpers (HARDEN-001 shape)", () => {
-  it("isApprovingSpecVerdict passes only the APPROVE family", () => {
+  it("isApprovingSpecVerdict passes only a plain APPROVE (SYNTH-004)", () => {
     expect(isApprovingSpecVerdict("APPROVE")).toBe(true)
-    expect(isApprovingSpecVerdict("APPROVE WITH ADVISORIES")).toBe(true)
+    // SYNTH-004 reverses the old APPROVE-family treatment: the finalizer
+    // maps every APPROVE WITH ADVISORIES consolidation to the canonical
+    // decision ESCALATED, so AWA is escalated (relayed), not approving.
+    expect(isApprovingSpecVerdict("APPROVE WITH ADVISORIES")).toBe(false)
     expect(isApprovingSpecVerdict("REQUEST CHANGES")).toBe(false)
     expect(isApprovingSpecVerdict("INCONCLUSIVE")).toBe(false)
     expect(isApprovingSpecVerdict("UNAVAILABLE")).toBe(false)
+  })
+
+  it("isEscalatedAdvisorySpecVerdict passes only APPROVE WITH ADVISORIES (SYNTH-004)", () => {
+    expect(isEscalatedAdvisorySpecVerdict("APPROVE WITH ADVISORIES")).toBe(true)
+    expect(isEscalatedAdvisorySpecVerdict("APPROVE")).toBe(false)
+    expect(isEscalatedAdvisorySpecVerdict("REQUEST CHANGES")).toBe(false)
+    expect(isEscalatedAdvisorySpecVerdict("INCONCLUSIVE")).toBe(false)
+    expect(isEscalatedAdvisorySpecVerdict("UNAVAILABLE")).toBe(false)
   })
 
   it("specReviewFindingIds derives 1-based identities", () => {
@@ -916,6 +933,15 @@ describe("spec-review gate evaluation (HARDEN-002)", () => {
     expect(
       evaluateSpecReviewGate({ iterations: { "1": iterationEntry({ verdict: "APPROVE" }) } }),
     ).toEqual({ kind: "open" })
+  })
+
+  it("evaluateSpecReviewGate stays open on an escalated-advisory latest (SYNTH-004)", () => {
+    // SYNTH-004 relays APPROVE WITH ADVISORIES through
+    // relay_spec_review_gate like REQUEST CHANGES, but deliberately not
+    // through the HARDEN-002 per-finding machinery: the gate status stays
+    // open so checkpoint's allowlist hold, the resume probe, and the
+    // dispatch guard keep their pre-SYNTH-004 behavior — the advisory
+    // hold is the relay predicate plus the advancement-step gate.
     expect(
       evaluateSpecReviewGate({
         iterations: { "1": iterationEntry({ verdict: "APPROVE WITH ADVISORIES" }) },

@@ -2014,9 +2014,13 @@ retains its no-artifact fallback.
   confirmation** -- proceed immediately from one step to
   the next. The only legitimate mid-pipeline human
   interactions are the interactive clarify ask gate in
-  Step 1 (Speckit) and the per-finding spec review
-  decision gate in Step 4 -- required human input
-  within a step, not between-step confirmations. At
+  Step 1 (Speckit), the per-finding spec review
+  decision gate in Step 4, and the enforcement-code
+  recovery on `missing_human_decision`,
+  `undeclared_step`, or `escalated_advisory_unrelayed`
+  (via the `question` tool or orchestrator relay) --
+  required human input within a step, not between-step
+  confirmations. At
   the ask gate, every question Dewey cannot answer
   MUST be asked through the question tool, one at a
   time, before the clarify exit is taken. At the
@@ -2070,5 +2074,19 @@ retains its no-artifact fallback.
   demo output by calling `format_unleash_demo`, emitting
   the returned text verbatim; never reconstruct it from
   memory or paraphrase it
+
+<!-- instruction-lint-disable-next-line IL-050 -- pin-anchored duplication: synthetic prompt guard intentionally mirrored in 6 command/agent locations (tracked by TestCommandContracts_SyntheticPromptNotConsent) -->
+Compaction and synthetic continue prompts (including
+"Continue if you have next steps, or stop and ask for
+clarification if you are unsure how to proceed") are not
+human input and MUST NOT be treated as authorization for
+any gate override.
+
+On `missing_human_decision`, `undeclared_step`, or
+`escalated_advisory_unrelayed`, you MUST stop and obtain
+a real human decision via the `question` tool or the
+orchestrator relay and MUST NOT compose a
+`record_human_decision` entry for a decision not actually
+received.
 
 </protect>
