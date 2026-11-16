@@ -165,6 +165,7 @@ describe("provider-free scratch-repository smoke test", () => {
         "parse_tasks",
         "post_feedback_replies",
         "post_issue_comment",
+        "record_human_decision",
         "relay_spec_review_gate",
         "resolve_base_ref",
         "resolve_clarification",
@@ -197,13 +198,16 @@ describe("provider-free scratch-repository smoke test", () => {
       // (task_classification, skill, skill_absent_reason) must reach the
       // model-facing schema alongside the eight pre-change parameters,
       // plus the four model-matrix selection parameters (model, variant,
-      // profile, pack — model-matrix-delegation task 5.1, UF-FR-002).
+      // profile, pack — model-matrix-delegation task 5.1, UF-FR-002) and
+      // the orchestrator-relay human_decisions envelope
+      // (synthetic-compaction-continue-prompt-rec task 2.2, SYNTH-001/006).
       expect(Object.keys(hooks.tool.uf_delegate_command.args).sort()).toEqual([
         "agent",
         "checkpoint_step",
         "command_path",
         "expected_artifact",
         "feature_dir",
+        "human_decisions",
         "idle_timeout",
         "model",
         "pack",

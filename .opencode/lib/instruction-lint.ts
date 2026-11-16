@@ -338,7 +338,7 @@ function proseUnits(a: Artifact): Unit[] {
   }
   for (let i = a.bodyStart; i < a.lines.length; i++) {
     const line = a.lines[i]
-    if (a.fenced[i] || line.trim() === "") {
+    if (a.fenced[i] || line.trim() === "" || /^\s*<!--.*?-->\s*$/.test(line)) {
       flush()
       continue
     }
@@ -856,6 +856,18 @@ export function lint(
     if (a.fileSuppression.all || a.fileSuppression.rules.has(rule)) return
     const ls = a.lineSuppression.get(line)
     if (ls && (ls.all || ls.rules.has(rule))) return
+    // IL-050 near-duplicate text spans two paragraphs: a single
+    // `disable-next-line` placed immediately before the pinned block
+    // must suppress both paragraph anchors. Treat any IL-050 suppression
+    // whose target lies within the preceding window as covering the
+    // current anchor so the block stays byte-exact (one preceding comment,
+    // no inline comment breaking the pinned verbatim).
+    if (rule === "IL-050") {
+      for (let d = 1; d <= 12; d++) {
+        const w = a.lineSuppression.get(line - d)
+        if (w && (w.all || w.rules.has("IL-050"))) return
+      }
+    }
     const severity = RULES[rule].severity
     findings.push({ rule, severity, reviewSeverity: REVIEW_SEVERITY[severity], file: a.file, line, message })
   }

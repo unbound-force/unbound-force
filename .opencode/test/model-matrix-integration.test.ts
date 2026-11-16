@@ -1001,9 +1001,11 @@ describe("uf_delegate_command model-matrix seam verification", () => {
     const harness = integrationDeps({})
     const delegate = createDelegateCommandTool(recordingExec().exec, FAKE_CWD, harness.deps)
 
-    // The tool's registered args carry the full fifteen-parameter surface —
-    // the ten pre-change parameters plus the four selection parameters and
-    // variant — so the host-side schema and the executor's internal
+    // The tool's registered args carry the full sixteen-parameter surface —
+    // the ten pre-change parameters plus the four selection parameters,
+    // variant, and the orchestrator-relay human_decisions envelope
+    // (synthetic-compaction-continue-prompt-rec task 2.2, SYNTH-001/006) —
+    // so the host-side schema and the executor's internal
     // re-validation cannot drift apart.
     const registered = delegate as unknown as {
       args: Record<string, { safeParse: (value: unknown) => { success: boolean } }>
@@ -1026,6 +1028,7 @@ describe("uf_delegate_command model-matrix seam verification", () => {
         "variant",
         "profile",
         "pack",
+        "human_decisions",
       ].sort(),
     )
 
