@@ -70,8 +70,10 @@ import {
   type BaseRefResolution,
 } from "../../lib/review-diff.js"
 import {
+  appendHumanDecisions,
   deleteState,
   isEnoent,
+  readHumanDecisionRecord,
   readSpecReviewGateRecord,
   readState,
   reconcileSpecReviewGateState,
@@ -86,6 +88,11 @@ import {
   defaultGitExec,
   evaluateSpecReviewGate,
   failure,
+  HUMAN_DECISION_ID_PATTERN,
+  HUMAN_DECISION_REF_MAX_LENGTH,
+  isEscalatedAdvisorySpecVerdict,
+  isHumanDecisionTextWithinBounds,
+  isSyntheticCompactionPromptAnswer,
   latestSpecReviewIteration,
   normalizeModelName,
   sanitizeSlug,
@@ -93,8 +100,11 @@ import {
   SPEC_REVIEW_GATE_STEP_ALLOWLIST,
   SPEC_REVIEW_STATE_COMMAND,
   type GitExec,
+  type HumanDecisionEntry,
+  type HumanDecisionSource,
   type SpecReviewDecision,
   type SpecReviewGateStatus,
+  type SpecReviewIterationEntry,
 } from "../../lib/uf-workflow-types.js"
 import {
   UNLEASH_EXIT_VARIANTS,
@@ -337,6 +347,311 @@ function specReviewGateRefusalCode(status: SpecReviewGateStatus): string {
   return "spec_review_gate_paused"
 }
 
+// ---------------------------------------------------------------------------
+// Gate-override human-decision reference (SYNTH-001, task 2.4)
+// ---------------------------------------------------------------------------
+
+/** Substring whose presence in a data key marks a gate override (SYNTH-001). */
+const GATE_OVERRIDE_KEY_SUBSTRING = "override"
+
+/** Bound on a data-key path echoed into an error envelope (SYNTH-006 bounded identifiers). */
+const GATE_OVERRIDE_KEY_PATH_MAX_LENGTH = 256
+
+/**
+ * Maximum length of a checkpoint step name (SYNTH-006 input domain). One
+ * bound, two roles: the input bound rejects step names over 128 characters
+ * before any security-sensitive operation (checked first in the checkpoint
+ * tool's execute), and the same value caps the step-name echo in error
+ * envelopes — the oversize-rejection message names the offending step
+ * truncated to this bound, and every later rejection echoes a step name
+ * already within it. Exported so tests and the zod args schema share the
+ * single definition.
+ */
+export const CHECKPOINT_STEP_NAME_MAX_LENGTH = 128
+
+/** Bound on the record-read failure detail echoed into an error envelope. */
+const HUMAN_DECISION_READ_ERROR_DETAIL_MAX_LENGTH = 200
+
+/**
+ * Bound an identifier echoed into an error envelope. SYNTH-006 mandates that
+ * errors name bounded identifiers (decision_id, step, data key) — never raw
+ * question, answer, or justification text — and key paths or step names from
+ * caller JSON are unbounded by construction, so the echo is capped.
+ *
+ * @param value Identifier to echo (step name, key path, failure detail).
+ * @param maxLength Maximum characters the echo may occupy.
+ * @returns The identifier, truncated with an ellipsis marker when over bound.
+ */
+function boundIdentifierEcho(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 3)}...`
+}
+
+/**
+ * Find the first `data` key, at any nesting depth (objects and arrays), whose
+ * name contains `override` case-insensitively — the SYNTH-001 tripwire.
+ *
+ * Design decision (defense-in-depth layering): the declared-step allowlist
+ * (SYNTH-003, task 4.1) is the authoritative gate over step names; this scan
+ * is the tripwire that catches gate overrides smuggled through `data` keys
+ * under any step name, at any depth — the incident shape quoted the synthetic
+ * continue prompt inside `data.checklist_override`. The scan matches key
+ * NAMES only (values are ordinary data); the top-level
+ * `spec_review_decisions` argument is the existing HARDEN-002 surface whose
+ * per-finding validation handles its own override justification requirements,
+ * and it is deliberately not swept into this predicate. The walk is iterative
+ * (explicit stack): JSON.parse output is a finite acyclic tree, so the scan
+ * terminates without a visited set, and iteration keeps adversarially deep
+ * nesting from overflowing the call stack.
+ *
+ * @param data Parsed checkpoint `data` value; non-objects carry no keys.
+ * @returns The dotted key path of the first override-carrying key (array
+ *   elements indexed as `[n]`), or null when no key name matches.
+ */
+export function findGateOverrideDataKey(data: unknown): string | null {
+  if (typeof data !== "object" || data === null) return null
+  const stack: Array<{ value: unknown; path: string }> = [{ value: data, path: "" }]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    if (node === undefined) break
+    if (Array.isArray(node.value)) {
+      // Push in reverse so pop() visits elements in index order — the
+      // reported key path is deterministic (first match in DFS pre-order).
+      for (let index = node.value.length - 1; index >= 0; index--) {
+        stack.push({ value: node.value[index], path: `${node.path}[${index}]` })
+      }
+      continue
+    }
+    if (typeof node.value === "object" && node.value !== null) {
+      const entries = Object.entries(node.value)
+      for (let index = entries.length - 1; index >= 0; index--) {
+        const [key, child] = entries[index]
+        const keyPath = node.path === "" ? key : `${node.path}.${key}`
+        if (key.toLowerCase().includes(GATE_OVERRIDE_KEY_SUBSTRING)) {
+          return keyPath
+        }
+        stack.push({ value: child, path: keyPath })
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Whether a `human_decision_ref` string satisfies the SYNTH-006 input domain:
+ * at most `HUMAN_DECISION_REF_MAX_LENGTH` characters and matching the UUID v4
+ * `HUMAN_DECISION_ID_PATTERN` of the `decision_id` it names. Shape is checked
+ * before any record lookup, so a non-conforming reference — free text, an
+ * oversize blob, a quoted synthetic prompt — never reaches the record read
+ * and can never be interpolated into a path (the ref is only ever compared).
+ *
+ * @param ref Caller-supplied human_decision_ref string.
+ * @returns True when the ref is within the length bound and matches the pattern.
+ */
+export function isHumanDecisionRefWithinShape(ref: string): boolean {
+  return ref.length <= HUMAN_DECISION_REF_MAX_LENGTH && HUMAN_DECISION_ID_PATTERN.test(ref)
+}
+
+// ---------------------------------------------------------------------------
+// Declared checkpoint step enforcement (SYNTH-003, task 4.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The declared step allowlist for `uf.unleash` checkpoints (SYNTH-003): the
+ * union of both writer surfaces that record steps under command `uf.unleash` —
+ * the pipeline's user-facing steps, the machinery steps the uf-workflow plugin
+ * auto-checkpoints, and the gate and budget steps the `uf.unleash` command
+ * prose records. `implement-phase-N` (N a positive integer) is matched by
+ * {@link IMPLEMENT_PHASE_STEP_PATTERN}, not listed here. A step name outside
+ * this set rejects with `undeclared_step` unless a valid `human_decision_ref`
+ * per SYNTH-001 authorizes it.
+ *
+ * Distinct from `SPEC_REVIEW_GATE_STEP_ALLOWLIST` (HARDEN-002): that list
+ * names the steps permitted WHILE the spec-review gate holds; this list names
+ * the steps `uf.unleash` may record at all. Every HARDEN-002-permitted step
+ * is also declared here, but the converse is false — `implement` is declared
+ * yet refused while the gate holds. Keep the two surfaces separate.
+ *
+ * Exported so the lockstep consistency test (task 4.2) enumerates both writer
+ * surfaces against this single definition.
+ */
+export const UNLEASH_DECLARED_STEP_ALLOWLIST: readonly string[] = [
+  // Plugin auto-checkpointed machinery steps (recordAutoCheckpoint call
+  // sites recording under command uf.unleash).
+  "branch-safety-gate",
+  "tier-routing",
+  "resumability-detection",
+  // User-facing pipeline steps (uf.unleash command prose, Steps 1-10).
+  "clarify",
+  "plan",
+  "tasks",
+  "spec-review",
+  // implement-phase-N is pattern-matched, not enumerated.
+  "implement",
+  "code-review",
+  "quick-pre-flight",
+  "quick-fix-budget",
+  "retrospective",
+  "demo",
+]
+
+/**
+ * Matches the `implement-phase-N` step family: N a positive integer (>= 1)
+ * written canonically — no leading zero, no trailing characters — because the
+ * phase machinery records `implement-phase-${phase.number}` and
+ * `String(number)` never emits a leading zero. `implement-phase-0`,
+ * `implement-phase-`, `implement-phase-01`, and `implement-phase-2x` all
+ * fail this pattern.
+ */
+const IMPLEMENT_PHASE_STEP_PATTERN = /^implement-phase-[1-9][0-9]*$/
+
+/**
+ * Whether `step` is declared for `uf.unleash` checkpoints (SYNTH-003): a
+ * member of {@link UNLEASH_DECLARED_STEP_ALLOWLIST} or an
+ * `implement-phase-N` name with N a positive integer.
+ *
+ * @param step Checkpoint step name (callers bound it to
+ *   {@link CHECKPOINT_STEP_NAME_MAX_LENGTH} before this check).
+ * @returns True when the step is in the declared set for `uf.unleash`.
+ */
+export function isDeclaredUnleashCheckpointStep(step: string): boolean {
+  return (
+    UNLEASH_DECLARED_STEP_ALLOWLIST.includes(step) || IMPLEMENT_PHASE_STEP_PATTERN.test(step)
+  )
+}
+
+/**
+ * Whether `step` is an advancement step for `uf.unleash` checkpoints
+ * (SYNTH-004): the literal `implement` step or an `implement-phase-N` name
+ * with N a positive integer. These are the steps that advance the pipeline
+ * from spec-review into implementation, so the escalated-advisory hold
+ * (task 5.2) rejects exactly this set — a hold over the advancement steps,
+ * not an allowlist of permitted ones — while every other declared step still
+ * records. Both writer surfaces reduce to this predicate: a phase checkpoint
+ * carries the literal step string, and the `phase` argument records
+ * `implement-phase-${phase.number}` directly (upsertCheckpointStep enforces
+ * the match) with no prerequisite `implement` record, so gating only
+ * `implement` would leave the phase path around the hold.
+ *
+ * @param step Checkpoint step name (callers bound it to
+ *   {@link CHECKPOINT_STEP_NAME_MAX_LENGTH} before this check).
+ * @returns True when the step advances the pipeline into implementation.
+ */
+export function isUnleashAdvancementCheckpointStep(step: string): boolean {
+  return step === "implement" || IMPLEMENT_PHASE_STEP_PATTERN.test(step)
+}
+
+/**
+ * Outcome of resolving a `human_decision_ref` against the persisted
+ * human-decision record — the shared SYNTH-001 authorization path every
+ * checkpoint gate that a reference can satisfy resolves through (the
+ * override-data-key tripwire and the declared-step escape hatch).
+ */
+export type HumanDecisionRefResolution =
+  | { outcome: "authorized"; ref: string }
+  | { outcome: "shape_failure"; requirement: string }
+  | { outcome: "record_unreadable"; detail: string }
+  | { outcome: "unrecorded_ref"; ref: string }
+
+/**
+ * Resolve a `human_decision_ref` against the persisted human-decision record
+ * for a state key (SYNTH-001). Shape is checked first (SYNTH-006): a
+ * non-conforming ref — free text, a quoted synthetic prompt, an oversize
+ * blob — never reaches the record read and never has its supplied value
+ * echoed. An absent record file is the empty-record case; every other read
+ * failure is reported as `record_unreadable` so callers fail closed rather
+ * than treating the failure as a missing reference. Envelope text is rendered
+ * by the caller so each gate names its own context; the validation sequence
+ * lives here once.
+ *
+ * @param cwd Project root holding `.uf/progress/`.
+ * @param key Sanitized state key naming the record directory.
+ * @param ref Caller-supplied `human_decision_ref`, when present.
+ * @returns The resolution outcome; `authorized`/`unrecorded_ref` carry the
+ *   shape-validated ref.
+ */
+export function resolveHumanDecisionRef(
+  cwd: string,
+  key: string,
+  ref: string | undefined,
+): HumanDecisionRefResolution {
+  if (typeof ref !== "string" || !isHumanDecisionRefWithinShape(ref)) {
+    let requirement: string
+    if (typeof ref !== "string") {
+      requirement = "requires human_decision_ref"
+    } else if (ref.length > HUMAN_DECISION_REF_MAX_LENGTH) {
+      requirement = `human_decision_ref exceeds ${HUMAN_DECISION_REF_MAX_LENGTH} characters`
+    } else {
+      requirement = "human_decision_ref does not match the UUID v4 decision_id pattern"
+    }
+    return { outcome: "shape_failure", requirement }
+  }
+  let recorded: readonly HumanDecisionEntry[]
+  try {
+    // SYNTH-006 lookup semantics: an absent record file is the empty-record
+    // case (readHumanDecisionRecord returns []), which reports unrecorded_ref
+    // below; every other failure — permission denied, corrupted JSON,
+    // malformed entries — is reported as record_unreadable so callers fail
+    // closed.
+    recorded = readHumanDecisionRecord(cwd, key)
+  } catch (err: unknown) {
+    return {
+      outcome: "record_unreadable",
+      detail: err instanceof Error ? err.message : String(err),
+    }
+  }
+  if (!recorded.some((entry) => entry.decision_id === ref)) {
+    return { outcome: "unrecorded_ref", ref }
+  }
+  return { outcome: "authorized", ref }
+}
+
+// ---------------------------------------------------------------------------
+// Escalated-advisory advancement hold (SYNTH-004, task 5.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Render the escalated-advisory hold refusal (SYNTH-004, task 5.2). The
+ * message names the holding iteration, its verdict, correlation id, and
+ * finding count — the relay's identifying payload — plus the covering
+ * failure detail when the call supplied a reference that did not resolve,
+ * and the recovery path: relay the advisory, record the human decision,
+ * then cite its decision_id. Mirrors {@link specReviewGateMessage} (the
+ * HARDEN-002 renderer): one deterministic message per hold, built from
+ * bounded identifiers only.
+ *
+ * @param latest The holding latest iteration from
+ *   {@link latestSpecReviewIteration}.
+ * @param resolution The covering-resolution outcome for this call.
+ * @param key Sanitized state key naming the human-decision record.
+ * @returns The refusal message for the `escalated_advisory_unrelayed`
+ *   envelope.
+ */
+function escalatedAdvisoryHoldMessage(
+  latest: { iteration: number; entry: SpecReviewIterationEntry },
+  resolution: HumanDecisionRefResolution,
+  key: string,
+): string {
+  // The coverage detail distinguishes a fabricated reference (shape-valid,
+  // names no recorded entry — a bounded decision_id-shaped echo) from a
+  // malformed one (fixed requirement text) from a bare uncovered hold;
+  // SYNTH-006 bounded-identifier discipline applies to all three.
+  const coverage =
+    resolution.outcome === "unrecorded_ref"
+      ? ` — human_decision_ref ${resolution.ref} names no decision recorded for key ${key}`
+      : resolution.outcome === "shape_failure"
+        ? ` — ${resolution.requirement}`
+        : ""
+  return (
+    `escalated advisory hold: spec-review iteration ${latest.iteration} consolidated to ` +
+    `${latest.entry.verdict} (correlation ${latest.entry.correlation_id}, ` +
+    `${latest.entry.finding_count} findings) and no human-decision reference covers the ` +
+    `escalation (SYNTH-004)${coverage} — relay it via relay_spec_review_gate, record the ` +
+    "relayed human decision through the question tool or the orchestrator relay, then cite " +
+    "its decision_id as human_decision_ref; the advancement steps implement and " +
+    "implement-phase-N reject until the relayed decision is recorded"
+  )
+}
+
 /** Factory for the checkpoint tool (FR-001). */
 export function createCheckpointTool(exec: GitExec, cwd: string) {
   return tool({
@@ -349,10 +664,29 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
       "get_progress returns under `phases`. While the latest spec-review " +
       "iteration consolidated to REQUEST CHANGES, only gate-machinery steps " +
       "may be recorded until per-finding decisions adjudicate it via " +
-      "spec_review_decisions (HARDEN-002).",
+      "spec_review_decisions (HARDEN-002). Any data key at any nesting depth " +
+      "containing \"override\" marks a gate override and requires a " +
+      "human_decision_ref naming a recorded decision_id (SYNTH-001); free-text " +
+      "justification — including the synthetic continue prompt — never " +
+      "satisfies it. Under command uf.unleash the step name must come from " +
+      "the declared step set (the pipeline steps, the plugin's machinery " +
+      "steps, and implement-phase-<number>); an undeclared step rejects with " +
+      "undeclared_step unless a valid human_decision_ref authorizes it " +
+      "(SYNTH-003). While the latest spec-review iteration consolidated to " +
+      "APPROVE WITH ADVISORIES (persisted canonical decision ESCALATED), the " +
+      "advancement steps implement and implement-phase-<number> reject with " +
+      "escalated_advisory_unrelayed naming the correlation and finding count " +
+      "until a human_decision_ref naming a recorded decision_id covers the " +
+      "relayed advisory (SYNTH-004); every other declared step still records.",
     args: {
       command: z.string().describe("Command identifier (e.g. uf.unleash)"),
-      step: z.string().describe("Step name to record as completed"),
+      step: z
+        .string()
+        .max(CHECKPOINT_STEP_NAME_MAX_LENGTH)
+        .describe(
+          `Step name to record as completed (at most ${CHECKPOINT_STEP_NAME_MAX_LENGTH} ` +
+            "characters; under uf.unleash it must be a declared step name — SYNTH-003)",
+        ),
       data: z.string().optional().describe(
         "Optional JSON object string to merge into state data via Object.assign",
       ),
@@ -389,6 +723,20 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
             "iteration's finding_ids and recorded with derived overrides " +
             "before the step is recorded.",
         ),
+      human_decision_ref: z
+        .string()
+        .max(HUMAN_DECISION_REF_MAX_LENGTH)
+        .regex(HUMAN_DECISION_ID_PATTERN, "must match the UUID v4 decision_id pattern")
+        .optional()
+        .describe(
+          "Reference naming a decision_id recorded in the human-decision record " +
+            "(.uf/progress/<key>/human-decisions.json); required whenever any data " +
+            "key at any nesting depth contains \"override\" (SYNTH-001), and the " +
+            "covering reference that lifts the escalated-advisory hold on the " +
+            "advancement steps implement and implement-phase-<number> (SYNTH-004). " +
+            "Reference only — an inline human-decision payload is not accepted in " +
+            "place of a reference.",
+        ),
     },
     execute: async (args: {
       command: string
@@ -397,8 +745,29 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
       key?: string
       phase?: { number: number; verdict: "green" | "failed"; inventory?: PhaseFailureEntry[] }
       spec_review_decisions?: SpecReviewDecision[]
+      human_decision_ref?: string
     }) => {
       try {
+        // SYNTH-006 input domain (task 4.1): step names are bounded at
+        // CHECKPOINT_STEP_NAME_MAX_LENGTH, and the bound is enforced before
+        // any security-sensitive operation — file path derivation, record
+        // lookup, state persistence — so an oversize name never reaches
+        // them. The bound is command-agnostic (an input-domain limit, not a
+        // uf.unleash-scoped predicate) and no human_decision_ref can
+        // authorize an unbounded name; the echo is capped to the same bound.
+        if (args.step.length > CHECKPOINT_STEP_NAME_MAX_LENGTH) {
+          const stepEcho = boundIdentifierEcho(args.step, CHECKPOINT_STEP_NAME_MAX_LENGTH)
+          return {
+            output: JSON.stringify(
+              failure(
+                `step name exceeds ${CHECKPOINT_STEP_NAME_MAX_LENGTH} characters (SYNTH-006): ` +
+                  `"${stepEcho}" — rejected before any security-sensitive operation; supply a ` +
+                  "step name within the bound",
+                { retryable: false, code: "oversize_step" },
+              ),
+            ),
+          }
+        }
         const key = resolveKey(exec, cwd, args.key)
         const cmd = sanitizeSlug(args.command)
 
@@ -412,6 +781,141 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
           return { output: parsedPhase.failureOutput }
         }
         const phaseRecord = parsedPhase.value.phase
+
+        // SYNTH-003 (synthetic-compaction-continue-prompt-rec, task 4.1):
+        // the command-keyed declared-step predicate — the authoritative gate
+        // over step names, rejecting an undeclared step regardless of its
+        // data. Keyed on the call's command argument resolving to uf.unleash
+        // (the same HARDEN-002 command keying: every other command carries
+        // its own step vocabulary and is unaffected). The consented escape
+        // hatch is a valid human_decision_ref per SYNTH-001, resolved through
+        // the same shared path the override tripwire below uses. This check
+        // runs before the SYNTH-001 tripwire and every state write below it:
+        // a call rejected here persists nothing, including
+        // spec_review_decisions arriving on the same call. The
+        // recordAutoCheckpoint machinery path writes fixed, machinery-authored
+        // step names directly through upsertCheckpointStep and never passes
+        // through this predicate.
+        if (cmd === SPEC_REVIEW_STATE_COMMAND && !isDeclaredUnleashCheckpointStep(args.step)) {
+          const stepEcho = boundIdentifierEcho(args.step, CHECKPOINT_STEP_NAME_MAX_LENGTH)
+          const resolution = resolveHumanDecisionRef(cwd, key, args.human_decision_ref)
+          if (resolution.outcome === "record_unreadable") {
+            // Fail closed (SYNTH-006): an unreadable record must never
+            // authorize an undeclared step, and treating the failure as a
+            // missing reference would misreport it.
+            return {
+              output: JSON.stringify(
+                failure(
+                  `human-decision record for key ${key} is unreadable — failing closed (SYNTH-006; ` +
+                    `step "${stepEcho}"): ` +
+                    `${boundIdentifierEcho(resolution.detail, HUMAN_DECISION_READ_ERROR_DETAIL_MAX_LENGTH)}. ` +
+                    "A record that cannot be read must never authorize an undeclared step; inspect " +
+                    ".uf/progress/<key>/human-decisions.json, fix the condition, then retry with " +
+                    "the same human_decision_ref",
+                  { retryable: false, code: "human_decision_record_unreadable" },
+                ),
+              ),
+            }
+          }
+          if (resolution.outcome !== "authorized") {
+            const authorization =
+              resolution.outcome === "unrecorded_ref"
+                ? `human_decision_ref ${resolution.ref} names no decision recorded for key ${key}`
+                : resolution.requirement
+            return {
+              output: JSON.stringify(
+                failure(
+                  `undeclared step: step "${stepEcho}" is not in the declared step set for command ` +
+                    `${SPEC_REVIEW_STATE_COMMAND} (SYNTH-003) and ${authorization} — record the ` +
+                    "decision via the question tool or the orchestrator relay, then cite its " +
+                    "decision_id",
+                  { retryable: false, code: "undeclared_step" },
+                ),
+              ),
+            }
+          }
+          // Authorization resolved against the persisted record: stamp the
+          // reference as provenance, the same anti-spoofing spread the
+          // SYNTH-001 tripwire applies below — a smuggled caller-supplied
+          // data key of the same name cannot spoof the provenance the gate
+          // just verified. When the data also carries an override key, the
+          // tripwire re-resolves and re-stamps the same reference.
+          dataToMerge = { ...dataToMerge, human_decision_ref: resolution.ref }
+        }
+
+        // SYNTH-001 (synthetic-compaction-continue-prompt-rec, task 2.4): the
+        // data-key tripwire. Defense-in-depth layering — the declared-step
+        // allowlist (SYNTH-003, task 4.1) is the authoritative gate; this scan
+        // catches gate overrides smuggled through data keys under any step
+        // name, at any nesting depth. The check runs BEFORE the HARDEN-002
+        // decision recording and every state write below it: a call rejected
+        // here persists nothing, including spec_review_decisions arriving on
+        // the same call. The enforcement point is the tool boundary — the only
+        // surface that receives human_decision_ref; the recordAutoCheckpoint
+        // machinery path writes fixed, machinery-authored data keys and never
+        // carries an override key.
+        const overrideKeyPath = findGateOverrideDataKey(dataToMerge)
+        if (overrideKeyPath !== null) {
+          const stepEcho = boundIdentifierEcho(args.step, CHECKPOINT_STEP_NAME_MAX_LENGTH)
+          const keyEcho = boundIdentifierEcho(overrideKeyPath, GATE_OVERRIDE_KEY_PATH_MAX_LENGTH)
+          // SYNTH-001's authorization resolves through the shared
+          // resolveHumanDecisionRef path (task 4.1 extracted the sequence so
+          // the declared-step predicate resolves through the same one): shape
+          // first, then the record read with its fail-closed semantics, then
+          // membership. The envelopes below are unchanged — each names the
+          // step and the override-carrying data key.
+          const resolution = resolveHumanDecisionRef(cwd, key, args.human_decision_ref)
+          if (resolution.outcome === "shape_failure") {
+            return {
+              output: JSON.stringify(
+                failure(
+                  `missing human decision: step "${stepEcho}" data key "${keyEcho}" carries a gate ` +
+                    `override (SYNTH-001) and ${resolution.requirement} — cite the decision_id of a recorded ` +
+                    "human decision (a free-text justification, including quoting the synthetic " +
+                    "continue prompt, never satisfies the requirement, and an inline " +
+                    "human-decision payload is not accepted in place of a reference)",
+                  { retryable: false, code: "missing_human_decision" },
+                ),
+              ),
+            }
+          }
+          if (resolution.outcome === "record_unreadable") {
+            return {
+              output: JSON.stringify(
+                failure(
+                  `human-decision record for key ${key} is unreadable — failing closed (SYNTH-006; ` +
+                    `step "${stepEcho}", data key "${keyEcho}"): ` +
+                    `${boundIdentifierEcho(resolution.detail, HUMAN_DECISION_READ_ERROR_DETAIL_MAX_LENGTH)}. ` +
+                    "A record that cannot be read must never authorize a gate override; inspect " +
+                    ".uf/progress/<key>/human-decisions.json, fix the condition, then retry with " +
+                    "the same human_decision_ref",
+                  { retryable: false, code: "human_decision_record_unreadable" },
+                ),
+              ),
+            }
+          }
+          if (resolution.outcome === "unrecorded_ref") {
+            // Fabricated references and first-use empty records reject
+            // identically (SYNTH-001); the ref is shape-validated here, so
+            // echoing it names a bounded decision_id-shaped identifier.
+            return {
+              output: JSON.stringify(
+                failure(
+                  `missing human decision: human_decision_ref ${resolution.ref} names no decision recorded for ` +
+                    `key ${key} (step "${stepEcho}", data key "${keyEcho}"); record the decision via ` +
+                    "the question tool or the orchestrator relay, then cite its decision_id",
+                  { retryable: false, code: "missing_human_decision" },
+                ),
+              ),
+            }
+          }
+          // Authorization resolved against the persisted record: stamp the
+          // reference as provenance (SYNTH-001's accepted-override scenario).
+          // The machinery stamp is spread over the caller's parsed data, so a
+          // smuggled caller-supplied data key of the same name cannot spoof
+          // the provenance the gate just verified.
+          dataToMerge = { ...dataToMerge, human_decision_ref: resolution.ref }
+        }
 
         // HARDEN-002 (harden-spec-review-gate, task 3.1): decisions are
         // recorded before the gate evaluation, so one call can adjudicate
@@ -439,9 +943,12 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
         // HARDEN-002: while the latest REQUEST CHANGES iteration is not yet
         // adjudicated (or is held by a pause, or awaits its approving
         // iteration), only gate-machinery steps may be recorded — every
-        // other step would advance the pipeline past spec-review.
+        // other step would advance the pipeline past spec-review. The gate
+        // record is read once here and shared with the SYNTH-004 hold
+        // below.
         if (cmd === SPEC_REVIEW_STATE_COMMAND) {
-          const status = evaluateSpecReviewGate(readSpecReviewGateRecord(cwd, key))
+          const gateRecord = readSpecReviewGateRecord(cwd, key)
+          const status = evaluateSpecReviewGate(gateRecord)
           if (
             (status.kind === "missing_decisions" ||
               status.kind === "pending_approving_iteration" ||
@@ -455,6 +962,78 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
                   code: specReviewGateRefusalCode(status),
                 }),
               ),
+            }
+          }
+
+          // SYNTH-004 (synthetic-compaction-continue-prompt-rec, task 5.2):
+          // the escalated-advisory hold. While the latest consolidated
+          // spec-review result is APPROVE WITH ADVISORIES (persisted
+          // canonical decision ESCALATED — the finalizer maps every AWA
+          // consolidation to it), the advancement steps implement and
+          // implement-phase-N reject with escalated_advisory_unrelayed
+          // until a human-decision reference covers the escalation — a
+          // hold over the advancement steps mirroring the HARDEN-002 shape
+          // above, NOT an allowlist of permitted steps: every other
+          // declared step still records. evaluateSpecReviewGate
+          // deliberately stays open on an AWA latest (task 5.1 narrowed
+          // isApprovingSpecVerdict to plain APPROVE), so this check — not
+          // the per-finding machinery — is what holds advancement. The
+          // covering rule is per-call human_decision_ref resolution
+          // through the same shared resolveHumanDecisionRef path the
+          // SYNTH-001 tripwire and the SYNTH-003 escape hatch use: the
+          // orchestrator relays the advisory, records the human decision
+          // (question tool or delegation envelope), and the advancement
+          // checkpoint cites the stamped decision_id. The
+          // recordAutoCheckpoint machinery path bypasses this hold by
+          // design — it writes fixed, machinery-authored steps straight
+          // through upsertCheckpointStep with no gate evaluation, and the
+          // spec's MUST binds the checkpoint tool, not the plugin's own
+          // machinery writes. This hold is the last gate before the state
+          // write, so a rejection here returns
+          // escalated_advisory_unrelayed and never falls through to a
+          // different error code.
+          if (isUnleashAdvancementCheckpointStep(args.step)) {
+            const latest = gateRecord === null ? null : latestSpecReviewIteration(gateRecord)
+            if (latest !== null && isEscalatedAdvisorySpecVerdict(latest.entry.verdict)) {
+              const resolution = resolveHumanDecisionRef(cwd, key, args.human_decision_ref)
+              if (resolution.outcome === "record_unreadable") {
+                // Fail closed (SYNTH-006): an unreadable record must never
+                // cover an escalated advisory, and treating the failure as
+                // a missing reference would misreport it — the same
+                // fail-closed shape the tripwire and escape hatch apply.
+                const stepEcho = boundIdentifierEcho(args.step, CHECKPOINT_STEP_NAME_MAX_LENGTH)
+                return {
+                  output: JSON.stringify(
+                    failure(
+                      `human-decision record for key ${key} is unreadable — failing closed ` +
+                        `(SYNTH-006; escalated-advisory coverage for step "${stepEcho}"): ` +
+                        `${boundIdentifierEcho(resolution.detail, HUMAN_DECISION_READ_ERROR_DETAIL_MAX_LENGTH)}. ` +
+                        "A record that cannot be read must never cover an escalated advisory; inspect " +
+                        ".uf/progress/<key>/human-decisions.json, fix the condition, then retry with " +
+                        "the same human_decision_ref",
+                      { retryable: false, code: "human_decision_record_unreadable" },
+                    ),
+                  ),
+                }
+              }
+              if (resolution.outcome !== "authorized") {
+                return {
+                  output: JSON.stringify(
+                    failure(escalatedAdvisoryHoldMessage(latest, resolution, key), {
+                      retryable: false,
+                      code: "escalated_advisory_unrelayed",
+                    }),
+                  ),
+                }
+              }
+              // Coverage resolved against the persisted record: stamp the
+              // reference as provenance — the same anti-spoofing spread the
+              // SYNTH-003 escape hatch and SYNTH-001 tripwire apply, so the
+              // advancement checkpoint records which relayed human decision
+              // authorized passing the advisory. When the data also carries
+              // an override key, the tripwire above already re-resolved and
+              // re-stamped the same reference.
+              dataToMerge = { ...dataToMerge, human_decision_ref: resolution.ref }
             }
           }
         }
@@ -555,6 +1134,178 @@ export function createClearProgressTool(exec: GitExec, cwd: string) {
 }
 
 // ---------------------------------------------------------------------------
+// record_human_decision tool (synthetic-compaction-continue-prompt-rec,
+// SYNTH-001/006, task 2.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Structured output from record_human_decision: the persisted entry
+ * exactly as the record now carries it — machine-stamped `decision_id`
+ * (UUID v4), the caller-supplied source/question/answer, and
+ * machine-stamped `recorded_at`.
+ */
+export type RecordHumanDecisionData = HumanDecisionEntry
+
+/**
+ * zod-validated input contract for record_human_decision (SYNTH-006). The
+ * object is strict: callers supply exactly source, question, and answer
+ * (plus the optional key override) — a caller-supplied `decision_id` or
+ * `recorded_at` is an unknown key and rejected, so identity and timestamp
+ * stamps stay machine-owned. Byte bounds (not zod's character counts)
+ * match HUMAN_DECISION_TEXT_MAX_BYTES; validation runs at safeParse,
+ * before any security-sensitive operation.
+ */
+const RecordHumanDecisionInputSchema = z
+  .object({
+    source: z.enum(["question-tool", "orchestrator-relay"]),
+    question: z
+      .string()
+      .min(1, "empty string is invalid -- record the actual question text")
+      .refine(isHumanDecisionTextWithinBounds, {
+        message: "question exceeds the 16 KiB UTF-8 byte limit (SYNTH-006)",
+      }),
+    answer: z
+      .string()
+      .min(1, "empty string is invalid -- record the actual answer text")
+      .refine(isHumanDecisionTextWithinBounds, {
+        message: "answer exceeds the 16 KiB UTF-8 byte limit (SYNTH-006)",
+      }),
+    key: z.string().optional(),
+  })
+  .strict()
+
+/**
+ * Factory for the record_human_decision tool (SYNTH-006, task 2.3) with
+ * injectable git executor and working directory for testability — the
+ * in-session question path, one of the exactly two write surfaces the
+ * human-decision record accepts (SYNTH-001; the other is
+ * uf_delegate_command's orchestrator-relay envelope). Callers supply only
+ * source, question, and answer: `decision_id` (UUID v4) and `recorded_at`
+ * are machine-stamped by the shared append machinery, which owns the full
+ * SYNTH-006 store discipline (traversal-checked key sanitization, symlink
+ * refusal, 0o700/0o600, atomic temp-file-plus-rename, advisory-lock
+ * serialization). Answers containing the synthetic compaction prompt up to
+ * normalization are refused before any store write; errors carry bounded
+ * identifiers only, never raw question or answer text.
+ *
+ * @param exec Git executor used to derive the auto-detected state key.
+ * @param cwd Repository root holding `.uf/progress/`.
+ * @returns The record_human_decision tool.
+ */
+export function createRecordHumanDecisionTool(
+  exec: GitExec,
+  cwd: string,
+): ReturnType<typeof tool> {
+  return tool({
+    description:
+      "Record a human decision the session actually received (SYNTH-001/006) as an " +
+      "append-only entry in the human-decision record " +
+      "(.uf/progress/<key>/human-decisions.json), so a later gate-override checkpoint " +
+      "call can cite the entry's decision_id as human_decision_ref. Callers supply only " +
+      "source, question, and answer; decision_id (UUID v4) and recorded_at are " +
+      "machine-stamped. Answers matching the synthetic compaction prompt up to " +
+      "normalization (case, whitespace, or quoting variation, or embedded in larger " +
+      "text) are refused — the synthetic continue prompt is machinery output, never " +
+      "human consent. Never compose an entry for a decision not actually received; " +
+      "compose a real question-tool call or orchestrator relay instead (SYNTH-002).",
+    args: {
+      source: RecordHumanDecisionInputSchema.shape.source.describe(
+        "The surface the decision arrived through: \"question-tool\" for an in-session " +
+          "question-tool answer, \"orchestrator-relay\" for an orchestrator-relayed decision.",
+      ),
+      question: RecordHumanDecisionInputSchema.shape.question.describe(
+        "Question text as presented to the human (non-empty, at most 16 KiB UTF-8).",
+      ),
+      answer: RecordHumanDecisionInputSchema.shape.answer.describe(
+        "Answer text as received from the human (non-empty, at most 16 KiB UTF-8). An " +
+          "answer containing the synthetic compaction prompt up to normalization is " +
+          "refused with synthetic_prompt_answer.",
+      ),
+      key: RecordHumanDecisionInputSchema.shape.key.describe(
+        "Optional state key override; defaults to sanitized current git branch.",
+      ),
+    },
+    execute: async (args: {
+      source: HumanDecisionSource
+      question: string
+      answer: string
+      key?: string
+    }) => {
+      try {
+        const parsed = RecordHumanDecisionInputSchema.safeParse(args)
+        if (!parsed.success) {
+          return { output: invalidInputOutput(parsed.error) }
+        }
+        const input = parsed.data
+
+        // SYNTH-006 deny-list: refuse before any store write. The
+        // synthetic compaction prompt is machinery output, not human
+        // input, and MUST NOT be recorded as a human decision. The
+        // refusal names the condition with bounded identifiers only —
+        // never the answer text.
+        if (isSyntheticCompactionPromptAnswer(input.answer)) {
+          return {
+            output: JSON.stringify(
+              failure(
+                "Refused: the answer matches the synthetic compaction prompt (SYNTH-006). " +
+                  "The synthetic continue prompt is machinery output, not human input, and " +
+                  "must never be recorded as a human decision. Remediation: record a " +
+                  "decision actually received from a human via the question tool or the " +
+                  "orchestrator relay; retrying with the same answer will not fix this.",
+                { retryable: false, code: "synthetic_prompt_answer" },
+              ),
+            ),
+          }
+        }
+
+        // Same key resolution as checkpoint/get_progress/clear_progress:
+        // explicit key or sanitized current git branch. Store discipline
+        // (traversal-checked sanitization, symlink refusal, 0o700/0o600,
+        // atomic temp-plus-rename, advisory-lock serialization) is owned
+        // by appendHumanDecisions — the shared machinery both write
+        // surfaces use, never duplicated here.
+        const key = resolveKey(exec, cwd, input.key)
+        let stamped: readonly HumanDecisionEntry[]
+        try {
+          stamped = await appendHumanDecisions(cwd, key, [
+            { source: input.source, question: input.question, answer: input.answer },
+          ])
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err)
+          return {
+            output: JSON.stringify(
+              failure(
+                `Failed to persist the human decision to the human-decision record for key ${key}: ${msg}. ` +
+                  "Remediation: inspect .uf/progress/<key>/human-decisions.json (a corrupted record " +
+                  "fails closed); retry once the condition clears.",
+                { retryable: true, code: "HUMAN_DECISION_PERSIST_FAILED" },
+              ),
+            ),
+          }
+        }
+        const entry = stamped[0]
+        if (entry === undefined) {
+          // Defensive: a single-entry append returns one stamped entry;
+          // fail closed rather than confirming a decision that did not
+          // land.
+          return {
+            output: JSON.stringify(
+              failure(
+                "Human-decision append returned no stamped entry; nothing was confirmed as recorded",
+                { retryable: true, code: "HUMAN_DECISION_PERSIST_FAILED" },
+              ),
+            ),
+          }
+        }
+        return { output: JSON.stringify(success(entry)) }
+      } catch (err: unknown) {
+        return { output: failureFromError(err, "RECORD_HUMAN_DECISION_ERROR") }
+      }
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
 // relay_spec_review_gate tool (HARDEN-004)
 // ---------------------------------------------------------------------------
 
@@ -593,10 +1344,32 @@ export interface RelaySpecReviewGateDependencies {
   readonly readText: (path: string) => Promise<string>
 }
 
+/**
+ * Hold status the relay renders for an escalated-advisory latest iteration
+ * (SYNTH-004): APPROVE WITH ADVISORIES, which the review-dispatch
+ * finalizer maps to the canonical decision ESCALATED. The HARDEN-002 gate
+ * status evaluates these open — the hold is relay-purposes-only — so the
+ * renderer carries its own shape rather than a SpecReviewGateStatus
+ * member, and the relay tool synthesizes it from the latest iteration.
+ */
+export interface SpecReviewEscalatedAdvisoryStatus {
+  /** Discriminator: always "escalated_advisory". */
+  readonly kind: "escalated_advisory"
+  /** 1-based number of the escalated (latest) iteration. */
+  readonly iteration: number
+  /** The escalated iteration's verdict ("APPROVE WITH ADVISORIES"). */
+  readonly verdict: string
+}
+
 /** Input to the pure gate-relay renderer. */
 export interface SpecReviewRelayInput {
-  /** The holding gate status: undecided findings or a pause decision. */
-  readonly status: Extract<SpecReviewGateStatus, { kind: "missing_decisions" | "paused" }>
+  /**
+   * The holding gate status: undecided findings, a pause decision, or an
+   * escalated advisory (SYNTH-004).
+   */
+  readonly status:
+    | Extract<SpecReviewGateStatus, { kind: "missing_decisions" | "paused" }>
+    | SpecReviewEscalatedAdvisoryStatus
   /** Correlation ID of the artifact backing the latest iteration. */
   readonly correlationId: string
   /** Findings the latest iteration consolidated. */
@@ -618,7 +1391,9 @@ export interface SpecReviewRelayInput {
  * metadata — a missing artifact can never silently un-pause the gate.
  * Finding identity is the 1-based index into the artifact's findings
  * array, the same identity the gate record's finding_ids and per-finding
- * decisions carry.
+ * decisions carry. Escalated advisories (SYNTH-004) render through the
+ * same artifact-sourced path: the advisories surface as findings exactly
+ * as REQUEST CHANGES findings do, with an escalation-specific hold line.
  */
 export function renderSpecReviewGateRelay(input: SpecReviewRelayInput): string {
   const { status, correlationId, findingCount, decisions, findings } = input
@@ -629,6 +1404,13 @@ export function renderSpecReviewGateRelay(input: SpecReviewRelayInput): string {
     )
     lines.push(
       `The human paused findings [${status.paused.join(", ")}]. Exit through the spec-review paused exit path; the gate re-opens only through recorded decisions (checkpoint spec_review_decisions) — the recorded iteration is sealed (re-dispatch refused with iteration_already_recorded).`,
+    )
+  } else if (status.kind === "escalated_advisory") {
+    lines.push(
+      `Spec-review gate holds: iteration ${status.iteration} (${status.verdict}), correlation ${correlationId}.`,
+    )
+    lines.push(
+      `${findingCount} advisories consolidated — escalated advisory (SYNTH-004): every APPROVE WITH ADVISORIES consolidation persists as the canonical decision ESCALATED, so the result must be relayed before implementation continues. Record the human decision covering the escalation (question tool or orchestrator relay) and cite it via the checkpoint human_decision_ref argument; advancement is refused until the relayed decision is recorded.`,
     )
   } else {
     lines.push(
@@ -669,8 +1451,10 @@ export function renderSpecReviewGateRelay(input: SpecReviewRelayInput): string {
  * /uf.unleash child returns. The tool — not command prose — reads the
  * healed spec-review gate record (same path get_progress uses) and the
  * dispatch artifact and computes the pause state: an undecided
- * non-APPROVE iteration or a pause decision returns {gate_paused: true}
- * with the rendered relay; a decided gate, an approved gate, or no
+ * non-APPROVE iteration, a pause decision, or an escalated-advisory
+ * latest iteration (APPROVE WITH ADVISORIES — SYNTH-004 treats it like
+ * REQUEST CHANGES for relay purposes) returns {gate_paused: true} with
+ * the rendered relay; a decided gate, a plain-APPROVE gate, or no
  * spec-review record returns {gate_paused: false}. The orchestrator
  * presents the relay when paused and proceeds only when not — the child's
  * returned text is never decision input.
@@ -691,13 +1475,16 @@ export function createRelaySpecReviewGateTool(
       "Spec-review gate relay for /uf.run-pipeline-plan (HARDEN-004): reads the " +
       "healed uf.unleash spec-review gate record and the dispatch artifact " +
       "(.uf/artifacts/dispatch/<correlation>.json) and computes the pause state — " +
-      "an undecided non-APPROVE spec-review iteration or a pause decision returns " +
-      "{gate_paused: true, relay} with the deterministic artifact-sourced finding " +
-      "list (severity, description, file:line, correlation id); a decided gate, an " +
-      "approved gate, or no spec-review record returns {gate_paused: false}. Call " +
-      "unconditionally after a /uf.unleash child returns; present the relay when " +
-      "paused, proceed only when not. Returns {gate_paused, relay, iteration, " +
-      "verdict, correlation_id, finding_count, undecided_finding_ids}.",
+      "an undecided non-APPROVE spec-review iteration, a pause decision, or an " +
+      "escalated-advisory latest iteration (APPROVE WITH ADVISORIES, persisted " +
+      "canonical decision ESCALATED — SYNTH-004 relays it like REQUEST CHANGES) " +
+      "returns {gate_paused: true, relay} with the deterministic artifact-sourced " +
+      "finding list (severity, description, file:line, correlation id); a decided " +
+      "gate, a plain-APPROVE gate, or no spec-review record returns " +
+      "{gate_paused: false}. Call unconditionally after a /uf.unleash child " +
+      "returns; present the relay when paused, proceed only when not. Returns " +
+      "{gate_paused, relay, iteration, verdict, correlation_id, finding_count, " +
+      "undecided_finding_ids}.",
     args: {
       command: z.string().describe("Command identifier (e.g. uf.unleash)"),
       key: z.string().optional().describe(
@@ -740,7 +1527,25 @@ export function createRelaySpecReviewGateTool(
           }
         }
         const status = evaluateSpecReviewGate(record)
-        if (status.kind !== "missing_decisions" && status.kind !== "paused") {
+        // SYNTH-004: treat an escalated-advisory latest iteration (APPROVE
+        // WITH ADVISORIES — the finalizer maps every AWA consolidation to
+        // the canonical decision ESCALATED, so the marker is not a
+        // distinguishing subset) the same as REQUEST CHANGES for relay
+        // purposes. The HARDEN-002 gate status evaluates it open because
+        // the per-finding machinery does not adjudicate advisories; the
+        // widened relay predicate checks the verdict itself.
+        const escalatedAdvisory = isEscalatedAdvisorySpecVerdict(latest.entry.verdict)
+        const holdingStatus: SpecReviewRelayInput["status"] | null =
+          status.kind === "missing_decisions" || status.kind === "paused"
+            ? status
+            : escalatedAdvisory
+              ? {
+                  kind: "escalated_advisory",
+                  iteration: latest.iteration,
+                  verdict: latest.entry.verdict,
+                }
+              : null
+        if (holdingStatus === null) {
           // A decided or approved gate does not pause the orchestrator
           // (HARDEN-004): apply decisions continue the fix loop inside the
           // child, and an all-override or approving outcome closed the
@@ -760,7 +1565,8 @@ export function createRelaySpecReviewGateTool(
           }
         }
         // gate_paused: render the relay from the dispatch artifact —
-        // artifact-sourced, never child-text sourced (HARDEN-004).
+        // artifact-sourced, never child-text sourced (HARDEN-004). The
+        // escalated-advisory hold renders through the same path (SYNTH-004).
         let findings: readonly ReviewDispatchFindingSummary[] | null = null
         const correlationId = latest.entry.correlation_id
         // Defense-in-depth: the record is tool-written, but a crafted
@@ -781,7 +1587,7 @@ export function createRelaySpecReviewGateTool(
           }
         }
         const relay = renderSpecReviewGateRelay({
-          status,
+          status: holdingStatus,
           correlationId,
           findingCount: latest.entry.finding_count,
           decisions: decisionsForLatestIteration(record),
@@ -796,7 +1602,8 @@ export function createRelaySpecReviewGateTool(
               verdict: latest.entry.verdict,
               correlation_id: correlationId,
               finding_count: latest.entry.finding_count,
-              undecided_finding_ids: status.kind === "missing_decisions" ? status.undecided : [],
+              undecided_finding_ids:
+                holdingStatus.kind === "missing_decisions" ? holdingStatus.undecided : [],
             } satisfies RelaySpecReviewGateData),
           ),
         }
@@ -2677,6 +3484,14 @@ export interface DelegateCommandData {
   /** Whether checkpoint_step was recorded through the progress state store. */
   checkpoint_recorded: boolean
   /**
+   * Decision ids (UUID v4) machine-stamped for the orchestrator-relayed
+   * human decisions this call persisted to the human-decision record at
+   * spawn time (SYNTH-001/006, task 2.2) — the values a child session's
+   * `checkpoint` calls cite as `human_decision_ref`. Null when the call
+   * supplied no envelope.
+   */
+  human_decision_ids: string[] | null
+  /**
    * Task classification declared by the caller (delegation-skill-enforcement
    * D5); null when a command-path call omitted it. Judgment-classified and
    * unclassified calls never carry a skill reference or absence reason.
@@ -2878,6 +3693,15 @@ const DelegateAgentSchema = z
       "reviewer agents (divisor-*) are dispatched via invoke_agent; uf_delegate_command is for content delegation",
   })
 
+/**
+ * Defensive bound on the human_decisions envelope (SYNTH-001/006, task
+ * 2.2): at most 32 relayed decisions per delegation. Not a spec-mandated
+ * number — SYNTH-006 bounds each entry's question and answer at 16 KiB,
+ * and 32 entries x 32 KiB matches the 1 MiB command-file ceiling the
+ * rest of the envelope material obeys.
+ */
+const HUMAN_DECISIONS_ENVELOPE_MAX_ENTRIES = 32
+
 /** zod-validated input contract for uf_delegate_command. */
 const DelegateCommandInputSchema = z
   .object({
@@ -2886,7 +3710,7 @@ const DelegateCommandInputSchema = z
     prompt: PromptSchema.optional(),
     feature_dir: z.string().min(1).max(1024).optional(),
     expected_artifact: z.string().min(1).max(1024).optional(),
-    checkpoint_step: z.string().min(1).max(128).optional(),
+    checkpoint_step: z.string().min(1).max(CHECKPOINT_STEP_NAME_MAX_LENGTH).optional(),
     phase: z.number().int().min(1).max(1000).optional(),
     // Delegation-timeout-budgets D3: the ceiling depends on delegation
     // kind, so the shared bound is the command-path ceiling and the
@@ -2944,6 +3768,36 @@ const DelegateCommandInputSchema = z
       .string()
       .min(1, "empty string is invalid -- omit the parameter when no pack applies")
       .max(128)
+      .optional(),
+    // SYNTH-001/006 (synthetic-compaction-continue-prompt-rec task 2.2):
+    // the orchestrator-relay envelope. Callers supply question and answer
+    // only -- source is structural (this surface IS the orchestrator
+    // relay), and decision_id/recorded_at are machine-stamped at append
+    // time, which is why the entry object is strict: a caller cannot
+    // smuggle provenance or identity. Byte bounds (not zod's character
+    // counts) match HUMAN_DECISION_TEXT_MAX_BYTES; validation runs at
+    // safeParse, before any security-sensitive operation.
+    human_decisions: z
+      .array(
+        z
+          .object({
+            question: z
+              .string()
+              .min(1, "empty string is invalid -- relay the actual question text")
+              .refine(isHumanDecisionTextWithinBounds, {
+                message: "question exceeds the 16 KiB UTF-8 byte limit (SYNTH-006)",
+              }),
+            answer: z
+              .string()
+              .min(1, "empty string is invalid -- relay the actual answer text")
+              .refine(isHumanDecisionTextWithinBounds, {
+                message: "answer exceeds the 16 KiB UTF-8 byte limit (SYNTH-006)",
+              }),
+          })
+          .strict(),
+      )
+      .min(1, "empty array is invalid -- omit human_decisions when no decisions are relayed")
+      .max(HUMAN_DECISIONS_ENVELOPE_MAX_ENTRIES)
       .optional(),
   })
   .strict()
@@ -3599,7 +4453,10 @@ export function createDelegateCommandTool(
       "resolves through the model-matrix precedence chain (explicit model > profile > " +
       "pack > agent pin > task-kind default > classifier cascade > host model) and every " +
       "selection is recorded in the audit trail. Reviewer agents (divisor-*) are " +
-      "rejected — use invoke_agent for review invocations.",
+      "rejected — use invoke_agent for review invocations. Orchestrator-relayed " +
+      "human decisions (human_decisions) are appended to the human-decision record " +
+      "at spawn time, before the child session runs; the stamped decision_ids " +
+      "return in the success envelope's human_decision_ids.",
     args: {
       agent: DelegateCommandInputSchema.shape.agent.describe(
         "Content agent to delegate to (default cobalt-crush-dev). Reviewer agents (divisor-*) are rejected; dispatch them via invoke_agent.",
@@ -3667,6 +4524,15 @@ export function createDelegateCommandTool(
           "resolves the mapped profile's model AND renders a tool-authored directive instructing the " +
           "child to load .opencode/uf/packs/<pack>.md before writing. Must be a packs key of the " +
           "loaded matrix; fails closed otherwise.",
+      ),
+      human_decisions: DelegateCommandInputSchema.shape.human_decisions.describe(
+        "Optional orchestrator-relayed human decisions (SYNTH-001/006): entries of {question, answer} " +
+          "(each non-empty, at most 16 KiB UTF-8) relaying a human decision the orchestrator actually " +
+          "received. Machine-stamped with source orchestrator-relay, decision_id (UUID v4), and " +
+          "recorded_at, then appended to the human-decision record " +
+          "(.uf/progress/<key>/human-decisions.json) at spawn time, before the child session runs. " +
+          "The stamped decision_ids are returned in the success envelope (human_decision_ids) so the " +
+          "child's checkpoint calls can cite them as human_decision_ref values.",
       ),
     },
     async execute(args, context) {
@@ -4022,6 +4888,48 @@ export function createDelegateCommandTool(
           read_only: false,
         }
 
+        // SYNTH-001/006 (synthetic-compaction-continue-prompt-rec task
+        // 2.2): persist orchestrator-relayed human decisions at spawn
+        // time, BEFORE the delegated child session runs — a machinery
+        // write the child never authors. Placement is after every
+        // validation that can still reject the call (schema bounds, skill
+        // contract, command file, artifact path, model selection), so
+        // entries record exactly when the spawn commits; a failed child
+        // run leaves them in place (a relayed decision was actually
+        // received — the record is an audit trail, not a
+        // delegation-outcome log). A persist failure fails the delegation
+        // fail-closed: authorization that never reached the record does
+        // not exist, and the child's human_decision_ref citations would
+        // otherwise be rejected with no diagnosable cause.
+        let humanDecisionIds: string[] | null = null
+        if (input.human_decisions !== undefined) {
+          const relayKey = resolveKey(exec, cwd)
+          try {
+            const stamped = await appendHumanDecisions(
+              cwd,
+              relayKey,
+              input.human_decisions.map((entry) => ({
+                source: "orchestrator-relay" as const,
+                question: entry.question,
+                answer: entry.answer,
+              })),
+            )
+            humanDecisionIds = stamped.map((entry) => entry.decision_id)
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err)
+            return {
+              output: JSON.stringify(
+                failure(
+                  `Failed to persist human_decisions to the human-decision record for key ${relayKey}: ${msg}. ` +
+                    "Remediation: inspect .uf/progress/<key>/human-decisions.json (a corrupted record " +
+                    "fails closed); retry once the condition clears.",
+                  { retryable: true, code: "HUMAN_DECISION_PERSIST_FAILED" },
+                ),
+              ),
+            }
+          }
+        }
+
         // Delegate the child session lifecycle to the shared executor.
         const result = await executeAgentSession(
           {
@@ -4178,6 +5086,10 @@ export function createDelegateCommandTool(
           child_session_id: result.childSessionID ?? null,
           artifact_created: artifactCreated,
           checkpoint_recorded: checkpointRecorded,
+          // SYNTH-001/006 (task 2.2): stamped decision ids for the relayed
+          // envelope — null when the call supplied none, so pre-change
+          // consumers see no new key on that path.
+          human_decision_ids: humanDecisionIds,
           // Delegation-skill-enforcement D5 (task 1.5): the same audit
           // fields the checkpoint records, surfaced machine-parseably in
           // the success envelope (null when the call supplied none).
@@ -7012,6 +7924,7 @@ const UfWorkflowPlugin = {
         checkpoint: createCheckpointTool(defaultGitExec, cwd),
         get_progress: createGetProgressTool(defaultGitExec, cwd),
         clear_progress: createClearProgressTool(defaultGitExec, cwd),
+        record_human_decision: createRecordHumanDecisionTool(defaultGitExec, cwd),
         normalize_model_name: createNormalizeModelNameTool(),
         git_fetch: createGitFetchTool(defaultGitExec, cwd),
         git_push: createGitPushTool(defaultGitExec, cwd),

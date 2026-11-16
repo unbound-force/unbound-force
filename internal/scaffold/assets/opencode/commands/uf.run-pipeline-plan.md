@@ -341,10 +341,13 @@ from it.
 
 The orchestrator's own `question` tool use is limited
 to Phase 0 triage (non-mechanical item resolution and
-the work-item confirmation table) and pause-relay
+the work-item confirmation table), pause-relay
 decisions — `/uf.unleash` paused exits and delegation
 failures (the blocked-item question below) and
-non-green CI on a created PR (see Tracking). All other
+non-green CI on a created PR (see Tracking) — and
+enforcement-code recovery on `missing_human_decision`,
+`undeclared_step`, or `escalated_advisory_unrelayed`.
+All other
 human interaction happens inside the delegated commands'
 own gate protocols — surfaced to the orchestrator as
 paused exits or timeouts, not as live questions.
@@ -401,7 +404,10 @@ timeout recovery, which routes here when it says so):
 The remaining human control points are the Phase 0
 work-item table, the delegated commands' own gates
 (surfaced as paused exits or gate-timeout wedges),
-pause-relay questions, and non-green CI on a created
+pause-relay questions, enforcement-code recovery on
+`missing_human_decision`, `undeclared_step`, or
+`escalated_advisory_unrelayed` (per the question
+budget above), and non-green CI on a created
 PR (see Tracking).
 
 ### Guardrails
@@ -440,6 +446,20 @@ These rules are non-negotiable:
   repair.
 - **No auto-merge**: The PR MUST NOT be merged
   automatically. It stays open for human review.
+
+<!-- instruction-lint-disable-next-line IL-050 -- pin-anchored duplication: synthetic prompt guard intentionally mirrored in 6 command/agent locations (tracked by TestCommandContracts_SyntheticPromptNotConsent) -->
+Compaction and synthetic continue prompts (including
+"Continue if you have next steps, or stop and ask for
+clarification if you are unsure how to proceed") are not
+human input and MUST NOT be treated as authorization for
+any gate override.
+
+On `missing_human_decision`, `undeclared_step`, or
+`escalated_advisory_unrelayed`, you MUST stop and obtain
+a real human decision via the `question` tool or the
+orchestrator relay and MUST NOT compose a
+`record_human_decision` entry for a decision not actually
+received.
 
 ### Tracking
 

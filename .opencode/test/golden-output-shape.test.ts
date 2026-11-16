@@ -7,7 +7,12 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import type { ToolResult } from "../lib/uf-workflow-types.js"
+import { appendHumanDecisions, appendSpecReviewIterationToState } from "../lib/progress-state.js"
+import {
+  HUMAN_DECISION_ID_PATTERN,
+  specReviewFindingIds,
+  type ToolResult,
+} from "../lib/uf-workflow-types.js"
 import { formatUnleashExit, type UnleashExitData, type UnleashExitVariant } from "../lib/unleash-templates.js"
 import {
   LESSON_PROPOSAL_BEGIN,
@@ -466,7 +471,10 @@ describe("golden output shapes -- uf-workflow registry (24 documented sites)", (
       "uf.address-feedback",
     ] as const
     for (const command of documentedCommands) {
-      const step = `${command}-golden-step`
+      // SYNTH-003: undeclared step names under uf.unleash reject with
+      // undeclared_step, so the golden round-trip uses a declared name
+      // for that leg; the other commands still take arbitrary step names.
+      const step = command === "uf.unleash" ? "clarify" : `${command}-golden-step`
       const recorded = expectOk(
         await callEnvelopeTool(registry, "checkpoint", { command, step, key: "golden" }),
       )
@@ -1850,5 +1858,399 @@ describe("golden output shapes -- review-dispatch registry (18 documented sites)
     expect(written).toContain("+++ b/openspec/changes/golden/proposal.md")
     expect(written).toContain("+alpha")
     expect(result.diff_bytes).toBe(Buffer.byteLength(written, "utf8"))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Golden output shapes — synthetic-compaction seams (DE-007 Layers 2-3,
+// synthetic-compaction-continue-prompt-rec task 7.1)
+//
+// Added after the seam-verification site registry, so like the
+// checkout_pr_head block this describe sits outside the counted sites
+// above. The four seams this change widens or creates are executed through
+// the same `module.server()` registration and `tool.execute()` dispatch
+// path the OpenCode host uses: checkpoint's human_decision_ref
+// authorization (SYNTH-001/003/004/006), record_human_decision
+// (SYNTH-006), uf_delegate_command's human_decisions envelope
+// (SYNTH-001/006 — the envelope leg below), and relay_spec_review_gate's
+// widened escalated-advisory predicate (SYNTH-004). Layer 1 (registration
+// surface, input-schema parity) lives in registration-surface.test.ts;
+// the declared-step allowlist lockstep (task 4.2) lives in
+// unleash-step-lockstep.test.ts.
+//
+// Layer 3 write→read pairs run against the real progress store in the
+// scratch root: registry-path record_human_decision writes are read back
+// through registry-path checkpoint reference validation and get_progress;
+// the orchestrator-relay envelope leg writes through appendHumanDecisions —
+// the exact store machinery the registry-wired uf_delegate_command
+// envelope persists through, whose call wiring, spawn-time ordering, and
+// stamped-id result are pinned in unleash-delegate.test.ts against the
+// same function (a full registry delegation would spawn a live child
+// session); the widened relay predicate reads the seeded dispatch
+// artifact and spec-review gate record through relay_spec_review_gate.
+// ---------------------------------------------------------------------------
+
+describe("golden output shapes -- synthetic-compaction seams (task 7.1)", () => {
+  /** Branch every registry call in this block resolves through mockGit. */
+  const SEAM_BRANCH = "opsx/seam-golden"
+
+  /** Sanitized state key naming the progress and human-decision records. */
+  const SEAM_KEY = "opsx-seam-golden"
+
+  /** Correlation of the seeded AWA consolidation (issue #1118 shape). */
+  const SEAM_CORRELATION = "8ef4f276-3333-4333-8333-333333333333"
+
+  /** The seeded consolidation's advisories: 1 HIGH + 1 MEDIUM. */
+  const SEAM_FINDINGS = [
+    {
+      severity: "HIGH",
+      category: "advisory-relay",
+      description: "Seam golden high advisory of the escalated consolidation",
+      root_cause: "Consolidated as an advisory without a relayed human decision",
+      file: "specs/seam-advisory-1.md",
+      line: 1,
+    },
+    {
+      severity: "MEDIUM",
+      category: "advisory-relay",
+      description: "Seam golden medium advisory of the escalated consolidation",
+      root_cause: "Consolidated as an advisory without a relayed human decision",
+      file: "specs/seam-advisory-2.md",
+      line: 2,
+    },
+  ]
+
+  /** A shape-valid decision_id that no test in this block records. */
+  const UNRECORDED_REF = "123e4567-e89b-42d3-a456-426614174000"
+
+  /** Load the uf-workflow registry against a fresh scratch root. */
+  async function seamRegistry(): Promise<{ directory: string; registry: ToolRegistry }> {
+    const directory = await makeScratch("uf-golden-seam-")
+    const registry = await loadRegistry(UfWorkflowPlugin, directory)
+    mockGit({ [GIT_BRANCH]: SEAM_BRANCH, [GIT_HEAD]: SHA_A })
+    return { directory, registry }
+  }
+
+  /**
+   * Seed the escalated-advisory gate (SYNTH-004): the AWA dispatch
+   * artifact first, then the matching iteration — the append's healing
+   * pass records the artifact-derived entry, and the matching correlation
+   * keeps it a single iteration.
+   */
+  async function seedEscalatedAdvisoryGate(directory: string): Promise<void> {
+    await writeProjectFile(
+      directory,
+      `.uf/artifacts/dispatch/${SEAM_CORRELATION}.json`,
+      JSON.stringify({
+        artifact_type: "review-dispatch",
+        schema_version: "1.0.0",
+        timestamp: "2026-11-15T00:00:00.000Z",
+        context: {
+          branch: SEAM_BRANCH,
+          commit: "b".repeat(40),
+          correlation_id: SEAM_CORRELATION,
+          workflow_id: "uf.review-council",
+        },
+        payload: {
+          command: "review-council",
+          mode: "specs",
+          full: false,
+          input_context: {
+            kind: "pr",
+            pr_number: 1118,
+            base_ref: "main",
+            base_sha: "a".repeat(40),
+            head_ref: SEAM_BRANCH,
+            head_sha: "b".repeat(40),
+          },
+          change_profile: {
+            kind: "diff",
+            lines: 400,
+            files: 12,
+            components: 3,
+            security_sensitive: false,
+            user_facing: false,
+            categories: ["standard", "documentation"],
+            tier: "standard",
+          },
+          plan_version: 1,
+          plan: [],
+          runs: [],
+          coverage: { preflight_verdict: "PASS", checks_total: 5, checks_passed: 5 },
+          findings: SEAM_FINDINGS,
+          advisories: [],
+          proposals: [],
+          verdict: "APPROVE WITH ADVISORIES",
+          verdict_reason: "2 advisory findings consolidated with no blocking severity",
+          run_counts: { total: 5, success: 5, failed: 0, skipped: 0, budget_skipped: 0, limit_skipped: 0, cancelled: 0 },
+          workflow_result: { kind: "council", value: "APPROVE WITH ADVISORIES" },
+          correlation_id: SEAM_CORRELATION,
+        },
+      }),
+    )
+    appendSpecReviewIterationToState(directory, SEAM_BRANCH, {
+      verdict: "APPROVE WITH ADVISORIES",
+      correlation_id: SEAM_CORRELATION,
+      finding_count: SEAM_FINDINGS.length,
+      finding_ids: specReviewFindingIds(SEAM_FINDINGS.length),
+    })
+  }
+
+  /** Assert an error envelope carrying the expected code and return it narrowed. */
+  function expectErrorEnvelope(
+    envelope: ToolResult<unknown>,
+    code: string,
+  ): Extract<ToolResult<unknown>, { status: "error" }> {
+    expect(
+      envelope.status,
+      `expected error envelope ${code}, received ${JSON.stringify(envelope)}`,
+    ).toBe("error")
+    if (envelope.status !== "error") {
+      throw new Error("tool envelope reported success")
+    }
+    expect(envelope.code).toBe(code)
+    return envelope
+  }
+
+  it("checkpoint [SYNTH-003] rejects an undeclared step with undeclared_step", async () => {
+    const { registry } = await seamRegistry()
+
+    const error = expectErrorEnvelope(
+      await callEnvelopeTool(registry, "checkpoint", {
+        command: "uf.unleash",
+        step: "fabricated-escape-hatch",
+      }),
+      "undeclared_step",
+    )
+
+    expect(error.retryable).toBe(false)
+    expect(error.message).toContain("fabricated-escape-hatch")
+    expect(error.message).toContain("not in the declared step set for command uf.unleash")
+    expect(error.message).toContain("SYNTH-003")
+    // No ref supplied: the authorization requirement is the shape failure.
+    expect(error.message).toContain("requires human_decision_ref")
+  })
+
+  it("checkpoint [SYNTH-001] rejects an override-carrying data key without a ref with missing_human_decision", async () => {
+    const { registry } = await seamRegistry()
+
+    const error = expectErrorEnvelope(
+      await callEnvelopeTool(registry, "checkpoint", {
+        command: "uf.unleash",
+        // A declared step, isolating the data-key tripwire from the
+        // SYNTH-003 allowlist; the key name carries the incident shape.
+        step: "spec-review",
+        data: JSON.stringify({ checklist_override: "proceed past the gate" }),
+      }),
+      "missing_human_decision",
+    )
+
+    expect(error.retryable).toBe(false)
+    expect(error.message).toContain('step "spec-review"')
+    expect(error.message).toContain('data key "checklist_override"')
+    expect(error.message).toContain("carries a gate override")
+    expect(error.message).toContain("SYNTH-001")
+    expect(error.message).toContain("requires human_decision_ref")
+  })
+
+  it("checkpoint [SYNTH-001] rejects a well-formed unrecorded ref with missing_human_decision", async () => {
+    const { registry } = await seamRegistry()
+
+    const error = expectErrorEnvelope(
+      await callEnvelopeTool(registry, "checkpoint", {
+        command: "uf.unleash",
+        step: "spec-review",
+        data: JSON.stringify({ checklist_override: "proceed past the gate" }),
+        human_decision_ref: UNRECORDED_REF,
+      }),
+      "missing_human_decision",
+    )
+
+    expect(error.retryable).toBe(false)
+    // The shape-validated ref is a bounded decision_id-shaped echo naming
+    // the state key it failed against.
+    expect(error.message).toContain(
+      `human_decision_ref ${UNRECORDED_REF} names no decision recorded for key ${SEAM_KEY}`,
+    )
+  })
+
+  it("checkpoint [SYNTH-006] fails closed on an unreadable human-decision record with human_decision_record_unreadable", async () => {
+    const { directory, registry } = await seamRegistry()
+    // Corrupt the record the ref resolution would read — the store fails
+    // closed rather than treating the failure as a missing reference.
+    await writeProjectFile(directory, `.uf/progress/${SEAM_KEY}/human-decisions.json`, "{ corrupted")
+
+    const error = expectErrorEnvelope(
+      await callEnvelopeTool(registry, "checkpoint", {
+        command: "uf.unleash",
+        step: "spec-review",
+        data: JSON.stringify({ checklist_override: "proceed past the gate" }),
+        human_decision_ref: UNRECORDED_REF,
+      }),
+      "human_decision_record_unreadable",
+    )
+
+    expect(error.retryable).toBe(false)
+    expect(error.message).toContain("is unreadable")
+    expect(error.message).toContain("failing closed")
+    expect(error.message).toContain("SYNTH-006")
+    expect(error.message).toContain("inspect .uf/progress/<key>/human-decisions.json")
+  })
+
+  it("checkpoint [SYNTH-004] rejects an advancement step under an escalated advisory with escalated_advisory_unrelayed", async () => {
+    const { directory, registry } = await seamRegistry()
+    await seedEscalatedAdvisoryGate(directory)
+
+    const error = expectErrorEnvelope(
+      await callEnvelopeTool(registry, "checkpoint", {
+        command: "uf.unleash",
+        step: "implement",
+      }),
+      "escalated_advisory_unrelayed",
+    )
+
+    expect(error.retryable).toBe(false)
+    // The refusal names the holding verdict, correlation, and finding
+    // count — the relay's identifying payload — plus the recovery path.
+    expect(error.message).toContain("APPROVE WITH ADVISORIES")
+    expect(error.message).toContain(`correlation ${SEAM_CORRELATION}`)
+    expect(error.message).toContain("2 findings")
+    expect(error.message).toContain("SYNTH-004")
+    expect(error.message).toContain("relay_spec_review_gate")
+  })
+
+  it("record_human_decision [SYNTH-006] returns the machine-stamped entry as its success envelope", async () => {
+    const { registry } = await seamRegistry()
+
+    const entry = expectOk(
+      await callEnvelopeTool<{
+        decision_id: string
+        source: string
+        question: string
+        answer: string
+        recorded_at: string
+      }>(registry, "record_human_decision", {
+        source: "question-tool",
+        question: "Proceed past the spec-review gate for the seam fixture?",
+        answer: "Yes, the advisory is tracked separately.",
+      }),
+    )
+
+    expect(entry.source).toBe("question-tool")
+    expect(entry.question).toBe("Proceed past the spec-review gate for the seam fixture?")
+    expect(entry.answer).toBe("Yes, the advisory is tracked separately.")
+    // Machine-stamped identity and provenance, never caller-supplied.
+    expect(HUMAN_DECISION_ID_PATTERN.test(entry.decision_id)).toBe(true)
+    expect(Number.isNaN(Date.parse(entry.recorded_at))).toBe(false)
+  })
+
+  it("round-trips a record_human_decision write through checkpoint ref validation and get_progress (question-tool surface)", async () => {
+    const { directory, registry } = await seamRegistry()
+    await seedEscalatedAdvisoryGate(directory)
+
+    // The widened relay predicate reads the seeded dispatch artifact and
+    // gate record and pauses (Layer 3: relay_spec_review_gate round-trip).
+    const relay = expectOk(
+      await callEnvelopeTool<{
+        gate_paused: boolean
+        relay: string | null
+        iteration: number | null
+        verdict: string | null
+        correlation_id: string | null
+        finding_count: number | null
+        undecided_finding_ids: string[]
+      }>(registry, "relay_spec_review_gate", { command: "uf.unleash" }),
+    )
+    expect(relay.gate_paused).toBe(true)
+    expect(relay.iteration).toBe(1)
+    expect(relay.verdict).toBe("APPROVE WITH ADVISORIES")
+    expect(relay.correlation_id).toBe(SEAM_CORRELATION)
+    expect(relay.finding_count).toBe(SEAM_FINDINGS.length)
+    expect(relay.undecided_finding_ids).toEqual([])
+    expect(relay.relay).toContain(
+      `Spec-review gate holds: iteration 1 (APPROVE WITH ADVISORIES), correlation ${SEAM_CORRELATION}.`,
+    )
+    expect(relay.relay).toContain("2 advisories consolidated — escalated advisory (SYNTH-004)")
+    expect(relay.relay).toContain("Findings from the dispatch artifact:")
+    expect(relay.relay).toContain(
+      "1. [HIGH] Seam golden high advisory of the escalated consolidation (specs/seam-advisory-1.md:1) — undecided",
+    )
+    expect(relay.relay).toContain(
+      "2. [MEDIUM] Seam golden medium advisory of the escalated consolidation (specs/seam-advisory-2.md:2) — undecided",
+    )
+
+    // Write: the human decision lands through the registry-path tool.
+    const entry = expectOk(
+      await callEnvelopeTool<{
+        decision_id: string
+        source: string
+        question: string
+        answer: string
+        recorded_at: string
+      }>(registry, "record_human_decision", {
+        source: "question-tool",
+        question: `Proceed past the escalated advisory (correlation ${SEAM_CORRELATION})?`,
+        answer: "Yes, proceed to implement.",
+      }),
+    )
+    expect(HUMAN_DECISION_ID_PATTERN.test(entry.decision_id)).toBe(true)
+
+    // Read: the advancement checkpoint resolves that decision_id against
+    // the record the write landed in — under the hold the relay reported —
+    // and stamps it as provenance on the recorded state.
+    const state = expectOk(
+      await callEnvelopeTool<{ completed_steps: string[]; data: Record<string, unknown> }>(registry, "checkpoint", {
+        command: "uf.unleash",
+        step: "implement",
+        human_decision_ref: entry.decision_id,
+      }),
+    )
+    expect(state.completed_steps).toContain("implement")
+    expect(state.data.human_decision_ref).toBe(entry.decision_id)
+
+    // Read back through get_progress (FR-002, unchanged: context listing
+    // only — the state carries the provenance stamp, never the decision
+    // text).
+    const progress = expectOk(
+      await callEnvelopeTool<{ completed_steps: string[]; data: Record<string, unknown> }>(registry, "get_progress", {
+        command: "uf.unleash",
+      }),
+    )
+    expect(progress.completed_steps).toContain("implement")
+    expect(progress.data.human_decision_ref).toBe(entry.decision_id)
+  })
+
+  it("round-trips an orchestrator-relay envelope append through the registry checkpoint's ref validation (orchestrator-relay surface)", async () => {
+    const { directory, registry } = await seamRegistry()
+    await seedEscalatedAdvisoryGate(directory)
+
+    // Write: the orchestrator-relay envelope leg. The registry-wired
+    // uf_delegate_command persists through exactly this appendHumanDecisions
+    // call — its wiring, spawn-time ordering, and stamped-id envelope are
+    // pinned in unleash-delegate.test.ts against the same function —
+    // because a full registry delegation would spawn a live child session.
+    const stamped = await appendHumanDecisions(directory, SEAM_BRANCH, [
+      {
+        source: "orchestrator-relay",
+        question: `Proceed past the escalated advisory (correlation ${SEAM_CORRELATION})?`,
+        answer: "Yes, proceed to implement.",
+      },
+    ])
+    expect(stamped[0]?.source).toBe("orchestrator-relay")
+    const ref = stamped[0]?.decision_id
+    expect(ref).toBeDefined()
+
+    // Read: through the registry-path checkpoint, exercising the phase
+    // argument writer surface of the advancement steps under the same hold.
+    const state = expectOk(
+      await callEnvelopeTool<{ completed_steps: string[]; data: Record<string, unknown> }>(registry, "checkpoint", {
+        command: "uf.unleash",
+        step: "implement-phase-1",
+        phase: { number: 1, verdict: "green", inventory: [] },
+        human_decision_ref: ref,
+      }),
+    )
+    expect(state.completed_steps).toContain("implement-phase-1")
+    expect(state.data.human_decision_ref).toBe(ref)
   })
 })

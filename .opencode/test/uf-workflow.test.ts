@@ -18,9 +18,11 @@ import type { PluginInput } from "@opencode-ai/plugin"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { PreflightDeclaredDependencies } from "../lib/preflight-declared.js"
+import { appendHumanDecisions, readState } from "../lib/progress-state.js"
 import {
   defaultGitExec,
   failure,
+  HUMAN_DECISION_ID_PATTERN,
   success,
   type ToolFailure,
   type ToolResult,
@@ -46,6 +48,7 @@ import {
   createRelaySpecReviewGateTool,
   createPersistUnleashSummaryTool,
   createPreflightDeclaredChecksTool,
+  createRecordHumanDecisionTool,
   DELEGATION_BYTES_PER_TOKEN,
   DELEGATION_CACHED_PREFIX_TOKENS,
   estimateDelegationFootprint,
@@ -170,6 +173,7 @@ describe("UfWorkflowPlugin", () => {
       "parse_tasks",
       "post_feedback_replies",
       "post_issue_comment",
+      "record_human_decision",
       "relay_spec_review_gate",
       "resolve_base_ref",
       "resolve_clarification",
@@ -267,7 +271,9 @@ describe("UfWorkflowPlugin", () => {
     // pre-change parameters plus task_classification, skill, and
     // skill_absent_reason (task 1.1), plus the four model-matrix selection
     // parameters model, variant, profile, and pack (model-matrix-
-    // delegation task 5.1, UF-FR-002). The registration-surface suite
+    // delegation task 5.1, UF-FR-002), plus the orchestrator-relay
+    // human_decisions envelope (synthetic-compaction-continue-prompt-rec
+    // task 2.2, SYNTH-001/006). The registration-surface suite
     // proves args is the zod raw shape the host validates input through;
     // this pin holds the key set itself to the documented contract, so a
     // parameter added to the input schema but not the registration
@@ -278,6 +284,7 @@ describe("UfWorkflowPlugin", () => {
       "command_path",
       "expected_artifact",
       "feature_dir",
+      "human_decisions",
       "idle_timeout",
       "model",
       "pack",
@@ -537,6 +544,14 @@ async function invokeTool<T = unknown>(
 
 // ---------------------------------------------------------------------------
 // checkpoint tool tests (FR-001)
+//
+// Fixture steps use declared uf.unleash step names (clarify, plan,
+// implement-phase-N): since SYNTH-003 (synthetic-compaction-continue-prompt-rec
+// task 4.1) the checkpoint tool rejects undeclared step names under command
+// uf.unleash, and these mechanics fixtures exercise the tool's recording
+// contract, not the declared-step predicate (that gate's wiring tests live in
+// human-decisions-store.test.ts; its comprehensive matrix is the SYNTH-003
+// describe below).
 // ---------------------------------------------------------------------------
 
 describe("checkpoint tool (FR-001)", () => {
@@ -553,14 +568,14 @@ describe("checkpoint tool (FR-001)", () => {
   it("creates new state on first call", async () => {
     const result = await invokeTool<ProgressState>(
       createCheckpointTool(branchExec, tmpDir),
-      { command: "uf.unleash", step: "step-0" },
+      { command: "uf.unleash", step: "clarify" },
     )
     expect(result.status).toBe("ok")
     if (result.status === "ok") {
       const s = result.data as ProgressState
       expect(s.command).toBe("uf.unleash")
-      expect(s.current_step).toBe("step-0")
-      expect(s.completed_steps).toEqual(["step-0"])
+      expect(s.current_step).toBe("clarify")
+      expect(s.completed_steps).toEqual(["clarify"])
       expect(s.data).toEqual({})
       expect(s.created_at).toBeTruthy()
       expect(s.updated_at).toBeTruthy()
@@ -569,30 +584,30 @@ describe("checkpoint tool (FR-001)", () => {
 
   it("appends steps on subsequent calls", async () => {
     const cp = createCheckpointTool(branchExec, tmpDir)
-    await invokeTool(cp, { command: "uf.unleash", step: "step-0" })
+    await invokeTool(cp, { command: "uf.unleash", step: "clarify" })
     const result = await invokeTool<ProgressState>(cp, {
       command: "uf.unleash",
-      step: "step-1",
+      step: "plan",
     })
     expect(result.status).toBe("ok")
     if (result.status === "ok") {
       const s = result.data as ProgressState
-      expect(s.current_step).toBe("step-1")
-      expect(s.completed_steps).toEqual(["step-0", "step-1"])
+      expect(s.current_step).toBe("plan")
+      expect(s.completed_steps).toEqual(["clarify", "plan"])
     }
   })
 
   it("duplicate step is idempotent (FR-001)", async () => {
     const cp = createCheckpointTool(branchExec, tmpDir)
-    await invokeTool(cp, { command: "uf.unleash", step: "step-0" })
+    await invokeTool(cp, { command: "uf.unleash", step: "clarify" })
     const result = await invokeTool<ProgressState>(cp, {
       command: "uf.unleash",
-      step: "step-0",
+      step: "clarify",
     })
     expect(result.status).toBe("ok")
     if (result.status === "ok") {
       expect((result.data as ProgressState).completed_steps).toEqual([
-        "step-0",
+        "clarify",
       ])
     }
   })
@@ -601,12 +616,12 @@ describe("checkpoint tool (FR-001)", () => {
     const cp = createCheckpointTool(branchExec, tmpDir)
     await invokeTool(cp, {
       command: "uf.unleash",
-      step: "step-0",
+      step: "clarify",
       data: JSON.stringify({ a: 1 }),
     })
     const result = await invokeTool<ProgressState>(cp, {
       command: "uf.unleash",
-      step: "step-1",
+      step: "plan",
       data: JSON.stringify({ b: 2 }),
     })
     expect(result.status).toBe("ok")
@@ -618,7 +633,7 @@ describe("checkpoint tool (FR-001)", () => {
   it("creates files with 0o600 permissions (FR-005)", async () => {
     await invokeTool(createCheckpointTool(branchExec, tmpDir), {
       command: "uf.unleash",
-      step: "step-0",
+      step: "clarify",
     })
     const fp = join(
       tmpDir,
@@ -634,7 +649,7 @@ describe("checkpoint tool (FR-001)", () => {
   it("creates directories with 0o700 permissions (FR-005)", async () => {
     await invokeTool(createCheckpointTool(branchExec, tmpDir), {
       command: "uf.unleash",
-      step: "step-0",
+      step: "clarify",
     })
     const dir = join(tmpDir, ".uf", "progress", "opsx-test-branch")
     const stats = statSync(dir)
@@ -644,7 +659,7 @@ describe("checkpoint tool (FR-001)", () => {
   it("uses explicit key when provided", async () => {
     const result = await invokeTool<ProgressState>(
       createCheckpointTool(branchExec, tmpDir),
-      { command: "uf.unleash", step: "step-0", key: "custom-key" },
+      { command: "uf.unleash", step: "clarify", key: "custom-key" },
     )
     expect(result.status).toBe("ok")
     if (result.status === "ok") {
@@ -655,7 +670,7 @@ describe("checkpoint tool (FR-001)", () => {
   it("returns failure on invalid JSON data", async () => {
     const result = await invokeTool(
       createCheckpointTool(branchExec, tmpDir),
-      { command: "uf.unleash", step: "step-0", data: "not-json" },
+      { command: "uf.unleash", step: "clarify", data: "not-json" },
     )
     expect(result.status).toBe("error")
     if (result.status === "error") {
@@ -777,7 +792,7 @@ describe("checkpoint tool (FR-001)", () => {
       createCheckpointTool(branchExec, tmpDir),
       {
         command: "uf.unleash",
-        step: "step-0",
+        step: "clarify",
         phase: { number: 4, verdict: "green", inventory: [] },
       },
     )
@@ -786,6 +801,138 @@ describe("checkpoint tool (FR-001)", () => {
       expect(result.code).toBe("CHECKPOINT_ERROR")
       expect(result.message).toContain("implement-phase-4")
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// checkpoint declared-step enforcement matrix (SYNTH-003, task 4.3)
+//
+// The comprehensive SYNTH-003 matrix through the checkpoint tool's rejection
+// envelope: under command uf.unleash an undeclared step name — the incident's
+// checklist-override-phase8-9, or any made-up name, override-shaped or not —
+// rejects with undeclared_step and persists nothing, unless a valid
+// human_decision_ref naming a recorded decision_id authorizes it (the
+// SYNTH-001 escape hatch). The normal declared steps record untouched, and
+// another command's checkpoint never passes through the uf.unleash predicate
+// (HARDEN-002 command keying). The implement-phase-N pattern edges
+// (implement-phase-0, implement-phase-01, …) are pinned by the task 4.1
+// suite in human-decisions-store.test.ts and are not duplicated here; the
+// writer-surface lockstep enumeration lives in unleash-step-lockstep.test.ts.
+// ---------------------------------------------------------------------------
+
+describe("checkpoint declared-step enforcement matrix (SYNTH-003, task 4.3)", () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "uf-declared-steps-"))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it("rejects the incident's checklist-override-phase8-9 without a ref and persists nothing", async () => {
+    const result = await invokeTool(createCheckpointTool(branchExec, tmpDir), {
+      command: "uf.unleash",
+      step: "checklist-override-phase8-9",
+    })
+
+    expect(result.status).toBe("error")
+    if (result.status !== "error") return
+    expect(result.code).toBe("undeclared_step")
+    expect(result.retryable).toBe(false)
+    // The envelope names the offending step and the command whose declared
+    // step set it missed.
+    expect(result.message).toContain("checklist-override-phase8-9")
+    expect(result.message).toContain("uf.unleash")
+    // Rejected before any state write: no progress persists for the step.
+    expect(readState(tmpDir, "opsx-test-branch", "uf.unleash")).toBeNull()
+  })
+
+  it("accepts checklist-override-phase8-9 when a valid human_decision_ref authorizes it", async () => {
+    // The SYNTH-001 escape hatch: seed a real recorded human decision the
+    // way the tasks 2.4-2.5 suite does (an orchestrator-relay append through
+    // the record store), then cite its machine-stamped decision_id.
+    const stamped = await appendHumanDecisions(tmpDir, "opsx-test-branch", [
+      {
+        source: "orchestrator-relay",
+        question: "Record the phase 8-9 checklist override step?",
+        answer: "Yes, record it.",
+      },
+    ])
+    const ref = stamped[0]?.decision_id
+    expect(ref).toBeDefined()
+    expect(HUMAN_DECISION_ID_PATTERN.test(ref ?? "")).toBe(true)
+
+    const result = await invokeTool<ProgressState>(
+      createCheckpointTool(branchExec, tmpDir),
+      {
+        command: "uf.unleash",
+        step: "checklist-override-phase8-9",
+        human_decision_ref: ref,
+      },
+    )
+
+    expect(result.status).toBe("ok")
+    const state = readState(tmpDir, "opsx-test-branch", "uf.unleash")
+    expect(state?.completed_steps).toContain("checklist-override-phase8-9")
+    // The authorizing reference is stamped into the recorded data as
+    // provenance — the same anti-spoofing discipline SYNTH-001 applies to
+    // gate overrides.
+    expect(state?.data.human_decision_ref).toBe(ref)
+  })
+
+  it("rejects an undeclared non-override step name (strict predicate)", async () => {
+    // Rejection is not limited to override-shaped step names: any name
+    // outside the declared set rejects identically.
+    const result = await invokeTool(createCheckpointTool(branchExec, tmpDir), {
+      command: "uf.unleash",
+      step: "totally-made-up-step",
+    })
+
+    expect(result.status).toBe("error")
+    if (result.status !== "error") return
+    expect(result.code).toBe("undeclared_step")
+    expect(result.retryable).toBe(false)
+    expect(result.message).toContain("totally-made-up-step")
+    expect(readState(tmpDir, "opsx-test-branch", "uf.unleash")).toBeNull()
+  })
+
+  it("records the normal declared steps without any ref", async () => {
+    const cp = createCheckpointTool(branchExec, tmpDir)
+    // One representative of each declared family: a user-facing pipeline
+    // step, the implement-phase-N pattern family, the plugin's machinery
+    // steps, and the command prose's gate/budget steps.
+    const declaredSteps = [
+      "implement",
+      "implement-phase-2",
+      "branch-safety-gate",
+      "tier-routing",
+      "quick-pre-flight",
+    ]
+    for (const step of declaredSteps) {
+      const result = await invokeTool<ProgressState>(cp, {
+        command: "uf.unleash",
+        step,
+      })
+      expect(result.status, step).toBe("ok")
+    }
+    const state = readState(tmpDir, "opsx-test-branch", "uf.unleash")
+    expect(state?.completed_steps).toEqual(declaredSteps)
+  })
+
+  it("does not apply the uf.unleash predicate to uf.review-council's phase-1a-preflight", async () => {
+    // Command keying (HARDEN-002): another command carries its own step
+    // vocabulary — phase-1a-preflight is undeclared under the uf.unleash
+    // allowlist and is not an override data key, yet records fine.
+    const result = await invokeTool(createCheckpointTool(branchExec, tmpDir), {
+      command: "uf.review-council",
+      step: "phase-1a-preflight",
+    })
+
+    expect(result.status).toBe("ok")
+    const state = readState(tmpDir, "opsx-test-branch", "uf.review-council")
+    expect(state?.completed_steps).toContain("phase-1a-preflight")
   })
 })
 
@@ -818,7 +965,7 @@ describe("get_progress tool (FR-002)", () => {
   it("returns full state after checkpoint", async () => {
     await invokeTool(createCheckpointTool(branchExec, tmpDir), {
       command: "uf.unleash",
-      step: "step-0",
+      step: "clarify",
     })
     const result = await invokeTool<ProgressState>(
       createGetProgressTool(branchExec, tmpDir),
@@ -828,7 +975,7 @@ describe("get_progress tool (FR-002)", () => {
     if (result.status === "ok") {
       const s = result.data as ProgressState
       expect(s.command).toBe("uf.unleash")
-      expect(s.completed_steps).toEqual(["step-0"])
+      expect(s.completed_steps).toEqual(["clarify"])
     }
   })
 })
@@ -851,7 +998,7 @@ describe("clear_progress tool (FR-003)", () => {
   it("deletes existing state file", async () => {
     await invokeTool(createCheckpointTool(branchExec, tmpDir), {
       command: "uf.unleash",
-      step: "step-0",
+      step: "clarify",
     })
     const clearResult = await invokeTool(
       createClearProgressTool(branchExec, tmpDir),
@@ -950,7 +1097,7 @@ describe("symlink defense (FR-005)", () => {
 
     const result = await invokeTool(
       createCheckpointTool(branchExec, tmpDir),
-      { command: "uf.unleash", step: "step-0" },
+      { command: "uf.unleash", step: "clarify" },
     )
     expect(result.status).toBe("error")
     if (result.status === "error") {
@@ -2403,6 +2550,7 @@ describe("tool args schema exposure", () => {
     expect(Object.keys(definition.args).sort()).toEqual([
       "command",
       "data",
+      "human_decision_ref",
       "key",
       "phase",
       "spec_review_decisions",
@@ -2420,6 +2568,23 @@ describe("tool args schema exposure", () => {
     const definition = createClearProgressTool(branchExec, "/fake")
 
     expect(Object.keys(definition.args).sort()).toEqual(["command", "key"])
+  })
+
+  it("exposes record_human_decision as a zod-args tool definition", () => {
+    // DE-007 Layer 1 (synthetic-compaction-continue-prompt-rec task 2.3):
+    // the registered argument set matches the documented {source,
+    // question, answer, key} contract — callers supply only source,
+    // question, and answer plus the optional key override; identity
+    // fields (decision_id, recorded_at) are absent because the tool
+    // machine-stamps them.
+    const definition = createRecordHumanDecisionTool(branchExec, "/fake")
+
+    expect(Object.keys(definition.args).sort()).toEqual([
+      "answer",
+      "key",
+      "question",
+      "source",
+    ])
   })
 
   it("exposes relay_spec_review_gate as a zod-args tool definition", () => {

@@ -7,7 +7,8 @@ import type { PluginInput } from "@opencode-ai/plugin"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { DEFAULT_STORM_THRESHOLD } from "../lib/model-matrix.js"
-import type { ToolResult } from "../lib/uf-workflow-types.js"
+import { appendHumanDecisions } from "../lib/progress-state.js"
+import type { HumanDecisionEntry, ToolResult } from "../lib/uf-workflow-types.js"
 import {
   createDelegateCommandTool,
   createGetProgressTool,
@@ -42,6 +43,24 @@ vi.mock("node:fs", async (importOriginal) => {
     readFileSync: vi.fn(),
     mkdirSync: vi.fn(),
     writeFileSync: vi.fn(),
+  }
+})
+
+// The human-decisions relay envelope (SYNTH-001/006,
+// synthetic-compaction-continue-prompt-rec task 2.2) persists through
+// appendHumanDecisions — real filesystem I/O in progress-state. The
+// store contract itself has a dedicated suite (human-decisions-store
+// .test.ts, real temp roots); this suite pins the ENVELOPE wiring: what
+// the plugin passes to the store, when (spawn time, before the child
+// session runs), and how persist failures surface. Mocking the seam
+// keeps every delegate test off the real filesystem — the same recipe
+// as the node:fs mock above — while the spread of actual preserves
+// readState/writeState for the auto-checkpoint path.
+vi.mock("../lib/progress-state.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/progress-state.js")>()
+  return {
+    ...actual,
+    appendHumanDecisions: vi.fn(),
   }
 })
 
@@ -124,6 +143,12 @@ interface FakeClientOptions {
    * descendant rather than the delegation's child session.
    */
   readonly descendantStormProbe?: boolean
+  /**
+   * Callback fired when the fake client successfully creates the child
+   * session (SYNTH-001/006 task 2.2): spawn-ordering probes assert the
+   * human-decision relay persist precedes the child session's creation.
+   */
+  readonly onCreate?: () => void
 }
 
 function fieldsResponse<T>(data: T): T {
@@ -188,6 +213,9 @@ function fakeClient(options: FakeClientOptions = {}): { readonly client: Client;
       if (options.createError !== undefined) {
         return fieldsResponse({ data: undefined, error: options.createError } as unknown as CreateResponse)
       }
+      // Fires only on successful creation — a createError run created no
+      // child session, so an ordering probe must not observe one.
+      options.onCreate?.()
       return fieldsResponse({ data: { id: "child-session" }, error: undefined } as unknown as CreateResponse)
     },
     message: async (request: MessageOptions): Promise<MessageResponse> => {
@@ -1816,6 +1844,10 @@ describe("uf_delegate_command expected-artifact verification", () => {
         child_session_id: "child-session",
         artifact_created: true,
         checkpoint_recorded: false,
+        // SYNTH-001/006 (synthetic-compaction-continue-prompt-rec task
+        // 2.2): no human_decisions envelope on this call, so no stamped
+        // decision ids — null, never an empty array.
+        human_decision_ids: null,
         // Delegation-skill-enforcement D5 (task 1.5): the audit fields
         // surface in the envelope -- judgment classification, no skill
         // reference, no absence reason.
@@ -2820,6 +2852,8 @@ describe("uf_delegate_command seam verification", () => {
         child_session_id: "child-session",
         artifact_created: false,
         checkpoint_recorded: true,
+        // SYNTH-001/006 (task 2.2): no envelope supplied on this call.
+        human_decision_ids: null,
         task_classification: "deterministic",
         skill: ".opencode/skills/pre-flight/SKILL.md",
         skill_absent_reason: null,
@@ -2927,6 +2961,8 @@ describe("uf_delegate_command seam verification", () => {
         child_session_id: "child-session",
         artifact_created: false,
         checkpoint_recorded: false,
+        // SYNTH-001/006 (task 2.2): no envelope supplied on this call.
+        human_decision_ids: null,
         task_classification: "deterministic",
         skill: null,
         skill_absent_reason: reason,
@@ -4068,5 +4104,281 @@ describe("uf_delegate_command compaction-storm surfacing", () => {
         "delegation.storm_threshold is invalid (99)",
       ),
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// uf_delegate_command — human-decisions relay envelope (SYNTH-001/006)
+// ---------------------------------------------------------------------------
+
+describe("uf_delegate_command human-decisions relay envelope", () => {
+  it("persists relayed decisions at spawn time, before the child session runs, and returns the stamped ids", async () => {
+    const order: string[] = []
+    const fake = fakeClient({ onCreate: () => order.push("create") })
+    const reads = fakeReadText({})
+    const artifact = fakeFileExists([])
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: reads.readText,
+      fileExists: artifact.fileExists,
+    }
+    const stamped: readonly HumanDecisionEntry[] = [
+      {
+        decision_id: "11111111-2222-4333-8444-555555555555",
+        source: "orchestrator-relay",
+        question: "Proceed past the phase 3 quality gate?",
+        answer: "Yes, proceed; the flaky test is tracked separately.",
+        recorded_at: "2026-11-15T00:00:00.000Z",
+      },
+      {
+        decision_id: "66666666-7777-4888-9aaa-bbbbbbbbbbbb",
+        source: "orchestrator-relay",
+        question: "Skip the slow integration profile for this run?",
+        answer: "No, run the full profile.",
+        recorded_at: "2026-11-15T00:00:00.000Z",
+      },
+    ]
+    vi.mocked(appendHumanDecisions).mockImplementation(async () => {
+      order.push("persist")
+      return stamped
+    })
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Implement task 2.2 of the change.",
+      task_classification: "judgment",
+      human_decisions: [
+        {
+          question: "Proceed past the phase 3 quality gate?",
+          answer: "Yes, proceed; the flaky test is tracked separately.",
+        },
+        {
+          question: "Skip the slow integration profile for this run?",
+          answer: "No, run the full profile.",
+        },
+      ],
+    })
+
+    expect(result.status).toBe("ok")
+    // The relay persists through the progress store under the sanitized
+    // branch key, with source pinned structurally to the relay surface —
+    // callers supply question and answer only (SYNTH-006).
+    expect(appendHumanDecisions).toHaveBeenCalledTimes(1)
+    expect(appendHumanDecisions).toHaveBeenCalledWith(
+      FAKE_CWD,
+      "opsx-unleash-deterministic-tools",
+      [
+        {
+          source: "orchestrator-relay",
+          question: "Proceed past the phase 3 quality gate?",
+          answer: "Yes, proceed; the flaky test is tracked separately.",
+        },
+        {
+          source: "orchestrator-relay",
+          question: "Skip the slow integration profile for this run?",
+          answer: "No, run the full profile.",
+        },
+      ],
+    )
+    // Spawn-time ordering (SYNTH-001): the record is written before the
+    // delegated child session runs, so a child's human_decision_ref
+    // citations can never race their own authorization into existence.
+    expect(order).toEqual(["persist", "create"])
+    // The stamped ids surface for the child's checkpoint citations.
+    if (result.status === "ok") {
+      expect(result.data.human_decision_ids).toEqual([
+        "11111111-2222-4333-8444-555555555555",
+        "66666666-7777-4888-9aaa-bbbbbbbbbbbb",
+      ])
+    }
+  })
+
+  it("returns human_decision_ids null and never touches the record when no envelope is supplied", async () => {
+    const fake = fakeClient()
+    const reads = fakeReadText({})
+    const artifact = fakeFileExists([])
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: reads.readText,
+      fileExists: artifact.fileExists,
+    }
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Implement task 2.3 of the change.",
+      task_classification: "judgment",
+    })
+
+    // Pre-change call shape is unaffected: no envelope means no record
+    // write and a null (not empty-array) ids field in the envelope.
+    expect(result.status).toBe("ok")
+    expect(appendHumanDecisions).not.toHaveBeenCalled()
+    if (result.status === "ok") {
+      expect(result.data.human_decision_ids).toBeNull()
+    }
+  })
+
+  it("fails closed with HUMAN_DECISION_PERSIST_FAILED before spawning when the record append fails", async () => {
+    const fake = fakeClient()
+    const reads = fakeReadText({})
+    const artifact = fakeFileExists([])
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: reads.readText,
+      fileExists: artifact.fileExists,
+    }
+    vi.mocked(appendHumanDecisions).mockRejectedValue(
+      new Error(
+        "human-decision record for key opsx-unleash-deterministic-tools is corrupted (malformed JSON)",
+      ),
+    )
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Implement task 2.2 of the change.",
+      task_classification: "judgment",
+      human_decisions: [{ question: "Proceed?", answer: "Yes." }],
+    })
+
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("HUMAN_DECISION_PERSIST_FAILED")
+      expect(result.retryable).toBe(true)
+      // Bounded identifiers only: the key and the store's error, plus the
+      // remediation path — no raw question or answer text (SYNTH-006).
+      expect(result.message).toContain("key opsx-unleash-deterministic-tools")
+      expect(result.message).toContain("corrupted (malformed JSON)")
+      expect(result.message).toContain("retry once the condition clears")
+    }
+    // The persist sits after every validation (host introspection ran, so
+    // the failure is the persist, not an earlier gate) but before the
+    // child spawn: no session created, prompted, or aborted, and no
+    // checkpoint write — authorization that never reached the record does
+    // not exist, so the delegation never runs.
+    expect(fake.calls.messages).toHaveLength(1)
+    expect(fake.calls.creates).toHaveLength(0)
+    expect(fake.calls.prompts).toHaveLength(0)
+    expect(fake.calls.aborts).toHaveLength(0)
+    expect(writeFileSync).not.toHaveBeenCalled()
+  })
+
+  it("rejects an empty envelope array with INVALID_INPUT before any spawn or record write", async () => {
+    const fake = fakeClient()
+    const reads = fakeReadText({})
+    const artifact = fakeFileExists([])
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: reads.readText,
+      fileExists: artifact.fileExists,
+    }
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Implement task 2.2 of the change.",
+      task_classification: "judgment",
+      human_decisions: [],
+    })
+
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("INVALID_INPUT")
+      expect(result.retryable).toBe(false)
+      expect(result.message).toBe(
+        "human_decisions: empty array is invalid -- omit human_decisions when no decisions are relayed",
+      )
+    }
+    // Schema bounds reject before any security-sensitive operation: no
+    // host introspection, no session activity, no record write.
+    expect(appendHumanDecisions).not.toHaveBeenCalled()
+    expect(fake.calls.messages).toHaveLength(0)
+    expect(fake.calls.creates).toHaveLength(0)
+  })
+
+  it("rejects envelope entries carrying extraneous fields -- no provenance or identity smuggling", async () => {
+    const fake = fakeClient()
+    const reads = fakeReadText({})
+    const artifact = fakeFileExists([])
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: reads.readText,
+      fileExists: artifact.fileExists,
+    }
+
+    // A caller cannot claim question-tool provenance (or stamp a
+    // decision_id / recorded_at) through the relay: the entry object is
+    // strict, so extraneous keys are a schema violation, not data.
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Implement task 2.2 of the change.",
+      task_classification: "judgment",
+      human_decisions: [{ question: "Proceed?", answer: "Yes.", source: "question-tool" }],
+    })
+
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("INVALID_INPUT")
+      expect(result.retryable).toBe(false)
+      // The offending entry and field are named (zod's strict-object
+      // wording is version-specific; the path identity is the contract).
+      expect(result.message).toContain("human_decisions.0")
+      expect(result.message).toContain("source")
+    }
+    expect(appendHumanDecisions).not.toHaveBeenCalled()
+    expect(fake.calls.creates).toHaveLength(0)
+  })
+
+  it.each([
+    [
+      "an empty-string question",
+      [{ question: "", answer: "A." }],
+      "human_decisions.0.question: empty string is invalid -- relay the actual question text",
+    ],
+    [
+      "an empty-string answer",
+      [{ question: "Q?", answer: "" }],
+      "human_decisions.0.answer: empty string is invalid -- relay the actual answer text",
+    ],
+    [
+      "a question over the 16 KiB byte bound",
+      [{ question: "x".repeat(16 * 1024 + 1), answer: "A." }],
+      "human_decisions.0.question: question exceeds the 16 KiB UTF-8 byte limit (SYNTH-006)",
+    ],
+    [
+      "an answer over the 16 KiB byte bound",
+      [{ question: "Q?", answer: "x".repeat(16 * 1024 + 1) }],
+      "human_decisions.0.answer: answer exceeds the 16 KiB UTF-8 byte limit (SYNTH-006)",
+    ],
+    [
+      "more than 32 entries",
+      Array.from({ length: 33 }, () => ({ question: "Q?", answer: "A." })),
+      // zod's array-max wording is version-specific; the field identity
+      // is the contract (the over-length skill precedent).
+      "human_decisions",
+    ],
+  ] as const)("rejects %s with INVALID_INPUT before any spawn or record write", async (_label, envelope, expected) => {
+    const fake = fakeClient()
+    const reads = fakeReadText({})
+    const artifact = fakeFileExists([])
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: reads.readText,
+      fileExists: artifact.fileExists,
+    }
+
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Implement task 2.2 of the change.",
+      task_classification: "judgment",
+      human_decisions: envelope,
+    })
+
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("INVALID_INPUT")
+      expect(result.retryable).toBe(false)
+      expect(result.message).toContain(expected)
+    }
+    expect(appendHumanDecisions).not.toHaveBeenCalled()
+    expect(fake.calls.creates).toHaveLength(0)
   })
 })

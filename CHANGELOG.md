@@ -1525,6 +1525,43 @@ Each entry follows the format: `- <change-name>: <summary>`.
   current tree (zero heredoc instances repo-wide, verified
   2026-11-10 — the gap was latent, not live). Coverage extends
   only; no existing gate is weakened, narrowed, or bypassed.
+- synthetic-compaction-continue-prompt-rec: closes the checkpoint
+  gate-override bypass (issue #1118: 67 compactions into a
+  `/uf.unleash` child run, the model treated opencode's synthetic
+  continue prompt — "Continue if you have next steps, or stop and
+  ask for clarification if you are unsure how to proceed" — as
+  human authorization for a checklist override, checkpointing an
+  undeclared `checklist-override-phase8-9` step whose free-text
+  justification quoted that prompt). Gate overrides — any `data`
+  key containing `override` at any nesting depth — now require a
+  `human_decision_ref` resolving to a recorded entry in the
+  persisted human-decision record
+  (`.uf/progress/<key>/human-decisions.json`): entries come from
+  the new `record_human_decision` tool (in-session `question`-tool
+  answers, machine-stamped UUID v4 `decision_id` and
+  `recorded_at`, append-only, synthetic-prompt answers refused
+  with `synthetic_prompt_answer`) or from `uf_delegate_command`'s
+  new `human_decisions` envelope persisted at spawn time
+  (orchestrator relay); free-text justifications reject with
+  `missing_human_decision`, and unreadable or corrupted records
+  fail closed with `human_decision_record_unreadable`
+  (SYNTH-001, SYNTH-006). `checkpoint` also rejects `uf.unleash`
+  step names outside the declared allowlist with `undeclared_step`
+  (SYNTH-003; the allowlist is held in lockstep with command prose
+  and plugin auto-checkpoint sites by a consistency test), and
+  every APPROVE WITH ADVISORIES spec-review consolidation
+  (persisted canonical decision ESCALATED) now relays through
+  `relay_spec_review_gate` and holds `implement` and
+  `implement-phase-N` advancement with
+  `escalated_advisory_unrelayed` until a human decision covers it
+  (SYNTH-004). The not-consent rule is pinned verbatim in
+  `/uf.unleash`, `/uf.run-pipeline-plan`, and `cobalt-crush-dev`
+  prose plus their scaffold mirrors
+  (`TestCommandContracts_SyntheticPromptNotConsent`, SYNTH-002),
+  and the exact incident payload replays as a regression fixture
+  asserting refusal (SYNTH-005). Legitimate human overrides are
+  unchanged and now carry machine-stamped provenance. (Spec:
+  openspec/changes/synthetic-compaction-continue-prompt-rec/proposal.md)
 - harden-spec-review-gate: closes the spec-review REQUEST CHANGES
   bypass (issue #1078: after a REQUEST CHANGES verdict the child
   session edited spec.md and returned a compaction summary, and
