@@ -1,19 +1,21 @@
 ---
 description: >
-  Run Gaze quality analysis on a Go package. Supports three modes:
-  full (default), crap (CRAP scores only), and quality (test quality
-  metrics only). Delegates to the gaze-reporter agent.
+  Run Gaze quality analysis on a Go or external-analyzer project.
+  Supports three modes: full (default), crap (CRAP scores only), and
+  quality (test quality metrics only). Delegates to the gaze-reporter
+  agent.
 agent: gaze-reporter
 ---
-<!-- scaffolded by gaze v1.2.7 -->
+<!-- scaffolded by gaze dev -->
 
+<protect>
 # Command: /gaze
 
 ## Description
 
 Run Gaze quality analysis and produce a human-readable report.
 Delegates to the `gaze-reporter` agent which runs the appropriate
-`gaze` CLI commands and interprets the JSON output.
+`gaze` CLI commands, shows the Gaze-rendered report, and adds judgment.
 
 ## Usage
 
@@ -42,17 +44,9 @@ Delegates to the `gaze-reporter` agent which runs the appropriate
 ## Instructions
 
 Pass `$ARGUMENTS` to the `gaze-reporter` agent. The agent handles
-mode parsing, binary resolution, command execution, and report
-formatting.
+mode parsing, binary resolution, analyzer/language detection (`.gaze.yaml`
+then heuristic), command execution, and report formatting.
 
 If no arguments are provided, the agent defaults to full mode with
 the package pattern `./...`.
-
-## Long analysis note
-For repository-wide analysis that may run several minutes, consider whether
-to run `gaze crap` in the background with output redirected to a file you
-create (e.g. `> /tmp/gaze-report.json`) and poll the output file rather than
-blocking the turn. This is an applicability judgment based on expected
-runtime and scope, not a required step. Prefer backgrounding when holding
-the turn is wasteful and keep short scoped runs synchronous. If a
-launch-and-poll tool is later registered, migrate this guidance to invoke it.
+</protect>
