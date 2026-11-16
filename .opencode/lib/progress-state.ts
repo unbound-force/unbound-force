@@ -85,12 +85,24 @@ export interface PhaseCheckpointInput {
   number: number
   verdict: "green" | "failed"
   inventory: PhaseFailureEntry[]
+  /**
+   * Remaining budgeted-ancestor budget at checkpoint time
+   * (per-task-delegation-budgets PTB-FR-004); omitted when the phase
+   * ran unbudgeted.
+   */
+  readonly remaining_ms?: number
 }
 
 /** Durable record of one phase's pre-flight checkpoint, keyed by phase number. */
 export interface PhaseCheckpointRecord {
   verdict: "green" | "failed"
   inventory: PhaseFailureEntry[]
+  /**
+   * Remaining budgeted-ancestor budget at checkpoint time
+   * (per-task-delegation-budgets PTB-FR-004); omitted when the phase
+   * ran unbudgeted.
+   */
+  readonly remaining_ms?: number
   recorded_at: string
 }
 

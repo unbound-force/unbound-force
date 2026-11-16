@@ -74,6 +74,10 @@ import {
   type BaseRefResolution,
 } from "../../lib/review-diff.js"
 import {
+  derivePerTaskTimeoutMs,
+  type PerTaskTimeoutProvenanceRecord,
+} from "../../lib/run-timeout.js"
+import {
   appendHumanDecisions,
   deleteState,
   isEnoent,
@@ -84,6 +88,7 @@ import {
   recordSpecReviewDecisionsToState,
   writeState,
   type PhaseCheckpointInput,
+  type PhaseFailureEntry,
   type ProgressState,
 } from "../../lib/progress-state.js"
 import {
@@ -259,6 +264,10 @@ function upsertCheckpointStep(
     state.phases[String(phase.number)] = {
       verdict: phase.verdict,
       inventory: phase.inventory,
+      // PTB-FR-004: carry the remaining-budget report through to the
+      // durable record; re-checkpointing without it drops the prior
+      // value (the record is replaced, not merged).
+      ...(phase.remaining_ms !== undefined ? { remaining_ms: phase.remaining_ms } : {}),
       recorded_at: now,
     }
   }
@@ -306,7 +315,35 @@ const PhaseCheckpointArgSchema = z.object({
     )
     .max(200)
     .default([]),
+  // PTB-FR-004 (per-task-delegation-budgets): the budgeted ancestor's
+  // remaining budget at checkpoint time, taken from the delegation
+  // envelope. Omitted when the phase ran unbudgeted.
+  remaining_ms: z.number().int().positive().optional(),
 })
+
+/** Validated phase fields the checkpoint line is rendered from. */
+export interface PhaseCheckpointLineSource {
+  readonly number: number
+  readonly verdict: "green" | "failed"
+  readonly remaining_ms?: number
+}
+
+/**
+ * Render the tool-owned phase checkpoint line (PTB-FR-004, DE-003):
+ * prescribed terminal output is rendered by the tool, never
+ * reconstructed by the executing agent from a prose template. The
+ * budget clause appears only when remaining_ms was recorded; the
+ * number, verdict, and remaining_ms come from the same payload the
+ * tool already validates.
+ */
+export function renderPhaseCheckpointLine(
+  phase: PhaseCheckpointLineSource,
+): string {
+  const base = `Phase ${phase.number} checkpoint: ${phase.verdict}`
+  return phase.remaining_ms !== undefined
+    ? `${base} (remaining budget: ~${phase.remaining_ms}ms)`
+    : base
+}
 
 /**
  * Validation for the checkpoint tool's `phase` argument inside execute: the
@@ -702,7 +739,11 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
         .describe(
           "Optional phase-scoped record; requires step implement-phase-<number>. " +
             "verdict is the phase pre-flight outcome; inventory lists classified " +
-            "failures (pre-existing, environmental, or change-caused)",
+            "failures (pre-existing, environmental, or change-caused); remaining_ms " +
+            "optionally records the budgeted ancestor's remaining budget at " +
+            "checkpoint time (PTB-FR-004). With phase recorded, the result data " +
+            "carries the tool-rendered phase_checkpoint_line (budget clause only " +
+            "when remaining_ms was recorded)",
         ),
       spec_review_decisions: z
         .array(
@@ -747,7 +788,12 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
       step: string
       data?: string
       key?: string
-      phase?: { number: number; verdict: "green" | "failed"; inventory?: PhaseFailureEntry[] }
+      phase?: {
+        number: number
+        verdict: "green" | "failed"
+        inventory?: PhaseFailureEntry[]
+        remaining_ms?: number
+      }
       spec_review_decisions?: SpecReviewDecision[]
       human_decision_ref?: string
     }) => {
@@ -1050,7 +1096,21 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
           dataToMerge,
           phaseRecord,
         )
-        return { output: JSON.stringify(success(state)) }
+        // PTB-FR-004 (DE-003): a phase-recorded checkpoint also returns the
+        // tool-rendered line so the command emits it verbatim; the
+        // response-only field never persists to the state file.
+        return {
+          output: JSON.stringify(
+            success(
+              phaseRecord !== undefined
+                ? {
+                    ...state,
+                    phase_checkpoint_line: renderPhaseCheckpointLine(phaseRecord),
+                  }
+                : state,
+            ),
+          ),
+        }
       } catch (err: unknown) {
         return { output: failureFromError(err, "CHECKPOINT_ERROR") }
       }
@@ -3637,6 +3697,19 @@ export interface DelegateCommandData {
    * valid or absent.
    */
   storm_threshold_warning: string | null
+  /**
+   * Per-task timeout derivation provenance (PTB-FR-001): every
+   * derivation input, the unclamped derived value, the ceiling, and
+   * the clamp outcome — present on every per-task delegation result,
+   * success or failure; null for command-path and other non-per-task
+   * delegations.
+   */
+  timeout_provenance: PerTaskTimeoutProvenanceRecord | null
+  /**
+   * Remaining budgeted-ancestor budget in milliseconds at result time
+   * (PTB-FR-004); null when the delegation ran unbudgeted.
+   */
+  remaining_ms: number | null
   /** Child session usage, when the executor reported step-finish parts. */
   usage: InvocationUsage | null
   /** Request, host-resolution, and child-report provenance. */
@@ -4284,6 +4357,40 @@ function delegateResumeCapture(
         return null
       }
     },
+  }
+}
+
+/**
+ * Count the tasks in one `## Phase N` heading of feature_dir/tasks.md
+ * (per-task-delegation-budgets D1, PTB-FR-001): the enclosing phase's
+ * task count is the phase-scope signal the timeout derivation charges
+ * sibling overhead against. Reads through the same injected readText
+ * seam and parse_tasks grammar the resume capture uses, and fails
+ * closed to zero — an unreadable or absent tasks.md, a path escaping
+ * the repository root, or a missing phase heading never blocks the
+ * delegation itself.
+ *
+ * @param readText Reads UTF-8 text from an absolute path (tasks.md).
+ * @param cwd Repository root used for repo-relative path resolution.
+ * @param featureDir Optional feature directory holding tasks.md.
+ * @param phase One-based phase number the delegation targets.
+ * @returns The phase's task count, or zero when unavailable.
+ */
+async function phaseTaskCountForDelegation(
+  readText: (path: string) => Promise<string>,
+  cwd: string,
+  featureDir: string | undefined,
+  phase: number,
+): Promise<number> {
+  if (featureDir === undefined) return 0
+  const tasksAbs = resolveRepoRelative(cwd, `${featureDir}/tasks.md`)
+  if (tasksAbs === null) return 0
+  try {
+    const contents = await readText(tasksAbs)
+    const parsed = parseTasksText(contents)
+    return parsed.phases[phase - 1]?.tasks.length ?? 0
+  } catch {
+    return 0
   }
 }
 
@@ -5087,6 +5194,35 @@ export function createDelegateCommandTool(
                 checkpointStep: input.checkpoint_step,
                 fallbackIdleMs: DEFAULT_DELEGATE_IDLE_TIMEOUT_MS,
                 resumeCapture: delegateResumeCapture(exec, cwd, input.feature_dir, deps.readText),
+                // PTB-FR-001 (per-task-delegation-budgets D1): derive the
+                // wall clock from this phase's work signals — the
+                // tasks.md phase task count and the measured prompt
+                // bytes — unless the caller's explicit timeout wins
+                // outright. The configured ceiling is the schema-level
+                // bound for this call's delegation kind, so the
+                // derivation can never request a window validation
+                // would reject.
+                derivation: derivePerTaskTimeoutMs({
+                  baseMs: DEFAULT_TIMEOUT_MILLISECONDS,
+                  phaseTaskCount: await phaseTaskCountForDelegation(
+                    deps.readText,
+                    cwd,
+                    input.feature_dir,
+                    input.phase,
+                  ),
+                  // tasks.md records task ids and descriptions only —
+                  // no per-task file set exists to count, so the file
+                  // term contributes nothing for per-task delegations.
+                  phaseFileCount: 0,
+                  promptBytes: Buffer.byteLength(promptText, "utf8"),
+                  tier: null,
+                  maxParallelRuns: 1,
+                  configuredCeilingMs:
+                    input.command_path !== undefined
+                      ? MAX_COMMAND_DELEGATION_TIMEOUT_MS
+                      : MAX_PROMPT_DELEGATION_TIMEOUT_MS,
+                  explicitTimeoutMs: input.timeout,
+                }),
               }
             : null
         const result = await (perTaskDelegation === null
@@ -5162,6 +5298,11 @@ export function createDelegateCommandTool(
                       : {}),
                   }
                 : {}),
+              // PTB-FR-001/PTB-FR-004: per-task results carry their
+              // derivation provenance and — under a budgeted ancestor —
+              // the remaining budget, machine-parseably on failure too.
+              ...(result.timeout_provenance !== undefined ? { timeout_provenance: result.timeout_provenance } : {}),
+              ...(result.remaining_ms !== undefined ? { remaining_ms: result.remaining_ms } : {}),
             }),
           }
         }
@@ -5307,6 +5448,11 @@ export function createDelegateCommandTool(
           // of the audit trail.
           storm_threshold: storm.threshold,
           storm_threshold_warning: storm.warning,
+          // PTB-FR-001/PTB-FR-004: per-task derivation provenance and —
+          // under a budgeted ancestor — the remaining budget, surfaced
+          // machine-parseably like the rest of the delegation audit.
+          timeout_provenance: result.timeout_provenance ?? null,
+          remaining_ms: result.remaining_ms ?? null,
           usage: result.usage,
           provenance: result.provenance,
           text: result.text,

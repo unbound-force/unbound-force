@@ -1239,7 +1239,7 @@ per-task executor wrapper. Omit `timeout` and
   derivation and clamp outcome recorded as timeout
   provenance on the result (PTB-FR-001). An explicit
   `timeout` argument overrides the derivation entirely;
-  pass one only when the operator instructs.
+  pass one only when the human instructs.
 - Under a budgeted command-path parent the wrapper
   inherits the parent's idle watchdog through the
   delegation-budget registry: a progressing child
@@ -1287,9 +1287,9 @@ per-task executor wrapper. Omit `timeout` and
 
    The tool auto-checkpoints `implement` with the phase
    data on success. On failure, branch on the envelope:
-   when it carries `timeout` of kind `wall_clock` or
-   `idle` (retryable), re-issue the same call once with
-   the resume context appended to the prompt -- relay
+   when it carries `timeout` and `error.retryable` is
+   true, re-issue the same call once with the resume
+   context appended to the prompt -- relay
    `timeout.resume.files_modified` (files the timed-out
    attempt touched) and `timeout.resume.tasks_completed`
    (task ids it marked complete), telling the child to
@@ -1299,9 +1299,9 @@ per-task executor wrapper. Omit `timeout` and
    true or `resume` is non-null; when `resume` is null
    (unreadable state), anchor the retry on the tasks.md
    checkbox state. A second timeout on the same task,
-   kind `budget` (`budget_exhausted`, non-retryable), or
-   any non-timeout failure: emit the envelope's error and
-   **STOP**.
+   `error.retryable: false` (e.g. `budget_exhausted`),
+   or any non-timeout failure: emit the envelope's error
+   and **STOP**.
 
    After each successful delegation, mark the task
    complete immediately -- the checkbox is the
@@ -1498,10 +1498,13 @@ per-task executor wrapper. Omit `timeout` and
        phase:
          number: [N]
          verdict: "green" | "failed"
-         remaining_ms: [remaining parent budget in ms, as
-           reported by the most recent per-task delegation
-           envelope -- omit when no budgeted ancestor
-           exists]
+         remaining_ms: [remaining parent budget in ms, from
+           the most recent per-task delegation envelope of
+           THIS phase's own delegations -- omit when this
+           phase's delegations produced no envelope
+           carrying it (worktree-spawned tasks, already
+           complete on entry, or unbudgeted); never reach
+           back to an earlier phase's envelope]
          inventory:
            - name: [failing check]
              classification: pre-existing | environmental
@@ -1527,15 +1530,14 @@ per-task executor wrapper. Omit `timeout` and
      so the 3-iteration budget spans sessions rather
      than resetting per resume.
 
-     When a budgeted ancestor exists, also render the
-     phase checkpoint line -- `Phase [N] checkpoint:
-     [verdict] (remaining budget: ~[X]ms)` with `[X]` the
-     recorded `remaining_ms` -- so the resume boundary
-     is plannable before the parent budget expires (the
+     The checkpoint result also carries a tool-rendered
+     `phase_checkpoint_line`, with the remaining-budget
+     clause exactly when `remaining_ms` was recorded.
+     Emit it verbatim as the phase checkpoint line --
+     never reconstruct it -- so the resume boundary is
+     plannable before the parent budget expires (the
      value is informational; wall-clock and hierarchical
-     clamping stay authoritative). When no budgeted
-     ancestor exists, emit no budget clause -- top-level
-     behavior is unchanged (PTB-FR-004).
+     clamping stay authoritative) (PTB-FR-004).
 
    - If green: proceed to the next phase.
    - If failed: run the build/test fix loop (above)

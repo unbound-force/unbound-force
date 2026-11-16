@@ -240,6 +240,15 @@ export interface InvokeAgentResult {
    */
   readonly timeout_provenance?: PerTaskTimeoutProvenanceRecord
   /**
+   * Remaining budgeted-ancestor budget in milliseconds
+   * (per-task-delegation-budgets PTB-FR-004): the ancestor deadline
+   * minus the clock at result-assembly time, floored at zero. Present
+   * only when a budgeted ancestor framed the run — success, failure,
+   * or budget_exhausted — so the caller can thread the remaining
+   * budget into its phase checkpoint. Absent for unbudgeted runs.
+   */
+  readonly remaining_ms?: number
+  /**
    * Finish reason reported by the child's final step-finish part, null
    * when unreported. Present on success results so dispatch can apply
    * length policy to non-empty (truncated) runs (RD-FR-060).
@@ -1265,6 +1274,12 @@ export async function executePerTaskDelegation(
         ? { ...details, resume: capture === undefined ? null : await assembleResumeHint(capture, before) }
         : details,
       timeout_provenance: timeoutProvenance,
+      // PTB-FR-004: budget_exhausted reports what little budget remains
+      // (floored at zero) so the caller can record it at its checkpoint.
+      // The exhausted branch only fires under a budgeted ancestor, but
+      // the guard keeps the narrowing local rather than trusting the
+      // clamp contract.
+      remaining_ms: inherited === null ? undefined : Math.max(0, inherited.deadlineMs - now()),
     }
   }
 
@@ -1287,7 +1302,13 @@ export async function executePerTaskDelegation(
     read_only,
     provenance,
   )
-  const withProvenance: InvokeAgentResult = { ...result, timeout_provenance: timeoutProvenance }
+  // PTB-FR-004: every result under a budgeted ancestor carries the
+  // remaining budget at result time; unbudgeted runs omit the field.
+  const withProvenance: InvokeAgentResult = {
+    ...result,
+    timeout_provenance: timeoutProvenance,
+    remaining_ms: inherited === null ? undefined : Math.max(0, inherited.deadlineMs - now()),
+  }
   if (!resumeEligible || withProvenance.timeout === undefined || !carriesResumeHint(withProvenance.timeout.kind)) {
     return withProvenance
   }
