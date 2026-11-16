@@ -35,6 +35,16 @@ permission:
     "dewey gate auto-answer": allow
     "dewey gate distill-unattended": allow
     "gh issue comment": allow
+    # Terminal catch-all denies, placed last so they win over every
+    # allow on any prefix: each shell metacharacter is a chaining,
+    # redirection, or substitution vector.
+    "*>*": deny
+    "*<*": deny
+    "*|*": deny
+    "*;*": deny
+    "*&*": deny
+    "*$(*": deny
+    "*`*": deny
 ---
 
 # Distiller Agent
