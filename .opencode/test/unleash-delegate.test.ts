@@ -377,6 +377,35 @@ function recordingExec(
 }
 
 /**
+ * Sequenced GitExec for per-task resume-hint tests (PTB-FR-003): answers
+ * `status --porcelain -z` from a queue of canned outputs (delegation-start
+ * before-state, then abort-time after-state), answers the checkpoint branch
+ * read, and throws on anything else. Records every call for order
+ * assertions; an exhausted queue throws so an unexpected capture fails the
+ * test instead of silently returning stale state.
+ */
+function sequencedStatusExec(
+  statuses: string[],
+  branch = "opsx/unleash-deterministic-tools",
+): { exec: GitExec; calls: Array<{ args: string[]; cwd: string }> } {
+  const calls: Array<{ args: string[]; cwd: string }> = []
+  let statusIndex = 0
+  const exec: GitExec = (args, cwd) => {
+    calls.push({ args, cwd })
+    const command = args.join(" ")
+    if (command === "status --porcelain -z") {
+      const status = statuses[statusIndex]
+      statusIndex++
+      if (status === undefined) throw new Error(`no canned status for call ${statusIndex}`)
+      return status
+    }
+    if (command === "rev-parse --abbrev-ref HEAD") return branch
+    throw new Error(`unexpected git command: ${command}`)
+  }
+  return { exec, calls }
+}
+
+/**
  * Fake readText keyed on absolute paths (the tool resolves command_path
  * against the cwd before reading). Records every read so tests can assert
  * both repo-relative resolution and that the reviewer manifest is never
@@ -395,6 +424,30 @@ function fakeReadText(files: Record<string, string>): {
     return files[path]
   }
   return { readText, calls }
+}
+
+/**
+ * Sequenced readText for per-task resume-hint tests (PTB-FR-003): serves
+ * one tasks.md path from a queue of canned bodies (delegation-start
+ * before-state, then abort-time after-state) and throws ENOENT for every
+ * other path — the model-matrix probe included — so unknown reads fail
+ * closed the way production fs reads do. An exhausted queue throws rather
+ * than serving stale state.
+ */
+function sequencedTasksReadText(
+  tasksAbs: string,
+  bodies: string[],
+): DelegateCommandDependencies["readText"] {
+  let bodyIndex = 0
+  return async (path: string): Promise<string> => {
+    if (path !== tasksAbs) {
+      throw Object.assign(new Error(`ENOENT: no such file or directory, ${path}`), { code: "ENOENT" })
+    }
+    const body = bodies[bodyIndex]
+    bodyIndex++
+    if (body === undefined) throw new Error(`no canned tasks.md body for read ${bodyIndex}`)
+    return body
+  }
 }
 
 /**
@@ -2354,7 +2407,13 @@ describe("uf_delegate_command checkpoint recording", () => {
     if (result.status === "ok") {
       expect(result.data?.checkpoint_recorded).toBe(true)
     }
-    expect(execCalls).toEqual([{ args: ["rev-parse", "--abbrev-ref", "HEAD"], cwd: FAKE_CWD }])
+    // The per-task wrapper snapshots the worktree before the run (D3
+    // before-state capture), so the status read precedes the checkpoint
+    // branch read.
+    expect(execCalls).toEqual([
+      { args: ["status", "--porcelain", "-z"], cwd: FAKE_CWD },
+      { args: ["rev-parse", "--abbrev-ref", "HEAD"], cwd: FAKE_CWD },
+    ])
 
     expect(writeFileSync).toHaveBeenCalledTimes(1)
     const [, stateRaw] = vi.mocked(writeFileSync).mock.calls[0]
@@ -2553,7 +2612,11 @@ describe("uf_delegate_command audit trail", () => {
     })
 
     expect(result.status).toBe("ok")
-    expect(execCalls).toEqual([{ args: ["rev-parse", "--abbrev-ref", "HEAD"], cwd: FAKE_CWD }])
+    // D3 before-state capture first, then the checkpoint branch read.
+    expect(execCalls).toEqual([
+      { args: ["status", "--porcelain", "-z"], cwd: FAKE_CWD },
+      { args: ["rev-parse", "--abbrev-ref", "HEAD"], cwd: FAKE_CWD },
+    ])
     expect(writeFileSync).toHaveBeenCalledTimes(1)
     const [statePathArg, stateRaw] = vi.mocked(writeFileSync).mock.calls[0]
     expect(statePathArg).toBe(
@@ -2897,7 +2960,11 @@ describe("uf_delegate_command seam verification", () => {
     // ProgressState field set a delegated run persists (phase-scoped
     // records belong to the checkpoint tool's surface, not the
     // delegate's auto-checkpoint)...
-    expect(execCalls).toEqual([{ args: ["rev-parse", "--abbrev-ref", "HEAD"], cwd: FAKE_CWD }])
+    // D3 before-state capture first, then the checkpoint branch read.
+    expect(execCalls).toEqual([
+      { args: ["status", "--porcelain", "-z"], cwd: FAKE_CWD },
+      { args: ["rev-parse", "--abbrev-ref", "HEAD"], cwd: FAKE_CWD },
+    ])
     expect(writeFileSync).toHaveBeenCalledTimes(1)
     const [statePathArg, stateRaw] = vi.mocked(writeFileSync).mock.calls[0]
     expect(statePathArg).toBe(
@@ -3458,6 +3525,10 @@ describe("uf_delegate_command timeout budgets", () => {
 
     expect(result.timeout).toMatchObject({ kind: "wall_clock" })
     expect("resume" in result).toBe(false)
+    // Prompt-only without checkpoint_step "implement" + phase is not a
+    // per-task delegation, so the timeout envelope carries no advisory
+    // hint either (PTB-FR-003 routes only the per-task call shape).
+    expect((result.timeout as Record<string, unknown>).resume).toBeUndefined()
   })
 
   it("aborts a stalled child on the default 10-minute idle timeout long before the wall clock", async () => {

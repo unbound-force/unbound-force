@@ -12,11 +12,13 @@ import {
   PromptSchema,
   directModelIdentity,
   executeAgentSession,
+  executePerTaskDelegation,
   resolveHostModel,
   StructuralHostModelError,
   type InvocationProvenance,
   type InvocationUsage,
   type ModelIdentity,
+  type PerTaskResumeCapture,
   type TimeoutDetails,
 } from "../../lib/agent-executor.js"
 import { classifyBranch } from "../../lib/branch-classification.js"
@@ -4211,6 +4213,81 @@ function readDelegateResumeState(exec: GitExec, cwd: string, commandPath: string
 }
 
 /**
+ * Production resume-capture seams for a per-task implement delegation
+ * (per-task-delegation-budgets design D3, PTB-FR-003): the worktree's
+ * modified paths through the injected git executor, and the completed
+ * top-level task ids in feature_dir/tasks.md through the shared
+ * parse_tasks grammar (matchTaskLine) and the injected readText seam.
+ * The per-task executor snapshots both at delegation start and diffs
+ * them at abort time, so the hint reports only what the child changed.
+ *
+ * Both seams fail closed: any error, an absent feature_dir, or a
+ * tasks.md path escaping the repository root yields null, so an
+ * unreadable hint never masks the timeout it annotates (D4 of #950).
+ * The hint carries repository-relative paths and task ids only —
+ * never command output or message content (Constitution V).
+ *
+ * @param exec Git executor used to read the worktree status.
+ * @param cwd Repository root used for repo-relative path resolution.
+ * @param featureDir Optional feature directory holding tasks.md.
+ * @param readText Reads UTF-8 text from an absolute path (tasks.md).
+ * @returns The capture seams the per-task executor diffs.
+ */
+function delegateResumeCapture(
+  exec: GitExec,
+  cwd: string,
+  featureDir: string | undefined,
+  readText: (path: string) => Promise<string>,
+): PerTaskResumeCapture {
+  return {
+    captureModifiedFiles: async (): Promise<readonly string[] | null> => {
+      try {
+        // -z keeps paths NUL-separated: no C-quoting to unescape, and a
+        // rename/copy entry carries its original path in the next field.
+        const fields = exec(["status", "--porcelain", "-z"], cwd).split("\0")
+        const files: string[] = []
+        for (let index = 0; index < fields.length; index++) {
+          const entry = fields[index]
+          if (entry === "") continue
+          const status = entry.slice(0, 2)
+          const path = entry.slice(3)
+          if (path !== "") files.push(path)
+          if (status.includes("R") || status.includes("C")) {
+            index++
+            const original = fields[index]
+            if (original !== undefined && original !== "") files.push(original)
+          }
+        }
+        return files
+      } catch {
+        return null
+      }
+    },
+    captureCompletedTasks: async (): Promise<readonly string[] | null> => {
+      if (featureDir === undefined) return null
+      const tasksAbs = resolveRepoRelative(cwd, `${featureDir}/tasks.md`)
+      if (tasksAbs === null) return null
+      try {
+        const contents = await readText(tasksAbs)
+        const completed: string[] = []
+        for (const line of contents.split("\n")) {
+          const match = matchTaskLine(line)
+          // Top-level checked tasks only: indented checkbox lines are
+          // continuation detail, not tasks — the classification the
+          // parse_tasks tool itself applies.
+          if (match !== null && match.indent === "" && match.checked) {
+            completed.push(match.id)
+          }
+        }
+        return completed
+      } catch {
+        return null
+      }
+    },
+  }
+}
+
+/**
  * Production classifier agent-engine spawn (model-matrix-delegation design
  * D5, MM-FR-005): runs the hidden model-matrix-classifier subagent through
  * the shared executeAgentSession session path with the invocation's
@@ -4464,7 +4541,13 @@ async function defaultModelLimits(
  * - limit-ended runs (delegation-timeout-budgets D4) return
  *   DELEGATE_FAILED with the executor's `timeout` details and, for
  *   command-path calls, `resume` (state key, last checkpoint step,
- *   completed steps) so callers resume instead of restarting
+ *   completed steps) so callers resume instead of restarting;
+ *   per-task implement delegations (checkpoint_step "implement" plus
+ *   phase) run through the per-task executor wrapper
+ *   (per-task-delegation-budgets D2/D3), whose wall-clock, idle, and
+ *   budget terminations carry the advisory `timeout.resume` hint —
+ *   files_modified and tasks_completed since delegation start, null
+ *   when unreadable (PTB-FR-003)
  *
  * @param exec Git executor used to derive the auto-checkpoint state key.
  * @param cwd Repository root used for repo-relative path resolution.
@@ -4985,23 +5068,68 @@ export function createDelegateCommandTool(
         }
 
         // Delegate the child session lifecycle to the shared executor.
-        const result = await executeAgentSession(
-          {
-            client: deps.client,
-            sessionID: context.sessionID,
-            directory: context.directory,
-            parentAbort: context.abort,
-            timeoutMilliseconds: input.timeout ?? DEFAULT_TIMEOUT_MILLISECONDS,
-            idleTimeoutMilliseconds: input.idle_timeout ?? DEFAULT_DELEGATE_IDLE_TIMEOUT_MS,
-            stormThreshold: storm.threshold,
-          },
-          input.agent,
-          promptText,
-          childModel,
-          childVariant,
-          false,
-          provenance,
-        )
+        // Per-task implement delegations (checkpoint_step "implement"
+        // plus a phase number — the /uf.unleash implement call shape,
+        // per-task-delegation-budgets D2/D3) route through the per-task
+        // wrapper so a timeout termination carries the advisory resume
+        // hint (PTB-FR-003): it resolves the inherited budget and idle
+        // window through the delegation-budget registry, fails fast
+        // budget_exhausted before spawning (PTB-FR-002), and attaches
+        // files_modified / tasks_completed — diffed from the
+        // delegation-start snapshot through the capture seams — to the
+        // timeout envelope. Unbudgeted callers keep the shared
+        // executor's semantics: an explicit idle_timeout still wins,
+        // and fallbackIdleMs preserves the delegation default.
+        const perTaskDelegation =
+          input.checkpoint_step === "implement" && input.phase !== undefined
+            ? {
+                phase: input.phase,
+                checkpointStep: input.checkpoint_step,
+                fallbackIdleMs: DEFAULT_DELEGATE_IDLE_TIMEOUT_MS,
+                resumeCapture: delegateResumeCapture(exec, cwd, input.feature_dir, deps.readText),
+              }
+            : null
+        const result = await (perTaskDelegation === null
+          ? executeAgentSession(
+              {
+                client: deps.client,
+                sessionID: context.sessionID,
+                directory: context.directory,
+                parentAbort: context.abort,
+                timeoutMilliseconds: input.timeout ?? DEFAULT_TIMEOUT_MILLISECONDS,
+                idleTimeoutMilliseconds: input.idle_timeout ?? DEFAULT_DELEGATE_IDLE_TIMEOUT_MS,
+                stormThreshold: storm.threshold,
+              },
+              input.agent,
+              promptText,
+              childModel,
+              childVariant,
+              false,
+              provenance,
+            )
+          : executePerTaskDelegation(
+              {
+                client: deps.client,
+                sessionID: context.sessionID,
+                directory: context.directory,
+                parentAbort: context.abort,
+                timeoutMilliseconds: input.timeout ?? DEFAULT_TIMEOUT_MILLISECONDS,
+                // The wrapper owns idle precedence (PTB-FR-002): an
+                // explicit window wins, else the budgeted ancestor's
+                // registered window, else the fallback above — so the
+                // delegation default is passed as fallbackIdleMs, not
+                // baked in here.
+                idleTimeoutMilliseconds: input.idle_timeout,
+                stormThreshold: storm.threshold,
+              },
+              input.agent,
+              promptText,
+              childModel,
+              childVariant,
+              false,
+              provenance,
+              perTaskDelegation,
+            ))
 
         if (result.status !== "success" || result.error !== null) {
           const code = result.status === "cancelled" ? "DELEGATE_CANCELLED" : "DELEGATE_FAILED"
@@ -5017,7 +5145,11 @@ export function createDelegateCommandTool(
           // (the field is omitted when no child session ever existed).
           // Limit-ended runs also carry the timeout classification and,
           // for command-path delegations, the durable resume state
-          // (delegation-timeout-budgets D4).
+          // (delegation-timeout-budgets D4). Per-task implement
+          // delegations carry the executor's advisory hint inside the
+          // timeout details — timeout.resume with files_modified and
+          // tasks_completed, null when unreadable
+          // (per-task-delegation-budgets D3, PTB-FR-003).
           return {
             output: JSON.stringify({
               ...envelope,
