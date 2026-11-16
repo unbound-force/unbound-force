@@ -67,6 +67,91 @@ func TestCommandContracts_TriageIssue(t *testing.T) {
 	assertCommandCopies(t, "uf.triage-issue.md", true, clauses)
 }
 
+// TestCommandContracts_TriageIssuePostingStructure pins the
+// /uf.triage-issue posting choreography (issue #1049, from the PR
+// #1024 review): the GitHub mutations that carry untrusted text
+// (issue-comment posting in Section 4.3, child-issue creation in
+// Section 4.4, and the post-split parent comment) route through the
+// `post_issue_comment` and `create_child_issue` tools that PR #1024
+// extracted from the hand-composed shell choreography.
+// TestCommandContracts_TriageIssue does not cover the posting
+// procedure, and TestCommandContracts_RejectShellHeredocPayloads is
+// purely negative, so a regression that swaps the invocation back to
+// direct shell interpolation of comment text (the original injection
+// vector) or drops the tool clauses passed the suite. The clause
+// table pins the replacement pattern on both template copies; count
+// pins hold the occurrence counts that presence cannot; forbidden
+// fragments keep the direct shell spellings out.
+func TestCommandContracts_TriageIssuePostingStructure(t *testing.T) {
+	clauses := []commandClause{
+		{name: "mutation safety reminder", all: []string{"The GitHub mutations in steps 4.3 and 4.4", "MUST go through the `post_issue_comment` and `create_child_issue` tools", "The tools own temp-file creation with 0o600 permissions, JSON serialization, `gh --input` posting, failure-stop, and cleanup on all exit paths", "MUST NOT interpolate untrusted text into shell arguments", "MUST NOT hand-compose the mutation if a tool call fails"}},
+		{name: "section 4.3 comment posting invocation", all: []string{"**Post the comment** (on Approve or Modify)", "Call the `post_issue_comment` tool with the confirmed comment", `"issue_number": <ISSUE_NUMBER>`, `"body": "<confirmed comment text, exactly as approved>"`}},
+		{name: "section 4.3 tool-owned choreography", all: []string{"The tool owns the entire posting choreography: temporary-file creation with 0o600 permissions, JSON serialization, `gh api --input`, failure-stop, and cleanup on all paths", "The comment body reaches `gh` as a validated parameter — it is never interpolated into shell arguments and never written through a shell heredoc"}},
+		{name: "section 4.3 failure discipline", all: []string{"Do NOT retry, do NOT fall back to a shell write, and do NOT hand-compose the post"}},
+		{name: "section 4.4 child-issue invocation", all: []string{"Each child issue body MUST include a cross-reference: `Split from #<ISSUE_NUMBER>`", "Call the `create_child_issue` tool with the confirmed title and body", `"title": "<confirmed child title>"`, `"body": "<confirmed child body with Split from #N>"`}},
+		{name: "section 4.4 tool-owned choreography", all: []string{"The tool owns the entire creation choreography: temporary-file creation with 0o600 permissions, `gh issue create --body-file`, its documented retry policy, and cleanup on all paths", "The title and body reach `gh` as validated parameters — never shell text"}},
+		{name: "section 4.4 failure discipline", all: []string{"Do NOT retry, do NOT fall back to a shell write, and do NOT hand-compose the creation"}},
+		{name: "post-split parent comment", all: []string{"After all confirmed child issues are created, post a comment on the parent issue listing the created children", "Post this comment by calling `post_issue_comment` (the Section 4.3 tool)"}},
+		{name: "guardrail 8 shell injection prevention", all: []string{"**Shell injection prevention**", "issue-comment posting (Section 4.3) and child-issue creation (Section 4.4)", "MUST go through the `post_issue_comment` and `create_child_issue` tools, which own the 0o600 temp-file writes, payload serialization, `gh --input` / `--body-file` posting, and cleanup", "Two non-tool `gh` channels are sanctioned for constrained values only", "`gh label create` and `gh issue edit --add-label` (Section 4.2) carry human-confirmed label names, descriptions, and colors", "`gh issue list --search` (Phase 1 and Section 4.4) carries keyword-sanitized text", "Arbitrary untrusted text MUST NOT be interpolated into shell arguments, MUST NOT be written through a shell heredoc, and MUST NOT be hand-composed into a comment or child issue when a tool call fails"}},
+	}
+
+	assertCommandCopies(t, "uf.triage-issue.md", true, clauses)
+
+	// Count pins: presence-only clauses cannot pin occurrence counts.
+	// The command directs a call through each posting tool exactly once
+	// (plus the post-split parent comment reusing post_issue_comment),
+	// the routing rule appears at exactly its two sites (the gate's
+	// mutation safety reminder and Guardrail 8), the failure-envelope
+	// and repo-omission discipline repeats on both mutation sections,
+	// and each gh posting verb appears exactly once, as the backticked
+	// tool-owns prose, so a re-added raw invocation (a second
+	// `gh api --input`, a bare `gh issue create`) fails the count, not
+	// just presence.
+	countPins := []struct {
+		fragment string
+		want     int
+	}{
+		{"Call the `post_issue_comment` tool", 1},
+		{"Call the `create_child_issue` tool", 1},
+		{"Post this comment by calling `post_issue_comment`", 1},
+		{"MUST go through the `post_issue_comment` and `create_child_issue` tools", 2},
+		{"The tool owns the entire posting choreography", 1},
+		{"The tool owns the entire creation choreography", 1},
+		{"Report the tool's error envelope verbatim", 2},
+		{"do NOT fall back to a shell write", 2},
+		{"Omit `repo` to resolve the repository from the working tree", 2},
+		{"gh api --input", 1},
+		{"gh issue create", 1},
+	}
+	for _, pin := range countPins {
+		for _, copy := range loadCommandCopies(t, "uf.triage-issue.md", true) {
+			if got := strings.Count(normalizeCommandText(copy.text), normalizeCommandText(pin.fragment)); got != pin.want {
+				t.Errorf("%s: fragment %q occurs %d times, want %d", copy.name, pin.fragment, got, pin.want)
+			}
+		}
+	}
+
+	// Forbidden spellings: PR #1024 replaced the hand-composed
+	// `gh api ... --method POST --input "<FILE>"` blocks (the original
+	// injection vector) with the intent-level tools, which own the
+	// temp-file, serialization, and posting choreography. Neither
+	// direct shell spelling may return: comment and child-issue text
+	// reaches gh only as a validated tool parameter, never a
+	// `gh issue comment --body` argument and never a hand-composed
+	// api POST.
+	for _, copy := range loadCommandCopies(t, "uf.triage-issue.md", true) {
+		normalized := normalizeCommandText(copy.text)
+		for _, forbidden := range []string{
+			"gh issue comment",
+			"--method POST",
+		} {
+			if strings.Contains(normalized, normalizeCommandText(forbidden)) {
+				t.Errorf("%s: tool-owned posting must not carry the direct shell invocation %q", copy.name, forbidden)
+			}
+		}
+	}
+}
+
 // TestCommandContracts_RunPipelinePlanTimeoutRecovery pins the
 // delegation-timeout-budgets recovery protocol (issue #930): the
 // /uf.unleash delegation runs at the command-path ceiling, and timeout
