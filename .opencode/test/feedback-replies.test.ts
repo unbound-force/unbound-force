@@ -1,32 +1,41 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { basename, dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { z } from "zod"
 
 import {
   CreateChildIssueInputSchema,
+  FeedbackOperationError,
+  FeedbackTriagePayloadSchema,
   FileFeedbackIssueInputSchema,
   MAX_THREAD_PAGES,
   PostFeedbackRepliesInputSchema,
   PostIssueCommentInputSchema,
   RESOLVE_THREAD_MUTATION,
   REVIEW_THREADS_QUERY,
+  WriteFeedbackTriageArtifactInputSchema,
   classifyGhError,
   createChildIssue,
   defaultFeedbackGhExec,
   feedbackStatePath,
+  feedbackTriageArtifactPath,
   fileFeedbackIssue,
   itemKey,
+  joinFiledIssues,
+  nextRoundNumber,
   parseIssueUrl,
   postFeedbackReplies,
   postIssueComment,
   readFeedbackState,
+  renderFeedbackTriageArtifact,
   renderReplyBody,
   replyEndpoint,
   writeFeedbackState,
+  writeFeedbackTriageArtifact,
   type CreateChildIssueData,
   type FeedbackGhExec,
   type FeedbackReplyDeps,
@@ -34,12 +43,15 @@ import {
   type PostFeedbackRepliesData,
   type PostFeedbackRepliesInput,
   type PostIssueCommentData,
+  type WriteFeedbackTriageArtifactData,
+  type WriteFeedbackTriageArtifactInput,
 } from "../lib/feedback-replies.js"
 import {
   createCreateChildIssueTool,
   createFileFeedbackIssueTool,
   createPostFeedbackRepliesTool,
   createPostIssueCommentTool,
+  createWriteFeedbackTriageArtifactTool,
 } from "../plugins/uf-workflow/index.js"
 
 // ---------------------------------------------------------------------------
@@ -49,6 +61,14 @@ import {
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>()
   return { ...actual, execFileSync: vi.fn() }
+})
+
+// Module-level mock: renameSync passes through to the real fs while
+// recording its (temp, destination) pairs — the artifact-write tests
+// read them to observe the temp-file names the writes chose.
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>()
+  return { ...actual, renameSync: vi.fn(actual.renameSync) }
 })
 
 // ---------------------------------------------------------------------------
@@ -993,6 +1013,676 @@ describe("postIssueComment and createChildIssue (uf.triage-issue 4.3/4.4)", () =
 })
 
 // ---------------------------------------------------------------------------
+// write_feedback_triage_artifact (issue #1022) — shared fixtures
+// ---------------------------------------------------------------------------
+
+/** Pull request URL of the artifact-test PR. */
+const PR_URL = `https://github.com/${REPO}/pull/${PR}`
+
+/** One triage item for the artifact input, with overrides applied last. */
+function triageItem(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    comment_kind: "review",
+    comment_id: 11,
+    thread_id: "T11",
+    reviewer: "alice",
+    reviewer_role: "maintainer",
+    file: null,
+    line: null,
+    classification: "data-driven",
+    tier: 1,
+    evidence: ["the timeout constant is unnamed"],
+    recommendation: "accept",
+    decision: "accept",
+    decision_reasoning: "named the constant in abc1234",
+    commit_sha: null,
+    divisor_agents_used: ["divisor-guard"],
+    tier2_unavailable: false,
+    conflict_flag: false,
+    ...overrides,
+  }
+}
+
+/** One projected post_feedback_replies outcome, with overrides applied last. */
+function replyOutcome(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    key: "review:11",
+    comment_kind: "review",
+    comment_id: 11,
+    decision: "accept",
+    reply: "posted",
+    reply_id: 1011,
+    reply_url: `https://github.com/${REPO}/pull/${PR}#discussion_r1011`,
+    issue: null,
+    issue_number: null,
+    issue_url: null,
+    thread: "resolved",
+    thread_id: "T11",
+    error: null,
+    ...overrides,
+  }
+}
+
+/** A raw write_feedback_triage_artifact input: one accepted review item. */
+function rawArtifactInput(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    pr_number: PR,
+    pr_url: PR_URL,
+    branch: "feature/name-the-timeout",
+    commit: "abc1234",
+    backlog_item_id: "1022",
+    items: [triageItem()],
+    ...overrides,
+  }
+}
+
+/** The same input parsed through the schema, so defaults are applied. */
+function artifactInput(overrides: Record<string, unknown> = {}): WriteFeedbackTriageArtifactInput {
+  return WriteFeedbackTriageArtifactInputSchema.parse(rawArtifactInput(overrides))
+}
+
+/** Deps for the artifact write: no gh call happens, the clock is fixed, and the clear hook is optional. */
+function artifactDeps(clearProgress?: () => void): FeedbackReplyDeps {
+  return {
+    gh: fakeGh([]).gh,
+    cwd: root,
+    now: () => new Date("2026-11-08T12:00:00.000Z"),
+    ...(clearProgress !== undefined ? { clearProgress } : {}),
+  }
+}
+
+/** Run fn and return the FeedbackOperationError it threw. */
+function operationError(fn: () => unknown): FeedbackOperationError {
+  try {
+    fn()
+  } catch (err) {
+    expect(err).toBeInstanceOf(FeedbackOperationError)
+    return err as FeedbackOperationError
+  }
+  throw new Error("expected the call to throw a FeedbackOperationError")
+}
+
+/** The artifact directory under the test root. */
+function artifactDir(): string {
+  return dirname(feedbackTriageArtifactPath(root, PR, 1))
+}
+
+// ---------------------------------------------------------------------------
+// write_feedback_triage_artifact — round scan
+// ---------------------------------------------------------------------------
+
+describe("nextRoundNumber", () => {
+  it("returns round 1 for a missing or empty artifact directory", () => {
+    expect(nextRoundNumber(root, PR)).toBe(1) // a missing directory is round 1, not an error
+    mkdirSync(artifactDir(), { recursive: true })
+    expect(nextRoundNumber(root, PR)).toBe(1)
+  })
+
+  it("derives the highest round plus one, tolerating gaps from deleted rounds", () => {
+    mkdirSync(artifactDir(), { recursive: true })
+    writeFileSync(feedbackTriageArtifactPath(root, PR, 1), "{}\n")
+    writeFileSync(feedbackTriageArtifactPath(root, PR, 3), "{}\n")
+    // Round 2 was deleted; a file count would answer 3, the rule answers 4.
+    expect(nextRoundNumber(root, PR)).toBe(4)
+  })
+
+  it("ignores unparsable names, other PRs' artifacts, and stranded temp files", () => {
+    mkdirSync(artifactDir(), { recursive: true })
+    writeFileSync(join(artifactDir(), "pr-42-round-1.json"), "{}\n")
+    writeFileSync(join(artifactDir(), "pr-42-round-2.json.12345.6789.tmp"), "{}\n") // an interrupted write
+    writeFileSync(
+      join(artifactDir(), "pr-42-round-3.json.12345.6789.3f2504e0-4f89-11d3-9a0c-0305e82c3301.tmp"),
+      "{}\n",
+    ) // the entropy-hardened temp format
+    writeFileSync(join(artifactDir(), "pr-7-round-9.json"), "{}\n")
+    writeFileSync(join(artifactDir(), "pr-42-round-x.json"), "{}\n")
+    writeFileSync(join(artifactDir(), "notes.txt"), "not a round\n")
+    expect(nextRoundNumber(root, PR)).toBe(2)
+  })
+
+  it("fails closed when the artifact directory cannot be read", () => {
+    mkdirSync(dirname(artifactDir()), { recursive: true })
+    writeFileSync(artifactDir(), "a file where the directory should be") // readdir gets ENOTDIR
+    const err = operationError(() => nextRoundNumber(root, PR))
+    expect(err.code).toBe("artifact_error")
+    expect(err.message).toMatch(/could not scan/)
+    expect(err.retryable).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// write_feedback_triage_artifact — join, render, and summary counting
+// ---------------------------------------------------------------------------
+
+describe("joinFiledIssues", () => {
+  it("maps FILE items to their outcomes by comment identity, ignoring the rest", () => {
+    const input = artifactInput({
+      items: [
+        triageItem({ comment_id: 11 }),
+        triageItem({ comment_id: 12, thread_id: "T12", decision: "file", recommendation: "author-decides" }),
+      ],
+      replies_result: {
+        items: [
+          replyOutcome({ key: "review:11" }),
+          replyOutcome({
+            key: "review:12",
+            comment_id: 12,
+            decision: "file",
+            issue_number: 301,
+            issue_url: `https://github.com/${REPO}/issues/301`,
+          }),
+          // An outcome with no matching item — the result may cover more
+          // comments than this artifact records — never reaches the map.
+          replyOutcome({ key: "review:99", comment_id: 99, decision: "reply" }),
+        ],
+      },
+    })
+    const joined = joinFiledIssues(input)
+    expect([...joined.keys()]).toEqual(["review:12"])
+    expect(joined.get("review:12")).toEqual({ number: 301, url: `https://github.com/${REPO}/issues/301` })
+
+    // Without a replies result the FILE items still join — to nulls.
+    const withoutResult = artifactInput({
+      items: [triageItem({ comment_id: 12, thread_id: "T12", decision: "file", recommendation: "author-decides" })],
+    })
+    expect([...joinFiledIssues(withoutResult).entries()]).toEqual([["review:12", { number: null, url: null }]])
+  })
+})
+
+describe("renderFeedbackTriageArtifact", () => {
+  it("routes FILE items to their joined issues and strips the comment identity", () => {
+    const input = artifactInput({
+      items: [
+        triageItem({
+          comment_id: 11,
+          file: "internal/proxy.go",
+          line: 42,
+          commit_sha: "abc1234",
+          divisor_agents_used: ["divisor-guard", "divisor-architect"],
+        }),
+        triageItem({
+          comment_id: 12,
+          thread_id: "T12",
+          reviewer: "bob",
+          reviewer_role: "external",
+          decision: "file",
+          recommendation: "author-decides",
+          evidence: ["the retry gap predates this PR"],
+          decision_reasoning: "tracked in a follow-up issue",
+          divisor_agents_used: ["divisor-adversary"],
+          tier2_unavailable: true,
+        }),
+        triageItem({
+          comment_id: 13,
+          thread_id: "T13",
+          reviewer: "dave",
+          reviewer_role: "external",
+          decision: "file",
+          recommendation: "author-decides",
+          tier: 2,
+          evidence: ["the swallowed error is LOW"],
+          decision_reasoning: "tracked for the next milestone",
+          divisor_agents_used: [],
+        }),
+        triageItem({
+          comment_kind: "issue",
+          comment_id: 14,
+          thread_id: "issue-14",
+          reviewer: "carol",
+          reviewer_role: "contributor",
+          classification: "subjective",
+          tier: 2,
+          evidence: ["the naming preference"],
+          recommendation: "author-decides",
+          decision: "reply",
+          decision_reasoning: null,
+          divisor_agents_used: ["divisor-scribe", "divisor-guard"],
+          conflict_flag: true,
+        }),
+      ],
+      replies_result: {
+        items: [
+          replyOutcome({ key: "review:11" }),
+          replyOutcome({
+            key: "review:12",
+            comment_id: 12,
+            decision: "file",
+            issue_number: 301,
+            issue_url: `https://github.com/${REPO}/issues/301`,
+          }),
+          // Item 13's issue failed to file: the outcome records nulls, and
+          // the artifact records that reality rather than failing.
+          replyOutcome({ key: "review:13", comment_id: 13, decision: "file", issue_number: null, issue_url: null }),
+          replyOutcome({
+            key: "issue:14",
+            comment_kind: "issue",
+            comment_id: 14,
+            decision: "reply",
+            thread: "not_applicable",
+            thread_id: null,
+          }),
+        ],
+      },
+    })
+
+    // The full-envelope toEqual pins completeness: every 1.1.0 item field
+    // renders (nullable fields as null, never absent), the
+    // comment_kind/comment_id identity is stripped (1.1.0 is
+    // additionalProperties: false), and items keep their input order.
+    expect(renderFeedbackTriageArtifact(input, 2, "2026-11-08T12:00:00.000Z")).toEqual({
+      hero: "cobalt-crush",
+      version: "1.0.0",
+      timestamp: "2026-11-08T12:00:00.000Z",
+      artifact_type: "feedback-triage",
+      schema_version: "1.1.0",
+      context: { branch: "feature/name-the-timeout", commit: "abc1234", backlog_item_id: "1022" },
+      payload: {
+        pr_number: PR,
+        pr_url: PR_URL,
+        branch: "feature/name-the-timeout",
+        round: 2,
+        items: [
+          {
+            thread_id: "T11",
+            reviewer: "alice",
+            reviewer_role: "maintainer",
+            file: "internal/proxy.go",
+            line: 42,
+            classification: "data-driven",
+            tier: 1,
+            evidence: ["the timeout constant is unnamed"],
+            recommendation: "accept",
+            decision: "accept",
+            decision_reasoning: "named the constant in abc1234",
+            commit_sha: "abc1234",
+            filed_issue_number: null, // a non-file item never carries an issue
+            filed_issue_url: null,
+            divisor_agents_used: ["divisor-guard", "divisor-architect"],
+            tier2_unavailable: false,
+            conflict_flag: false,
+          },
+          {
+            thread_id: "T12",
+            reviewer: "bob",
+            reviewer_role: "external",
+            file: null,
+            line: null,
+            classification: "data-driven",
+            tier: 1,
+            evidence: ["the retry gap predates this PR"],
+            recommendation: "author-decides",
+            decision: "file",
+            decision_reasoning: "tracked in a follow-up issue",
+            commit_sha: null,
+            filed_issue_number: 301, // joined from the replies result by comment identity
+            filed_issue_url: `https://github.com/${REPO}/issues/301`,
+            divisor_agents_used: ["divisor-adversary"],
+            tier2_unavailable: true,
+            conflict_flag: false,
+          },
+          {
+            thread_id: "T13",
+            reviewer: "dave",
+            reviewer_role: "external",
+            file: null,
+            line: null,
+            classification: "data-driven",
+            tier: 2,
+            evidence: ["the swallowed error is LOW"],
+            recommendation: "author-decides",
+            decision: "file",
+            decision_reasoning: "tracked for the next milestone",
+            commit_sha: null,
+            filed_issue_number: null, // its issue failed: the nulls pass through
+            filed_issue_url: null,
+            divisor_agents_used: [],
+            tier2_unavailable: false,
+            conflict_flag: false,
+          },
+          {
+            thread_id: "issue-14",
+            reviewer: "carol",
+            reviewer_role: "contributor",
+            file: null,
+            line: null,
+            classification: "subjective",
+            tier: 2,
+            evidence: ["the naming preference"],
+            recommendation: "author-decides",
+            decision: "reply",
+            decision_reasoning: null,
+            commit_sha: null,
+            filed_issue_number: null,
+            filed_issue_url: null,
+            divisor_agents_used: ["divisor-scribe", "divisor-guard"],
+            tier2_unavailable: false,
+            conflict_flag: true,
+          },
+        ],
+        summary: {
+          total_items: 4,
+          accepted: 1,
+          modified: 0,
+          rejected: 0,
+          asked: 0,
+          filed: 2,
+          replied: 1,
+          tier1_count: 2,
+          tier2_count: 2,
+          divisor_agents_invoked: ["divisor-adversary", "divisor-architect", "divisor-guard", "divisor-scribe"],
+        },
+      },
+    })
+  })
+
+  it("derives the summary counts from the items: every decision, both tiers, the sorted agent union", () => {
+    const input = artifactInput({
+      items: [
+        triageItem({ comment_id: 21, thread_id: "T21", decision: "accept", divisor_agents_used: ["divisor-guard", "divisor-architect"] }),
+        triageItem({ comment_id: 22, thread_id: "T22", decision: "modify", tier: 2, divisor_agents_used: ["divisor-testing", "divisor-guard"] }),
+        triageItem({ comment_id: 23, thread_id: "T23", decision: "reject", divisor_agents_used: ["divisor-adversary"] }),
+        triageItem({ comment_id: 24, thread_id: "T24", decision: "ask", tier: 2, divisor_agents_used: [] }),
+        triageItem({ comment_id: 25, thread_id: "T25", decision: "file", recommendation: "author-decides", divisor_agents_used: ["divisor-architect", "divisor-adversary"] }),
+        triageItem({ comment_id: 26, thread_id: "T26", decision: "reply", tier: 2, divisor_agents_used: ["divisor-scribe"] }),
+      ],
+    })
+    expect(renderFeedbackTriageArtifact(input, 1, "2026-11-08T12:00:00.000Z").payload.summary).toEqual({
+      total_items: 6,
+      accepted: 1,
+      modified: 1,
+      rejected: 1,
+      asked: 1,
+      filed: 1,
+      replied: 1,
+      tier1_count: 3,
+      tier2_count: 3,
+      // The deduplicated union of every item's divisor_agents_used, sorted.
+      divisor_agents_invoked: ["divisor-adversary", "divisor-architect", "divisor-guard", "divisor-scribe", "divisor-testing"],
+    })
+  })
+
+  it("fails the input closed when an item's decision disagrees with its reply outcome", () => {
+    const raw = rawArtifactInput({
+      replies_result: { items: [replyOutcome({ decision: "reject" })] }, // the run recorded reject; the item says accept
+    })
+    const parsed = WriteFeedbackTriageArtifactInputSchema.safeParse(raw)
+    expect(parsed.success).toBe(false)
+    if (!parsed.success) {
+      expect(parsed.error.issues.map((issue) => issue.message).join("; ")).toMatch(/decision mismatch for review:11/)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// write_feedback_triage_artifact — the write
+// ---------------------------------------------------------------------------
+
+describe("writeFeedbackTriageArtifact", () => {
+  it("writes the round-1 artifact 0o600 under a 0o700 directory with no temp residue", () => {
+    const data = writeFeedbackTriageArtifact(artifactInput(), artifactDeps())
+
+    expect(data).toMatchObject({ pr_number: PR, round: 1, progress_cleared: false, warnings: [] })
+    expect(data.path).toBe(feedbackTriageArtifactPath(root, PR, 1))
+    expect(data.bytes).toBe(statSync(data.path).size)
+    expect(statSync(data.path).mode & 0o777).toBe(0o600)
+    expect(statSync(dirname(data.path)).mode & 0o777).toBe(0o700)
+    // The rename completed: the directory holds exactly the artifact, no temp file.
+    expect(readdirSync(dirname(data.path))).toEqual(["pr-42-round-1.json"])
+
+    const document = JSON.parse(readFileSync(data.path, "utf-8")) as { timestamp: string; payload: { summary: unknown } }
+    expect(document.timestamp).toBe("2026-11-08T12:00:00.000Z") // the injectable clock, not the wall clock
+    expect(data.counts).toEqual(document.payload.summary) // the returned counts are the rendered ones
+    expect(data.summary).toBe(
+      `Wrote feedback-triage round 1 for PR 42: 1 items (1 accepted, 0 modified, 0 rejected, 0 asked, 0 filed, 0 replied) to ${data.path}.`,
+    )
+  })
+
+  it("stamps the envelope from the injected clock, not the wall clock", () => {
+    const data = writeFeedbackTriageArtifact(artifactInput(), {
+      gh: fakeGh([]).gh,
+      cwd: root,
+      now: () => new Date("2027-03-04T05:06:07.000Z"),
+    })
+    const document = JSON.parse(readFileSync(data.path, "utf-8")) as { timestamp: string }
+    expect(document.timestamp).toBe("2027-03-04T05:06:07.000Z")
+  })
+
+  it("writes a valid artifact without a replies result (the Section 4.5 'No — skip posting' path)", () => {
+    const data = writeFeedbackTriageArtifact(
+      artifactInput({
+        items: [triageItem({ comment_id: 12, thread_id: "T12", decision: "file", recommendation: "author-decides" })],
+      }),
+      artifactDeps(),
+    )
+    expect(data.round).toBe(1)
+    const document = JSON.parse(readFileSync(data.path, "utf-8")) as { payload: { items: Array<Record<string, unknown>> } }
+    expect(document.payload.items[0]).toMatchObject({ decision: "file", filed_issue_number: null, filed_issue_url: null })
+  })
+
+  it("writes nothing when the rendered payload fails the 1.1.0 mirror", () => {
+    const parsed = artifactInput()
+    // The input schema and the payload mirror are maintained separately
+    // (the mirror is pinned to the JSON Schema through the checked-in
+    // samples), so drift between them is the failure this gate exists for.
+    // Simulate the drifted field the way drift would deliver it: a value
+    // past the compile-time type, cast to keep the test compiling.
+    const drifted = {
+      ...parsed,
+      items: [{ ...parsed.items[0], reviewer_role: "superuser" }],
+    } as unknown as WriteFeedbackTriageArtifactInput
+    const err = operationError(() => writeFeedbackTriageArtifact(drifted, artifactDeps()))
+    expect(err.code).toBe("invalid_input")
+    expect(err.message).toMatch(/failed 1\.1\.0 validation/)
+    expect(existsSync(join(root, ".uf"))).toBe(false) // failed before any directory or file was created
+  })
+
+  it("refuses a symlinked artifact directory, writing nothing", () => {
+    mkdirSync(dirname(artifactDir()), { recursive: true })
+    const target = join(root, "elsewhere")
+    mkdirSync(target)
+    symlinkSync(target, artifactDir())
+    const err = operationError(() => writeFeedbackTriageArtifact(artifactInput(), artifactDeps()))
+    expect(err.code).toBe("artifact_error")
+    expect(err.message).toMatch(/refusing to write into a symlinked \.uf\/artifacts\/feedback-triage directory/)
+    expect(readdirSync(target)).toEqual([]) // nothing was written through the link
+  })
+
+  it("refuses a symlinked .uf parent when the linked path lacks the artifact directory, writing nothing", () => {
+    // The pre-fix gap: lstat on the resolved artifact root returned
+    // ENOENT through the link, the leaf check swallowed it, and the
+    // recursive mkdir followed `.uf` out of the repository.
+    const outside = join(root, "outside")
+    mkdirSync(outside)
+    symlinkSync(outside, join(root, ".uf"))
+    const err = operationError(() => writeFeedbackTriageArtifact(artifactInput(), artifactDeps()))
+    expect(err.code).toBe("artifact_error")
+    expect(err.message).toMatch(/refusing to write through the symlinked parent .*\/\.uf of \.uf\/artifacts\/feedback-triage/)
+    expect(readdirSync(outside)).toEqual([]) // mkdir never followed the link
+  })
+
+  it("refuses a symlinked .uf parent that already holds the artifact directory, writing nothing", () => {
+    // The stealth variant of the same gap: lstat on the resolved
+    // artifact root follows the `.uf` link and stats the leaf, so a
+    // target that already contains artifacts/feedback-triage passed
+    // the leaf-only checks and the write escaped the repository.
+    const outside = join(root, "outside")
+    mkdirSync(join(outside, "artifacts", "feedback-triage"), { recursive: true })
+    symlinkSync(outside, join(root, ".uf"))
+    const err = operationError(() => writeFeedbackTriageArtifact(artifactInput(), artifactDeps()))
+    expect(err.code).toBe("artifact_error")
+    expect(err.message).toMatch(/refusing to write through the symlinked parent .*\/\.uf of \.uf\/artifacts\/feedback-triage/)
+    expect(readdirSync(join(outside, "artifacts", "feedback-triage"))).toEqual([]) // nothing written through the link
+  })
+
+  it("refuses a symlinked .uf/artifacts parent, writing nothing", () => {
+    mkdirSync(join(root, ".uf"))
+    const outside = join(root, "outside")
+    mkdirSync(outside)
+    symlinkSync(outside, join(root, ".uf", "artifacts"))
+    const err = operationError(() => writeFeedbackTriageArtifact(artifactInput(), artifactDeps()))
+    expect(err.code).toBe("artifact_error")
+    expect(err.message).toMatch(
+      /refusing to write through the symlinked parent .*\/\.uf\/artifacts of \.uf\/artifacts\/feedback-triage/,
+    )
+    expect(readdirSync(outside)).toEqual([]) // the feedback-triage directory was never created through the link
+  })
+
+  it("separates same-millisecond temp files with a high-entropy suffix, not pid and the clock alone", () => {
+    // Two writes for the same round in one process at the same
+    // frozen millisecond share the final path, the pid, and
+    // Date.now() — pid plus the timestamp alone collide on one temp
+    // path (a same-millisecond retry would clobber the first
+    // write's temp before its rename). Deleting the artifact
+    // between the writes forces the retry onto the same round and
+    // final path; the passthrough renameSync spy observes the temp
+    // path each write chose.
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000)
+    const renameSpy = vi.mocked(renameSync)
+    renameSpy.mockClear()
+    try {
+      const first = writeFeedbackTriageArtifact(artifactInput(), artifactDeps())
+      expect(first.round).toBe(1)
+      rmSync(first.path) // the retry targets the same round again
+      const retry = writeFeedbackTriageArtifact(artifactInput(), artifactDeps())
+      expect(retry.round).toBe(1)
+      expect(retry.path).toBe(first.path)
+      const temps = renameSpy.mock.calls
+        .filter((call) => String(call[1]) === first.path)
+        .map((call) => String(call[0]))
+      expect(temps).toHaveLength(2)
+      expect(temps[0]).not.toBe(temps[1])
+      expect(temps[0]).toMatch(/\.tmp$/)
+    } finally {
+      nowSpy.mockRestore()
+      renameSpy.mockClear()
+    }
+  })
+
+  it("fails closed when the next round exceeds the safe-integer range, writing nothing", () => {
+    // The scan's \d+ is unbounded, but the 1.1.0 mirror caps rounds at
+    // MAX_SAFE_INTEGER (zod's .int() range), so a directory seeded with a
+    // maximal round file makes every later write fail as invalid_input
+    // instead of rendering a float-corrupted round. This boundary is also
+    // why the write path is always a fresh plain-digit name the scan
+    // already counted past: an entry planted at that name would have
+    // raised the scan's max, so the artifact-path symlink guard inside the
+    // write is defense-in-depth against a post-scan race, not a reachable
+    // state — the directory refusal above is the behavioral pin for the
+    // lstat gate.
+    mkdirSync(artifactDir(), { recursive: true })
+    writeFileSync(join(artifactDir(), "pr-42-round-9007199254740991.json"), "{}\n")
+    const err = operationError(() => writeFeedbackTriageArtifact(artifactInput(), artifactDeps()))
+    expect(err.code).toBe("invalid_input")
+    expect(err.message).toMatch(/failed 1\.1\.0 validation/)
+    expect(err.message).toMatch(/round/)
+    expect(readdirSync(artifactDir())).toEqual(["pr-42-round-9007199254740991.json"]) // nothing written, not even a temp file
+  })
+
+  it("clears the progress state after the artifact is durable", () => {
+    const observed: boolean[] = []
+    const data = writeFeedbackTriageArtifact(
+      artifactInput(),
+      artifactDeps(() => {
+        observed.push(existsSync(feedbackTriageArtifactPath(root, PR, 1)))
+      }),
+    )
+    expect(observed).toEqual([true]) // the clear ran once, after the write
+    expect(data.progress_cleared).toBe(true)
+    expect(data.warnings).toEqual([])
+  })
+
+  it("reports a failed progress clear as a warning on a durable artifact", () => {
+    const data = writeFeedbackTriageArtifact(
+      artifactInput(),
+      artifactDeps(() => {
+        throw new Error("branch key unavailable")
+      }),
+    )
+    expect(data.progress_cleared).toBe(false)
+    expect(data.warnings).toEqual(["could not clear the uf.address-feedback progress state: branch key unavailable"])
+    expect(existsSync(feedbackTriageArtifactPath(root, PR, 1))).toBe(true) // the artifact is already durable
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FeedbackTriagePayloadSchema — the 1.1.0 mirror pinned to the schema samples
+// ---------------------------------------------------------------------------
+
+/** Repository-root feedback-triage sample registry (test files live two levels deeper). */
+const TRIAGE_SAMPLES_ROOT = fileURLToPath(new URL("../../schemas/feedback-triage/samples/", import.meta.url))
+
+/**
+ * Every checked-in sample, sorted for deterministic runs: the 1.0.0-era root
+ * fixtures plus the v1.1.0 directory, with the directory kept in the name so
+ * a failure names the exact file. The `v1.1.0` directory entry itself is not
+ * `.json`, so the root scan drops it.
+ */
+const TRIAGE_SAMPLES: readonly string[] = [
+  ...readdirSync(TRIAGE_SAMPLES_ROOT).filter((name) => name.endsWith(".json")),
+  ...readdirSync(join(TRIAGE_SAMPLES_ROOT, "v1.1.0"))
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => `v1.1.0/${name}`),
+].sort()
+
+/**
+ * Whether the mirror must reject a sample, from the registry's naming
+ * convention — the same one the Go fixtures test in internal/schemas
+ * enforces: `invalid-*` documents a rejection, every other `.json` fixture
+ * documents a pass. The check reads the base name because v1.1.0 samples
+ * carry their directory prefix in the discovered name.
+ */
+function mustReject(name: string): boolean {
+  return basename(name).startsWith("invalid-")
+}
+
+/** Parse one checked-in sample as JSON. */
+function readTriageSample(name: string): unknown {
+  return JSON.parse(readFileSync(join(TRIAGE_SAMPLES_ROOT, name), "utf-8")) as unknown
+}
+
+/** The mirror's verdict on one sample, with the issue list for failure messages. */
+function mirrorVerdict(name: string): { valid: boolean; error: string | null } {
+  const result = FeedbackTriagePayloadSchema.safeParse(readTriageSample(name))
+  return {
+    valid: result.success,
+    error: result.success
+      ? null
+      : result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; "),
+  }
+}
+
+describe("FeedbackTriagePayloadSchema (the 1.1.0 mirror, pinned to the checked-in samples)", () => {
+  it("discovers the checked-in samples: both directories, both families", () => {
+    // The pin cannot go vacuous: the two fixtures design D4 names are
+    // present, and each directory carries invalid-* fixtures to reject.
+    expect(TRIAGE_SAMPLES).toContain("sample-feedback-triage.json") // the 1.0.0 sample
+    expect(TRIAGE_SAMPLES).toContain("v1.1.0/sample-feedback-triage.json")
+    const rootInvalid = TRIAGE_SAMPLES.filter((name) => mustReject(name) && !name.includes("/"))
+    const v110Invalid = TRIAGE_SAMPLES.filter((name) => mustReject(name) && name.includes("/"))
+    expect(rootInvalid.length, "samples/ carries invalid-* fixtures").toBeGreaterThan(0)
+    expect(v110Invalid.length, "samples/v1.1.0/ carries invalid-* fixtures").toBeGreaterThan(0)
+  })
+
+  it("accepts the valid samples: the 1.1.0 sample and the 1.0.0 sample", () => {
+    // 1.1.0 is a strict superset of 1.0.0, so the 1.0.0 sample — which omits
+    // filed_issue_number/filed_issue_url and the filed/replied counts — must
+    // pass the 1.1.0 mirror: the same minor-version compatibility the Go CI
+    // test pins on the JSON Schema side.
+    for (const name of TRIAGE_SAMPLES.filter((name) => !mustReject(name))) {
+      const verdict = mirrorVerdict(name)
+      expect(verdict.valid, `${name}: ${verdict.error}`).toBe(true)
+    }
+  })
+
+  it("rejects the invalid-* samples under samples/ and samples/v1.1.0/", () => {
+    for (const name of TRIAGE_SAMPLES.filter(mustReject)) {
+      const verdict = mirrorVerdict(name)
+      expect(verdict.valid, `${name}: expected the 1.1.0 mirror to reject it`).toBe(false)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Tool boundary (envelopes)
 // ---------------------------------------------------------------------------
 
@@ -1010,6 +1700,10 @@ describe("tool envelopes", () => {
     const file = createFileFeedbackIssueTool(deps(fakeGh([]).gh)) as unknown as { args: z.ZodRawShape }
     const issueComment = createPostIssueCommentTool(deps(fakeGh([]).gh)) as unknown as { args: z.ZodRawShape }
     const childIssue = createCreateChildIssueTool(deps(fakeGh([]).gh)) as unknown as { args: z.ZodRawShape }
+    // DE-007 registration-surface layer: the write tool's args are pinned to
+    // its input schema so the model-facing parameter surface cannot drift
+    // from the shape the execute path validates.
+    const artifact = createWriteFeedbackTriageArtifactTool(artifactDeps()) as unknown as { args: z.ZodRawShape }
     expect(Object.keys(post.args).sort()).toEqual(Object.keys(PostFeedbackRepliesInputSchema.shape).sort())
     expect(Object.keys(post.args).sort()).toEqual(["items", "pr_number", "repo", "resolve_threads"])
     expect(Object.keys(file.args).sort()).toEqual(["body", "comment_id", "comment_kind", "pr_number", "repo", "title"])
@@ -1017,8 +1711,19 @@ describe("tool envelopes", () => {
     expect(Object.keys(issueComment.args).sort()).toEqual(["body", "issue_number", "repo"])
     expect(Object.keys(childIssue.args).sort()).toEqual(Object.keys(CreateChildIssueInputSchema.shape).sort())
     expect(Object.keys(childIssue.args).sort()).toEqual(["body", "repo", "title"])
+    expect(Object.keys(artifact.args).sort()).toEqual(Object.keys(WriteFeedbackTriageArtifactInputSchema.shape).sort())
+    expect(Object.keys(artifact.args).sort()).toEqual([
+      "backlog_item_id",
+      "branch",
+      "commit",
+      "items",
+      "pr_number",
+      "pr_url",
+      "replies_result",
+    ])
     expect(post.args.resolve_threads?.safeParse(undefined).success).toBe(false)
     expect(post.args.repo?.safeParse(undefined).success).toBe(true)
+    expect(artifact.args.replies_result?.safeParse(undefined).success).toBe(true) // optional: the 4.5 skip path
   })
 
   it("returns invalid_input with the fetch-tool error contract", async () => {
@@ -1106,6 +1811,144 @@ describe("tool envelopes", () => {
       "summary",
       "warnings",
     ])
+  })
+
+  it("returns the write_feedback_triage_artifact success, invalid_input, and artifact_error envelopes", async () => {
+    // Schema failures and the decision cross-check both fail closed before
+    // anything is written.
+    const invalid = await run(createWriteFeedbackTriageArtifactTool(artifactDeps()), rawArtifactInput({ commit: "not-a-sha" }))
+    expect(invalid).toMatchObject({ status: "error", error: true, code: "invalid_input", retryable: false })
+    expect(String(invalid.message)).toMatch(/commit/)
+
+    const duplicate = await run(
+      createWriteFeedbackTriageArtifactTool(artifactDeps()),
+      rawArtifactInput({ items: [triageItem(), triageItem()] }),
+    )
+    expect(duplicate).toMatchObject({ status: "error", error: true, code: "invalid_input" })
+
+    const mismatch = await run(
+      createWriteFeedbackTriageArtifactTool(artifactDeps()),
+      rawArtifactInput({ replies_result: { items: [replyOutcome({ decision: "reject" })] } }),
+    )
+    expect(mismatch).toMatchObject({ status: "error", error: true, code: "invalid_input" })
+    expect(String(mismatch.message)).toMatch(/decision mismatch for review:11/)
+    expect(existsSync(join(root, ".uf"))).toBe(false)
+
+    const ok = (await run(createWriteFeedbackTriageArtifactTool(artifactDeps()), rawArtifactInput())) as {
+      status: string
+      data: WriteFeedbackTriageArtifactData
+    }
+    expect(ok.status).toBe("ok")
+    expect(Object.keys(ok.data).sort()).toEqual([
+      "bytes",
+      "counts",
+      "path",
+      "pr_number",
+      "progress_cleared",
+      "round",
+      "summary",
+      "warnings",
+    ])
+    expect(ok.data.progress_cleared).toBe(false) // no clearProgress hook is wired
+
+    // A round-scan read failure surfaces as artifact_error.
+    rmSync(join(root, ".uf"), { recursive: true, force: true })
+    mkdirSync(join(root, ".uf", "artifacts"), { recursive: true })
+    writeFileSync(join(root, ".uf", "artifacts", "feedback-triage"), "a file where the directory should be")
+    const scan = await run(createWriteFeedbackTriageArtifactTool(artifactDeps()), rawArtifactInput())
+    expect(scan).toMatchObject({ status: "error", error: true, code: "artifact_error", retryable: false })
+  })
+
+  // DE-007 round-trip layer: the artifact the tool writes reads back from
+  // disk, validates under the same 1.1.0 zod mirror and JSON Schema sample
+  // set the checked-in fixtures pin, and a second call derives the next
+  // round from the on-disk scan.
+  it("write_feedback_triage_artifact round-trip: the written artifact validates under the 1.1.0 mirror and the sample set, reads back from disk, and the next call derives round 2", async () => {
+    const cleared: string[] = []
+    const write = createWriteFeedbackTriageArtifactTool(artifactDeps(() => cleared.push("cleared")))
+    const input = rawArtifactInput({
+      items: [
+        triageItem(),
+        triageItem({
+          comment_id: 12,
+          thread_id: "T12",
+          reviewer: "bob",
+          reviewer_role: "contributor",
+          file: "lib/timeout.ts",
+          line: 7,
+          classification: "subjective",
+          tier: 2,
+          evidence: ["the retry gap predates this PR"],
+          recommendation: "author-decides",
+          decision: "file",
+          decision_reasoning: "filed as a follow-up issue",
+          divisor_agents_used: ["divisor-adversary", "divisor-guard"],
+        }),
+      ],
+      replies_result: {
+        items: [
+          replyOutcome(),
+          replyOutcome({
+            key: "review:12",
+            comment_id: 12,
+            decision: "file",
+            issue: "filed",
+            issue_number: 301,
+            issue_url: `https://github.com/${REPO}/issues/301`,
+          }),
+        ],
+      },
+    })
+
+    const first = (await run(write, input)) as { status: string; data: WriteFeedbackTriageArtifactData }
+    expect(first.status).toBe("ok")
+    expect(first.data.round).toBe(1)
+    expect(first.data.path).toBe(feedbackTriageArtifactPath(root, PR, 1))
+    expect(first.data.counts).toMatchObject({ total_items: 2, accepted: 1, filed: 1, tier2_count: 1 })
+    expect(cleared).toEqual(["cleared"])
+
+    // Write→read: the artifact reads back from disk as the rendered envelope.
+    const written = JSON.parse(readFileSync(first.data.path, "utf8")) as {
+      hero: string
+      artifact_type: string
+      schema_version: string
+      payload: Record<string, unknown>
+    }
+    expect(written.hero).toBe("cobalt-crush")
+    expect(written.artifact_type).toBe("feedback-triage")
+    expect(written.schema_version).toBe("1.1.0")
+
+    // The payload validates under the zod mirror (the same safeParse the
+    // write gate runs), and its key structure — payload, item, and summary —
+    // equals the valid v1.1.0 sample's, the fixture set the Go CI test pins
+    // to schemas/feedback-triage/v1.1.0.schema.json.
+    expect(FeedbackTriagePayloadSchema.safeParse(written.payload).success).toBe(true)
+    const sample = readTriageSample("v1.1.0/sample-feedback-triage.json") as {
+      items: Array<Record<string, unknown>>
+      summary: Record<string, unknown>
+    }
+    expect(Object.keys(written.payload).sort()).toEqual(["branch", "items", "pr_number", "pr_url", "round", "summary"])
+    expect(Object.keys(written.payload).sort()).toEqual(Object.keys(sample).sort())
+    const writtenItems = written.payload.items as Array<Record<string, unknown>>
+    expect(Object.keys(writtenItems[0]).sort()).toEqual(Object.keys(sample.items[0]).sort())
+    expect(Object.keys(written.payload.summary as Record<string, unknown>).sort()).toEqual(
+      Object.keys(sample.summary).sort(),
+    )
+    // The FILE item carries its joined issue; the identity fields are stripped.
+    expect(writtenItems[1]).toMatchObject({ filed_issue_number: 301, decision: "file" })
+    expect(writtenItems[0]).not.toHaveProperty("comment_kind")
+    expect(writtenItems[0]).not.toHaveProperty("comment_id")
+
+    // A second call derives the next round from the on-disk artifact, and
+    // both rounds stay readable side by side (gaps and history preserved).
+    const second = (await run(write, input)) as { status: string; data: WriteFeedbackTriageArtifactData }
+    expect(second.status).toBe("ok")
+    expect(second.data.round).toBe(2)
+    expect(second.data.path).toBe(feedbackTriageArtifactPath(root, PR, 2))
+    expect(second.data.counts).toEqual(first.data.counts)
+    expect(cleared).toEqual(["cleared", "cleared"])
+    expect(existsSync(feedbackTriageArtifactPath(root, PR, 1))).toBe(true)
+    expect(existsSync(feedbackTriageArtifactPath(root, PR, 2))).toBe(true)
   })
 })
 

@@ -6,6 +6,34 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- extract-feedback-triage-artifact-tool: new
+  `write_feedback_triage_artifact` tool in the `uf-workflow`
+  plugin renders and writes the `/uf.address-feedback`
+  feedback-triage 1.1.0 artifact in one call: it joins FILE items
+  to their filed issues from the `post_feedback_replies` success
+  data by comment identity (cross-checking decisions; a mismatch
+  fails `invalid_input` with nothing written), derives the
+  summary counts, scans the next round number (highest round plus
+  one, not a file count), renders the envelope, validates the
+  payload against a zod mirror of
+  `schemas/feedback-triage/v1.1.0.schema.json` (pinned to the
+  checked-in samples), writes it atomically to
+  `.uf/artifacts/feedback-triage/pr-<N>-round-<M>.json` (0o600
+  files under 0o700 directories, per-component symlink refusal from
+  the repository root down, collision-resistant temp names), and
+  clears the
+  `uf.address-feedback` progress state (a clear failure is a
+  warning — the artifact is already durable). Section 4.7 now
+  instructs one tool call with the parameter mapping plus one
+  rendered-output example instead of the hand-written envelope
+  template, round scan, atomic-write prose, and terminal
+  `clear_progress` (canonical and scaffold mirrors; Go contract
+  tests re-pinned). Artifact bytes are unchanged for the same
+  inputs. Instruction delta (DE-004): `uf.address-feedback.md`
+  1451 → 1431 lines (16,738 → 16,841 tokens; load set 23,306 →
+  23,409) per copy. (Spec:
+  openspec/changes/extract-feedback-triage-artifact-tool/)
+  (Fixes: #1022, Docs: #1143)
 - compaction-storm-on-a-tight-context-mode: delegation
   now refuses tight-context models and aborts compaction
   storms. A selection headroom gate (DELEG-FR-001) skips
