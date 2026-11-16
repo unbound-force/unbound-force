@@ -1,13 +1,18 @@
 /**
- * Tests for the shared per-run timeout derivation (OpenSpec change
- * derive-per-run-timeout, task 1.2 — RD-FR-028 scenarios).
+ * Tests for the shared per-run and per-task timeout derivations
+ * (OpenSpec change derive-per-run-timeout, task 1.2 — RD-FR-028
+ * scenarios; OpenSpec change per-task-delegation-budgets, task 1.2 —
+ * PTB-FR-001 scenarios).
  *
- * The derivation is a pure function of scalar signals (constitution
+ * Both derivations are pure functions of scalar signals (constitution
  * Principles II/IV): formula arithmetic, monotonicity in prompt bytes
  * and tier, contention gating and cap, floor-at-base, ceiling clamp
  * including the 1_800_000 executor bound, ceiling-below-base floor
  * precedence, tier-less zero profile term, determinism, and the
- * explicit-source passthrough (design D1/D2/D5).
+ * explicit-source passthrough (design D1/D2/D5). The per-task variant
+ * adds the phase-shape signals: monotonicity in phase task and file
+ * count, the flat-default replacement, and the full per-task
+ * provenance record (per-task-delegation-budgets design D1).
  */
 import { describe, expect, it } from "vitest"
 
@@ -17,13 +22,21 @@ import {
   MAX_CONTENTION_MULTIPLIER,
   MAX_TIMEOUT_MS,
   MS_PER_KIB_ABOVE_FREE,
+  MS_PER_PHASE_FILE_ABOVE_FREE,
+  MS_PER_PHASE_TASK_ABOVE_FREE,
+  PHASE_FREE_FILES,
+  PHASE_FREE_TASKS,
   PROMPT_FREE_BYTES,
   TIER_TERM_MS,
   contentionMultiplier,
   derivePerRunTimeoutMs,
+  derivePerTaskTimeoutMs,
+  phaseFileTermMs,
+  phaseTaskTermMs,
   profileTermMs,
   promptTermMs,
   resolveBaseWindowMs,
+  type PerTaskTimeoutSignals,
   type TimeoutDerivationSignals,
 } from "../lib/run-timeout.js"
 import { TimeoutSchema } from "../lib/agent-executor.js"
@@ -35,6 +48,26 @@ function signals(overrides: Partial<TimeoutDerivationSignals> = {}): TimeoutDeri
     promptBytes: PROMPT_FREE_BYTES,
     resolvedTier: "standard",
     sessionProfileTier: "standard",
+    maxParallelRuns: 1,
+    configuredCeilingMs: MAX_TIMEOUT_MS,
+    ...overrides,
+  }
+}
+
+/**
+ * Baseline per-task signals matching the issue #1080 incident panel
+ * shape: a single-task phase (the delegated task is the free window),
+ * the free core file set, a prompt at the free window, no tier
+ * signal, and a sequential fan-out. The 20-minute base matches the
+ * panel's successful-delegation upper bound.
+ */
+function perTaskSignals(overrides: Partial<PerTaskTimeoutSignals> = {}): PerTaskTimeoutSignals {
+  return {
+    baseMs: 1_200_000,
+    phaseTaskCount: PHASE_FREE_TASKS,
+    phaseFileCount: PHASE_FREE_FILES,
+    promptBytes: PROMPT_FREE_BYTES,
+    tier: null,
     maxParallelRuns: 1,
     configuredCeilingMs: MAX_TIMEOUT_MS,
     ...overrides,
@@ -300,6 +333,333 @@ describe("manifest-mode retrieval allowance (RD-FR-036)", () => {
   it("derivation stays deterministic with the allowance applied", () => {
     const input = signals({ promptBytes: 200_000, manifestMode: true, maxParallelRuns: 4 })
     expect(derivePerRunTimeoutMs(input)).toEqual(derivePerRunTimeoutMs(input))
+  })
+})
+
+describe("phaseTaskTermMs", () => {
+  it("adds nothing at or below the free window", () => {
+    expect(phaseTaskTermMs(0)).toBe(0)
+    expect(phaseTaskTermMs(PHASE_FREE_TASKS)).toBe(0)
+  })
+
+  it("charges per sibling task above the free window (D1 calibration)", () => {
+    expect(PHASE_FREE_TASKS).toBe(1)
+    expect(MS_PER_PHASE_TASK_ABOVE_FREE).toBe(60_000)
+    // The delegated task itself is the free window; the #1080
+    // incident phase held 11 tasks — 10 siblings at 60 s each.
+    expect(phaseTaskTermMs(11)).toBe(600_000)
+  })
+
+  it("charges the full term for the first task above the free window", () => {
+    expect(phaseTaskTermMs(PHASE_FREE_TASKS + 1)).toBe(MS_PER_PHASE_TASK_ABOVE_FREE)
+  })
+
+  it("is monotonically non-decreasing in the phase task count", () => {
+    let previous = -1
+    for (let tasks = 0; tasks <= 40; tasks += 3) {
+      const term = phaseTaskTermMs(tasks)
+      expect(term).toBeGreaterThanOrEqual(previous)
+      previous = term
+    }
+  })
+})
+
+describe("phaseFileTermMs", () => {
+  it("adds nothing at or below the free window", () => {
+    expect(phaseFileTermMs(0)).toBe(0)
+    expect(phaseFileTermMs(PHASE_FREE_FILES)).toBe(0)
+  })
+
+  it("charges per file above the free window (D1 calibration)", () => {
+    expect(PHASE_FREE_FILES).toBe(4)
+    expect(MS_PER_PHASE_FILE_ABOVE_FREE).toBe(30_000)
+    expect(phaseFileTermMs(9)).toBe(150_000)
+  })
+
+  it("charges the full term for the first file above the free window", () => {
+    expect(phaseFileTermMs(PHASE_FREE_FILES + 1)).toBe(MS_PER_PHASE_FILE_ABOVE_FREE)
+  })
+
+  it("is monotonically non-decreasing in the phase file count", () => {
+    let previous = -1
+    for (let files = 0; files <= 40; files += 3) {
+      const term = phaseFileTermMs(files)
+      expect(term).toBeGreaterThanOrEqual(previous)
+      previous = term
+    }
+  })
+})
+
+describe("derivePerTaskTimeoutMs", () => {
+  it("composes the formula: (base + tier + task + file + prompt) x multiplier", () => {
+    const result = derivePerTaskTimeoutMs(
+      perTaskSignals({
+        baseMs: 600_000,
+        phaseTaskCount: 6,
+        phaseFileCount: 6,
+        promptBytes: 179_200,
+        tier: "heavy",
+      }),
+    )
+    // 600_000 + 300_000 (heavy) + 300_000 (5 tasks above free) +
+    // 60_000 (2 files above free) + 166_500 (111 KiB above free) =
+    // 1_426_500, no multiplier.
+    expect(result.effectiveMs).toBe(1_426_500)
+    expect(result.provenance.source).toBe("derived")
+    expect(result.provenance.clamped).toBe(false)
+  })
+
+  it("replaces the flat 1_800_000 per-task default with the derived window", () => {
+    // PTB-FR-001 scenario "Flat default no longer applies for
+    // per-task delegations": with no explicit timeout the effective
+    // wall clock is the derived value from work signals — not the
+    // 1_800_000 ms flat default the #1080 incident delegated under —
+    // and the derivation provenance is present on the result.
+    const result = derivePerTaskTimeoutMs(perTaskSignals({ phaseTaskCount: 3 }))
+    // 1_200_000 + 2 x 60_000 = 1_320_000, under the flat default.
+    expect(result.effectiveMs).toBe(1_320_000)
+    expect(result.effectiveMs).not.toBe(MAX_TIMEOUT_MS)
+    expect(result.provenance.source).toBe("derived")
+    expect(result.provenance.phase_task_count).toBe(3)
+  })
+
+  it("scales the window with larger phases (more tasks or files)", () => {
+    // PTB-FR-001 scenario "Larger phases scale the window": two
+    // identical delegations except phase size — the larger phase's
+    // effective timeout is greater than or equal to the smaller's.
+    const small = derivePerTaskTimeoutMs(
+      perTaskSignals({ phaseTaskCount: 2, phaseFileCount: 5 }),
+    )
+    const moreTasks = derivePerTaskTimeoutMs(
+      perTaskSignals({ phaseTaskCount: 12, phaseFileCount: 5 }),
+    )
+    const moreFiles = derivePerTaskTimeoutMs(
+      perTaskSignals({ phaseTaskCount: 2, phaseFileCount: 15 }),
+    )
+    // 1_290_000 vs 1_890_000 (clamped to 1_800_000) vs 1_590_000.
+    expect(moreTasks.effectiveMs).toBeGreaterThan(small.effectiveMs)
+    expect(moreFiles.effectiveMs).toBeGreaterThan(small.effectiveMs)
+  })
+
+  it("is monotonically non-decreasing in the phase task count", () => {
+    let previous = -1
+    for (let tasks = 0; tasks <= 30; tasks += 3) {
+      const { effectiveMs } = derivePerTaskTimeoutMs(
+        perTaskSignals({ phaseTaskCount: tasks }),
+      )
+      expect(effectiveMs).toBeGreaterThanOrEqual(previous)
+      previous = effectiveMs
+    }
+  })
+
+  it("is monotonically non-decreasing in the phase file count", () => {
+    let previous = -1
+    for (let files = 0; files <= 30; files += 3) {
+      const { effectiveMs } = derivePerTaskTimeoutMs(
+        perTaskSignals({ phaseFileCount: files }),
+      )
+      expect(effectiveMs).toBeGreaterThanOrEqual(previous)
+      previous = effectiveMs
+    }
+  })
+
+  it("is monotonically non-decreasing in tier", () => {
+    const tiers = ["lightweight", "standard", "heavy"] as const
+    let previous = -1
+    for (const tier of tiers) {
+      const { effectiveMs } = derivePerTaskTimeoutMs(perTaskSignals({ tier }))
+      expect(effectiveMs).toBeGreaterThanOrEqual(previous)
+      previous = effectiveMs
+    }
+  })
+
+  it("reuses the shared per-run tier terms", () => {
+    const lightweight = derivePerTaskTimeoutMs(perTaskSignals({ tier: "lightweight" }))
+    const standard = derivePerTaskTimeoutMs(perTaskSignals({ tier: "standard" }))
+    const heavy = derivePerTaskTimeoutMs(perTaskSignals({ tier: "heavy" }))
+    // TIER_TERM_MS: lightweight 0, standard 120_000, heavy 300_000.
+    expect(lightweight.effectiveMs).toBe(1_200_000)
+    expect(standard.effectiveMs).toBe(1_320_000)
+    expect(heavy.effectiveMs).toBe(1_500_000)
+  })
+
+  it("applies no contention at or below one parallel run", () => {
+    // PTB-FR-001 item 4: the multiplier applies only when the
+    // configured fan-out exceeds one concurrent delegation.
+    const single = derivePerTaskTimeoutMs(perTaskSignals({ maxParallelRuns: 1 }))
+    const zero = derivePerTaskTimeoutMs(perTaskSignals({ maxParallelRuns: 0 }))
+    expect(single.provenance.contention_multiplier).toBe(1)
+    expect(zero.provenance.contention_multiplier).toBe(1)
+    expect(zero.effectiveMs).toBe(single.effectiveMs)
+  })
+
+  it("multiplies the derived sum by the contention multiplier", () => {
+    const result = derivePerTaskTimeoutMs(
+      perTaskSignals({ baseMs: 600_000, phaseTaskCount: 6, maxParallelRuns: 2 }),
+    )
+    // (600_000 + 300_000) x 1.15 = 1_035_000.
+    expect(result.effectiveMs).toBe(1_035_000)
+    expect(result.provenance.contention_multiplier).toBe(1.15)
+  })
+
+  it("multiplies the window under parallel contention", () => {
+    // PTB-FR-001 scenario "Parallel contention multiplies the
+    // window": effective >= the single-run derivation, and the
+    // unclamped derivation strictly greater.
+    const single = derivePerTaskTimeoutMs(perTaskSignals({ phaseTaskCount: 6 }))
+    const parallel = derivePerTaskTimeoutMs(
+      perTaskSignals({ phaseTaskCount: 6, maxParallelRuns: 4 }),
+    )
+    expect(parallel.effectiveMs).toBeGreaterThanOrEqual(single.effectiveMs)
+    expect(parallel.provenance.derived_ms).toBeGreaterThan(
+      single.provenance.derived_ms,
+    )
+    // 1_500_000 x 1.45 = 2_175_000 -> clamped to the ceiling.
+    expect(parallel.effectiveMs).toBe(MAX_TIMEOUT_MS)
+    expect(parallel.provenance.contention_multiplier).toBe(1.45)
+  })
+
+  it("caps the contention multiplier at 1.5", () => {
+    const five = derivePerTaskTimeoutMs(perTaskSignals({ maxParallelRuns: 5 }))
+    const eight = derivePerTaskTimeoutMs(perTaskSignals({ maxParallelRuns: 8 }))
+    expect(five.provenance.contention_multiplier).toBe(MAX_CONTENTION_MULTIPLIER)
+    expect(eight.provenance.contention_multiplier).toBe(MAX_CONTENTION_MULTIPLIER)
+    expect(MAX_CONTENTION_MULTIPLIER).toBe(1.5)
+    expect(eight.effectiveMs).toBe(five.effectiveMs)
+  })
+
+  it("never reduces below the base window (floor)", () => {
+    // Zero tier, task, file, and prompt terms leave exactly the base.
+    const result = derivePerTaskTimeoutMs(
+      perTaskSignals({ phaseTaskCount: 0, phaseFileCount: 0, promptBytes: 0 }),
+    )
+    expect(result.effectiveMs).toBe(1_200_000)
+    expect(result.provenance.clamped).toBe(false)
+  })
+
+  it("clamps at a configured ceiling below the derived value", () => {
+    const result = derivePerTaskTimeoutMs(
+      perTaskSignals({ phaseTaskCount: 11, configuredCeilingMs: 1_500_000 }),
+    )
+    // 1_200_000 + 600_000 = 1_800_000 unclamped; the ceiling wins.
+    expect(result.effectiveMs).toBe(1_500_000)
+    expect(result.provenance.ceiling_ms).toBe(1_500_000)
+    expect(result.provenance.clamped).toBe(true)
+  })
+
+  it("clamps at the ceiling with clamped provenance", () => {
+    // PTB-FR-001 scenario "Derived value clamped at the ceiling":
+    // work signals large enough that the unclamped derivation exceeds
+    // the ceiling; the ceiling never exceeds the 1_800_000 bound.
+    const result = derivePerTaskTimeoutMs(
+      perTaskSignals({
+        phaseTaskCount: 11,
+        phaseFileCount: 20,
+        tier: "heavy",
+        maxParallelRuns: 4,
+      }),
+    )
+    // (1_200_000 + 300_000 + 600_000 + 480_000) x 1.45 = 3_741_000.
+    expect(result.provenance.derived_ms).toBe(3_741_000)
+    expect(result.effectiveMs).toBe(MAX_TIMEOUT_MS)
+    expect(result.provenance.ceiling_ms).toBe(MAX_TIMEOUT_MS)
+    expect(result.provenance.clamped).toBe(true)
+  })
+
+  it("clamps at the executor bound even with a higher configured ceiling", () => {
+    const result = derivePerTaskTimeoutMs(
+      perTaskSignals({
+        phaseTaskCount: 30,
+        phaseFileCount: 40,
+        tier: "heavy",
+        maxParallelRuns: 8,
+        configuredCeilingMs: 3_600_000,
+      }),
+    )
+    expect(result.effectiveMs).toBe(MAX_TIMEOUT_MS)
+    expect(result.provenance.ceiling_ms).toBe(MAX_TIMEOUT_MS)
+  })
+
+  it("raises a configured ceiling below the base to the base (floor precedence)", () => {
+    // PTB-FR-001: when the configured ceiling is below the resolved
+    // base window the base floor takes precedence — the effective
+    // ceiling is the base window.
+    const result = derivePerTaskTimeoutMs(
+      perTaskSignals({ phaseTaskCount: 6, configuredCeilingMs: 300_000 }),
+    )
+    // Derived 1_500_000; the ceiling is raised to the 1_200_000 base.
+    expect(result.effectiveMs).toBe(1_200_000)
+    expect(result.provenance.ceiling_ms).toBe(1_200_000)
+    expect(result.provenance.clamped).toBe(true)
+  })
+
+  it("derives a zero tier term for tier-less entries", () => {
+    const tierless = derivePerTaskTimeoutMs(perTaskSignals({ tier: null }))
+    const lightweight = derivePerTaskTimeoutMs(perTaskSignals({ tier: "lightweight" }))
+    expect(tierless.provenance.tier_term_ms).toBe(0)
+    expect(tierless.provenance.tier).toBeNull()
+    // Tier-less and lightweight both contribute a zero tier term.
+    expect(tierless.effectiveMs).toBe(lightweight.effectiveMs)
+  })
+
+  it("records every derivation input in the provenance record", () => {
+    const result = derivePerTaskTimeoutMs(
+      perTaskSignals({
+        phaseTaskCount: 11,
+        phaseFileCount: 9,
+        promptBytes: 179_200,
+        tier: "heavy",
+        maxParallelRuns: 4,
+      }),
+    )
+    // (1_200_000 + 300_000 + 600_000 + 150_000 + 166_500) x 1.45 =
+    // 3_503_925 -> clamped to the 1_800_000 executor bound.
+    expect(result.provenance).toEqual({
+      effective_ms: MAX_TIMEOUT_MS,
+      source: "derived",
+      base_ms: 1_200_000,
+      phase_task_count: 11,
+      phase_task_term_ms: 600_000,
+      phase_file_count: 9,
+      phase_file_term_ms: 150_000,
+      prompt_bytes: 179_200,
+      prompt_term_ms: 166_500,
+      tier: "heavy",
+      tier_term_ms: 300_000,
+      contention_multiplier: 1.45,
+      max_parallel_runs: 4,
+      derived_ms: 3_503_925,
+      ceiling_ms: MAX_TIMEOUT_MS,
+      clamped: true,
+    })
+  })
+
+  it("is deterministic: identical inputs produce identical output", () => {
+    const input = perTaskSignals({
+      phaseTaskCount: 11,
+      promptBytes: 200_000,
+      tier: "standard",
+      maxParallelRuns: 4,
+    })
+    expect(derivePerTaskTimeoutMs(input)).toEqual(derivePerTaskTimeoutMs(input))
+  })
+
+  it("passes an explicit timeout through unchanged with source explicit", () => {
+    // PTB-FR-001 scenario "Explicit timeout bypasses derivation":
+    // any combination of work signals — the explicit argument wins
+    // outright, no derivation term modifies it, and the provenance
+    // carries no derivation fields at all.
+    const result = derivePerTaskTimeoutMs(
+      perTaskSignals({
+        phaseTaskCount: 11,
+        phaseFileCount: 20,
+        tier: "heavy",
+        maxParallelRuns: 4,
+        explicitTimeoutMs: 900_000,
+      }),
+    )
+    expect(result.effectiveMs).toBe(900_000)
+    expect(result.provenance).toEqual({ effective_ms: 900_000, source: "explicit" })
   })
 })
 

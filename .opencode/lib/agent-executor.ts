@@ -10,6 +10,8 @@ import {
   probeSubtreeActivity,
   registerDeadline,
   registeredProbeCounters,
+  resolveIdleApplicability,
+  resolveInheritedBudget,
   resolveInheritedDeadline,
   selectRunningTool,
   type RunningToolPart,
@@ -18,6 +20,7 @@ import {
   unregisterProbeState,
 } from "./delegation-budget.js"
 import { normalizeStormThreshold } from "./model-matrix.js"
+import { type DerivedPerTaskTimeout, type PerTaskTimeoutProvenanceRecord } from "./run-timeout.js"
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -120,6 +123,46 @@ export interface InvocationProvenance {
  */
 export type TimeoutKind = "wall_clock" | "idle" | "budget" | "storm"
 
+/**
+ * Advisory resume hint for a timed-out per-task delegation
+ * (per-task-delegation-budgets design D3, PTB-FR-003): the files the
+ * child touched and the tasks it marked complete since the delegation
+ * started, assembled by diffing already-observable state — the
+ * worktree diff or session file tracking and the tasks.md checkbox
+ * state — never by semantic analysis, and never carrying message
+ * content (Constitution V). The hint is advisory input to the
+ * executor-owned bounded retry (DE-005): the retry prompt relays it
+ * verbatim; no semantic merge is attempted.
+ */
+export interface PerTaskResumeHint {
+  /** Repository-relative paths modified since the delegation started. */
+  readonly files_modified: readonly string[]
+  /** Task identifiers marked complete since the delegation started. */
+  readonly tasks_completed: readonly string[]
+}
+
+/**
+ * Executor-owned bounded-retry provenance
+ * (per-task-delegation-budgets PTB-FR-003, DE-005): present when the
+ * per-task executor re-issued a retryable timeout termination instead
+ * of returning it to the caller. The record proves the single bound
+ * retry happened and whether its prompt carried concrete relayed
+ * resume state, so a retried failure returned to the caller is final
+ * for that termination kind. Absent when no retry ran and for every
+ * non-per-task caller.
+ */
+export interface PerTaskRetryRecord {
+  /** Timeout kind that ended the first attempt. */
+  readonly first_attempt_kind: TimeoutKind
+  /**
+   * True when the retry prompt carried concrete relayed state — the
+   * first attempt's resume hint, or a readable fresh capture's
+   * completed-task anchor when the hint was unreadable. False when it
+   * degraded to directing the child to the tasks.md checkboxes itself.
+   */
+  readonly resume_relayed: boolean
+}
+
 /** Limit details attached to runs that ended by a limit (timeout, storm, or exhausted budget; design D4). */
 export interface TimeoutDetails {
   readonly kind: TimeoutKind
@@ -157,6 +200,16 @@ export interface TimeoutDetails {
    * its holding session, so the id is present whenever a storm fires.
    */
   readonly storm_session_id: string | null
+  /**
+   * Advisory per-task resume hint (per-task-delegation-budgets D3,
+   * PTB-FR-003): the files the child modified and the tasks it
+   * completed since the delegation started. Present only on per-task
+   * delegation results that ended by the wall clock, the idle
+   * watchdog, or an exhausted budget; null when the underlying state
+   * was unreadable (fail-closed, per D4 of #950). Absent for every
+   * non-per-task caller.
+   */
+  readonly resume?: PerTaskResumeHint | null
 }
 
 /**
@@ -200,6 +253,35 @@ export interface InvokeAgentResult {
    */
   readonly resume?: InvocationResumeState
   /**
+   * Per-task timeout derivation provenance
+   * (per-task-delegation-budgets D1, PTB-FR-001): every derivation
+   * input, the unclamped derived value, the ceiling, and the clamp
+   * outcome. Present on every result the per-task delegation executor
+   * returns — success or failure — so the effective wall clock stays
+   * observable per RD-FR-009 / RD-FR-030. Absent for every
+   * non-per-task caller.
+   */
+  readonly timeout_provenance?: PerTaskTimeoutProvenanceRecord
+  /**
+   * Remaining budgeted-ancestor budget in milliseconds
+   * (per-task-delegation-budgets PTB-FR-004): the ancestor deadline
+   * minus the clock at result-assembly time, floored at zero. Present
+   * only when a budgeted ancestor framed the run — success, failure,
+   * or budget_exhausted — so the caller can thread the remaining
+   * budget into its phase checkpoint. Absent for unbudgeted runs.
+   */
+  readonly remaining_ms?: number
+  /**
+   * Executor-owned bounded-retry provenance (PTB-FR-003, DE-005):
+   * present when the per-task executor re-issued a retryable timeout
+   * termination once with the resume context tool-rendered into the
+   * retry prompt — on success (the retry finished the task) and on the
+   * returned failure alike. A failure carrying this record already
+   * consumed the bound, so it is final for that termination kind;
+   * non-retryable terminations (e.g. budget_exhausted) never carry it.
+   */
+  readonly retry?: PerTaskRetryRecord
+  /**
    * Finish reason reported by the child's final step-finish part, null
    * when unreported. Present on success results so dispatch can apply
    * length policy to non-empty (truncated) runs (RD-FR-060).
@@ -237,6 +319,18 @@ export interface ExecutorDependencies {
    * delegation records no checkpoint.
    */
   readonly checkpointStep?: string
+  /**
+   * Per-task wall-clock deferral (per-task-delegation-budgets D2,
+   * PTB-FR-002): when armed, an expired wall clock holds while the
+   * child is progressing (activity within ACTIVE_WINDOW_MS,
+   * including running tool parts inside their DT-FR-014 deferral
+   * bound) and re-arms each activity window, aborting once activity
+   * stops; the idle watchdog stays the primary stall signal and the
+   * inherited budget the absolute backstop. Armed only for per-task
+   * children of a budgeted ancestor carrying an idle window; every
+   * other caller keeps the absolute wall clock from #930/#950.
+   */
+  readonly deferWallClockWhileActive?: boolean
   /** Clock seam for budget and idle arithmetic (default Date.now). */
   readonly now?: () => number
 }
@@ -494,12 +588,18 @@ export async function resolveHostModel(
  * fails as retryable child_empty_response), timeout, cancellation,
  * and cleanup, plus the delegation-timeout-budgets limits: the wall
  * clock is clamped to any inherited parent budget (D1), the child's
- * deadline is registered for nested runs, the optional idle watchdog
+ * deadline — carrying the run's idle window for nested per-task
+ * inheritance (per-task-delegation-budgets D2) — is registered for
+ * nested runs, the optional idle watchdog
  * aborts a child whose session subtree stops changing (D2) -- deferred
  * while any tool part is running, within the DT-FR-014 bound (the
  * earliest observable tool deadline plus grace, else the fixed
  * IDLE_DEFERRAL_CAP_MS from the last fingerprint change), with the
- * wall clock as the absolute backstop -- and limit-ended results
+ * wall clock as the absolute backstop -- except in per-task
+ * deferral mode (deferWallClockWhileActive, per-task-delegation-
+ * budgets D2/PTB-FR-002), where an expired wall clock holds while
+ * the child is progressing and re-arms each activity window --
+ * and limit-ended results
  * carry `timeout` details (D4) including the validated running_tool
  * (DT-FR-015). Also owns the
  * compaction-storm detector (compaction-storm design D2, DELEG-FR-002):
@@ -540,6 +640,11 @@ export async function executeAgentSession(
   const now = deps.now ?? Date.now
   const startedAt = now()
   const idleMilliseconds = deps.idleTimeoutMilliseconds
+  // Per-task wall-clock deferral (per-task-delegation-budgets D2,
+  // PTB-FR-002): armed only by the per-task delegation executor for a
+  // child of a budgeted ancestor carrying an idle window; every other
+  // caller keeps the absolute wall clock from #930/#950.
+  const deferWallClock = deps.deferWallClockWhileActive === true
   // Compaction-storm threshold (DELEG-FR-002, design D2): the probe's
   // per-session compaction accounting is shared with the idle watchdog
   // (DT-FR-002); N consecutive compactions without intervening substantive
@@ -641,7 +746,20 @@ export async function executeAgentSession(
     linkedAbort.abort(deps.parentAbort.reason)
     abortChild()
   }
-  const timeout = setTimeout(() => {
+  // Wall clock with per-task deferral (per-task-delegation-budgets
+  // D2, PTB-FR-002): in deferral mode an expired clock holds while
+  // the child is progressing — activity within ACTIVE_WINDOW_MS,
+  // which the probe maintains for running tool parts inside their
+  // DT-FR-014 deferral bound — and re-arms for one activity window,
+  // so the abort lands within one window of activity stopping and a
+  // run whose probes keep failing (stale activity) cannot defer
+  // forever. Out of deferral mode the clock stays absolute exactly
+  // as in #930/#950.
+  const onWallClockExpired = (): void => {
+    if (deferWallClock && probed && now() - lastProgressAt <= ACTIVE_WINDOW_MS) {
+      wallClockTimer = setTimeout(onWallClockExpired, ACTIVE_WINDOW_MS)
+      return
+    }
     // A late wall-clock timer must not overwrite an abort cause
     // already recorded by the idle watchdog or a parent
     // cancellation: the catch block classifies the result from
@@ -652,7 +770,8 @@ export async function executeAgentSession(
     }
     linkedAbort.abort(new Error("invoke_agent run timed out"))
     abortChild()
-  }, effectiveMilliseconds)
+  }
+  let wallClockTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(onWallClockExpired, effectiveMilliseconds)
 
   // Activity probe (design D2): a changed subtree fingerprint is progress
   // for the idle watchdog, and the same probe folds the compaction
@@ -755,8 +874,11 @@ export async function executeAgentSession(
     if (childID === null) {
       return failedResult(provenance, "child_create_failed", responseFailure("create child session", created), true)
     }
-    // Nested runs inside this child inherit its absolute deadline (D1).
-    registerDeadline(childID, startedAt + effectiveMilliseconds)
+    // Nested runs inside this child inherit its absolute deadline (D1)
+    // and, when this run carries an idle watchdog, its idle window
+    // (per-task-delegation-budgets D2): the registry entry is the one
+    // place a nested per-task call resolves both from.
+    registerDeadline(childID, startedAt + effectiveMilliseconds, idleMilliseconds)
     if (linkedAbort.signal.aborted) {
       abortChild()
       throw linkedAbort.signal.reason
@@ -944,7 +1066,9 @@ export async function executeAgentSession(
     return withChild(failedResult(provenance, "invocation_failed", errorText(error), true))
   } finally {
     settled = true
-    clearTimeout(timeout)
+    if (wallClockTimer !== undefined) {
+      clearTimeout(wallClockTimer)
+    }
     clearInterval(probePoll)
     if (childID !== null) {
       unregisterDeadline(childID)
@@ -957,4 +1081,384 @@ export async function executeAgentSession(
     deps.parentAbort.removeEventListener("abort", cancelFromParent)
     await cleanupAbort
   }
+}
+
+// ── Per-task delegation executor (per-task-delegation-budgets) ─
+
+/**
+ * Seams capturing the advisory resume state (design D3, PTB-FR-003).
+ * Both return repository-relative identifiers and null when the state
+ * is unreadable, which fails the hint closed. Production
+ * implementations live in the plugin layer (worktree diff or session
+ * file tracking; tasks.md checkbox state under the parse_tasks
+ * grammar); the executor only diffs what they report, so no new I/O
+ * or filesystem watcher enters the lib (Constitution IV/V).
+ */
+export interface PerTaskResumeCapture {
+  /**
+   * Captures the repository-relative paths currently modified in the
+   * worktree, or null when unreadable.
+   *
+   * @returns The modified paths, or null when the state is unreadable.
+   */
+  readonly captureModifiedFiles: () => Promise<readonly string[] | null>
+  /**
+   * Captures the task identifiers currently marked complete in
+   * tasks.md, or null when unreadable.
+   *
+   * @returns The completed task identifiers, or null when unreadable.
+   */
+  readonly captureCompletedTasks: () => Promise<readonly string[] | null>
+}
+
+/**
+ * Context identifying one per-task /uf.unleash implementation
+ * delegation (design D2/D3, PTB-FR-001..003): the tasks.md phase the
+ * task belongs to, the checkpoint step the caller asked the run to
+ * record, the derived (or explicit) timeout with its provenance, the
+ * idle fallback for unbudgeted callers, and the optional
+ * resume-capture seams.
+ */
+export interface PerTaskDelegationContext {
+  /** 1-based tasks.md phase number of the delegated task. */
+  readonly phase: number
+  /** Checkpoint step the caller asked the run to record; "implement" marks a resume-eligible per-task delegation. */
+  readonly checkpointStep?: string
+  /**
+   * Derivation outcome from derivePerTaskTimeoutMs (PTB-FR-001). Its
+   * effectiveMs is the requested wall clock and its provenance record
+   * rides the result verbatim; absent when the caller supplied only
+   * an explicit timeoutMilliseconds, which then passes through with
+   * source "explicit".
+   */
+  readonly derivation?: DerivedPerTaskTimeout
+  /**
+   * Idle window applied only when neither an explicit
+   * idleTimeoutMilliseconds nor a budgeted ancestor supplies one: the
+   * caller threads its existing delegation default, keeping that
+   * default's single source of truth outside this lib and unbudgeted
+   * per-task callers behaving exactly as before (PTB-FR-002
+   * introduces no new global idle default).
+   */
+  readonly fallbackIdleMs?: number
+  /** Resume-capture seams; absent on call sites that cannot supply them. */
+  readonly resumeCapture?: PerTaskResumeCapture
+}
+
+/** One fail-closed snapshot of the resume state (design D3). */
+interface ResumeSnapshot {
+  readonly files: readonly string[]
+  readonly tasks: readonly string[]
+}
+
+/**
+ * Capture one resume snapshot through both seams concurrently. Any
+ * throw or null return marks the snapshot unreadable so the hint can
+ * fail closed without masking the timeout it annotates.
+ *
+ * @param capture The resume-capture seams.
+ * @returns The snapshot, or null when either side is unreadable.
+ */
+async function captureResumeSnapshot(capture: PerTaskResumeCapture): Promise<ResumeSnapshot | null> {
+  try {
+    const [files, tasks] = await Promise.all([capture.captureModifiedFiles(), capture.captureCompletedTasks()])
+    if (files === null || tasks === null) {
+      return null
+    }
+    return { files, tasks }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Assemble the advisory resume hint by diffing a fresh after-state
+ * against the before-state captured at delegation start (PTB-FR-003):
+ * the files and tasks newly modified or completed since the
+ * delegation started are the child's observable progress. An
+ * unreadable snapshot on either side yields null — the executor
+ * never synthesizes resume content (fail-closed, per D4 of #950).
+ *
+ * @param capture The resume-capture seams.
+ * @param before The delegation-start snapshot, or null when it was unreadable.
+ * @returns The hint, or null when the state is unreadable.
+ */
+async function assembleResumeHint(
+  capture: PerTaskResumeCapture,
+  before: ResumeSnapshot | null,
+): Promise<PerTaskResumeHint | null> {
+  if (before === null) {
+    return null
+  }
+  const after = await captureResumeSnapshot(capture)
+  if (after === null) {
+    return null
+  }
+  return {
+    files_modified: after.files.filter((path) => !before.files.includes(path)),
+    tasks_completed: after.tasks.filter((task) => !before.tasks.includes(task)),
+  }
+}
+
+/** Whether a timeout kind's termination carries the per-task resume hint (PTB-FR-003). */
+function carriesResumeHint(kind: TimeoutKind): boolean {
+  return kind === "wall_clock" || kind === "idle" || kind === "budget"
+}
+
+/**
+ * Render the resume preamble the executor prepends to the one bounded
+ * retry's prompt (PTB-FR-003, DE-005): the retry opens by relaying the
+ * first attempt's observable progress so the child verifies and
+ * continues from durable state instead of re-deriving it — the retry
+ * never starts from a blank context by construction.
+ *
+ * A readable hint relays its files and tasks verbatim. A null
+ * (unreadable) hint falls back to a fresh capture for the
+ * completed-task anchor, and finally to directing the child to the
+ * tasks.md checkbox state itself. The preamble is mechanical prose
+ * assembled from already-observable state, never semantic analysis
+ * (Constitution V).
+ *
+ * @param kind Timeout kind that ended the first attempt.
+ * @param phase 1-based tasks.md phase number of the delegated task.
+ * @param hint The first attempt's resume hint, or null when unreadable.
+ * @param capture The resume-capture seams, when the caller supplied them.
+ * @returns The preamble text, and whether it carried concrete relayed
+ *   state (vs. the checkbox self-read fallback).
+ */
+async function renderResumePreamble(
+  kind: TimeoutKind,
+  phase: number,
+  hint: PerTaskResumeHint | null,
+  capture: PerTaskResumeCapture | undefined,
+): Promise<{ preamble: string; relayed: boolean }> {
+  // Mechanical article for the kind interpolation (only "idle" takes
+  // "an"); the preamble stays fully deterministic.
+  const article = kind === "idle" ? "an" : "a"
+  if (hint !== null) {
+    const files = hint.files_modified.length > 0 ? hint.files_modified.join(", ") : "none"
+    const tasks = hint.tasks_completed.length > 0 ? hint.tasks_completed.join(", ") : "none"
+    return {
+      preamble:
+        `This is the single retry of a per-task delegation that ended in ${article} ${kind} timeout; ` +
+        "the attempt budget is spent, so continue efficiently.\n\n" +
+        `The timed-out attempt already made this durable progress:\n` +
+        `- Files modified: ${files}\n` +
+        `- Tasks completed: ${tasks}\n\n` +
+        "Verify that state against the working tree and tasks.md, continue from it, " +
+        "and do not redo completed work.\n\n",
+      relayed: true,
+    }
+  }
+  // Fail-closed fallback (D4 of #950): the hint state is unreadable, so
+  // try one fresh capture for the completed-task anchor before
+  // directing the child to the checkboxes itself.
+  if (capture !== undefined) {
+    const snapshot = await captureResumeSnapshot(capture)
+    if (snapshot !== null) {
+      const tasks = snapshot.tasks.length > 0 ? snapshot.tasks.join(", ") : "none"
+      return {
+        preamble:
+          `This is the single retry of a per-task delegation that ended in ${article} ${kind} timeout; ` +
+          "the attempt budget is spent, so continue efficiently.\n\n" +
+          `The timed-out attempt's diff against its start could not be read, but the ` +
+          `tasks.md checkbox state at retry time lists these phase tasks as complete: ${tasks}.\n\n` +
+          "Verify that state against tasks.md, treat every [x] checkbox in the phase as " +
+          "complete, continue from the first unchecked task, and do not redo completed work.\n\n",
+        relayed: true,
+      }
+    }
+  }
+  return {
+    preamble:
+      `This is the single retry of a per-task delegation that ended in ${article} ${kind} timeout; ` +
+      "the attempt budget is spent, so continue efficiently.\n\n" +
+      `The timed-out attempt's resume state could not be read. Anchor on the tasks.md ` +
+      `checkbox state instead: read tasks.md, treat every [x] checkbox in phase ${phase} as ` +
+      "complete, continue from the first unchecked task, and do not redo completed work.\n\n",
+    relayed: false,
+  }
+}
+
+/**
+ * Executes one per-task /uf.unleash implementation delegation with
+ * hierarchical budgeting, inherited idle semantics, derivation
+ * provenance, and the advisory resume hint
+ * (per-task-delegation-budgets design D2/D3, PTB-FR-001..003,
+ * AE-FR-010).
+ *
+ * Wraps executeAgentSession. Before any child session exists it
+ * resolves the inherited budget through the delegation-budget
+ * registry (direct hit on the caller's session, else at most 8
+ * parent hops), clamps the requested — derived or explicit — wall
+ * clock to the ancestor deadline minus the 60 s reserve, and fails
+ * fast with a non-retryable budget_exhausted envelope when less than
+ * the 30 s minimum remains. It resolves the idle watchdog's
+ * applicability (an explicit window wins, else the budgeted
+ * ancestor's registered window, else the caller's existing fallback
+ * for unbudgeted runs — never a new global default) and arms the
+ * wall-clock deferral for per-task children of a budgeted ancestor
+ * carrying idle, so a progressing child is not killed by its derived
+ * clock while the inherited budget stays the absolute backstop
+ * (PTB-FR-002). Every result carries the per-task timeout
+ * provenance; wall-clock, idle, and budget terminations additionally
+ * carry the advisory resume hint inside the timeout envelope — null
+ * when the underlying state is unreadable — for delegations that
+ * identify as implement-phase per-task calls (checkpoint_step
+ * "implement" plus a positive phase). Other callers of
+ * executeAgentSession are untouched.
+ *
+ * @param deps Injected client, session context, and timeout boundary.
+ * @param agent Manifest-declared agent name the child runs as.
+ * @param promptText Resolved prompt text to deliver to the child session.
+ * @param model Resolved model identity for the child session.
+ * @param variant Optional runtime variant for the child session.
+ * @param read_only Invocation provenance flag.
+ * @param provenance Initial provenance populated by the caller.
+ * @param perTask Per-task context: phase, checkpoint step, derivation,
+ *   idle fallback, and resume-capture seams.
+ * @returns Observable result with status, text, usage, error,
+ *   provenance, the finish reason on success, per-task timeout
+ *   provenance, and the resume hint on timeout terminations.
+ */
+export async function executePerTaskDelegation(
+  deps: ExecutorDependencies,
+  agent: string,
+  promptText: string,
+  model: ModelIdentity,
+  variant: string | undefined,
+  read_only: boolean,
+  provenance: InvocationProvenance,
+  perTask: PerTaskDelegationContext,
+): Promise<InvokeAgentResult> {
+  const now = deps.now ?? Date.now
+  const startedAt = now()
+  // Hierarchical budget (D2): resolve the ancestor entry before any
+  // child session exists, so the fail-fast below can refuse to spawn
+  // and the idle applicability can inherit through the same entry.
+  const inherited = await resolveInheritedBudget(deps.client, deps.sessionID, deps.directory, deps.parentAbort)
+  const requestedMs = perTask.derivation?.effectiveMs ?? deps.timeoutMilliseconds
+  const budget = clampToBudget(requestedMs, inherited === null ? null : inherited.deadlineMs, startedAt)
+  // Idle applicability (D2, PTB-FR-002): an explicit window wins,
+  // else the budgeted ancestor's registered window, else the caller's
+  // existing fallback — never a new global default.
+  const applicability = resolveIdleApplicability(deps.idleTimeoutMilliseconds, inherited)
+  const idleMilliseconds = applicability.idleMs ?? perTask.fallbackIdleMs
+  // Timeout provenance (D1, PTB-FR-001): the derivation record rides
+  // the result verbatim; a call without one passes its explicit
+  // request through with source "explicit".
+  const timeoutProvenance: PerTaskTimeoutProvenanceRecord =
+    perTask.derivation?.provenance ?? { effective_ms: requestedMs, source: "explicit" }
+  // Resume applicability (D3, PTB-FR-003): only implement-phase
+  // per-task calls (checkpoint_step "implement" plus a positive
+  // phase) carry the hint; every other caller is unaffected.
+  const resumeEligible = perTask.checkpointStep === "implement" && perTask.phase > 0
+  const capture = resumeEligible ? perTask.resumeCapture : undefined
+  const before = capture === undefined ? null : await captureResumeSnapshot(capture)
+
+  if (budget.exhausted) {
+    const details: TimeoutDetails = {
+      kind: "budget",
+      effective_ms: budget.effectiveMs,
+      requested_ms: requestedMs,
+      budget_clamped: budget.clamped,
+      idle_timeout_ms: idleMilliseconds ?? null,
+      elapsed_ms: now() - startedAt,
+      last_progress_ms_ago: null,
+      child_active: null,
+      pending_question: false,
+      running_tool: null,
+      storm_session_id: null,
+    }
+    return {
+      ...failedResult(
+        provenance,
+        "budget_exhausted",
+        `parent delegation budget exhausted (${budget.effectiveMs} ms left after the reserve); ` +
+          "return to the caller so it can resume from durable state",
+        false,
+      ),
+      timeout: resumeEligible
+        ? { ...details, resume: capture === undefined ? null : await assembleResumeHint(capture, before) }
+        : details,
+      timeout_provenance: timeoutProvenance,
+      // PTB-FR-004: budget_exhausted reports what little budget remains
+      // (floored at zero) so the caller can record it at its checkpoint.
+      // The exhausted branch only fires under a budgeted ancestor, but
+      // the guard keeps the narrowing local rather than trusting the
+      // clamp contract.
+      remaining_ms: inherited === null ? undefined : Math.max(0, inherited.deadlineMs - now()),
+    }
+  }
+
+  // The shared executor owns the child lifecycle: it re-resolves the
+  // same registry entry and re-clamps (its clamp is never looser),
+  // registers the child's deadline — carrying the resolved idle
+  // window — and unregisters it when the run ends. Both the first
+  // attempt and the bounded retry run through this wiring, so they
+  // share the inherited budget and idle semantics.
+  const runAttempt = (prompt: string): Promise<InvokeAgentResult> =>
+    executeAgentSession(
+      {
+        ...deps,
+        timeoutMilliseconds: requestedMs,
+        idleTimeoutMilliseconds: idleMilliseconds,
+        checkpointStep: deps.checkpointStep ?? perTask.checkpointStep,
+        deferWallClockWhileActive: inherited !== null && idleMilliseconds !== undefined,
+      },
+      agent,
+      prompt,
+      model,
+      variant,
+      read_only,
+      provenance,
+    )
+  // PTB-FR-004: every result under a budgeted ancestor carries the
+  // remaining budget at result time; unbudgeted runs omit the field.
+  // Recomputed at each attempt's result-assembly time.
+  const decorate = (result: InvokeAgentResult): InvokeAgentResult => ({
+    ...result,
+    timeout_provenance: timeoutProvenance,
+    remaining_ms: inherited === null ? undefined : Math.max(0, inherited.deadlineMs - now()),
+  })
+  // Attach the advisory resume hint to the final result's timeout
+  // envelope (PTB-FR-003): the after-state at result-assembly time
+  // diffed against the delegation-start snapshot.
+  const finalize = async (result: InvokeAgentResult): Promise<InvokeAgentResult> => {
+    if (!resumeEligible || result.timeout === undefined || !carriesResumeHint(result.timeout.kind)) {
+      return result
+    }
+    return {
+      ...result,
+      timeout: {
+        ...result.timeout,
+        resume: capture === undefined ? null : await assembleResumeHint(capture, before),
+      },
+    }
+  }
+
+  const first = decorate(await runAttempt(promptText))
+  // Executor-owned bounded retry (DE-005, PTB-FR-003): a retryable
+  // timeout termination of a resume-eligible per-task delegation is
+  // re-issued exactly once, with the resume context tool-rendered into
+  // the retry prompt — never a blank-context re-issue, never a second
+  // retry. Non-retryable terminations (budget_exhausted), storm
+  // terminations and other kinds without a per-task resume hint, and
+  // non-timeout failures return to the caller immediately; a failure
+  // that carries the retry record already consumed the bound.
+  if (
+    !resumeEligible ||
+    first.timeout === undefined ||
+    first.error?.retryable !== true ||
+    !carriesResumeHint(first.timeout.kind)
+  ) {
+    return await finalize(first)
+  }
+  const hint = capture === undefined ? null : await assembleResumeHint(capture, before)
+  const { preamble, relayed } = await renderResumePreamble(first.timeout.kind, perTask.phase, hint, capture)
+  const retried = decorate(await runAttempt(preamble + promptText))
+  return await finalize({
+    ...retried,
+    retry: { first_attempt_kind: first.timeout.kind, resume_relayed: relayed },
+  })
 }
