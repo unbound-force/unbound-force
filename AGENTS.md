@@ -164,7 +164,7 @@ imported externally.
   preserves a target's existing devDependencies) — restoring byte
   parity by copying the canonical manifest over the mirror would
   regress the npm 10.9.9 crash avoidance
-- **Policy mirrors**: `.uf/preflight.yaml` and `.uf/reviewer-capabilities.yaml` are project-owned and intentionally diverge from embedded assets; compensating tests pin their shape (`projectOwnedPolicyMirrors` in scaffold_test.go, the repo-local persona enrollment lock in reviewer_capabilities_test.go)
+- **Policy mirrors**: `.uf/preflight.yaml`, `.uf/review-matrix.yaml`, and `.uf/reviewer-capabilities.yaml` are project-owned and intentionally diverge from embedded assets (review-matrix divergence supports external tools integrating with the review matrix); compensating tests pin their shape (`projectOwnedPolicyMirrors` in scaffold_test.go, the repo-local persona enrollment lock in reviewer_capabilities_test.go, v3 schema validity for `.uf/review-matrix.yaml` in internal/schemas/ci_test.go)
 - **Command evals**: `.eval/fixtures/<name>/` holds a `task.yaml`
   (command, timeout), `setup.sh`, `assertions.yaml` (deterministic
   trajectory checks), and a `guidance.md` brief that auto-question
