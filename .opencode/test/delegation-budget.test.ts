@@ -1729,7 +1729,14 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
     // millisecond less fails fast instead).
     register("parent", start + BUDGET_RESERVE_MS + MIN_NESTED_BUDGET_MS)
     const fake = executorClient()
-    const pending = runPerTask(fake.client, { timeoutMilliseconds: 1_800_000 })
+    // A non-implement checkpoint step scopes this row to a single
+    // attempt: the executor-owned retry (PTB-FR-003, DE-005) is gated
+    // on implement-phase eligibility, and the clamp boundary it pins
+    // is phase-independent.
+    const pending = runPerTask(fake.client, {
+      timeoutMilliseconds: 1_800_000,
+      checkpointStep: "quick-pre-flight",
+    })
     await vi.advanceTimersByTimeAsync(0)
     expect(fake.calls.creates).toBe(1)
     expect(fake.calls.deadlineDuringRun).toBe(start + MIN_NESTED_BUDGET_MS)
@@ -1746,6 +1753,28 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
       budget_clamped: true,
       idle_timeout_ms: null,
     })
+  })
+
+  it("ends the retry at a spent ancestor budget without a second spawn (PTB-FR-003)", async () => {
+    const start = Date.now()
+    // Enough budget for exactly one 30 s clamped attempt: the first
+    // termination is a retryable budget-clamped wall clock, and the
+    // ancestor budget is spent by the time the retry re-resolves it.
+    register("parent", start + BUDGET_RESERVE_MS + MIN_NESTED_BUDGET_MS)
+    const fake = executorClient()
+    const pending = runPerTask(fake.client, { timeoutMilliseconds: 1_800_000 })
+    await vi.advanceTimersByTimeAsync(MIN_NESTED_BUDGET_MS)
+    await vi.advanceTimersByTimeAsync(0)
+    const result = await pending
+    // DE-005: the retry re-issued once, and its attempt hit the
+    // exhausted ancestor budget inside the shared executor, so the
+    // final failure carries a budget termination plus retry
+    // provenance — the bound is consumed and the failure is final.
+    expect(result.error?.code).toBe("budget_exhausted")
+    expect(result.error?.retryable).toBe(false)
+    expect(result.timeout).toMatchObject({ kind: "budget", budget_clamped: true })
+    expect(result.retry).toEqual({ first_attempt_kind: "wall_clock", resume_relayed: false })
+    expect(fake.calls.creates).toBe(1)
   })
 
   it("fails fast with budget_exhausted before spawning a child", async () => {
@@ -1768,6 +1797,9 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
     })
     // The derivation record rides the fail-fast verbatim (PTB-FR-001).
     expect(result.timeout_provenance).toBe(derivation.provenance)
+    // budget_exhausted is non-retryable, so the executor never
+    // consumed or carried a retry record.
+    expect(result.retry).toBeUndefined()
   })
 
   it("attaches an empty resume hint to the budget fail-fast when eligible", async () => {
@@ -1779,6 +1811,9 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
     // The before-state was readable and nothing changed, so the hint
     // is present but empty: the caller learns the child never started.
     expect(result.timeout?.resume).toEqual({ files_modified: [], tasks_completed: [] })
+    // The fail-fast branch returns before the retry code: no bound
+    // consumed, no retry record.
+    expect(result.retry).toBeUndefined()
   })
 
   it("inherits the ancestor's idle watchdog and aborts a stalled child with a resume hint", async () => {
@@ -1789,6 +1824,11 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
     await vi.advanceTimersByTimeAsync(0)
     // The child made observable progress before stalling.
     seams.progress(["internal/foo/bar.go"], ["1.2"])
+    // First attempt: the inherited 10 s idle watchdog fires (~t = 11 s).
+    await vi.advanceTimersByTimeAsync(15_000)
+    // DE-005: the retryable idle termination is re-issued exactly once
+    // with the resume preamble; the second attempt stalls the same way
+    // (~t = 22 s), and the returned failure is final.
     await vi.advanceTimersByTimeAsync(15_000)
     const result = await pending
     expect(result.error?.code).toBe("idle_timeout")
@@ -1800,6 +1840,8 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
       files_modified: ["internal/foo/bar.go"],
       tasks_completed: ["1.2"],
     })
+    expect(result.retry).toEqual({ first_attempt_kind: "idle", resume_relayed: true })
+    expect(fake.calls.creates).toBe(2)
   })
 
   it("holds an expired derived wall clock while the child keeps progressing", async () => {
@@ -1809,7 +1851,10 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
     const fake = executorClient({
       latest: () => message("m", [{ id: "p", type: "text", text: "x".repeat(streaming ? ++counter : counter) }]),
     })
-    const pending = runPerTask(fake.client, { timeoutMilliseconds: 5_000 })
+    // A non-implement checkpoint step scopes out the executor-owned
+    // retry (PTB-FR-003, DE-005): this row pins the deferral mechanics,
+    // which are phase-independent, on a single attempt.
+    const pending = runPerTask(fake.client, { timeoutMilliseconds: 5_000, checkpointStep: "quick-pre-flight" })
     await vi.advanceTimersByTimeAsync(8_000)
     // t = 8 s: the 5 s derived wall clock expired, but the ancestor
     // budget carries an idle window and the child streams, so the
@@ -1842,7 +1887,8 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
           { id: "b1", type: "tool", tool: "bash", state: { status: "running", metadata: { output: "steady" } } },
         ]),
     })
-    const pending = runPerTask(fake.client, { timeoutMilliseconds: 5_000 })
+    // Non-implement step: single attempt, deferral mechanics only.
+    const pending = runPerTask(fake.client, { timeoutMilliseconds: 5_000, checkpointStep: "quick-pre-flight" })
     await vi.advanceTimersByTimeAsync(12_000)
     // t = 12 s: past both the 5 s wall clock and the 10 s idle window,
     // but the quiet bash holds the idle deferral within its DT-FR-014
@@ -1873,7 +1919,8 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
     const fake = executorClient({
       latest: () => message("m", [{ id: "p", type: "text", text: "x".repeat(streaming ? ++counter : counter) }]),
     })
-    const pending = runPerTask(fake.client, { timeoutMilliseconds: 5_000 })
+    // Non-implement step: single attempt, deferral mechanics only.
+    const pending = runPerTask(fake.client, { timeoutMilliseconds: 5_000, checkpointStep: "quick-pre-flight" })
     await vi.advanceTimersByTimeAsync(2_000)
     // Last progress at t = 2 s; the 5 s wall clock expired and
     // re-armed, and the 600 s inherited idle window will not fire
@@ -1895,7 +1942,11 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
 
   it("does not defer the wall clock when probes never succeed", async () => {
     register("parent", Date.now() + BUDGET_RESERVE_MS + 600_000, 10_000)
-    const pending = runPerTask(executorClient({ latest: () => undefined }).client, { timeoutMilliseconds: 5_000 })
+    // Non-implement step: single attempt, absolute-clock mechanics only.
+    const pending = runPerTask(executorClient({ latest: () => undefined }).client, {
+      timeoutMilliseconds: 5_000,
+      checkpointStep: "quick-pre-flight",
+    })
     await vi.advanceTimersByTimeAsync(5_000)
     const result = await pending
     // Failing probes cannot confirm activity, so the expired clock
@@ -1917,6 +1968,12 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
     })
     await vi.advanceTimersByTimeAsync(0)
     seams.progress(["internal/foo/bar.go"], ["1.1", "1.2"])
+    // First attempt: the unbudgeted 5 s wall clock fires while the
+    // child streams.
+    await vi.advanceTimersByTimeAsync(5_000)
+    // DE-005: the retryable termination is re-issued once with the
+    // resume preamble; the second attempt streams and times out the
+    // same way, and the returned failure is final.
     await vi.advanceTimersByTimeAsync(5_000)
     const result = await pending
     // No budgeted ancestor: no deferral — the wall clock fires at 5 s
@@ -1931,6 +1988,8 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
     // No derivation was supplied, so the explicit request passes
     // through with source "explicit" (PTB-FR-001).
     expect(result.timeout_provenance).toEqual({ effective_ms: 5_000, source: "explicit" })
+    expect(result.retry).toEqual({ first_attempt_kind: "wall_clock", resume_relayed: true })
+    expect(fake.calls.creates).toBe(2)
   })
 
   it("returns an empty resume hint when the child made no observable progress (PTB-FR-003 scenario 2)", async () => {
@@ -1941,6 +2000,10 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
       fallbackIdleMs: 300_000,
       resumeCapture: seams.capture,
     })
+    // First attempt: the 130 s wall clock fires on the stalled child.
+    await vi.advanceTimersByTimeAsync(130_000)
+    // DE-005: the retry re-issued once; the second attempt stalls the
+    // same way and the returned failure is final.
     await vi.advanceTimersByTimeAsync(130_000)
     const result = await pending
     expect(result.error?.code).toBe("timeout")
@@ -1949,6 +2012,10 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
     // than absent.
     expect(result.timeout).toMatchObject({ kind: "wall_clock", child_active: false })
     expect(result.timeout?.resume).toEqual({ files_modified: [], tasks_completed: [] })
+    // The empty hint is still relayed concrete state, so the retry
+    // record marks the preamble as delivered.
+    expect(result.retry).toEqual({ first_attempt_kind: "wall_clock", resume_relayed: true })
+    expect(fake.calls.creates).toBe(2)
     // Constitution V: the hint never carries message content.
     expect(JSON.stringify(result.timeout)).not.toContain("same")
   })
@@ -1965,11 +2032,18 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
     // The before-snapshot was readable; the after-read at abort time
     // is not. The executor never synthesizes resume content.
     seams.degrade("null")
+    // First attempt: the 5 s wall clock fires; the after-state reads
+    // fail closed, so the retry anchors on the checkbox fallback
+    // instead of relayed state.
+    await vi.advanceTimersByTimeAsync(5_000)
+    // DE-005: the retry re-issued once; its attempt times out the same
+    // way against the still-unreadable state.
     await vi.advanceTimersByTimeAsync(5_000)
     const result = await pending
     expect(result.error?.code).toBe("timeout")
     expect(result.timeout?.kind).toBe("wall_clock")
     expect(result.timeout?.resume).toBeNull()
+    expect(result.retry).toEqual({ first_attempt_kind: "wall_clock", resume_relayed: false })
   })
 
   it("fails the resume hint closed when the before-state is unreadable or a seam throws", async () => {
@@ -1981,9 +2055,15 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
         fallbackIdleMs: 300_000,
         resumeCapture: seams.capture,
       })
+      // Both attempts: the first 5 s window times out, the DE-005
+      // retry re-issues once, and the second window times out too.
+      await vi.advanceTimersByTimeAsync(5_000)
       await vi.advanceTimersByTimeAsync(5_000)
       const result = await pending
       expect(result.error?.code).toBe("timeout")
+      // The degraded seams yield a null hint, so the retry fell back
+      // to the checkbox anchor rather than relayed state.
+      expect(result.retry).toEqual({ first_attempt_kind: "wall_clock", resume_relayed: false })
       return result.timeout?.resume
     }
     // Both unreadable modes take the same fail-closed path: null reads
@@ -1997,25 +2077,36 @@ describe("executePerTaskDelegation budgets, idle inheritance, and resume hints",
       readonly checkpointStep?: string
       readonly phase?: number
       readonly resumeCapture?: PerTaskResumeCapture
-    }): Promise<PerTaskResumeHint | null | undefined> => {
+    }) => {
       const pending = runPerTask(executorClient().client, {
         timeoutMilliseconds: 5_000,
         fallbackIdleMs: 300_000,
         ...extra,
       })
+      // The first 5 s window times out; an eligible call re-issues the
+      // retryable termination once (DE-005), so the clock must pass a
+      // second window before the result settles.
+      await vi.advanceTimersByTimeAsync(5_000)
       await vi.advanceTimersByTimeAsync(5_000)
       const result = await pending
       expect(result.error?.code).toBe("timeout")
-      return result.timeout?.resume
+      return result
     }
-    // PTB-FR-003: only implement-phase per-task calls carry the hint.
-    // A non-implement checkpoint step never sees the key.
-    expect(await resumeOnTimeout({ checkpointStep: "quick-pre-flight" })).toBeUndefined()
+    // PTB-FR-003: only implement-phase per-task calls carry the hint
+    // or the executor-owned retry. A non-implement checkpoint step
+    // never sees either.
+    const nonImplement = await resumeOnTimeout({ checkpointStep: "quick-pre-flight" })
+    expect(nonImplement.timeout?.resume).toBeUndefined()
+    expect(nonImplement.retry).toBeUndefined()
     // Neither does a non-positive phase.
-    expect(await resumeOnTimeout({ phase: 0 })).toBeUndefined()
+    const nonPositivePhase = await resumeOnTimeout({ phase: 0 })
+    expect(nonPositivePhase.timeout?.resume).toBeUndefined()
+    expect(nonPositivePhase.retry).toBeUndefined()
     // An eligible caller without capture seams reports null, not a
-    // synthesized hint.
-    expect(await resumeOnTimeout({})).toBeNull()
+    // synthesized hint, and the retry anchors on the checkbox state.
+    const eligible = await resumeOnTimeout({})
+    expect(eligible.timeout?.resume).toBeNull()
+    expect(eligible.retry).toEqual({ first_attempt_kind: "wall_clock", resume_relayed: false })
   })
 
   it("threads the derivation provenance through a successful run", async () => {

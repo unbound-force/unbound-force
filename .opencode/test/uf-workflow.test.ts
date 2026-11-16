@@ -17,6 +17,7 @@ import { join } from "node:path"
 import type { PluginInput } from "@opencode-ai/plugin"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { registerDeadline, unregisterDeadline } from "../lib/delegation-budget.js"
 import type { PreflightDeclaredDependencies } from "../lib/preflight-declared.js"
 import { appendHumanDecisions, readState } from "../lib/progress-state.js"
 import {
@@ -571,6 +572,10 @@ describe("checkpoint tool (FR-001)", () => {
 
   afterEach(() => {
     rmSync(tmpDir, { recursive: true, force: true })
+    // The delegation-budget registry is module-global; the derivation
+    // tests register a budget for the fixed invokeTool session id, so
+    // it must be cleared to keep it from leaking into later tests.
+    unregisterDeadline("test-session")
   })
 
   it("creates new state on first call", async () => {
@@ -755,16 +760,26 @@ describe("checkpoint tool (FR-001)", () => {
     }
   })
 
-  it("records remaining_ms on the phase payload and round-trips it through get_progress (PTB-FR-004)", async () => {
-    const cp = createCheckpointTool(branchExec, tmpDir)
+  it("derives remaining_ms from the delegation-budget registry and round-trips it through get_progress (PTB-FR-004)", async () => {
+    // DE-001: the remaining budget is tool-derived. The registry entry
+    // for the invoking session resolves the deadline (a depth-0 hit
+    // never touches the client) and the fixed clock pins the derived
+    // value. The agent-supplied remaining_ms below must never reach the
+    // record — the schema strips it, and only the derived value
+    // persists.
+    registerDeadline("test-session", 1_440_000)
+    const cp = createCheckpointTool(branchExec, tmpDir, {
+      client: {} as unknown as PluginInput["client"],
+      now: () => 1_000_000,
+    })
     const recorded = await invokeTool<PhaseCheckpointResponse>(cp, {
       command: "uf.unleash",
       step: "implement-phase-3",
-      phase: { number: 3, verdict: "green", inventory: [], remaining_ms: 440_000 },
+      phase: { number: 3, verdict: "green", inventory: [], remaining_ms: 1 },
     })
     expect(recorded.status).toBe("ok")
     if (recorded.status === "ok") {
-      // DE-003: the line is tool-rendered with the exact remaining_ms.
+      // DE-003: the line is tool-rendered with the exact derived value.
       expect(recorded.data?.phase_checkpoint_line).toBe(
         "Phase 3 checkpoint: green (remaining budget: ~440000ms)",
       )
@@ -782,13 +797,20 @@ describe("checkpoint tool (FR-001)", () => {
     }
   })
 
-  it("drops remaining_ms when the phase record is re-recorded without it", async () => {
-    const cp = createCheckpointTool(branchExec, tmpDir)
+  it("drops remaining_ms when the phase record is re-recorded after the budget is unregistered", async () => {
+    registerDeadline("test-session", 1_440_000)
+    const cp = createCheckpointTool(branchExec, tmpDir, {
+      client: {} as unknown as PluginInput["client"],
+      now: () => 1_000_000,
+    })
     await invokeTool(cp, {
       command: "uf.unleash",
       step: "implement-phase-3",
-      phase: { number: 3, verdict: "green", inventory: [], remaining_ms: 440_000 },
+      phase: { number: 3, verdict: "green", inventory: [] },
     })
+    // Unbudgeted re-record: no registry entry resolves for the session,
+    // so the derived field is absent and the clause drops.
+    unregisterDeadline("test-session")
     const result = await invokeTool<PhaseCheckpointResponse>(cp, {
       command: "uf.unleash",
       step: "implement-phase-3",
@@ -798,23 +820,32 @@ describe("checkpoint tool (FR-001)", () => {
     if (result.status === "ok") {
       const s = result.data as PhaseCheckpointResponse
       expect(s.phases?.["3"]?.remaining_ms).toBeUndefined()
-      // Re-recording without remaining_ms drops the budget clause.
+      // Re-recording without a derived remaining budget drops the clause.
       expect(s.phase_checkpoint_line).toBe("Phase 3 checkpoint: green")
     }
   })
 
-  it("rejects a non-positive remaining_ms on the phase payload", async () => {
-    const result = await invokeTool<ProgressState>(
-      createCheckpointTool(branchExec, tmpDir),
+  it("omits the budget clause when the derived remaining budget is zero (PTB-FR-004)", async () => {
+    // The deadline sits exactly at the fixed clock, so the derived
+    // value floors to zero — persisted as absent, never as a zero, so
+    // the persisted schema stays positive-only.
+    registerDeadline("test-session", 1_000_000)
+    const result = await invokeTool<PhaseCheckpointResponse>(
+      createCheckpointTool(branchExec, tmpDir, {
+        client: {} as unknown as PluginInput["client"],
+        now: () => 1_000_000,
+      }),
       {
         command: "uf.unleash",
         step: "implement-phase-3",
-        phase: { number: 3, verdict: "green", inventory: [], remaining_ms: 0 },
+        phase: { number: 3, verdict: "green", inventory: [] },
       },
     )
-    expect(result.status).toBe("error")
-    if (result.status === "error") {
-      expect(result.code).toBe("INVALID_INPUT")
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      const s = result.data as PhaseCheckpointResponse
+      expect(s.phases?.["3"]?.remaining_ms).toBeUndefined()
+      expect(s.phase_checkpoint_line).toBe("Phase 3 checkpoint: green")
     }
   })
 

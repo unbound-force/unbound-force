@@ -19,9 +19,11 @@ import {
   type InvocationUsage,
   type ModelIdentity,
   type PerTaskResumeCapture,
+  type PerTaskRetryRecord,
   type TimeoutDetails,
 } from "../../lib/agent-executor.js"
 import { classifyBranch } from "../../lib/branch-classification.js"
+import { resolveInheritedDeadline } from "../../lib/delegation-budget.js"
 import {
   ClassifierCascade,
   createClassifierCache,
@@ -315,10 +317,6 @@ const PhaseCheckpointArgSchema = z.object({
     )
     .max(200)
     .default([]),
-  // PTB-FR-004 (per-task-delegation-budgets): the budgeted ancestor's
-  // remaining budget at checkpoint time, taken from the delegation
-  // envelope. Omitted when the phase ran unbudgeted.
-  remaining_ms: z.number().int().positive().optional(),
 })
 
 /** Validated phase fields the checkpoint line is rendered from. */
@@ -694,7 +692,20 @@ function escalatedAdvisoryHoldMessage(
 }
 
 /** Factory for the checkpoint tool (FR-001). */
-export function createCheckpointTool(exec: GitExec, cwd: string) {
+export function createCheckpointTool(
+  exec: GitExec,
+  cwd: string,
+  deps: {
+    /**
+     * Plugin client for the delegation-budget ancestry walk (PTB-FR-004,
+     * DE-001). Absent in tests that exercise only unbudgeted checkpoints;
+     * production always passes input.client.
+     */
+    readonly client?: PluginInput["client"]
+    /** Clock override for deterministic remaining-budget tests. */
+    readonly now?: () => number
+  } = {},
+) {
   return tool({
     description:
       "Record a completed workflow step to persistent storage. " +
@@ -739,11 +750,12 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
         .describe(
           "Optional phase-scoped record; requires step implement-phase-<number>. " +
             "verdict is the phase pre-flight outcome; inventory lists classified " +
-            "failures (pre-existing, environmental, or change-caused); remaining_ms " +
-            "optionally records the budgeted ancestor's remaining budget at " +
-            "checkpoint time (PTB-FR-004). With phase recorded, the result data " +
+            "failures (pre-existing, environmental, or change-caused). The tool " +
+            "derives the budgeted ancestor's remaining budget (remaining_ms) from " +
+            "the delegation-budget registry at record time (PTB-FR-004, DE-001) — " +
+            "it is never agent-supplied. With phase recorded, the result data " +
             "carries the tool-rendered phase_checkpoint_line (budget clause only " +
-            "when remaining_ms was recorded)",
+            "when the tool derived a positive remaining budget)",
         ),
       spec_review_decisions: z
         .array(
@@ -783,20 +795,22 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
             "place of a reference.",
         ),
     },
-    execute: async (args: {
-      command: string
-      step: string
-      data?: string
-      key?: string
-      phase?: {
-        number: number
-        verdict: "green" | "failed"
-        inventory?: PhaseFailureEntry[]
-        remaining_ms?: number
-      }
-      spec_review_decisions?: SpecReviewDecision[]
-      human_decision_ref?: string
-    }) => {
+    execute: async (
+      args: {
+        command: string
+        step: string
+        data?: string
+        key?: string
+        phase?: {
+          number: number
+          verdict: "green" | "failed"
+          inventory?: PhaseFailureEntry[]
+        }
+        spec_review_decisions?: SpecReviewDecision[]
+        human_decision_ref?: string
+      },
+      context: { sessionID: string; abort?: AbortSignal },
+    ) => {
       try {
         // SYNTH-006 input domain (task 4.1): step names are bounded at
         // CHECKPOINT_STEP_NAME_MAX_LENGTH, and the bound is enforced before
@@ -831,6 +845,32 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
           return { output: parsedPhase.failureOutput }
         }
         const phaseRecord = parsedPhase.value.phase
+
+        // PTB-FR-004 (DE-001): the remaining budget is derived inside the
+        // tool from the delegation-budget registry — never an agent-
+        // supplied selection. A phase record under a budgeted ancestor
+        // carries remaining_ms = max(0, deadline - now); a lookup failure
+        // fails open (no field, no budget clause), and a derived 0 is
+        // omitted so the persisted schema stays positive-only.
+        let phaseWithBudget = phaseRecord
+        if (phaseRecord !== undefined && deps.client !== undefined && context.sessionID !== undefined) {
+          try {
+            const deadlineMs = await resolveInheritedDeadline(
+              deps.client,
+              context.sessionID,
+              cwd,
+              context.abort ?? new AbortController().signal,
+            )
+            if (deadlineMs !== null) {
+              const remaining = Math.max(0, deadlineMs - (deps.now?.() ?? Date.now()))
+              if (remaining > 0) {
+                phaseWithBudget = { ...phaseRecord, remaining_ms: remaining }
+              }
+            }
+          } catch {
+            // Fail open: a budget-lookup failure records no budget field.
+          }
+        }
 
         // SYNTH-003 (synthetic-compaction-continue-prompt-rec, task 4.1):
         // the command-keyed declared-step predicate — the authoritative gate
@@ -1094,7 +1134,7 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
           args.command,
           args.step,
           dataToMerge,
-          phaseRecord,
+          phaseWithBudget,
         )
         // PTB-FR-004 (DE-003): a phase-recorded checkpoint also returns the
         // tool-rendered line so the command emits it verbatim; the
@@ -1102,10 +1142,10 @@ export function createCheckpointTool(exec: GitExec, cwd: string) {
         return {
           output: JSON.stringify(
             success(
-              phaseRecord !== undefined
+              phaseWithBudget !== undefined
                 ? {
                     ...state,
-                    phase_checkpoint_line: renderPhaseCheckpointLine(phaseRecord),
+                    phase_checkpoint_line: renderPhaseCheckpointLine(phaseWithBudget),
                   }
                 : state,
             ),
@@ -3710,6 +3750,15 @@ export interface DelegateCommandData {
    * (PTB-FR-004); null when the delegation ran unbudgeted.
    */
   remaining_ms: number | null
+  /**
+   * Executor-owned bounded-retry provenance (PTB-FR-003, DE-005): set
+   * when the per-task executor re-issued a retryable timeout termination
+   * once with the resume context tool-rendered into the retry prompt —
+   * the success envelope only ever carries it after a retry that
+   * finished the task. Null for first-attempt successes, failures that
+   * never retried, and non-per-task delegations.
+   */
+  retry: PerTaskRetryRecord | null
   /** Child session usage, when the executor reported step-finish parts. */
   usage: InvocationUsage | null
   /** Request, host-resolution, and child-report provenance. */
@@ -5303,6 +5352,10 @@ export function createDelegateCommandTool(
               // the remaining budget, machine-parseably on failure too.
               ...(result.timeout_provenance !== undefined ? { timeout_provenance: result.timeout_provenance } : {}),
               ...(result.remaining_ms !== undefined ? { remaining_ms: result.remaining_ms } : {}),
+              // PTB-FR-003 (DE-005): executor-owned bounded-retry
+              // provenance — a failure carrying it already consumed the
+              // single retry, so it is final for that termination kind.
+              ...(result.retry !== undefined ? { retry: result.retry } : {}),
             }),
           }
         }
@@ -5453,6 +5506,10 @@ export function createDelegateCommandTool(
           // machine-parseably like the rest of the delegation audit.
           timeout_provenance: result.timeout_provenance ?? null,
           remaining_ms: result.remaining_ms ?? null,
+          // PTB-FR-003 (DE-005): retry provenance rides success only
+          // when a retry actually finished the task; first-attempt
+          // successes stay null.
+          retry: result.retry ?? null,
           usage: result.usage,
           provenance: result.provenance,
           text: result.text,
@@ -8253,7 +8310,7 @@ const UfWorkflowPlugin = {
     return {
       tool: {
         resolve_base_ref: createResolveBaseRefTool(defaultGitExec, cwd),
-        checkpoint: createCheckpointTool(defaultGitExec, cwd),
+        checkpoint: createCheckpointTool(defaultGitExec, cwd, { client: input.client }),
         get_progress: createGetProgressTool(defaultGitExec, cwd),
         clear_progress: createClearProgressTool(defaultGitExec, cwd),
         record_human_decision: createRecordHumanDecisionTool(defaultGitExec, cwd),

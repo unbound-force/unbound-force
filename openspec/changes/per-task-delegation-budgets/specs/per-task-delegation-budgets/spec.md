@@ -149,7 +149,7 @@ callers without a budgeted ancestor behave as before.
   4-hour parent budget
 - **WHEN** the executor resolves the inherited deadline
 - **THEN** the failure is `budget_exhausted`
-- **AND** the command prose MUST NOT retry it
+- **AND** it is never retried and carries no `retry` provenance
 
 ### Requirement: Lightweight Resume Hint for Prompt-Only Delegations
 
@@ -170,11 +170,18 @@ MUST include an optional advisory `resume` object alongside the existing
 
 When state is unreadable, the executor MUST return `resume: null` rather than
 synthesizing content (fail-closed, per D4 from #950). The hint is advisory: it
-does not perform a semantic merge; the retry caller decides how to re-anchor.
+does not perform a semantic merge; the retry prompt re-anchors from it without
+merging edits.
 
-Command prose (`/uf.unleash`) MUST NOT issue a retry from a blank context
-when `child_active: true` at timeout or when a resume hint is present. It
-MUST relay `files_modified` and `tasks_completed` into the retry prompt.
+The bounded retry is executor-owned (DE-005): the per-task delegation executor
+MUST re-issue a retryable timeout termination exactly once, with the resume
+context — `files_modified` and `tasks_completed`, or the `tasks.md` checkbox
+state when the hint is null — tool-rendered into the retry prompt, so the
+retry never starts from a blank context. The result MUST carry `retry`
+provenance (`first_attempt_kind`, `resume_relayed`); a failure carrying it
+already consumed the bound. Non-retryable terminations (`budget_exhausted`)
+are never retried, and command prose (`/uf.unleash`) MUST NOT re-issue the
+returned failure.
 
 Prompt-only delegations without `checkpoint_step`/`phase` are unaffected;
 other callers ignore the optional field.
@@ -209,9 +216,11 @@ other callers ignore the optional field.
 
 - **GIVEN** a per-task timeout whose result carries `child_active: true` or a
   non-null `resume` hint
-- **WHEN** `/uf.unleash` handles the failure
+- **WHEN** the per-task delegation executor handles the failure
 - **THEN** it MUST NOT retry the task from a blank prompt without the hint
 - **AND** the retry prompt includes the hint's files and tasks
+- **AND** the result carries `retry` provenance naming the first attempt's
+  timeout kind
 
 ### Requirement: Outer-Budget Visibility at Phase Checkpoints
 
@@ -225,8 +234,12 @@ deadline) and the human line MUST include a `remaining budget: ~Xms` clause.
 No new checkpoint type or state file is introduced; when no budgeted ancestor
 exists (top-level invocation or unbudgeted parent), no budget line is emitted.
 
-The remaining-budget value MUST be derived from `resolveInheritedDeadline` on
-the current session; probes do not affect it. Wall-clock and hierarchical
+The remaining-budget value MUST be tool-derived (DE-001): the `checkpoint`
+tool resolves the budgeted ancestor from the delegation-budget registry on
+the current session (`resolveInheritedDeadline`) and derives `remaining_ms`
+itself at record time; the agent MUST NOT supply it as a checkpoint
+parameter. The value is omitted when it derives to zero or the lookup
+fails open; probes do not affect it. Wall-clock and hierarchical
 clamping remain authoritative — the budget line is informational for the
 orchestrator to plan a resume boundary before being cut off mid-phase.
 
@@ -236,6 +249,8 @@ orchestrator to plan a resume boundary before being cut off mid-phase.
   a per-task child that just completed a phase-1 checkpoint
 - **WHEN** the implementation phase emits the checkpoint
 - **THEN** the checkpoint `phase` payload includes `remaining_ms`
+- **AND** the value was derived by the checkpoint tool at record time, not
+  supplied by the agent
 - **AND** the human-readable line includes remaining budget
 
 #### Scenario: Unbudgeted invocation omits budget line

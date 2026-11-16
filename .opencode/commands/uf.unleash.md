@@ -1249,9 +1249,9 @@ per-task executor wrapper. Omit `timeout` and
   and `budget_exhausted` (non-retryable) fails fast when
   the parent budget is spent (PTB-FR-002). Wall-clock
   stays the absolute backstop, each result reports the
-  remaining parent budget (`remaining_ms`) for the phase
-  checkpoint below, and unbudgeted top-level invocations
-  keep the existing delegation defaults.
+  remaining parent budget (`remaining_ms`), and unbudgeted
+  top-level invocations keep the existing delegation
+  defaults.
 
 1. Separate the phase's tasks into two groups from the
    parse result:
@@ -1286,22 +1286,13 @@ per-task executor wrapper. Omit `timeout` and
    ```
 
    The tool auto-checkpoints `implement` with the phase
-   data on success. On failure, branch on the envelope:
-   when it carries `timeout` and `error.retryable` is
-   true, re-issue the same call once with the resume
-   context appended to the prompt -- relay
-   `timeout.resume.files_modified` (files the timed-out
-   attempt touched) and `timeout.resume.tasks_completed`
-   (task ids it marked complete), telling the child to
-   verify and continue from that state instead of
-   re-deriving it (PTB-FR-003). The retry MUST NOT start
-   from a blank prompt when `timeout.child_active` is
-   true or `resume` is non-null; when `resume` is null
-   (unreadable state), anchor the retry on the tasks.md
-   checkbox state. A second timeout on the same task,
-   `error.retryable: false` (e.g. `budget_exhausted`),
-   or any non-timeout failure: emit the envelope's error
-   and **STOP**.
+   data on success. On failure, emit the envelope's error
+   and **STOP** -- the per-task executor already re-issued
+   a retryable timeout termination once, with the resume
+   context tool-rendered into the retry prompt (PTB-FR-003;
+   `retry` provenance on the envelope), so the returned
+   failure is final. `error.retryable: false` failures
+   (e.g. `budget_exhausted`) were never retried (MP-024).
 
    After each successful delegation, mark the task
    complete immediately -- the checkbox is the
@@ -1495,20 +1486,13 @@ per-task executor wrapper. Omit `timeout` and
      checkpoint
        command: "uf.unleash"
        step: "implement-phase-[N]"
-       phase:
-         number: [N]
-         verdict: "green" | "failed"
-         remaining_ms: [remaining parent budget in ms, from
-           the most recent per-task delegation envelope of
-           THIS phase's own delegations -- omit when this
-           phase's delegations produced no envelope
-           carrying it (worktree-spawned tasks, already
-           complete on entry, or unbudgeted); never reach
-           back to an earlier phase's envelope]
-         inventory:
-           - name: [failing check]
-             classification: pre-existing | environmental
-                            | change-caused
+      phase:
+        number: [N]
+        verdict: "green" | "failed"
+        inventory:
+          - name: [failing check]
+            classification: pre-existing | environmental
+                           | change-caused
        data:
          fixLoopPhase[N]: [fix-loop iterations used so far, 0
                            if the loop never ran]
@@ -1517,27 +1501,33 @@ per-task executor wrapper. Omit `timeout` and
      `verdict` is `"green"` when every check passed or
      every failure was classified `pre-existing` or
      `environmental` (inventory carries those entries);
-     otherwise `"failed"` (inventory carries every
-     classified failure). The iteration count rides the
-     free-form `data` parameter as the gate-distinct
-     `fixLoopPhase[N]` key -- the checkpoint tool
-     persists `number`, `verdict`, `inventory`, and the
-     optional `remaining_ms` from the structured `phase`
-     object, while `data` round-trips through
-     `get_progress` -- so record it
-     on every checkpoint, increment it after each
-     delegated fix attempt, and read it back on resume
-     so the 3-iteration budget spans sessions rather
-     than resetting per resume.
+    otherwise `"failed"` (inventory carries every
+    classified failure). The iteration count rides the
+    free-form `data` parameter as the gate-distinct
+    `fixLoopPhase[N]` key -- the remaining parent budget
+    (`remaining_ms`) is tool-derived: the checkpoint tool
+    resolves the budgeted ancestor from the
+    delegation-budget registry at record time and derives
+    the value itself (PTB-FR-004, DE-001) -- never supply
+    it from the envelope. The tool persists `number`,
+    `verdict`, `inventory`, and the derived
+    `remaining_ms` from the structured `phase`
+    object, while `data` round-trips through
+    `get_progress` -- so record it
+    on every checkpoint, increment it after each
+    delegated fix attempt, and read it back on resume
+    so the 3-iteration budget spans sessions rather
+    than resetting per resume.
 
-     The checkpoint result also carries a tool-rendered
-     `phase_checkpoint_line`, with the remaining-budget
-     clause exactly when `remaining_ms` was recorded.
-     Emit it verbatim as the phase checkpoint line --
-     never reconstruct it -- so the resume boundary is
-     plannable before the parent budget expires (the
-     value is informational; wall-clock and hierarchical
-     clamping stay authoritative) (PTB-FR-004).
+    The checkpoint result also carries a tool-rendered
+    `phase_checkpoint_line`, with the remaining-budget
+    clause exactly when the tool derived a positive
+    remaining budget. Emit it verbatim as the phase
+    checkpoint line --
+    never reconstruct it -- so the resume boundary is
+    plannable before the parent budget expires (the
+    value is informational; wall-clock and hierarchical
+    clamping stay authoritative) (PTB-FR-004).
 
    - If green: proceed to the next phase.
    - If failed: run the build/test fix loop (above)
