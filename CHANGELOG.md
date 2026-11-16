@@ -1568,6 +1568,45 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- fix-feedback-reply-followups: three reliability fixes to the
+  unattended feedback and review-dispatch flows (issue #1023,
+  epic #1060 Tier 2). gh exit code 4 is now classified one way
+  everywhere: the new shared `classifyGhFailure` module
+  (`.opencode/lib/gh-error.ts`) implements the decision table
+  (stderr text keys first — timeout, rate limit, authentication —
+  with gh's documented auth exit code 4 as the fallback
+  authentication signal), and both `classifyGhError`
+  (feedback-replies) and `ghFailureError`/`classifyError`
+  (review-dispatch) delegate to it. review-dispatch's
+  exit-4-without-matching-stderr class now reports
+  `gh_auth_failed` / not retryable instead of
+  `rate_limited` / retryable; every previously pinned exit-4
+  case (which carries rate-limit stderr) is unchanged.
+  `createIssue` no longer retries `gh issue create` after a
+  timeout — the issue may exist server-side, so a retry could
+  file it twice; the failure now names the ambiguity and
+  directs the operator to check the repository before
+  re-running, mirroring the existing unparseable-output guard.
+  The `/uf.address-feedback` Section 1.7 crash-recovery
+  instruction now says to pass the full confirmed item list
+  again, unchanged — including items whose replies were already
+  posted — instead of naming only the already-posted subset
+  (which, followed literally, recorded the reply-comments
+  checkpoint with pending replies never posted). Instruction
+  delta (DE-004): `uf.address-feedback.md` unchanged at 1431
+  lines (16,841 → 16,864 tokens; load set 23,409 → 23,432 per
+  copy; pre-existing IL-030/IL-031 budget warnings unchanged).
+  `gh-error.ts` joins the scaffolded shared-lib module set
+  (asset mirror, `isToolOwned`/`isDivisorAsset` lists,
+  `stageReviewPluginSources`), and the uf init file-count
+  window in `cmd/unbound-force/main_test.go` shifts [84-88]
+  → [86-90]: the deployed surface grew by one asset, and the
+  old window had already lagged the surface by one
+  (TestRunInit_FreshDir failed on main at 89 in environments
+  where review plugin activation materializes all four gated
+  plugins). (Spec:
+  openspec/changes/fix-feedback-reply-followups/)
+  (Fixes: #1023, Docs: #1160)
 - compaction-storm-detector-sums-compactio (#1125): the
   compaction-storm detector now scopes its counting per session
   (DELEG-FR-002) instead of summing consecutive compactions

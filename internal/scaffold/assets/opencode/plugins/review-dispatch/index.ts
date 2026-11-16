@@ -27,6 +27,7 @@ import {
   type InvokeAgentResult,
   type ModelIdentity,
 } from "../../lib/agent-executor.js"
+import { classifyGhFailure } from "../../lib/gh-error.js"
 import {
   DEFAULT_CEILING_MS,
   MAX_TIMEOUT_MS,
@@ -9747,31 +9748,36 @@ interface FetchPrReviewContextOutput {
 }
 
 /**
- * Build the Error for a failed `gh` invocation, annotated with a structured
- * `ghCode` property for classifyError.
+ * Build the Error for a failed `gh` invocation, annotated with the
+ * structured `ghCode` and `retryable` properties for classifyError.
  *
- * Detects gh-reported timeouts and GitHub API rate limits from stderr (plus
- * gh's rate-limit exit code 4); every other failure annotates `api_error`.
- * Shared by runGhCommand's non-zero-exit throw and fetch_pr_checks'
- * exit-code-tolerant classification of stdout that carries no check-status
- * data, so both paths produce identically classified errors.
+ * Classification delegates to the shared `classifyGhFailure` table
+ * (`../../lib/gh-error.ts`) so this plugin and the uf-workflow
+ * feedback tools report identical codes for identical failures
+ * (FRR-FR-001, issue #1023 MEDIUM 3). Semantics: stderr text keys
+ * (timeout, rate limit, authentication) first; gh's documented
+ * exit code 4 ("a command requires authentication") as the fallback
+ * authentication signal. Shared by runGhCommand's non-zero-exit
+ * throw and fetch_pr_checks' exit-code-tolerant classification of
+ * stdout that carries no check-status data, so both paths produce
+ * identically classified errors.
  *
  * @param stderr The gh process's stderr text.
  * @param exitCode The gh process's exit code.
- * @returns An Error whose `ghCode` property classifies the failure.
+ * @returns An Error whose `ghCode` and `retryable` properties classify the failure.
  */
-function ghFailureError(stderr: string, exitCode: number): Error & { ghCode: string } {
-  const lower = stderr.toLowerCase()
-  // Detect gh-reported timeout messages (AbortSignal timeouts reject the
-  // stream read before exit-code handling).
-  if (lower.includes("timed out") || lower.includes("timeout")) {
-    return Object.assign(new Error(`gh CLI timed out: ${stderr.trim()}`), { ghCode: "timeout" })
-  }
-  // Detect rate limiting from GitHub API.
-  if (lower.includes("rate limit") || lower.includes("api rate limit exceeded") || exitCode === 4) {
-    return Object.assign(new Error(`GitHub API rate limited: ${stderr.trim()}`), { ghCode: "rate_limited" })
-  }
-  return Object.assign(new Error(`gh CLI failed (exit ${exitCode}): ${stderr.trim()}`), { ghCode: "api_error" })
+function ghFailureError(stderr: string, exitCode: number): Error & { ghCode: string; retryable: boolean } {
+  const { code, retryable } = classifyGhFailure({ stderr, exitCode })
+  const detail = stderr.trim()
+  const message =
+    code === "timeout"
+      ? `gh CLI timed out: ${detail}`
+      : code === "rate_limited"
+        ? `GitHub API rate limited: ${detail}`
+        : code === "gh_auth_failed"
+          ? `gh CLI is not authenticated (exit ${exitCode}): ${detail}`
+          : `gh CLI failed (exit ${exitCode}): ${detail}`
+  return Object.assign(new Error(message), { ghCode: code, retryable })
 }
 
 /**
@@ -9818,11 +9824,20 @@ function classifyError(error: unknown, fallbackCode: string, fallbackMessage: st
     return { error: true, code: "timeout", message: "gh CLI call timed out", retryable: true }
   }
   if (error instanceof Error) {
-    const ghCode = (error as Error & { ghCode?: string }).ghCode
-    if (ghCode === "timeout") return { error: true, code: "timeout", message: error.message, retryable: true }
-    if (ghCode === "rate_limited")
-      return { error: true, code: "rate_limited", message: error.message, retryable: true }
-    return { error: true, code: ghCode ?? fallbackCode, message: error.message, retryable: false }
+    const annotated = error as Error & { ghCode?: string; retryable?: boolean }
+    if (annotated.ghCode !== undefined) {
+      // Retryability travels with the shared classification
+      // (ghFailureError annotates both from classifyGhFailure), so
+      // a code added to the shared table keeps its retryability
+      // here without further edits.
+      return {
+        error: true,
+        code: annotated.ghCode,
+        message: error.message,
+        retryable: annotated.retryable ?? false,
+      }
+    }
+    return { error: true, code: fallbackCode, message: error.message, retryable: false }
   }
   return { error: true, code: fallbackCode, message: fallbackMessage, retryable: false }
 }

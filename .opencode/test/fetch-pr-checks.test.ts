@@ -469,6 +469,26 @@ describe("fetch_pr_checks", () => {
         restore()
       }
     })
+
+    it("classifies exit 4 with no matching stderr as gh_auth_failed, not rate_limited (FRR-FR-001)", async () => {
+      // gh documents exit code 4 as "if a command requires
+      // authentication" (gh help exit-codes), not as a rate-limit
+      // code. The stderr below deliberately matches no text key and
+      // no fetch-pr-checks pattern, so the exit code is the only
+      // signal — before the shared classifier this input reported
+      // rate_limited/retryable (issue #1023 MEDIUM 3).
+      const { parsed, restore } = await callTool({
+        "pr checks": { stdout: "", stderr: "HTTP 422: Validation Failed", exitCode: 4 },
+      })
+      try {
+        expect(parsed.error).toBe(true)
+        expect(parsed.code).toBe("gh_auth_failed")
+        expect(parsed.retryable).toBe(false)
+        expect(parsed.message as string).toContain("gh CLI is not authenticated")
+      } finally {
+        restore()
+      }
+    })
   })
 
   describe("input validation", () => {
