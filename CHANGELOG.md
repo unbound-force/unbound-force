@@ -6,6 +6,13 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- review-matrix-policy-mirror: `.uf/review-matrix.yaml` is now a
+  project-owned policy mirror alongside `.uf/preflight.yaml` and
+  `.uf/reviewer-capabilities.yaml`. The repository copy may diverge
+  from the embedded scaffold asset so external tools can integrate
+  with the review matrix; `TestReviewMatrixSchema_RepositoryPolicyValidates`
+  (internal/schemas/ci_test.go) pins the repository copy to v3 schema
+  validity in place of byte identity.
 - per-task-delegation-budgets: `/uf.unleash` per-task
   implementation delegations (`uf_delegate_command` prompt-only,
   `checkpoint_step: "implement"`, `phase`) now derive their wall

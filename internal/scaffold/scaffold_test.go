@@ -124,13 +124,16 @@ func expectedEmbedded(relPath string, source []byte) []byte {
 // earned only by actual divergence and must carry a replacement check
 // that pins the repository copy to the canonical content:
 // uf/reviewer-capabilities.yaml (repo-local divisor-linguist) is covered
-// by TestReviewerCapabilities_RepositoryManifestExtendsCanonical, and
+// by TestReviewerCapabilities_RepositoryManifestExtendsCanonical,
 // uf/preflight.yaml (instruction-lint check) by
-// TestPreflightYaml_RepositoryManifestExtendsCanonical. Any mirror not
-// listed here — including uf/review-matrix.yaml, which has not diverged
-// — stays under byte-identity enforcement below.
+// TestPreflightYaml_RepositoryManifestExtendsCanonical, and
+// uf/review-matrix.yaml (external tool integrations may extend the
+// repository policy) by TestReviewMatrixSchema_RepositoryPolicyValidates,
+// which pins the repository copy to v3 schema validity. Any mirror not
+// listed here stays under byte-identity enforcement below.
 var projectOwnedPolicyMirrors = map[string]bool{
 	"uf/preflight.yaml":             true,
+	"uf/review-matrix.yaml":         true,
 	"uf/reviewer-capabilities.yaml": true,
 }
 
