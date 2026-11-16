@@ -5286,6 +5286,10 @@ var knownNonEmbeddedFiles = map[string]bool{
 	".specify/scripts/bash/update-agent-context.sh": true,
 	// OpenSpec config — created by openspec init
 	"openspec/config.yaml": true,
+	// Gaze 2.4.0 testing persona — repo-local via the gaze
+	// re-scaffold; the embedded canonical testing persona is
+	// divisor-testing.md
+	".opencode/agents/divisor-gaze-testing.md": true,
 	// Agents — local-only tooling, not scaffolded by uf init
 	".opencode/agents/gaze-reporter.md":       true,
 	".opencode/agents/gaze-test-generator.md": true,
