@@ -130,14 +130,37 @@ export type TimeoutKind = "wall_clock" | "idle" | "budget" | "storm"
  * started, assembled by diffing already-observable state — the
  * worktree diff or session file tracking and the tasks.md checkbox
  * state — never by semantic analysis, and never carrying message
- * content (Constitution V). The hint is advisory: the retry caller
- * decides how to re-anchor; no semantic merge is attempted.
+ * content (Constitution V). The hint is advisory input to the
+ * executor-owned bounded retry (DE-005): the retry prompt relays it
+ * verbatim; no semantic merge is attempted.
  */
 export interface PerTaskResumeHint {
   /** Repository-relative paths modified since the delegation started. */
   readonly files_modified: readonly string[]
   /** Task identifiers marked complete since the delegation started. */
   readonly tasks_completed: readonly string[]
+}
+
+/**
+ * Executor-owned bounded-retry provenance
+ * (per-task-delegation-budgets PTB-FR-003, DE-005): present when the
+ * per-task executor re-issued a retryable timeout termination instead
+ * of returning it to the caller. The record proves the single bound
+ * retry happened and whether its prompt carried concrete relayed
+ * resume state, so a retried failure returned to the caller is final
+ * for that termination kind. Absent when no retry ran and for every
+ * non-per-task caller.
+ */
+export interface PerTaskRetryRecord {
+  /** Timeout kind that ended the first attempt. */
+  readonly first_attempt_kind: TimeoutKind
+  /**
+   * True when the retry prompt carried concrete relayed state — the
+   * first attempt's resume hint, or a readable fresh capture's
+   * completed-task anchor when the hint was unreadable. False when it
+   * degraded to directing the child to the tasks.md checkboxes itself.
+   */
+  readonly resume_relayed: boolean
 }
 
 /** Limit details attached to runs that ended by a limit (timeout, storm, or exhausted budget; design D4). */
@@ -248,6 +271,16 @@ export interface InvokeAgentResult {
    * budget into its phase checkpoint. Absent for unbudgeted runs.
    */
   readonly remaining_ms?: number
+  /**
+   * Executor-owned bounded-retry provenance (PTB-FR-003, DE-005):
+   * present when the per-task executor re-issued a retryable timeout
+   * termination once with the resume context tool-rendered into the
+   * retry prompt — on success (the retry finished the task) and on the
+   * returned failure alike. A failure carrying this record already
+   * consumed the bound, so it is final for that termination kind;
+   * non-retryable terminations (e.g. budget_exhausted) never carry it.
+   */
+  readonly retry?: PerTaskRetryRecord
   /**
    * Finish reason reported by the child's final step-finish part, null
    * when unreported. Present on success results so dispatch can apply
@@ -1173,6 +1206,81 @@ function carriesResumeHint(kind: TimeoutKind): boolean {
 }
 
 /**
+ * Render the resume preamble the executor prepends to the one bounded
+ * retry's prompt (PTB-FR-003, DE-005): the retry opens by relaying the
+ * first attempt's observable progress so the child verifies and
+ * continues from durable state instead of re-deriving it — the retry
+ * never starts from a blank context by construction.
+ *
+ * A readable hint relays its files and tasks verbatim. A null
+ * (unreadable) hint falls back to a fresh capture for the
+ * completed-task anchor, and finally to directing the child to the
+ * tasks.md checkbox state itself. The preamble is mechanical prose
+ * assembled from already-observable state, never semantic analysis
+ * (Constitution V).
+ *
+ * @param kind Timeout kind that ended the first attempt.
+ * @param phase 1-based tasks.md phase number of the delegated task.
+ * @param hint The first attempt's resume hint, or null when unreadable.
+ * @param capture The resume-capture seams, when the caller supplied them.
+ * @returns The preamble text, and whether it carried concrete relayed
+ *   state (vs. the checkbox self-read fallback).
+ */
+async function renderResumePreamble(
+  kind: TimeoutKind,
+  phase: number,
+  hint: PerTaskResumeHint | null,
+  capture: PerTaskResumeCapture | undefined,
+): Promise<{ preamble: string; relayed: boolean }> {
+  // Mechanical article for the kind interpolation (only "idle" takes
+  // "an"); the preamble stays fully deterministic.
+  const article = kind === "idle" ? "an" : "a"
+  if (hint !== null) {
+    const files = hint.files_modified.length > 0 ? hint.files_modified.join(", ") : "none"
+    const tasks = hint.tasks_completed.length > 0 ? hint.tasks_completed.join(", ") : "none"
+    return {
+      preamble:
+        `This is the single retry of a per-task delegation that ended in ${article} ${kind} timeout; ` +
+        "the attempt budget is spent, so continue efficiently.\n\n" +
+        `The timed-out attempt already made this durable progress:\n` +
+        `- Files modified: ${files}\n` +
+        `- Tasks completed: ${tasks}\n\n` +
+        "Verify that state against the working tree and tasks.md, continue from it, " +
+        "and do not redo completed work.\n\n",
+      relayed: true,
+    }
+  }
+  // Fail-closed fallback (D4 of #950): the hint state is unreadable, so
+  // try one fresh capture for the completed-task anchor before
+  // directing the child to the checkboxes itself.
+  if (capture !== undefined) {
+    const snapshot = await captureResumeSnapshot(capture)
+    if (snapshot !== null) {
+      const tasks = snapshot.tasks.length > 0 ? snapshot.tasks.join(", ") : "none"
+      return {
+        preamble:
+          `This is the single retry of a per-task delegation that ended in ${article} ${kind} timeout; ` +
+          "the attempt budget is spent, so continue efficiently.\n\n" +
+          `The timed-out attempt's diff against its start could not be read, but the ` +
+          `tasks.md checkbox state at retry time lists these phase tasks as complete: ${tasks}.\n\n` +
+          "Verify that state against tasks.md, treat every [x] checkbox in the phase as " +
+          "complete, continue from the first unchecked task, and do not redo completed work.\n\n",
+        relayed: true,
+      }
+    }
+  }
+  return {
+    preamble:
+      `This is the single retry of a per-task delegation that ended in ${article} ${kind} timeout; ` +
+      "the attempt budget is spent, so continue efficiently.\n\n" +
+      `The timed-out attempt's resume state could not be read. Anchor on the tasks.md ` +
+      `checkbox state instead: read tasks.md, treat every [x] checkbox in phase ${phase} as ` +
+      "complete, continue from the first unchecked task, and do not redo completed work.\n\n",
+    relayed: false,
+  }
+}
+
+/**
  * Executes one per-task /uf.unleash implementation delegation with
  * hierarchical budgeting, inherited idle semantics, derivation
  * provenance, and the advisory resume hint
@@ -1286,37 +1394,71 @@ export async function executePerTaskDelegation(
   // The shared executor owns the child lifecycle: it re-resolves the
   // same registry entry and re-clamps (its clamp is never looser),
   // registers the child's deadline — carrying the resolved idle
-  // window — and unregisters it when the run ends.
-  const result = await executeAgentSession(
-    {
-      ...deps,
-      timeoutMilliseconds: requestedMs,
-      idleTimeoutMilliseconds: idleMilliseconds,
-      checkpointStep: deps.checkpointStep ?? perTask.checkpointStep,
-      deferWallClockWhileActive: inherited !== null && idleMilliseconds !== undefined,
-    },
-    agent,
-    promptText,
-    model,
-    variant,
-    read_only,
-    provenance,
-  )
+  // window — and unregisters it when the run ends. Both the first
+  // attempt and the bounded retry run through this wiring, so they
+  // share the inherited budget and idle semantics.
+  const runAttempt = (prompt: string): Promise<InvokeAgentResult> =>
+    executeAgentSession(
+      {
+        ...deps,
+        timeoutMilliseconds: requestedMs,
+        idleTimeoutMilliseconds: idleMilliseconds,
+        checkpointStep: deps.checkpointStep ?? perTask.checkpointStep,
+        deferWallClockWhileActive: inherited !== null && idleMilliseconds !== undefined,
+      },
+      agent,
+      prompt,
+      model,
+      variant,
+      read_only,
+      provenance,
+    )
   // PTB-FR-004: every result under a budgeted ancestor carries the
   // remaining budget at result time; unbudgeted runs omit the field.
-  const withProvenance: InvokeAgentResult = {
+  // Recomputed at each attempt's result-assembly time.
+  const decorate = (result: InvokeAgentResult): InvokeAgentResult => ({
     ...result,
     timeout_provenance: timeoutProvenance,
     remaining_ms: inherited === null ? undefined : Math.max(0, inherited.deadlineMs - now()),
+  })
+  // Attach the advisory resume hint to the final result's timeout
+  // envelope (PTB-FR-003): the after-state at result-assembly time
+  // diffed against the delegation-start snapshot.
+  const finalize = async (result: InvokeAgentResult): Promise<InvokeAgentResult> => {
+    if (!resumeEligible || result.timeout === undefined || !carriesResumeHint(result.timeout.kind)) {
+      return result
+    }
+    return {
+      ...result,
+      timeout: {
+        ...result.timeout,
+        resume: capture === undefined ? null : await assembleResumeHint(capture, before),
+      },
+    }
   }
-  if (!resumeEligible || withProvenance.timeout === undefined || !carriesResumeHint(withProvenance.timeout.kind)) {
-    return withProvenance
+
+  const first = decorate(await runAttempt(promptText))
+  // Executor-owned bounded retry (DE-005, PTB-FR-003): a retryable
+  // timeout termination of a resume-eligible per-task delegation is
+  // re-issued exactly once, with the resume context tool-rendered into
+  // the retry prompt — never a blank-context re-issue, never a second
+  // retry. Non-retryable terminations (budget_exhausted), storm
+  // terminations and other kinds without a per-task resume hint, and
+  // non-timeout failures return to the caller immediately; a failure
+  // that carries the retry record already consumed the bound.
+  if (
+    !resumeEligible ||
+    first.timeout === undefined ||
+    first.error?.retryable !== true ||
+    !carriesResumeHint(first.timeout.kind)
+  ) {
+    return await finalize(first)
   }
-  return {
-    ...withProvenance,
-    timeout: {
-      ...withProvenance.timeout,
-      resume: capture === undefined ? null : await assembleResumeHint(capture, before),
-    },
-  }
+  const hint = capture === undefined ? null : await assembleResumeHint(capture, before)
+  const { preamble, relayed } = await renderResumePreamble(first.timeout.kind, perTask.phase, hint, capture)
+  const retried = decorate(await runAttempt(preamble + promptText))
+  return await finalize({
+    ...retried,
+    retry: { first_attempt_kind: first.timeout.kind, resume_relayed: relayed },
+  })
 }

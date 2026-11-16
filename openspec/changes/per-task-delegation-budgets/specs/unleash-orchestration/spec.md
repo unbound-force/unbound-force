@@ -10,10 +10,11 @@
 
 `/uf.unleash` implementation-phase per-task delegations MUST derive their
 `timeout` via PTB-FR-001 rather than the flat default, MUST enable
-idle-aware stall detection via PTB-FR-002 under a budgeted parent, MUST thread
-the advisory `resume` hint per PTB-FR-003 and must not retry from blank when
-`child_active: true` or a hint is present is, and MUST report remaining parent
-budget at each implement-phase checkpoint per PTB-FR-004. No new checkpoint
+idle-aware stall detection via PTB-FR-002 under a budgeted parent, MUST
+relay the advisory `resume` context through the executor-owned bounded
+retry per PTB-FR-003 (the retry never starts from a blank context, and
+the returned failure is final), and MUST report remaining parent budget
+at each implement-phase checkpoint per PTB-FR-004. No new checkpoint
 type is introduced; the change stays inside the existing
 `uf_delegate_command` call site and the `checkpoint` `phase` payload.
 
@@ -27,7 +28,7 @@ type is introduced; the change stays inside the existing
 
 - **GIVEN** a per-task timeout failure carrying `resume.files_modified` and
   `resume.tasks_completed`
-- **WHEN** `/uf.unleash` retries the task
+- **WHEN** the per-task delegation executor retries the task
 - **THEN** the retry prompt includes the files and tasks from the hint
 - **AND** the retry is not issued from a blank context
 

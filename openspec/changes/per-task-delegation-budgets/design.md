@@ -120,8 +120,11 @@ by diffing that state, not by semantic analysis. The hint is returned inside
 the existing `DELEGATE_FAILED` `timeout.resume` envelope (or a new optional
 `sibling` field on it) only for this call site; other prompt-only callers are
 unaffected. An unreadable state yields `resume: null` (fail-closed, as in D4 of
-#950). Command prose MUST NOT retry from blank when `child_active: true` or a
-resume hint is present — it must relay files/tasks to the retry prompt.
+#950). The bounded retry is executor-owned (DE-005): the per-task delegation
+executor re-issues a retryable timeout termination exactly once with the
+resume context — files/tasks, or the tasks.md checkbox state when the hint
+is null — tool-rendered into the retry prompt, and marks the result with
+`retry` provenance; command prose never re-issues the returned failure.
 
 Alternative rejected: full semantic merge of timed-out worktree — complex,
 error-prone, and outside Tier 1 scope; returning raw session transcripts —
@@ -136,6 +139,12 @@ rendering to include remaining parent budget when a budgeted ancestor exists
 `phase` payload and `remaining budget: ~Xm` in the human line. No new
 checkpoint type or state file is introduced. When no budgeted ancestor exists,
 no budget line is emitted (top-level behavior unchanged).
+
+The derivation is tool-owned (DE-001): the checkpoint tool resolves the
+budgeted ancestor and derives `remaining_ms` itself at record time, so
+command prose never carries a selection of the value — the agent cannot
+supply or override it. A derived zero, or a lookup that fails open, omits
+the field and the budget clause.
 
 This is the only change to `uf.unleash.md` prose beyond the per-task timeout
 derivation call site and the resume-hint relay branch. Actual prose deltas

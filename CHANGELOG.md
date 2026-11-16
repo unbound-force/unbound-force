@@ -32,12 +32,23 @@ Each entry follows the format: `- <change-name>: <summary>`.
   snapshotted at delegation start and diffed at abort time;
   `null` when the abort-time state is unreadable (fail-closed),
   paths and task ids only -- never message content (PTB-FR-003).
-  Per-task results report `remaining_ms` (remaining
+  The bounded retry is executor-owned (DE-005): the per-task
+  executor re-issues a retryable wall-clock or idle termination
+  exactly once, tool-rendering the resume context -- the relayed
+  hint, or the `tasks.md` checkbox state when the hint is null --
+  into the retry prompt, and marks the result with `retry`
+  provenance (`first_attempt_kind`, `resume_relayed`); a failure
+  carrying it consumed the bound, non-retryable terminations
+  (`budget_exhausted`) are never retried, and `/uf.unleash` stops
+  at the failure decision point instead of re-issuing. Per-task
+  results report `remaining_ms` (remaining
   budgeted-ancestor budget, omitted when unbudgeted), and the
-  `checkpoint` tool's `phase` payload accepts and round-trips it
-  so phase checkpoints record it; a phase-recorded checkpoint also
-  returns a tool-rendered `phase_checkpoint_line` (remaining-budget
-  clause exactly when `remaining_ms` was recorded) that
+  `checkpoint` tool derives it itself at record time from the
+  delegation-budget registry -- the agent never supplies it
+  (DE-001) -- so phase checkpoints record it; a phase-recorded
+  checkpoint also returns a tool-rendered `phase_checkpoint_line`
+  (remaining-budget clause exactly when the tool derived a
+  positive remaining budget) that
   `/uf.unleash` emits verbatim, never reconstructed (PTB-FR-004).
   Every per-task result
   carries machine-parseable `timeout_provenance` (derivation
@@ -46,9 +57,9 @@ Each entry follows the format: `- <change-name>: <summary>`.
   the implemented surface with all six principles PASS
   (proposal's Constitution Alignment assessment).
   Instruction-text delta: .opencode/commands/uf.unleash.md
-  +61 lines / +768 tokens (retry routing branches on the
-  envelope's error.retryable; the phase checkpoint budget
-  line is tool-rendered and emitted verbatim). The
+  +51 lines / +620 tokens (the failure decision point stops at
+  the executor-owned bounded retry; the phase checkpoint budget
+  line is tool-derived and emitted verbatim). The
   IL-030/IL-031 instruction-budget overruns pre-date this
   change (20569 self / ~32057 loaded tokens at merge-base
   9c42f8f7). (Spec:

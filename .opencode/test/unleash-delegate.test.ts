@@ -116,6 +116,12 @@ interface FakeClientOptions {
   readonly parts?: readonly unknown[]
   /** Hang session.prompt on its abort signal (timeout/cancellation paths). */
   readonly hangPrompt?: boolean
+  /**
+   * Hang only the first N session.prompt calls on their abort signal,
+   * then answer normally (executor-owned bounded-retry paths, DE-005):
+   * the first attempt times out, the retry completes.
+   */
+  readonly hangPrompts?: number
   /** Hang session.message on its abort signal (host-resolution cancellation). */
   readonly hangMessage?: boolean
   /** Expose the activity-probe endpoints with a never-changing child (idle paths). */
@@ -250,7 +256,12 @@ function fakeClient(options: FakeClientOptions = {}): { readonly client: Client;
     },
     prompt: async (request: PromptOptions): Promise<PromptResponse> => {
       calls.prompts.push(request)
-      if (options.hangPrompt === true) {
+      // hangPrompt hangs every prompt; hangPrompts hangs only the
+      // first N, so the bounded-retry tests can let the retry succeed.
+      const hangThisPrompt =
+        options.hangPrompt === true ||
+        (options.hangPrompts !== undefined && calls.prompts.length <= options.hangPrompts)
+      if (hangThisPrompt) {
         return await new Promise<PromptResponse>((_resolve, reject) => {
           request.signal?.addEventListener("abort", () => reject(request.signal?.reason), { once: true })
         })
@@ -555,6 +566,19 @@ function deliveredPrompt(calls: FakeCalls): string {
   const parts = calls.prompts[0]?.body?.parts as unknown as Array<{ type: string; text: string }>
   if (parts === undefined || parts.length !== 1 || parts[0].type !== "text") {
     throw new Error(`expected exactly one text part, got ${JSON.stringify(parts)}`)
+  }
+  return parts[0].text
+}
+
+/**
+ * The Nth delivered child prompt's text (0-based) — the bounded-retry
+ * tests read the second prompt to assert the tool-rendered resume
+ * preamble the executor prepended (DE-005).
+ */
+function deliveredPromptAt(calls: FakeCalls, index: number): string {
+  const parts = calls.prompts[index]?.body?.parts as unknown as Array<{ type: string; text: string }>
+  if (parts === undefined || parts.length !== 1 || parts[0].type !== "text") {
+    throw new Error(`expected exactly one text part at prompt ${index}, got ${JSON.stringify(parts)}`)
   }
   return parts[0].text
 }
@@ -1934,9 +1958,11 @@ describe("uf_delegate_command expected-artifact verification", () => {
         storm_threshold_warning: null,
         // PTB-FR-001/PTB-FR-004 (per-task-delegation-budgets): non-per-task
         // delegations carry no derivation provenance and no remaining
-        // budget.
+        // budget. PTB-FR-003 (DE-005): no retry record either — the
+        // bounded retry is a per-task executor behavior.
         timeout_provenance: null,
         remaining_ms: null,
+        retry: null,
         usage: { cost_usd: 0.25, tokens: { input: 11, output: 7 } },
         provenance: {
           agent: "cobalt-crush-dev",
@@ -2975,6 +3001,10 @@ describe("uf_delegate_command seam verification", () => {
           clamped: false,
         },
         remaining_ms: null,
+        // PTB-FR-003 (DE-005): a first-attempt success carries no
+        // retry record — the bounded retry is executor-owned and this
+        // run never timed out.
+        retry: null,
         usage: null,
         provenance: {
           agent: "cobalt-crush-dev",
@@ -3089,9 +3119,10 @@ describe("uf_delegate_command seam verification", () => {
         storm_threshold_warning: null,
         // PTB-FR-001/PTB-FR-004 (per-task-delegation-budgets): no
         // per-task shape, so no derivation provenance or remaining
-        // budget.
+        // budget. PTB-FR-003 (DE-005): no retry record either.
         timeout_provenance: null,
         remaining_ms: null,
+        retry: null,
         usage: null,
         provenance: {
           agent: "cobalt-crush-dev",
@@ -3874,6 +3905,11 @@ describe("uf_delegate_command per-task delegation budgets (per-task-delegation-b
         configuredCeilingMs: MAX_TIMEOUT_MILLISECONDS,
       })
       await vi.advanceTimersByTimeAsync(expected.effectiveMs - 700_000 + 10_000)
+      // The wall_clock termination is retryable and carries the
+      // per-task resume hint, so the executor re-issues it exactly once
+      // (DE-005): the retry runs under the same derived window, and its
+      // wall clock must also expire before the delegation resolves.
+      await vi.advanceTimersByTimeAsync(expected.effectiveMs + 10_000)
       const result = (await pending) as unknown as Record<string, unknown>
 
       expect(result.code).toBe("DELEGATE_FAILED")
@@ -3882,6 +3918,13 @@ describe("uf_delegate_command per-task delegation budgets (per-task-delegation-b
         requested_ms: expected.effectiveMs,
       })
       expect(result.timeout_provenance).toMatchObject({ source: "derived", phase_task_count: 6 })
+      // recordingExec answers only rev-parse, so both resume captures
+      // fail closed: the retry preamble degraded to the tasks.md
+      // checkbox anchor (resume_relayed: false) and the final
+      // envelope's hint is null.
+      expect(result.retry).toEqual({ first_attempt_kind: "wall_clock", resume_relayed: false })
+      expect((result.timeout as Record<string, unknown>).resume).toBeNull()
+      expect(fake.calls.prompts).toHaveLength(2)
     } finally {
       vi.useRealTimers()
     }
@@ -3890,14 +3933,19 @@ describe("uf_delegate_command per-task delegation budgets (per-task-delegation-b
   it("threads the resume hint into an idle-timeout per-task envelope (PTB-FR-003)", async () => {
     vi.useFakeTimers()
     try {
-      const status = sequencedStatusExec(["", "M  lib/agent-executor.ts\0"])
+      // The executor re-issues a retryable idle timeout exactly once
+      // (DE-005), so the captures run twice for the first attempt's
+      // hint — once to render the retry preamble, once to attach the
+      // final envelope's hint after the retry also stalls.
+      const status = sequencedStatusExec(["", "M  lib/agent-executor.ts\0", "M  lib/agent-executor.ts\0"])
       const fake = fakeClient({ hangPrompt: true, stalledProbe: true })
       const deps: DelegateCommandDependencies = {
         client: fake.client,
         modelMatrix: matrixFreeDeps,
-        // Three tasks.md reads in order: the derivation read, the
-        // delegation-start snapshot, and the abort-time snapshot.
-        readText: sequencedTasksReadText(tasksAbs, [tasksBefore, tasksBefore, tasksAfter]),
+        // Five tasks.md reads in order: the derivation read, the
+        // delegation-start snapshot, the retry-branch hint read, and
+        // the retry's abort-time snapshot.
+        readText: sequencedTasksReadText(tasksAbs, [tasksBefore, tasksBefore, tasksAfter, tasksAfter]),
         fileExists: fakeFileExists([]).fileExists,
       }
       const pending = invokeDelegate(status.exec, deps, {
@@ -3908,7 +3956,10 @@ describe("uf_delegate_command per-task delegation budgets (per-task-delegation-b
         feature_dir: featureDir,
       })
       // Four phase tasks derive a ~780_000 ms wall clock, so the 600_000
-      // idle window fires first on the stalled child.
+      // idle window fires first on the stalled child — and again on the
+      // retry, whose own idle window starts when the retry is issued at
+      // fake-time 600_000.
+      await vi.advanceTimersByTimeAsync(700_000)
       await vi.advanceTimersByTimeAsync(700_000)
       const result = (await pending) as unknown as Record<string, unknown>
 
@@ -3920,6 +3971,22 @@ describe("uf_delegate_command per-task delegation budgets (per-task-delegation-b
         tasks_completed: ["1.1"],
       })
       expect(result.timeout_provenance).toMatchObject({ source: "derived", phase_task_count: 4 })
+      // Exactly one retry was issued (two prompts total), and its
+      // prompt carried the tool-rendered resume preamble ahead of the
+      // original prompt — the retry never starts from a blank context.
+      expect(fake.calls.prompts).toHaveLength(2)
+      const preamble =
+        "This is the single retry of a per-task delegation that ended in an idle timeout; " +
+        "the attempt budget is spent, so continue efficiently.\n\n" +
+        "The timed-out attempt already made this durable progress:\n" +
+        "- Files modified: lib/agent-executor.ts\n" +
+        "- Tasks completed: 1.1\n\n" +
+        "Verify that state against the working tree and tasks.md, continue from it, " +
+        "and do not redo completed work.\n\n"
+      expect(deliveredPromptAt(fake.calls, 1)).toBe(preamble + deliveredPromptAt(fake.calls, 0))
+      // The returned failure carries the retry record, so it is final:
+      // the single bound retry was already consumed.
+      expect(result.retry).toEqual({ first_attempt_kind: "idle", resume_relayed: true })
     } finally {
       vi.useRealTimers()
     }
@@ -3928,12 +3995,15 @@ describe("uf_delegate_command per-task delegation budgets (per-task-delegation-b
   it("returns an empty resume hint when the timed-out child made no durable progress", async () => {
     vi.useFakeTimers()
     try {
-      const status = sequencedStatusExec(["", ""])
+      // Both attempts and both hint reads see a clean tree, so the
+      // retry preamble relays an explicit "none" and the final
+      // envelope's hint stays empty rather than null.
+      const status = sequencedStatusExec(["", "", ""])
       const fake = fakeClient({ hangPrompt: true, stalledProbe: true })
       const deps: DelegateCommandDependencies = {
         client: fake.client,
         modelMatrix: matrixFreeDeps,
-        readText: sequencedTasksReadText(tasksAbs, [tasksBefore, tasksBefore, tasksBefore]),
+        readText: sequencedTasksReadText(tasksAbs, [tasksBefore, tasksBefore, tasksBefore, tasksBefore]),
         fileExists: fakeFileExists([]).fileExists,
       }
       const pending = invokeDelegate(status.exec, deps, {
@@ -3944,6 +4014,7 @@ describe("uf_delegate_command per-task delegation budgets (per-task-delegation-b
         feature_dir: featureDir,
       })
       await vi.advanceTimersByTimeAsync(700_000)
+      await vi.advanceTimersByTimeAsync(700_000)
       const result = (await pending) as unknown as Record<string, unknown>
 
       expect(result.code).toBe("DELEGATE_FAILED")
@@ -3951,6 +4022,10 @@ describe("uf_delegate_command per-task delegation budgets (per-task-delegation-b
         files_modified: [],
         tasks_completed: [],
       })
+      // The no-progress hint is still relayed — "none" is concrete
+      // state, not an unreadable one — so the retry ran once.
+      expect(fake.calls.prompts).toHaveLength(2)
+      expect(result.retry).toEqual({ first_attempt_kind: "idle", resume_relayed: true })
     } finally {
       vi.useRealTimers()
     }
@@ -3964,8 +4039,10 @@ describe("uf_delegate_command per-task delegation budgets (per-task-delegation-b
       const deps: DelegateCommandDependencies = {
         client: fake.client,
         modelMatrix: matrixFreeDeps,
-        // Only two bodies: the abort-time read throws, so the hint fails
-        // closed to null without masking the timeout it annotates.
+        // Only two bodies: every post-start tasks.md read throws — the
+        // retry-branch hint read, the fallback fresh capture, and the
+        // final envelope's hint — so each fails closed to null without
+        // masking the timeout it annotates.
         readText: sequencedTasksReadText(tasksAbs, [tasksBefore, tasksBefore]),
         fileExists: fakeFileExists([]).fileExists,
       }
@@ -3977,10 +4054,24 @@ describe("uf_delegate_command per-task delegation budgets (per-task-delegation-b
         feature_dir: featureDir,
       })
       await vi.advanceTimersByTimeAsync(700_000)
+      await vi.advanceTimersByTimeAsync(700_000)
       const result = (await pending) as unknown as Record<string, unknown>
 
       expect(result.code).toBe("DELEGATE_FAILED")
       expect((result.timeout as Record<string, unknown>).resume).toBeNull()
+      // The unreadable hint still produced exactly one retry, anchored
+      // on the tasks.md checkbox state itself: the fallback preamble
+      // directs the child to treat every [x] checkbox in the phase as
+      // complete and continue from the first unchecked task.
+      expect(fake.calls.prompts).toHaveLength(2)
+      const preamble =
+        "This is the single retry of a per-task delegation that ended in an idle timeout; " +
+        "the attempt budget is spent, so continue efficiently.\n\n" +
+        "The timed-out attempt's resume state could not be read. Anchor on the tasks.md " +
+        "checkbox state instead: read tasks.md, treat every [x] checkbox in phase 1 as " +
+        "complete, continue from the first unchecked task, and do not redo completed work.\n\n"
+      expect(deliveredPromptAt(fake.calls, 1)).toBe(preamble + deliveredPromptAt(fake.calls, 0))
+      expect(result.retry).toEqual({ first_attempt_kind: "idle", resume_relayed: false })
     } finally {
       vi.useRealTimers()
     }
@@ -4022,6 +4113,9 @@ describe("uf_delegate_command per-task delegation budgets (per-task-delegation-b
         tasks_completed: [],
       })
       expect(fake.calls.creates).toHaveLength(0)
+      // budget_exhausted is non-retryable, so the executor never
+      // consumed (or carried) a retry record for it.
+      expect(result.retry).toBeUndefined()
     } finally {
       vi.useRealTimers()
     }
@@ -4045,7 +4139,60 @@ describe("uf_delegate_command per-task delegation budgets (per-task-delegation-b
         expect(result.data.timeout_provenance).toMatchObject({ source: "derived", phase_task_count: 4 })
         // The frozen clock pins the report to the registered deadline.
         expect(result.data.remaining_ms).toBe(500_000)
+        // A first-attempt success never carries retry provenance.
+        expect(result.data.retry).toBeNull()
       }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("re-issues a retryable per-task timeout once and the retry completes the task (PTB-FR-003)", async () => {
+    vi.useFakeTimers()
+    try {
+      // Only the first prompt hangs; the retry answers normally, so
+      // the delegation succeeds on the bounded second attempt.
+      const status = sequencedStatusExec(["", "M  lib/agent-executor.ts\0"])
+      const fake = fakeClient({ hangPrompts: 1, stalledProbe: true })
+      const deps: DelegateCommandDependencies = {
+        client: fake.client,
+        modelMatrix: matrixFreeDeps,
+        // Three tasks.md reads: derivation, delegation-start snapshot,
+        // and the retry-branch hint read. The successful retry attaches
+        // no final hint, so no fourth read happens.
+        readText: sequencedTasksReadText(tasksAbs, [tasksBefore, tasksBefore, tasksAfter]),
+        fileExists: fakeFileExists([]).fileExists,
+      }
+      const pending = invokeDelegate(status.exec, deps, {
+        prompt: "Implement task 1.1.",
+        task_classification: "judgment",
+        checkpoint_step: "implement",
+        phase: 1,
+        feature_dir: featureDir,
+      })
+      // The first attempt idles at 600_000; the retry then completes
+      // immediately at fake-time 600_000.
+      await vi.advanceTimersByTimeAsync(700_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.status).toBe("ok")
+      const data = result.data as Record<string, unknown>
+      // The success envelope carries the retry provenance and the
+      // child's output, proving the retry finished the task.
+      expect(data.retry).toEqual({ first_attempt_kind: "idle", resume_relayed: true })
+      expect(data.timeout_provenance).toMatchObject({ source: "derived", phase_task_count: 4 })
+      // Exactly two child prompts: the first attempt and the single
+      // retry, whose prompt carried the relayed resume preamble.
+      expect(fake.calls.prompts).toHaveLength(2)
+      const preamble =
+        "This is the single retry of a per-task delegation that ended in an idle timeout; " +
+        "the attempt budget is spent, so continue efficiently.\n\n" +
+        "The timed-out attempt already made this durable progress:\n" +
+        "- Files modified: lib/agent-executor.ts\n" +
+        "- Tasks completed: 1.1\n\n" +
+        "Verify that state against the working tree and tasks.md, continue from it, " +
+        "and do not redo completed work.\n\n"
+      expect(deliveredPromptAt(fake.calls, 1)).toBe(preamble + deliveredPromptAt(fake.calls, 0))
     } finally {
       vi.useRealTimers()
     }
