@@ -287,3 +287,179 @@ describe("registration surface: consolidate_dispatch correlation_id exposure (RD
     ).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Tool-specific locks — synthetic-compaction seam parameters (DE-007
+// Layer 1, synthetic-compaction-continue-prompt-rec task 7.1)
+//
+// The per-plugin loop above never inspects an individual parameter, so a
+// schema regression silently dropping checkpoint's human_decision_ref,
+// uf_delegate_command's human_decisions envelope, or record_human_
+// decision's documented arg set would leave every loop test green while
+// breaking the SYNTH-001 authorization chain at the model boundary — the
+// incident shape this change hardens against. These locks pin the exposure
+// the same way the RD-CF-003 correlation_id lock above does. The
+// declared-step allowlist's lockstep consistency (SYNTH-003, task 4.2) is
+// also part of this layer and lives in unleash-step-lockstep.test.ts,
+// enumerated from the plugin's exported UNLEASH_DECLARED_STEP_ALLOWLIST —
+// never re-hardcoded here.
+// ---------------------------------------------------------------------------
+
+describe("registration surface: synthetic-compaction seam parameters (task 7.1)", () => {
+  /** The named uf-workflow tool definition, from the registry loaded once in beforeAll. */
+  function workflowTool(name: string): RegisteredTool | undefined {
+    return registries.get("uf-workflow")?.[name]
+  }
+
+  it("declares checkpoint's human_decision_ref as optional and UUID v4-shaped (reference-only)", () => {
+    const toolDef = workflowTool("checkpoint")
+    expect(
+      toolDef,
+      "uf-workflow.checkpoint must be present in the registry",
+    ).toBeDefined()
+    expect(
+      [...declaredParameterKeys(toolDef as RegisteredTool)],
+      "checkpoint must expose human_decision_ref — gate-override and escalated-advisory " +
+        "checkpoints cite a recorded decision_id through it (SYNTH-001/004)",
+    ).toContain("human_decision_ref")
+    const refSchema = (toolDef as RegisteredTool).args?.["human_decision_ref"] as z.ZodType
+    expect(
+      refSchema,
+      "checkpoint args must carry the human_decision_ref zod schema — the raw shape " +
+        "the host converts into the model-facing parameter schema",
+    ).toBeInstanceOf(z.ZodType)
+
+    // Optionality, behaviorally: the parameter accepts omission, because
+    // every checkpoint call without a gate override or escalated-advisory
+    // coverage requirement stays valid without one.
+    expect(
+      refSchema.safeParse(undefined).success,
+      "human_decision_ref must be optional — non-override checkpoints never cite one",
+    ).toBe(true)
+
+    // Usability: the parameter accepts a machine-stamped decision_id — the
+    // value record_human_decision and the relay envelope return.
+    expect(
+      refSchema.safeParse("123e4567-e89b-42d3-a456-426614174000").success,
+      "human_decision_ref must accept a well-formed UUID v4 decision_id — the stamped " +
+        "value both write surfaces return",
+    ).toBe(true)
+
+    // Reference-only (SYNTH-006): free text — a justification, a quoted
+    // synthetic prompt — is rejected at the schema before any
+    // security-sensitive operation; an inline human-decision payload is
+    // never accepted in place of a reference.
+    expect(
+      refSchema.safeParse("the human said to proceed past the gate").success,
+      "human_decision_ref must reject free text — reference-only, never an inline payload",
+    ).toBe(false)
+    expect(
+      refSchema.safeParse("123E4567-E89B-42D3-A456-426614174000").success,
+      "human_decision_ref must reject non-canonical uppercase ids — the pattern matches " +
+        "machine-stamped crypto.randomUUID() output",
+    ).toBe(false)
+  })
+
+  it("declares uf_delegate_command's human_decisions envelope as optional, strict-entry, and bounded", () => {
+    const toolDef = workflowTool("uf_delegate_command")
+    expect(
+      toolDef,
+      "uf-workflow.uf_delegate_command must be present in the registry",
+    ).toBeDefined()
+    expect(
+      [...declaredParameterKeys(toolDef as RegisteredTool)],
+      "uf_delegate_command must expose human_decisions — the orchestrator-relay envelope " +
+        "is one of the exactly two write surfaces the record accepts (SYNTH-001)",
+    ).toContain("human_decisions")
+    const envelopeSchema = (toolDef as RegisteredTool).args?.["human_decisions"] as z.ZodType
+    expect(
+      envelopeSchema,
+      "uf_delegate_command args must carry the human_decisions zod schema",
+    ).toBeInstanceOf(z.ZodType)
+
+    // Optionality, behaviorally: the pre-change call shape is preserved —
+    // no envelope means no record write and a null ids field.
+    expect(
+      envelopeSchema.safeParse(undefined).success,
+      "human_decisions must be optional — delegations without relayed decisions are the " +
+        "pre-change call shape",
+    ).toBe(true)
+
+    // Usability: a well-formed envelope — question and answer only — is
+    // accepted.
+    expect(
+      envelopeSchema.safeParse([{ question: "Proceed?", answer: "Yes." }]).success,
+      "human_decisions must accept a well-formed entry — callers supply question and " +
+        "answer only (source is structural, ids machine-stamped)",
+    ).toBe(true)
+
+    // Strict entry: provenance and identity are machine-stamped — a caller
+    // cannot smuggle decision_id, source, or recorded_at.
+    expect(
+      envelopeSchema.safeParse([
+        {
+          question: "Proceed?",
+          answer: "Yes.",
+          decision_id: "123e4567-e89b-42d3-a456-426614174000",
+        },
+      ]).success,
+      "human_decisions entries must be strict — a smuggled decision_id spoofs provenance " +
+        "the append machinery owns",
+    ).toBe(false)
+
+    // Bounds: an empty array is invalid (omit the parameter instead), and
+    // the envelope is capped at HUMAN_DECISIONS_ENVELOPE_MAX_ENTRIES (32).
+    expect(
+      envelopeSchema.safeParse([]).success,
+      "human_decisions must reject an empty array — omit the parameter when no decisions " +
+        "are relayed",
+    ).toBe(false)
+    const fullEnvelope = Array.from({ length: 32 }, () => ({ question: "Proceed?", answer: "Yes." }))
+    expect(
+      envelopeSchema.safeParse(fullEnvelope).success,
+      "human_decisions must accept 32 entries — the documented bound",
+    ).toBe(true)
+    expect(
+      envelopeSchema.safeParse([...fullEnvelope, { question: "Proceed?", answer: "Yes." }]).success,
+      "human_decisions must reject 33 entries — HUMAN_DECISIONS_ENVELOPE_MAX_ENTRIES is 32",
+    ).toBe(false)
+  })
+
+  it("registers record_human_decision with exactly the documented source/question/answer/key arg set", () => {
+    const toolDef = workflowTool("record_human_decision")
+    expect(
+      toolDef,
+      "uf-workflow.record_human_decision must be present in the registry — the in-session " +
+        "write surface of the human-decision record (SYNTH-006)",
+    ).toBeDefined()
+
+    // Input-schema parity with the documented input: exactly source,
+    // question, answer, and key. Callers supply only source, question, and
+    // answer; decision_id and recorded_at are machine-stamped, so no
+    // parameter exists for them.
+    expect(
+      [...declaredParameterKeys(toolDef as RegisteredTool)].sort(),
+      "record_human_decision must declare exactly the documented arg set — decision_id " +
+        "and recorded_at are machine-stamped and never caller-supplied",
+    ).toEqual(["answer", "key", "question", "source"])
+    const sourceSchema = (toolDef as RegisteredTool).args?.["source"] as z.ZodType
+    expect(
+      sourceSchema.safeParse("question-tool").success,
+      "source must accept the question-tool surface — one of the exactly two real surfaces",
+    ).toBe(true)
+    expect(
+      sourceSchema.safeParse("orchestrator-relay").success,
+      "source must accept the orchestrator-relay surface — the other real surface",
+    ).toBe(true)
+    expect(
+      sourceSchema.safeParse("inline-composed").success,
+      "source must reject an invented surface — compose a real question-tool call or " +
+        "orchestrator relay instead (SYNTH-002)",
+    ).toBe(false)
+    const keySchema = (toolDef as RegisteredTool).args?.["key"] as z.ZodType
+    expect(
+      keySchema.safeParse(undefined).success,
+      "key must be optional — it defaults to the sanitized current git branch",
+    ).toBe(true)
+  })
+})

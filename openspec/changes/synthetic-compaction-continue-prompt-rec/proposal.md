@@ -37,28 +37,40 @@ Fixes #1118.
 
 ## What Changes
 
-1. **Gate overrides need a human-decision reference (SYNTH-001).**
-   Any `checkpoint` call that records a gate override (checklist,
-   spec-review advisory escalation, quality gate) MUST carry a
-   reference to a matching `question`-tool answer from the session
-   or a relayed human decision from the orchestrator carried in
-   delegation input. Free-text justifications alone MUST be rejected.
+1. **Gate overrides need a human-decision reference (SYNTH-001,
+   SYNTH-006).**
+   Any `checkpoint` call whose `data` carries a gate override
+   (any top-level `data` key containing `override`) MUST carry a
+   reference to a recorded human decision in the persisted
+   human-decision record — written either by the orchestrator
+   relay (`uf_delegate_command` persists its typed
+   `human_decisions` envelope at spawn time) or by
+   `record_human_decision` for a `question`-tool answer the
+   session received. Free-text justifications alone MUST be
+   rejected.
 
 2. **Synthetic prompt is never consent (SYNTH-002).**
-   Command prose in `/uf.unleash`, `/uf.run-pipeline-plan` and the
-   autonomy agent MUST state explicitly that compaction or synthetic
-   continue prompts are not human input. A contract test MUST pin
-   that prose in both the live copy and the scaffold mirror.
+   Command prose in `/uf.unleash`, `/uf.run-pipeline-plan` and
+   the `cobalt-crush-dev` agent MUST state explicitly that
+   compaction or synthetic continue prompts are not human input.
+   A contract test MUST pin that prose in both the live copy and
+   the scaffold mirror.
 
 3. **No made-up override steps (SYNTH-003).**
    `checkpoint` MUST reject step names outside the command's
-   declared step set, or at minimum those matching `*override*`,
-   unless the human-decision reference in (1) is satisfied.
+   declared step set — the union of the pipeline steps, the
+   plugin's auto-checkpointed machinery steps, and the command
+   prose's gate/budget steps, kept in lockstep by a consistency
+   test — unless the human-decision reference in (1) is
+   satisfied.
 
-4. **Escalated advisories are relayed (SYNTH-004).**
-   An APPROVE WITH ADVISORIES result marked ESCALATED MUST be
-   relayed to the human via `relay_spec_review_gate` (from #1094)
-   before implementation continues.
+4. **Advisory results are relayed (SYNTH-004).**
+   The review-dispatch canonical decision maps every APPROVE
+   WITH ADVISORIES consolidation to ESCALATED, so every
+   APPROVE WITH ADVISORIES spec-review result MUST be relayed
+   to the human via `relay_spec_review_gate` (from #1094)
+   before implementation continues; plain APPROVE still
+   advances.
 
 5. **Regression coverage (SYNTH-005).**
    Deterministic tests replay the exact `checkpoint` JSON from
@@ -79,14 +91,23 @@ Fixes #1118.
 
 - `checkpoint` (TypeScript plugin tool in
   `.opencode/plugins/uf-workflow/index.ts`): validates gate
-  overrides carry a human-decision reference, rejects undeclared
-  step names, and enforces escalated-advisory relay
+  overrides carry a human-decision reference resolving to the
+  persisted human-decision record, rejects undeclared step
+  names, and enforces advisory-result relay
+- `uf_delegate_command` (same plugin): persists orchestrator-
+  relayed human decisions from its typed `human_decisions`
+  envelope parameter to the record at spawn time
+- `record_human_decision` (new plugin tool, same plugin):
+  records in-session `question`-tool answers under the
+  SYNTH-006 controls (machine stamps, append-only,
+  synthetic-prompt deny-list)
 - `/uf.unleash` and `/uf.run-pipeline-plan` command prose
   (`.opencode/commands/…`): synthetic prompt is not consent
-- Autonomy agent (`.opencode/agents/…`): synthetic prompt is not
-  consent
+- `cobalt-crush-dev` agent
+  (`.opencode/agents/cobalt-crush-dev.md`): synthetic prompt is
+  not consent
 - Progress-state record shape (`.opencode/lib/uf-workflow-types.ts`)
-  if needed to carry the human-decision reference
+  carries the human-decision reference and record entry types
 
 ### Removed Capabilities
 
@@ -101,16 +122,23 @@ Fixes #1118.
     `.opencode/commands/uf.unleash.md`
   - `internal/scaffold/assets/opencode/commands/uf.run-pipeline-plan.md`
     ↔ `.opencode/commands/uf.run-pipeline-plan.md`
-  - `internal/scaffold/assets/opencode/agents/autonomy*.md` ↔
-    `.opencode/agents/…` (as applicable)
+  - `internal/scaffold/assets/opencode/agents/cobalt-crush-dev.md`
+    ↔ `.opencode/agents/cobalt-crush-dev.md`
 - **Implementation runtime — TypeScript plugin tools**:
-  `checkpoint` / `get_progress` / `relay_spec_review_gate` in
+  `checkpoint` / `relay_spec_review_gate` /
+  `uf_delegate_command` / `record_human_decision` (widened or
+  new) and `get_progress` (unchanged — context listing only) in
   `.opencode/plugins/uf-workflow/index.ts`; shared types in
   `.opencode/lib/uf-workflow-types.ts`
 - **No behavioral change for legitimate human overrides** — only
   unauthenticated free-text justifications are blocked
-- **Instruction-text delta** recorded in change record at
-  implement time
+- **Instruction-text delta** — the not-consent paragraph adds
+  approximately 7 lines to each of the three prose files
+  (`uf.unleash.md`, `uf.run-pipeline-plan.md`,
+  `cobalt-crush-dev.md`), roughly 21 added lines total,
+  mirrored byte-identically into the scaffold copies; per-file
+  rows and totals recorded in the change record at implement
+  time (DE-004)
 
 ### Documentation Impact
 
@@ -151,9 +179,11 @@ present.
 **Assessment**: PASS
 
 Rejected overrides return machine-parseable errors
-(`missing_human_decision`, `undeclared_step`) with the offending
-step name and justification. Allowed overrides carry provenance
-(question-tool correlation or delegation relay id). The synthetic-
+(`missing_human_decision`, `undeclared_step`,
+`escalated_advisory_unrelayed`,
+`human_decision_record_unreadable`) with the offending
+step name and data key. Allowed overrides carry provenance
+(recorded `decision_id` with source and timestamp). The synthetic-
 prompt-not-consent prose is pinned by a contract test, making the
 claim regression-backed.
 
@@ -173,10 +203,17 @@ progress-state fixtures without external services. Coverage for
 
 Closes a privilege-escalation bypass: model quoting synthetic
 text as human consent to skip checklist/spec-review/quality
-gates. Authorization is now tied to a verifiable human-decision
-reference (question-tool answer or orchestrator relay), not to
-free-text claims. Least-privilege is enforced: the model cannot
-self-authorize gate passage.
+gates. Authorization is now tied to machinery-stamped
+human-decision record entries (question-tool answers or
+orchestrator relays persisted at delegation time), not to
+free-text claims. Least-privilege is enforced against the
+incident class — context-quoting confusion cannot self-authorize
+gate passage; the design's documented threat-model ceiling
+(design.md, Threat model) matches the residual risk every
+tool-enforced gate in this suite accepts. The record store
+applies security-by-default handling: 0o600/0o700 permissions,
+VCS exclusion, bounded inputs, and no question/answer content
+in logs or errors.
 
 ### VI. Deterministic Execution
 

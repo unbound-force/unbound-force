@@ -23,11 +23,15 @@
  * are the injectable surface; tests exercise them against temp roots).
  */
 
+import { randomUUID } from "node:crypto"
 import {
+  closeSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs"
@@ -42,15 +46,19 @@ import {
   appendSpecReviewIteration,
   deriveSpecReviewOverrides,
   duplicateSpecReviewDecisionIds,
+  isHumanDecisionTextWithinBounds,
   isValidSpecReviewDecision,
   latestSpecReviewIteration,
   nextSpecReviewIteration,
+  parseHumanDecisionRecord,
   parseSpecReviewGateRecord,
   sanitizeSlug,
   SPEC_REVIEW_RECORD_KEY,
   SPEC_REVIEW_STATE_COMMAND,
   specReviewFindingIds,
   unknownSpecReviewDecisionIds,
+  type HumanDecisionAppendInput,
+  type HumanDecisionEntry,
   type SpecReviewDecision,
   type SpecReviewGateRecord,
   type SpecReviewIterationEntry,
@@ -136,6 +144,15 @@ export function isEnoent(err: unknown): boolean {
     err instanceof Error &&
     "code" in err &&
     (err as NodeJS.ErrnoException).code === "ENOENT"
+  )
+}
+
+/** Type guard for EEXIST filesystem errors (advisory-lock contention). */
+function isEexist(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    "code" in err &&
+    (err as NodeJS.ErrnoException).code === "EEXIST"
   )
 }
 
@@ -531,4 +548,317 @@ export function recordSpecReviewDecisionsToState(
   }
   writeState(projectRoot, stateKey, SPEC_REVIEW_STATE_COMMAND, nextState)
   return { state: nextState, record: withDecisions, iteration: latest.iteration }
+}
+
+// ---------------------------------------------------------------------------
+// Human-decision record I/O (synthetic-compaction-continue-prompt-rec,
+// SYNTH-006, task 2.2)
+//
+// The append-only human-decision record at `.uf/progress/<key>/
+// human-decisions.json` is the artifact a gate override's
+// `human_decision_ref` resolves against (SYNTH-001). Store discipline
+// mirrors the progress state store — slug sanitization with explicit
+// `..`-component rejection, path-traversal containment, symlink refusal,
+// 0o700 directories, 0o600 files — plus the two properties an append-only
+// authorization store needs: atomic temp-file-plus-rename writes and
+// advisory-lock-serialized appends so concurrent writers (the
+// orchestrator-relay envelope and record_human_decision) cannot lose
+// entries.
+// ---------------------------------------------------------------------------
+
+/** Filename of the human-decision record inside a state-key directory. */
+export const HUMAN_DECISIONS_FILENAME = "human-decisions.json"
+
+/** Suffix of the advisory lock file; the lock lives beside the record. */
+const HUMAN_DECISIONS_LOCK_SUFFIX = ".lock"
+
+/** Suffix of the atomic-write temporary file (same directory as the record). */
+const HUMAN_DECISIONS_TEMP_SUFFIX = ".tmp"
+
+/** A held lock older than this is stale (its holder crashed) and is broken. */
+const HUMAN_DECISIONS_LOCK_STALE_MS = 30_000
+
+/**
+ * Give up acquiring the lock after this long. The critical section is a
+ * synchronous read-stamp-write of a small file (milliseconds), so a lock
+ * held this long means something is wrong.
+ */
+const HUMAN_DECISIONS_LOCK_ACQUIRE_TIMEOUT_MS = 10_000
+
+/** Retry cadence while another writer holds the lock. */
+const HUMAN_DECISIONS_LOCK_RETRY_DELAY_MS = 25
+
+/**
+ * Advisory-lock timing knobs (SYNTH-006): optional overrides with the
+ * production defaults above, injected by tests so the stale-break and
+ * acquire-timeout paths are exercisable without real-time waits.
+ */
+export interface HumanDecisionStoreOptions {
+  /** Age at which a held lock is considered stale. Default 30s. */
+  readonly lockStaleMs?: number
+  /** Acquisition deadline in milliseconds. Default 10s. */
+  readonly lockAcquireTimeoutMs?: number
+  /** Retry delay while contended, in milliseconds. Default 25ms. */
+  readonly lockRetryDelayMs?: number
+}
+
+/**
+ * Resolve a raw state key for the human-decision record (SYNTH-006): a
+ * key carrying a `..` path component is REJECTED before sanitization —
+ * the spec's traversal scenario mandates a machine-parseable rejection,
+ * not silent defusing — while ordinary raw branch names (e.g.
+ * `opsx/change-name`) sanitize exactly as the progress store resolves
+ * them. The containment guard in `humanDecisionsPath` backstops this.
+ *
+ * @param rawKey State key or raw branch name.
+ * @returns The sanitized state key.
+ */
+function resolveHumanDecisionsKey(rawKey: string): string {
+  if (/(^|[\\/])\.\.([\\/]|$)/.test(rawKey)) {
+    throw new Error(
+      "Path traversal blocked: human-decisions state key carries a '..' path component",
+    )
+  }
+  return sanitizeSlug(rawKey)
+}
+
+/**
+ * Compute the human-decision record path with path-traversal protection
+ * (mirrors `statePath`). The key MUST be pre-resolved by
+ * `resolveHumanDecisionsKey`.
+ */
+function humanDecisionsPath(cwd: string, key: string): string {
+  const progressRoot = resolve(cwd, PROGRESS_DIR)
+  const filePath = resolve(progressRoot, key, HUMAN_DECISIONS_FILENAME)
+  if (!filePath.startsWith(progressRoot + "/")) {
+    throw new Error(
+      "Path traversal blocked: resolved path escapes .uf/progress/",
+    )
+  }
+  return filePath
+}
+
+/**
+ * Read the human-decision record for a state key (SYNTH-006). An absent
+ * record file is the empty-record case (returns `[]`) — first use, not an
+ * error. Every other failure — a symlinked record, permission denied,
+ * corrupted JSON, malformed entries — throws so callers fail closed: a
+ * broken record must surface (checkpoint reports it as
+ * `human_decision_record_unreadable`), never shrink to an empty one. The
+ * read is lock-free by design: atomic temp-plus-rename writes mean a
+ * concurrent append exposes either the old or the new complete array,
+ * never a partial one.
+ *
+ * @param projectRoot Project worktree holding `.uf/progress/`.
+ * @param key State key or raw branch — traversal-checked and sanitized here.
+ * @returns The recorded entries; empty when no record exists yet.
+ */
+export function readHumanDecisionRecord(
+  projectRoot: string,
+  key: string,
+): readonly HumanDecisionEntry[] {
+  const stateKey = resolveHumanDecisionsKey(key)
+  const fp = humanDecisionsPath(projectRoot, stateKey)
+  let raw: string
+  try {
+    const stats = lstatSync(fp)
+    if (stats.isSymbolicLink()) {
+      throw new Error("Refusing to read symlinked human-decision record")
+    }
+    raw = readFileSync(fp, "utf-8")
+  } catch (err: unknown) {
+    if (isEnoent(err)) return []
+    throw err
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error(
+      `human-decision record for key ${stateKey} is corrupted (malformed JSON)`,
+    )
+  }
+  const entries = parseHumanDecisionRecord(parsed)
+  if (entries === null) {
+    throw new Error(
+      `human-decision record for key ${stateKey} is corrupted (malformed entry shape)`,
+    )
+  }
+  return entries
+}
+
+/**
+ * Run a critical section under the record's advisory lock (SYNTH-006):
+ * an exclusively-created lock file beside the record. Contended writers
+ * wait (await-based retry — the event loop is never blocked) until the
+ * holder releases; a lock older than the stale threshold is broken
+ * because its holder crashed; acquisition past the deadline fails with a
+ * machine-parseable error. The critical section itself is synchronous,
+ * so once the lock is held no interleaving can split the read-stamp-write.
+ *
+ * @param recordPath Record path the lock serializes appends to.
+ * @param options Optional timing overrides (tests); production defaults otherwise.
+ * @param criticalSection Synchronous read-stamp-write to run under the lock.
+ * @returns Whatever the critical section returns.
+ */
+async function withHumanDecisionsLock<T>(
+  recordPath: string,
+  options: HumanDecisionStoreOptions | undefined,
+  criticalSection: () => T,
+): Promise<T> {
+  const lockPath = recordPath + HUMAN_DECISIONS_LOCK_SUFFIX
+  const staleMs = options?.lockStaleMs ?? HUMAN_DECISIONS_LOCK_STALE_MS
+  const acquireTimeoutMs =
+    options?.lockAcquireTimeoutMs ?? HUMAN_DECISIONS_LOCK_ACQUIRE_TIMEOUT_MS
+  const retryDelayMs =
+    options?.lockRetryDelayMs ?? HUMAN_DECISIONS_LOCK_RETRY_DELAY_MS
+  const deadline = Date.now() + acquireTimeoutMs
+  for (;;) {
+    let fd: number
+    try {
+      fd = openSync(lockPath, "wx", 0o600)
+    } catch (err: unknown) {
+      if (!isEexist(err)) throw err
+      // Contended. Break a stale lock (its holder crashed mid-section),
+      // or wait out the current holder.
+      let stale = false
+      try {
+        const stats = lstatSync(lockPath)
+        stale = Date.now() - stats.mtimeMs > staleMs
+      } catch (err: unknown) {
+        if (isEnoent(err)) continue // Released between open and lstat.
+        throw err
+      }
+      if (stale) {
+        rmSync(lockPath, { force: true })
+        continue
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `timeout acquiring the human-decision record lock after ${acquireTimeoutMs}ms`,
+        )
+      }
+      await new Promise((resolveDelay: (value: void) => void) =>
+        setTimeout(resolveDelay, retryDelayMs),
+      )
+      continue
+    }
+    try {
+      return criticalSection()
+    } finally {
+      // Release: unlink first so the lock disappears the moment the
+      // section ends; a crashed holder leaves the file for age-based
+      // breaking above.
+      rmSync(lockPath, { force: true })
+      closeSync(fd)
+    }
+  }
+}
+
+/**
+ * Append human-decision entries to the record (SYNTH-006, task 2.2),
+ * machine-stamping `decision_id` (UUID v4, collision-guarded against the
+ * existing record) and `recorded_at` (one timestamp for the batch — the
+ * append is one machinery write). Callers supply only source, question,
+ * and answer; input bounds are validated FIRST, before any
+ * security-sensitive operation including file path derivation, and
+ * violations throw with bounded identifiers (entry index and field name)
+ * — never raw question or answer text. The append is serialized under the
+ * advisory lock and lands through an atomic temp-file-plus-rename, so
+ * concurrent appenders (the orchestrator-relay envelope here,
+ * record_human_decision later) never lose entries and lock-free readers
+ * never observe a partial record.
+ *
+ * @param projectRoot Project worktree holding `.uf/progress/`.
+ * @param key State key or raw branch — traversal-checked and sanitized here.
+ * @param entries Entries to append; source, question, and answer only.
+ * @param options Optional lock-timing overrides (tests); defaults otherwise.
+ * @returns The stamped entries as persisted, in append order.
+ */
+export async function appendHumanDecisions(
+  projectRoot: string,
+  key: string,
+  entries: readonly HumanDecisionAppendInput[],
+  options?: HumanDecisionStoreOptions,
+): Promise<readonly HumanDecisionEntry[]> {
+  for (const [index, entry] of entries.entries()) {
+    if (entry.source !== "question-tool" && entry.source !== "orchestrator-relay") {
+      throw new Error(`human decision entry ${index}: unknown source`)
+    }
+    if (
+      typeof entry.question !== "string" ||
+      entry.question === "" ||
+      !isHumanDecisionTextWithinBounds(entry.question)
+    ) {
+      throw new Error(
+        `human decision entry ${index}: question must be non-empty and at most 16 KiB UTF-8 bytes`,
+      )
+    }
+    if (
+      typeof entry.answer !== "string" ||
+      entry.answer === "" ||
+      !isHumanDecisionTextWithinBounds(entry.answer)
+    ) {
+      throw new Error(
+        `human decision entry ${index}: answer must be non-empty and at most 16 KiB UTF-8 bytes`,
+      )
+    }
+  }
+  const stateKey = resolveHumanDecisionsKey(key)
+  const recordPath = humanDecisionsPath(projectRoot, stateKey)
+  const dir = resolve(recordPath, "..")
+  // Directory guard mirrors writeState: refuse a symlinked key directory,
+  // create the directory 0o700 when absent.
+  try {
+    const dirStats = lstatSync(dir)
+    if (dirStats.isSymbolicLink()) {
+      throw new Error("Refusing to write into symlinked directory")
+    }
+  } catch (err: unknown) {
+    if (!isEnoent(err)) throw err
+    // Directory does not exist yet — created below.
+  }
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+
+  return await withHumanDecisionsLock(recordPath, options, () => {
+    // Critical section (synchronous — no interleaving once the lock is
+    // held): read, stamp, write. A corrupted or symlinked existing record
+    // throws here and the append fails closed — the audit trail is never
+    // overwritten from a state it could not read.
+    const existing = readHumanDecisionRecord(projectRoot, key)
+    const now = new Date().toISOString()
+    const seenIds = new Set(existing.map((entry) => entry.decision_id))
+    const stamped: HumanDecisionEntry[] = entries.map((entry) => {
+      let decisionId = randomUUID()
+      while (seenIds.has(decisionId)) {
+        decisionId = randomUUID()
+      }
+      seenIds.add(decisionId)
+      return {
+        decision_id: decisionId,
+        source: entry.source,
+        question: entry.question,
+        answer: entry.answer,
+        recorded_at: now,
+      }
+    })
+    const tempPath = `${recordPath}.${randomUUID()}${HUMAN_DECISIONS_TEMP_SUFFIX}`
+    try {
+      writeFileSync(
+        tempPath,
+        JSON.stringify([...existing, ...stamped], null, 2) + "\n",
+        { mode: 0o600 },
+      )
+      renameSync(tempPath, recordPath)
+    } catch (err: unknown) {
+      // Best-effort temp cleanup; the record itself was never touched.
+      try {
+        rmSync(tempPath, { force: true })
+      } catch {
+        // Cleanup is best-effort — surface the original failure.
+      }
+      throw err
+    }
+    return stamped
+  })
 }
