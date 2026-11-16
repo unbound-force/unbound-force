@@ -1658,12 +1658,14 @@ func TestUnleashCommand_ToolRoutingContracts(t *testing.T) {
 // derives each wall clock via derivePerTaskTimeoutMs (PTB-FR-001),
 // inherits the parent's idle watchdog through the delegation-budget
 // registry under a budgeted command-path parent (PTB-FR-002), relays
-// the timeout.resume hint into a single non-blank retry (PTB-FR-003),
-// and the phase checkpoint renders the remaining parent budget
-// (PTB-FR-004 / UO-FR-010). Both the embedded scaffold asset and the
+// the timeout.resume hint into a single non-blank retry routed on the
+// envelope's error.retryable (PTB-FR-003, DE-006), and the phase
+// checkpoint emits the tool-rendered phase_checkpoint_line verbatim
+// (PTB-FR-004 / UO-FR-010, DE-003). Both the embedded scaffold asset and the
 // canonical command are asserted -- the #930 delegation-timeout
-// content-gate pattern -- so prose drift in either copy fails, and
-// the pre-budget checkpoint rendering is asserted absent. Pinned
+// content-gate pattern -- so prose drift in either copy fails; the
+// pre-budget checkpoint rendering and the prose-template checkpoint
+// line are asserted absent. Pinned
 // sentences wrap across the 72-column markdown source, so fragments
 // are matched whitespace-normalized (the question-tool precedent's
 // option-label matching rule).
@@ -1780,24 +1782,35 @@ func TestUnleashCommand_PerTaskDelegationBudgets(t *testing.T) {
 
 			t.Run("resume relay without a blank retry (PTB-FR-003)", func(t *testing.T) {
 				assertFragments(t, sequentialExecution, "sequential execution", []string{
-					"when it carries `timeout` of kind `wall_clock` or `idle` (retryable), re-issue the same call once with the resume context appended to the prompt",
+					"when it carries `timeout` and `error.retryable` is true, re-issue the same call once with the resume context appended to the prompt",
 					"relay `timeout.resume.files_modified` (files the timed-out attempt touched) and `timeout.resume.tasks_completed` (task ids it marked complete)",
 					"telling the child to verify and continue from that state instead of re-deriving it (PTB-FR-003)",
 					"The retry MUST NOT start from a blank prompt when `timeout.child_active` is true or `resume` is non-null",
 					"when `resume` is null (unreadable state), anchor the retry on the tasks.md checkbox state",
-					"A second timeout on the same task, kind `budget` (`budget_exhausted`, non-retryable), or any non-timeout failure: emit the envelope's error and **STOP**",
+					"A second timeout on the same task, `error.retryable: false` (e.g. `budget_exhausted`), or any non-timeout failure: emit the envelope's error and **STOP**",
 				})
+				// DE-006: the retry routing must branch on the envelope's
+				// machine-parseable error.retryable, never on a prose
+				// re-derivation from timeout kinds (the storm kind is
+				// retryable in the envelope but matches no enumerated kind).
+				staleRouting := "when it carries `timeout` of kind `wall_clock` or `idle` (retryable), re-issue the same call once"
+				if strings.Contains(normalize(sequentialExecution), normalize(staleRouting)) {
+					t.Errorf("%s uf.unleash.md: retry branch re-derives retryability from timeout kinds %q", copy.name, staleRouting)
+				}
 			})
 
-			t.Run("phase checkpoint reports remaining budget (PTB-FR-004)", func(t *testing.T) {
+			t.Run("phase checkpoint emits the tool-rendered budget line (PTB-FR-004)", func(t *testing.T) {
 				assertFragments(t, budgetContract, "budget contract", []string{
 					"each result reports the remaining parent budget (`remaining_ms`) for the phase checkpoint below",
 				})
 				assertFragments(t, phaseCheckpoint, "phase checkpoint", []string{
-					"remaining_ms: [remaining parent budget in ms, as reported by the most recent per-task delegation envelope -- omit when no budgeted ancestor exists]",
+					"remaining_ms: [remaining parent budget in ms, from the most recent per-task delegation envelope of THIS phase's own delegations",
+					"omit when this phase's delegations produced no envelope carrying it (worktree-spawned tasks, already complete on entry, or unbudgeted)",
+					"never reach back to an earlier phase's envelope",
 					"persists `number`, `verdict`, `inventory`, and the optional `remaining_ms` from the structured `phase` object",
-					"also render the phase checkpoint line -- `Phase [N] checkpoint: [verdict] (remaining budget: ~[X]ms)` with `[X]` the recorded `remaining_ms`",
-					"When no budgeted ancestor exists, emit no budget clause -- top-level behavior is unchanged (PTB-FR-004)",
+					"The checkpoint result also carries a tool-rendered `phase_checkpoint_line`, with the remaining-budget clause exactly when `remaining_ms` was recorded",
+					"Emit it verbatim as the phase checkpoint line -- never reconstruct it",
+					"the value is informational; wall-clock and hierarchical clamping stay authoritative",
 				})
 				// The pre-change checkpoint rendering persisted only
 				// the three non-budget fields; its return would
@@ -1811,6 +1824,21 @@ func TestUnleashCommand_PerTaskDelegationBudgets(t *testing.T) {
 				}
 				if strings.Contains(normalize(phaseCheckpoint), normalize(stale)) {
 					t.Errorf("%s uf.unleash.md: phase checkpoint retains pre-budget rendering %q across wrapped lines", copy.name, stale)
+				}
+				// DE-003: the checkpoint line is tool-rendered and
+				// emitted verbatim; a prose template the agent
+				// reconstructs (or an unobservable no-budgeted-
+				// ancestor omission gate) is the superseded contract.
+				for _, staleTemplate := range []string{
+					"also render the phase checkpoint line -- `Phase [N] checkpoint:",
+					"When no budgeted ancestor exists, emit no budget clause",
+				} {
+					if strings.Contains(phaseCheckpoint, staleTemplate) {
+						t.Errorf("%s uf.unleash.md: phase checkpoint retains prose-template line rendering %q", copy.name, staleTemplate)
+					}
+					if strings.Contains(normalize(phaseCheckpoint), normalize(staleTemplate)) {
+						t.Errorf("%s uf.unleash.md: phase checkpoint retains prose-template line rendering %q across wrapped lines", copy.name, staleTemplate)
+					}
 				}
 			})
 		})

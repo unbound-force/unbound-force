@@ -543,6 +543,13 @@ async function invokeTool<T = unknown>(
   return JSON.parse(result.output) as ToolResult<T>
 }
 
+/**
+ * Checkpoint tool phase response: the state plus the response-only
+ * tool-rendered line (PTB-FR-004 / DE-003). The line never persists
+ * to the state file, so get_progress results do not carry it.
+ */
+type PhaseCheckpointResponse = ProgressState & { phase_checkpoint_line?: string }
+
 // ---------------------------------------------------------------------------
 // checkpoint tool tests (FR-001)
 //
@@ -745,6 +752,69 @@ describe("checkpoint tool (FR-001)", () => {
         { name: "TestTLS", classification: "environmental" },
         { name: "TestPath", classification: "pre-existing" },
       ])
+    }
+  })
+
+  it("records remaining_ms on the phase payload and round-trips it through get_progress (PTB-FR-004)", async () => {
+    const cp = createCheckpointTool(branchExec, tmpDir)
+    const recorded = await invokeTool<PhaseCheckpointResponse>(cp, {
+      command: "uf.unleash",
+      step: "implement-phase-3",
+      phase: { number: 3, verdict: "green", inventory: [], remaining_ms: 440_000 },
+    })
+    expect(recorded.status).toBe("ok")
+    if (recorded.status === "ok") {
+      // DE-003: the line is tool-rendered with the exact remaining_ms.
+      expect(recorded.data?.phase_checkpoint_line).toBe(
+        "Phase 3 checkpoint: green (remaining budget: ~440000ms)",
+      )
+    }
+    const result = await invokeTool<PhaseCheckpointResponse>(createGetProgressTool(branchExec, tmpDir), {
+      command: "uf.unleash",
+    })
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      const s = result.data as PhaseCheckpointResponse
+      expect(s.phases?.["3"]?.verdict).toBe("green")
+      expect(s.phases?.["3"]?.remaining_ms).toBe(440_000)
+      // The rendered line is response-only; it never persists to state.
+      expect(s.phase_checkpoint_line).toBeUndefined()
+    }
+  })
+
+  it("drops remaining_ms when the phase record is re-recorded without it", async () => {
+    const cp = createCheckpointTool(branchExec, tmpDir)
+    await invokeTool(cp, {
+      command: "uf.unleash",
+      step: "implement-phase-3",
+      phase: { number: 3, verdict: "green", inventory: [], remaining_ms: 440_000 },
+    })
+    const result = await invokeTool<PhaseCheckpointResponse>(cp, {
+      command: "uf.unleash",
+      step: "implement-phase-3",
+      phase: { number: 3, verdict: "green", inventory: [] },
+    })
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      const s = result.data as PhaseCheckpointResponse
+      expect(s.phases?.["3"]?.remaining_ms).toBeUndefined()
+      // Re-recording without remaining_ms drops the budget clause.
+      expect(s.phase_checkpoint_line).toBe("Phase 3 checkpoint: green")
+    }
+  })
+
+  it("rejects a non-positive remaining_ms on the phase payload", async () => {
+    const result = await invokeTool<ProgressState>(
+      createCheckpointTool(branchExec, tmpDir),
+      {
+        command: "uf.unleash",
+        step: "implement-phase-3",
+        phase: { number: 3, verdict: "green", inventory: [], remaining_ms: 0 },
+      },
+    )
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("INVALID_INPUT")
     }
   })
 

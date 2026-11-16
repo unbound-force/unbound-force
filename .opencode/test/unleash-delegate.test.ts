@@ -1,13 +1,17 @@
+import { Buffer } from "node:buffer"
 import { existsSync, lstatSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
 import type { PluginInput } from "@opencode-ai/plugin"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { DEFAULT_TIMEOUT_MILLISECONDS, MAX_TIMEOUT_MILLISECONDS } from "../lib/agent-executor.js"
+import { registerDeadline, unregisterDeadline } from "../lib/delegation-budget.js"
 import { DEFAULT_STORM_THRESHOLD } from "../lib/model-matrix.js"
 import { appendHumanDecisions } from "../lib/progress-state.js"
+import { derivePerTaskTimeoutMs } from "../lib/run-timeout.js"
 import type { HumanDecisionEntry, ToolResult } from "../lib/uf-workflow-types.js"
 import {
   createDelegateCommandTool,
@@ -1928,6 +1932,11 @@ describe("uf_delegate_command expected-artifact verification", () => {
         // so the documented default threshold applies with no warning.
         storm_threshold: DEFAULT_STORM_THRESHOLD,
         storm_threshold_warning: null,
+        // PTB-FR-001/PTB-FR-004 (per-task-delegation-budgets): non-per-task
+        // delegations carry no derivation provenance and no remaining
+        // budget.
+        timeout_provenance: null,
+        remaining_ms: null,
         usage: { cost_usd: 0.25, tokens: { input: 11, output: 7 } },
         provenance: {
           agent: "cobalt-crush-dev",
@@ -2941,6 +2950,31 @@ describe("uf_delegate_command seam verification", () => {
         // so the documented default threshold applies with no warning.
         storm_threshold: DEFAULT_STORM_THRESHOLD,
         storm_threshold_warning: null,
+        // PTB-FR-001 (per-task-delegation-budgets): the per-task
+        // implement shape derives its wall clock. No tasks.md is served
+        // here, so the phase task count fails closed to zero and the
+        // 409-byte composed prompt adds no prompt term — the unclamped
+        // 600_000 base window. Unbudgeted run, so no remaining-budget
+        // report (PTB-FR-004).
+        timeout_provenance: {
+          effective_ms: 600_000,
+          source: "derived",
+          base_ms: 600_000,
+          phase_task_count: 0,
+          phase_task_term_ms: 0,
+          phase_file_count: 0,
+          phase_file_term_ms: 0,
+          prompt_bytes: 409,
+          prompt_term_ms: 0,
+          tier: null,
+          tier_term_ms: 0,
+          contention_multiplier: 1,
+          max_parallel_runs: 1,
+          derived_ms: 600_000,
+          ceiling_ms: 1_800_000,
+          clamped: false,
+        },
+        remaining_ms: null,
         usage: null,
         provenance: {
           agent: "cobalt-crush-dev",
@@ -3053,6 +3087,11 @@ describe("uf_delegate_command seam verification", () => {
         // so the documented default threshold applies with no warning.
         storm_threshold: DEFAULT_STORM_THRESHOLD,
         storm_threshold_warning: null,
+        // PTB-FR-001/PTB-FR-004 (per-task-delegation-budgets): no
+        // per-task shape, so no derivation provenance or remaining
+        // budget.
+        timeout_provenance: null,
+        remaining_ms: null,
         usage: null,
         provenance: {
           agent: "cobalt-crush-dev",
@@ -3663,6 +3702,350 @@ describe("uf_delegate_command timeout budgets", () => {
         requested_ms: 14_400_000,
         budget_clamped: false,
       })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// uf_delegate_command — per-task delegation budgets
+// (per-task-delegation-budgets PTB-FR-001..004)
+// ---------------------------------------------------------------------------
+
+// The per-task implement call shape (prompt-only, checkpoint_step
+// "implement", positive phase, feature_dir) routes through the per-task
+// wrapper, so these rows verify the tool's own surfaces: the schema bound
+// retained for the per-task shape, the derivation wired from tasks.md and
+// the measured prompt, the wall clock actually running the derived window,
+// the advisory resume hint on timeout envelopes, and the budget registry's
+// fail-fast and remaining-budget reporting. The wrapper's executor-level
+// semantics are pinned in delegation-budget.test.ts.
+describe("uf_delegate_command per-task delegation budgets (per-task-delegation-budgets)", () => {
+  const featureDir = "openspec/changes/demo"
+  const tasksAbs = resolve(FAKE_CWD, `${featureDir}/tasks.md`)
+
+  const baseDeps = (client: Client, files: Record<string, string> = {}): DelegateCommandDependencies => ({
+    client,
+    modelMatrix: matrixFreeDeps,
+    readText: fakeReadText(files).readText,
+    fileExists: fakeFileExists([]).fileExists,
+  })
+
+  /** tasks.md before-state: phase 1 with four tasks, none complete. */
+  const tasksBefore = [
+    "## Phase 1: Build the feature",
+    "",
+    "- [ ] 1.1 First task",
+    "- [ ] 1.2 Second task",
+    "- [ ] 1.3 Third task",
+    "- [ ] 1.4 Fourth task",
+  ].join("\n")
+
+  /** tasks.md after-state: task 1.1 newly complete. */
+  const tasksAfter = tasksBefore.replace("- [ ] 1.1 First task", "- [x] 1.1 First task")
+
+  // The budget registry is module-global and invokeDelegate runs every
+  // delegation from the fixed "parent-session" id, so a registered budget
+  // must be cleared after every test to keep it from leaking into the
+  // rest of the file's delegations.
+  afterEach(() => {
+    unregisterDeadline("parent-session")
+  })
+
+  it("retains the prompt-only timeout bound for the per-task implement call shape", async () => {
+    const fake = fakeClient()
+    const result = await invokeDelegate(recordingExec().exec, baseDeps(fake.client, { [tasksAbs]: tasksBefore }), {
+      prompt: "Implement task 1.1.",
+      task_classification: "judgment",
+      checkpoint_step: "implement",
+      phase: 1,
+      feature_dir: featureDir,
+      timeout: 1_800_001,
+    })
+
+    expect(result.status).toBe("error")
+    if (result.status === "error") {
+      expect(result.code).toBe("INVALID_INPUT")
+      expect(result.message).toContain("prompt-only delegation timeout must not exceed 1800000 ms")
+    }
+    expect(fake.calls.creates).toHaveLength(0)
+  })
+
+  it("accepts an explicit timeout at the retained ceiling and bypasses derivation (PTB-FR-001)", async () => {
+    const fake = fakeClient()
+    const result = await invokeDelegate(recordingExec().exec, baseDeps(fake.client, { [tasksAbs]: tasksBefore }), {
+      prompt: "Implement task 1.1.",
+      task_classification: "judgment",
+      checkpoint_step: "implement",
+      phase: 1,
+      feature_dir: featureDir,
+      timeout: 1_800_000,
+    })
+
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      // The per-task call site always supplies a derivation, so only the
+      // explicitTimeoutMs wiring makes the caller's argument win: the
+      // served four-task phase would derive ~780_000 ms, but the explicit
+      // request passes through as the bare explicit provenance — no
+      // derivation term modifies it. The value also sits exactly at the
+      // retained 1_800_000 prompt-only ceiling (AE-FR-010), the accepted
+      // boundary complementing the above-ceiling rejection.
+      expect(result.data.timeout_provenance).toEqual({ effective_ms: 1_800_000, source: "explicit" })
+      // Unbudgeted success reports no remaining budget (PTB-FR-004).
+      expect(result.data.remaining_ms).toBeNull()
+    }
+  })
+
+  it("derives the per-task wall clock from the phase task count and prompt bytes (PTB-FR-001)", async () => {
+    const fake = fakeClient()
+    const reads = fakeReadText({ [tasksAbs]: tasksBefore })
+    const deps: DelegateCommandDependencies = {
+      client: fake.client,
+      modelMatrix: matrixFreeDeps,
+      readText: reads.readText,
+      fileExists: fakeFileExists([]).fileExists,
+    }
+    const result = await invokeDelegate(recordingExec().exec, deps, {
+      prompt: "Implement task 1.1.",
+      task_classification: "judgment",
+      checkpoint_step: "implement",
+      phase: 1,
+      feature_dir: featureDir,
+    })
+
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") {
+      // Oracle: the same pure derivation over the observed inputs — four
+      // phase-1 tasks parsed from the served tasks.md and the byte length
+      // of the prompt the child actually received.
+      const expected = derivePerTaskTimeoutMs({
+        baseMs: DEFAULT_TIMEOUT_MILLISECONDS,
+        phaseTaskCount: 4,
+        phaseFileCount: 0,
+        promptBytes: Buffer.byteLength(deliveredPrompt(fake.calls), "utf8"),
+        tier: null,
+        maxParallelRuns: 1,
+        configuredCeilingMs: MAX_TIMEOUT_MILLISECONDS,
+      })
+      expect(result.data.timeout_provenance).toEqual(expected.provenance)
+      // Unbudgeted success reports no remaining budget (PTB-FR-004).
+      expect(result.data.remaining_ms).toBeNull()
+    }
+    // The derivation read the served tasks.md through the shared seam.
+    expect(reads.calls).toContain(tasksAbs)
+  })
+
+  it("applies the derived window as the wall clock, not the flat default", async () => {
+    vi.useFakeTimers()
+    try {
+      // Six phase-1 tasks: (6-1) x 60_000 = 300_000 ms of sibling
+      // overhead, so the derived window is ~900_000 ms — past the
+      // 600_000 flat default the wall clock must no longer use.
+      const sixTasks = [
+        "## Phase 1: Build the feature",
+        "",
+        "- [ ] 1.1 First task",
+        "- [ ] 1.2 Second task",
+        "- [ ] 1.3 Third task",
+        "- [ ] 1.4 Fourth task",
+        "- [ ] 1.5 Fifth task",
+        "- [ ] 1.6 Sixth task",
+      ].join("\n")
+      const fake = fakeClient({ hangPrompt: true, activeProbe: true })
+      const pending = invokeDelegate(recordingExec().exec, baseDeps(fake.client, { [tasksAbs]: sixTasks }), {
+        prompt: "Implement task 1.6.",
+        task_classification: "judgment",
+        checkpoint_step: "implement",
+        phase: 1,
+        feature_dir: featureDir,
+      })
+      // Past the flat default: the derived window keeps the run alive.
+      await vi.advanceTimersByTimeAsync(700_000)
+      expect(fake.calls.aborts).toHaveLength(0)
+      const expected = derivePerTaskTimeoutMs({
+        baseMs: DEFAULT_TIMEOUT_MILLISECONDS,
+        phaseTaskCount: 6,
+        phaseFileCount: 0,
+        promptBytes: Buffer.byteLength(deliveredPrompt(fake.calls), "utf8"),
+        tier: null,
+        maxParallelRuns: 1,
+        configuredCeilingMs: MAX_TIMEOUT_MILLISECONDS,
+      })
+      await vi.advanceTimersByTimeAsync(expected.effectiveMs - 700_000 + 10_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.timeout).toMatchObject({
+        kind: "wall_clock",
+        requested_ms: expected.effectiveMs,
+      })
+      expect(result.timeout_provenance).toMatchObject({ source: "derived", phase_task_count: 6 })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("threads the resume hint into an idle-timeout per-task envelope (PTB-FR-003)", async () => {
+    vi.useFakeTimers()
+    try {
+      const status = sequencedStatusExec(["", "M  lib/agent-executor.ts\0"])
+      const fake = fakeClient({ hangPrompt: true, stalledProbe: true })
+      const deps: DelegateCommandDependencies = {
+        client: fake.client,
+        modelMatrix: matrixFreeDeps,
+        // Three tasks.md reads in order: the derivation read, the
+        // delegation-start snapshot, and the abort-time snapshot.
+        readText: sequencedTasksReadText(tasksAbs, [tasksBefore, tasksBefore, tasksAfter]),
+        fileExists: fakeFileExists([]).fileExists,
+      }
+      const pending = invokeDelegate(status.exec, deps, {
+        prompt: "Implement task 1.1.",
+        task_classification: "judgment",
+        checkpoint_step: "implement",
+        phase: 1,
+        feature_dir: featureDir,
+      })
+      // Four phase tasks derive a ~780_000 ms wall clock, so the 600_000
+      // idle window fires first on the stalled child.
+      await vi.advanceTimersByTimeAsync(700_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.retryable).toBe(true)
+      expect(result.timeout).toMatchObject({ kind: "idle", idle_timeout_ms: 600_000 })
+      expect((result.timeout as Record<string, unknown>).resume).toEqual({
+        files_modified: ["lib/agent-executor.ts"],
+        tasks_completed: ["1.1"],
+      })
+      expect(result.timeout_provenance).toMatchObject({ source: "derived", phase_task_count: 4 })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("returns an empty resume hint when the timed-out child made no durable progress", async () => {
+    vi.useFakeTimers()
+    try {
+      const status = sequencedStatusExec(["", ""])
+      const fake = fakeClient({ hangPrompt: true, stalledProbe: true })
+      const deps: DelegateCommandDependencies = {
+        client: fake.client,
+        modelMatrix: matrixFreeDeps,
+        readText: sequencedTasksReadText(tasksAbs, [tasksBefore, tasksBefore, tasksBefore]),
+        fileExists: fakeFileExists([]).fileExists,
+      }
+      const pending = invokeDelegate(status.exec, deps, {
+        prompt: "Implement task 1.1.",
+        task_classification: "judgment",
+        checkpoint_step: "implement",
+        phase: 1,
+        feature_dir: featureDir,
+      })
+      await vi.advanceTimersByTimeAsync(700_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect((result.timeout as Record<string, unknown>).resume).toEqual({
+        files_modified: [],
+        tasks_completed: [],
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("returns a null resume hint when the abort-time state is unreadable", async () => {
+    vi.useFakeTimers()
+    try {
+      const status = sequencedStatusExec(["", "M  lib/agent-executor.ts\0"])
+      const fake = fakeClient({ hangPrompt: true, stalledProbe: true })
+      const deps: DelegateCommandDependencies = {
+        client: fake.client,
+        modelMatrix: matrixFreeDeps,
+        // Only two bodies: the abort-time read throws, so the hint fails
+        // closed to null without masking the timeout it annotates.
+        readText: sequencedTasksReadText(tasksAbs, [tasksBefore, tasksBefore]),
+        fileExists: fakeFileExists([]).fileExists,
+      }
+      const pending = invokeDelegate(status.exec, deps, {
+        prompt: "Implement task 1.1.",
+        task_classification: "judgment",
+        checkpoint_step: "implement",
+        phase: 1,
+        feature_dir: featureDir,
+      })
+      await vi.advanceTimersByTimeAsync(700_000)
+      const result = (await pending) as unknown as Record<string, unknown>
+
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect((result.timeout as Record<string, unknown>).resume).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("fails fast budget_exhausted without spawning under a spent ancestor budget (PTB-FR-002)", async () => {
+    vi.useFakeTimers()
+    try {
+      // 20_000 ms left is under the 30_000 minimum once the 60_000
+      // reserve applies, so the per-task wrapper refuses before spawning.
+      registerDeadline("parent-session", Date.now() + 20_000)
+      const status = sequencedStatusExec(["", ""])
+      const fake = fakeClient()
+      const deps: DelegateCommandDependencies = {
+        client: fake.client,
+        modelMatrix: matrixFreeDeps,
+        readText: sequencedTasksReadText(tasksAbs, [tasksBefore, tasksBefore, tasksBefore]),
+        fileExists: fakeFileExists([]).fileExists,
+      }
+      const result = (await invokeDelegate(status.exec, deps, {
+        prompt: "Implement task 1.1.",
+        task_classification: "judgment",
+        checkpoint_step: "implement",
+        phase: 1,
+        feature_dir: featureDir,
+      })) as unknown as Record<string, unknown>
+
+      expect(result.code).toBe("DELEGATE_FAILED")
+      expect(result.retryable).toBe(false)
+      expect(String(result.message)).toContain("budget exhausted")
+      expect(result.timeout).toMatchObject({ kind: "budget" })
+      // The frozen fake clock makes the remaining-budget report exact.
+      expect(result.remaining_ms).toBe(20_000)
+      expect(result.timeout_provenance).toMatchObject({ source: "derived" })
+      // Fail-fast happens after the delegation-start snapshot but before
+      // any child session exists; the no-progress hint still reports.
+      expect((result.timeout as Record<string, unknown>).resume).toEqual({
+        files_modified: [],
+        tasks_completed: [],
+      })
+      expect(fake.calls.creates).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("reports the remaining budget on a budgeted success (PTB-FR-004)", async () => {
+    vi.useFakeTimers()
+    try {
+      registerDeadline("parent-session", Date.now() + 500_000)
+      const fake = fakeClient()
+      const result = await invokeDelegate(recordingExec().exec, baseDeps(fake.client, { [tasksAbs]: tasksBefore }), {
+        prompt: "Implement task 1.1.",
+        task_classification: "judgment",
+        checkpoint_step: "implement",
+        phase: 1,
+        feature_dir: featureDir,
+      })
+
+      expect(result.status).toBe("ok")
+      if (result.status === "ok") {
+        expect(result.data.timeout_provenance).toMatchObject({ source: "derived", phase_task_count: 4 })
+        // The frozen clock pins the report to the registered deadline.
+        expect(result.data.remaining_ms).toBe(500_000)
+      }
     } finally {
       vi.useRealTimers()
     }

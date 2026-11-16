@@ -6,6 +6,54 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- per-task-delegation-budgets: `/uf.unleash` per-task
+  implementation delegations (`uf_delegate_command` prompt-only,
+  `checkpoint_step: "implement"`, `phase`) now derive their wall
+  clock from the phase's work signals rather than a flat
+  per-delegation default. The pure `derivePerTaskTimeoutMs`
+  helper in `.opencode/lib/run-timeout.ts` composes the base
+  window with the phase's `tasks.md` task count and file surface,
+  measured prompt bytes, model tier, and parallel-run contention
+  (0.15 per run above one, capped at 1.5) -- monotonic in phase
+  size, clamped to the existing `1_800_000` ms ceiling with
+  floor-at-base precedence; an explicit caller `timeout` still
+  wins outright (PTB-FR-001). Per-task children of a budgeted
+  command-path parent inherit the parent's idle watchdog through
+  the existing delegation-budget registry -- no new global idle
+  default: a progressing child (`child_active` or a running tool
+  part) is not aborted by wall clock while it progresses, a
+  stalled child aborts retryably via `idle_timeout`, wall clock
+  stays the absolute backstop, and hierarchical clamping plus the
+  non-retryable `budget_exhausted` fail-fast are unchanged from
+  #930/#950 (PTB-FR-002). Wall-clock, idle, and budget
+  terminations of those delegations carry an advisory `resume`
+  hint (`files_modified`, `tasks_completed`), assembled from
+  `git status --porcelain` deltas and `tasks.md` checkbox diffs
+  snapshotted at delegation start and diffed at abort time;
+  `null` when the abort-time state is unreadable (fail-closed),
+  paths and task ids only -- never message content (PTB-FR-003).
+  Per-task results report `remaining_ms` (remaining
+  budgeted-ancestor budget, omitted when unbudgeted), and the
+  `checkpoint` tool's `phase` payload accepts and round-trips it
+  so phase checkpoints record it; a phase-recorded checkpoint also
+  returns a tool-rendered `phase_checkpoint_line` (remaining-budget
+  clause exactly when `remaining_ms` was recorded) that
+  `/uf.unleash` emits verbatim, never reconstructed (PTB-FR-004).
+  Every per-task result
+  carries machine-parseable `timeout_provenance` (derivation
+  inputs, unclamped value, ceiling, clamp outcome) on success
+  and failure alike. Constitution alignment verified against
+  the implemented surface with all six principles PASS
+  (proposal's Constitution Alignment assessment).
+  Instruction-text delta: .opencode/commands/uf.unleash.md
+  +61 lines / +768 tokens (retry routing branches on the
+  envelope's error.retryable; the phase checkpoint budget
+  line is tool-rendered and emitted verbatim). The
+  IL-030/IL-031 instruction-budget overruns pre-date this
+  change (20569 self / ~32057 loaded tokens at merge-base
+  9c42f8f7). (Spec:
+  openspec/changes/per-task-delegation-budgets/proposal.md)
+  (Fixes: #1080, Docs: #424)
 - extract-feedback-triage-artifact-tool: new
   `write_feedback_triage_artifact` tool in the `uf-workflow`
   plugin renders and writes the `/uf.address-feedback`
