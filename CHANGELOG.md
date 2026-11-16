@@ -1568,6 +1568,18 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/uf-gate/, Closes: #514)
 
 ### Fixed
+- address-feedback-skip-branch-terminal-state: define the
+  skip-branch terminal state at the end of Section 4.6
+  (`complete: false` including `reply: "issue_failed"`,
+  `issue_number: null`, `thread: "reply_not_posted"` ends the run:
+  no `reply-comments` checkpoint, no Section 4.7 artifact or
+  progress clear; re-run resumes from cache) and the FILE
+  `filed_issue_number`/`filed_issue_url` rendering in Section 4.7
+  (`complete: true` runs carry joined identity, skip-posting path
+  renders `null`/`null` with decision-based `filed` count via
+  `countDecision("file")` and `joinFiledIssues` recording reality
+  rather than an error), grounded to `post_feedback_replies` and
+  `write_feedback_triage_artifact` behavior. (Fixes: #1029)
 - fix-feedback-reply-followups: three reliability fixes to the
   unattended feedback and review-dispatch flows (issue #1023,
   epic #1060 Tier 2). gh exit code 4 is now classified one way

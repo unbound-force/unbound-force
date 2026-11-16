@@ -1323,6 +1323,19 @@ Posted 4 of 4 reply comments. Resolved 3 of 3 addressed threads.
 Posted 3 of 6 reply comments. Items 4, 5, 6 not posted. Resolved 2 of 3 addressed threads. Re-run `/uf.address-feedback 42` to retry.
 ```
 
+A `complete: false` result — including the skip branch where
+a FILE item's issue filing fails (`reply: "issue_failed"`,
+`issue_number: null`, `thread: "reply_not_posted"`) — ends the
+run at Section 4.6: print the `summary` line verbatim plus each
+item whose `error` is set, do not record the `reply-comments`
+checkpoint, and do not run Section 4.7 (no artifact is written
+and no progress is cleared). Re-run `/uf.address-feedback
+<PR_NUMBER>` with the same confirmed items resumes from the
+cache. Section 4.7 runs only after `complete: true` with its
+checkpoint, or after the skip-posting path at Section
+4.5 (which skips Section 4.6 entirely and omits
+`replies_result`).
+
 Do not post, file, or resolve anything by hand: the re-run
 resumes from the cache. On an error envelope (`status: "error"`,
 with `code`, `message`, and `retryable`), report it verbatim and
@@ -1375,6 +1388,15 @@ Then call `write_feedback_triage_artifact` once, with:
 - `items`: the built items, in posting order
 - `replies_result`: the `post_feedback_replies` success data, when
   Section 4.6 ran; omit it entirely when the author skipped posting
+
+On a `complete: true` run, every FILE item's `filed_issue_number`
+and `filed_issue_url` carry the joined identity from
+`replies_result` — a complete run cannot contain a failed filing.
+On the skip-posting path (`replies_result` omitted), every FILE
+item renders `filed_issue_number: null` and `filed_issue_url:
+null`; the `filed` count is decision-based
+(`countDecision("file")`), and `joinFiledIssues` renders those
+nulls as data, recording reality rather than an error.
 
 The tool owns the mechanics: it joins each FILE item to its filed
 issue from the replies result by comment identity (cross-checking
