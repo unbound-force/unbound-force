@@ -17,8 +17,9 @@
 - [x] 1.2 Merge eval-infra's `feat/trajectory-assertions` into
       `unbound-force/eval-infra` main and note the commit to pin
       (8a31ef0, eval-infra#3).
-- [x] 1.3 Ask an org admin to add the `ENMAAS_KEY` Actions secret
-      for this repo (D3).
+- [x] 1.3 Make the provider key available to the workflow (D3):
+      superseded by task 4.4, which derives it from the existing
+      `OPENCODE_CONFIG_CONTENT` org secret.
 
 ## 2. Land the harness (EV-FR-001 to EV-FR-004)
 
@@ -50,6 +51,9 @@
 - [x] 4.3 Write each fixture's result to the job summary and upload
       the trajectory, run log and `runs.db` with `if: always()`
       (EV-FR-006).
+- [ ] 4.4 Derive `ENMAAS_KEY` in the run step from the
+      `OPENCODE_CONFIG_CONTENT` secret, masked, failing with a clear
+      message when it has no literal EnMaaS key (D3, EV-FR-007).
 
 ## 5. Verification
 

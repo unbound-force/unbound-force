@@ -56,8 +56,9 @@ gate merges.
 - **New files**: `.eval/**`, `.github/workflows/ci_eval.yml`.
 - **Edited files**: `Makefile` (two targets), `AGENTS.md` (CI
   table, project structure, testing conventions).
-- **Repository settings**: an `ENMAAS_KEY` Actions secret. The
-  workflow needs no other secret and only `contents: read`.
+- **Repository settings**: none new. The workflow extracts the
+  provider key from the org's existing `OPENCODE_CONFIG_CONTENT`
+  secret and needs only `contents: read`.
 - **Dependency**: the driver changes on eval-infra's
   `feat/trajectory-assertions` branch must be merged into
   `unbound-force/eval-infra` main before the pin can point at an
