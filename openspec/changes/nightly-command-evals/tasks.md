@@ -51,7 +51,7 @@
 - [x] 4.3 Write each fixture's result to the job summary and upload
       the trajectory, run log and `runs.db` with `if: always()`
       (EV-FR-006).
-- [ ] 4.4 Derive `ENMAAS_KEY` in the run step from the
+- [x] 4.4 Derive `ENMAAS_KEY` in the run step from the
       `OPENCODE_CONFIG_CONTENT` secret, masked, failing with a clear
       message when it has no literal EnMaaS key (D3, EV-FR-007).
 
