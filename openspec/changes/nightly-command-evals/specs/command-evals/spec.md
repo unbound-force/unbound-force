@@ -129,15 +129,27 @@ fixture fails. A job MUST fail when any of its assertions fails.
 
 **ID: EV-FR-007** This requirement MUST be satisfied.
 
-The provider key MUST come only from the `ENMAAS_KEY` Actions secret
-in CI or the environment locally. No script MAY print it, and no
-artifact or summary MAY contain it.
+The provider key MUST reach the eval runtime only as the
+`ENMAAS_KEY` environment variable. Locally it comes from the
+environment. In CI it MUST be extracted from the org's
+`OPENCODE_CONFIG_CONTENT` secret, taking the API key of the provider
+whose `baseURL` points at the EnMaaS endpoint, and MUST be masked
+before use. No other part of that secret MAY be passed to opencode.
+No script MAY print the key or the secret, and no artifact or
+summary MAY contain them.
 
 #### Scenario: Missing key
 - **GIVEN** `ENMAAS_KEY` is unset
 - **WHEN** `.eval/run.sh` starts
 - **THEN** it exits non-zero naming the missing variable, without
   starting opencode
+
+#### Scenario: Secret without a usable EnMaaS key
+- **GIVEN** an `OPENCODE_CONFIG_CONTENT` secret with no EnMaaS
+  provider, or one whose API key is an `{env:...}` reference
+- **WHEN** the CI run step starts
+- **THEN** it fails with a message naming the problem
+- **AND** it prints nothing from the secret
 
 ### Requirement: Local Parity
 

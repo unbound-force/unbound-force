@@ -55,15 +55,26 @@ them in parallel on separate runners. The longest job (about 90
 minutes) sets the wall time instead of the sum of all five. Each job
 gets a 120-minute timeout.
 
-### D3. `ENMAAS_KEY`, not `OPENCODE_CONFIG_CONTENT`
+### D3. The key comes from `OPENCODE_CONFIG_CONTENT`, the config doesn't
 
 The org's `OPENCODE_CONFIG_CONTENT` secret carries a whole opencode
-config. The eval runtime needs the key itself for two reasons:
+config, including the EnMaaS provider and its literal API key. The
+eval runtime needs only the key, as `ENMAAS_KEY`, for two reasons:
 auto-question calls EnMaaS directly using `{env:ENMAAS_KEY}`, and an
 inline opencode config takes precedence over project config, so any
 `permission` block in that secret could loosen the eval's
-`external_directory` rules (EV-FR-002). A plain `ENMAAS_KEY` secret
-keeps CI identical to local runs.
+`external_directory` rules (EV-FR-002).
+
+So in CI the run step reads the secret with `jq`, takes the API key
+of the provider whose `baseURL` points at EnMaaS, masks it, and
+exports it as `ENMAAS_KEY` for that step only. The config itself is
+never exported, so nothing else in it reaches opencode, and local
+runs keep using `ENMAAS_KEY` unchanged. This reuses the secret the
+org already maintains instead of adding a second copy of the key.
+It ties the evals to the secret's layout: if the secret has no
+EnMaaS provider or holds an `{env:...}` reference instead of a
+literal key, the step fails with a message that names the problem
+and prints nothing from the secret.
 
 ### D4. The driver is pinned like the plugins
 
