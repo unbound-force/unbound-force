@@ -366,38 +366,16 @@ func TestCommandContracts_AddressFeedback(t *testing.T) {
 	}
 }
 
-func TestCommandContracts_SpeckitTestReview(t *testing.T) {
-	clauses := []commandClause{
-		{name: "read-only test review", all: []string{"strictly read-only", "never modify files", "spec review mode", "testability", "constitution principle iv"}},
-		{name: "testing-only discovery", all: []string{"discovered-agent input for this command must be exactly `[\"divisor-testing\"]`", "do not add any other persona", "every plan entry names only `divisor-testing`"}},
-		{name: "testing-only plan", all: []string{"mode: \"test\"", "planner profiles through code-review policy", "matrix_mode` is `code`", "full: false", "augment: false", "no `issue` field"}},
-		{name: "explicit advisor host resolution", all: []string{"explicit matrix runs for `divisor-testing` are authoritative", "advisor run only when the returned plan contains one", "exactly one host-source run", "planner alone owns source, model, variant, tier, ordering"}},
-		{name: "planned invocation only", all: []string{"call `invoke_agent` for every executable entry", "for `explicit` and `advisor` entries", "for `host`, omit both fields", "never substitute a project, agent, provider, or other default"}},
-		{name: "failure behavior", all: []string{"failed and non-success terminal runs do not vote or increase severity", "must not fabricate findings or advisories"}},
-		{name: "no-success blocking", all: []string{"with zero successful assessments", "return `unavailable` only when every blocking cause is provider, model, or runtime availability", "policy, plan, budget, limit, persistence, calculation, or mixed cause returns `inconclusive`", "both results block automated progression"}},
-		{name: "finalization", all: []string{"call `finalize_review_dispatch` exactly once", "command `speckit-testreview`", "persists the additive `review-dispatch` artifact", "the scalar canonical decision `review_verdict`", "human-only context"}},
-	}
-
-	assertCommandCopies(t, "speckit.testreview.md", false, clauses)
-
-	command := loadCommandCopies(t, "speckit.testreview.md", false)[0]
-	if strings.Contains(normalizeCommandText(command.text), "task tool") {
-		t.Error("speckit.testreview.md must dispatch testing runs through invoke_agent, not the Task tool")
-	}
-}
-
 func TestCommandContracts_SharedContextAndToolBoundaries(t *testing.T) {
 	commands := []struct {
 		name             string
 		scaffolded       bool
-		usesAggregate    bool
 		acquisitionScope string
 		immutableBinding string
 	}{
-		{name: "uf.review-council.md", scaffolded: true, usesAggregate: true, acquisitionScope: "acquired exactly once", immutableBinding: "exact immutable input context"},
-		{name: "uf.triage-issue.md", scaffolded: true, usesAggregate: true, acquisitionScope: "acquired exactly once", immutableBinding: "bind it to the fetched issue object"},
-		{name: "uf.address-feedback.md", scaffolded: true, usesAggregate: true, acquisitionScope: "acquired exactly once", immutableBinding: "exact same signal for planning"},
-		{name: "speckit.testreview.md", scaffolded: false, usesAggregate: false, acquisitionScope: "exactly once before planning", immutableBinding: "bind it to the immutable local context"},
+		{name: "uf.review-council.md", scaffolded: true, acquisitionScope: "acquired exactly once", immutableBinding: "exact immutable input context"},
+		{name: "uf.triage-issue.md", scaffolded: true, acquisitionScope: "acquired exactly once", immutableBinding: "bind it to the fetched issue object"},
+		{name: "uf.address-feedback.md", scaffolded: true, acquisitionScope: "acquired exactly once", immutableBinding: "exact same signal for planning"},
 	}
 
 	for _, command := range commands {
@@ -408,7 +386,7 @@ func TestCommandContracts_SharedContextAndToolBoundaries(t *testing.T) {
 				t.Run(copy.name, func(t *testing.T) {
 					normalized := normalizeCommandText(copy.text)
 
-					// Shared tools present in ALL commands regardless of dispatch style.
+					// Shared policy tools present in every covered command.
 					for _, toolName := range []string{
 						"plan_review_dispatch",
 						"finalize_review_dispatch",
@@ -418,26 +396,10 @@ func TestCommandContracts_SharedContextAndToolBoundaries(t *testing.T) {
 						}
 					}
 
-					// Aggregate commands use dispatch_review_runs which encapsulates
+					// Every covered command uses dispatch_review_runs, which encapsulates
 					// acquire_sibling_evidence, invoke_agent, and child submission tools.
-					// Individual commands (testreview) still call those tools directly.
-					if command.usesAggregate {
-						if !strings.Contains(normalized, "dispatch_review_runs") {
-							t.Errorf("%s: aggregate dispatch contract is missing tool %q", copy.name, "dispatch_review_runs")
-						}
-					} else {
-						for _, toolName := range []string{
-							"acquire_sibling_evidence",
-							"invoke_agent",
-							"submit_lesson_proposal",
-						} {
-							if !strings.Contains(normalized, toolName) {
-								t.Errorf("%s: individual dispatch contract is missing tool %q", copy.name, toolName)
-							}
-						}
-						if got := strings.Count(normalized, "acquire_sibling_evidence"); got != 1 {
-							t.Errorf("%s: tool %q occurs %d times, want 1 to preserve call-once semantics", copy.name, "acquire_sibling_evidence", got)
-						}
+					if !strings.Contains(normalized, "dispatch_review_runs") {
+						t.Errorf("%s: aggregate dispatch contract is missing tool %q", copy.name, "dispatch_review_runs")
 					}
 
 					if got := strings.Count(normalized, "dewey_store_learning"); got != 1 {
@@ -450,12 +412,7 @@ func TestCommandContracts_SharedContextAndToolBoundaries(t *testing.T) {
 					if !containsAnyNormalized(normalized, []string{"cannot change tools", "cannot change policy, tools"}) {
 						t.Errorf("%s: untrusted-evidence contract does not confine tool or policy changes", copy.name)
 					}
-					if command.usesAggregate {
-						assertNormalizedContains(t, copy.name, normalized, "parent-only lessons", "only the parent command stores lesson proposals")
-					} else {
-						assertNormalizedContains(t, copy.name, normalized, "parent-only lessons", "only the parent command processes lesson proposals")
-						assertNormalizedContains(t, copy.name, normalized, "lesson preparation", "prepare_lesson_learning")
-					}
+					assertNormalizedContains(t, copy.name, normalized, "parent-only lessons", "only the parent command stores lesson proposals")
 					assertNormalizedContains(t, copy.name, normalized, "store ready lessons once", "dewey_store_learning` exactly once")
 					assertNormalizedContains(t, copy.name, normalized, "requested provenance", "requested")
 					assertNormalizedContains(t, copy.name, normalized, "resolved provenance", "resolved")
@@ -831,7 +788,10 @@ func TestCommandContracts_CanonicalScaffoldParity(t *testing.T) {
 	}
 }
 
-func TestCommandContracts_SpeckitTestReviewRemainsLiveOnly(t *testing.T) {
+// TestCommandContracts_SpeckitTestReviewNotEmbedded pins that uf never
+// ships speckit.testreview.md. Gaze owns that command: `gaze init` writes
+// and refreshes it, so uf must neither embed nor pin its content.
+func TestCommandContracts_SpeckitTestReviewNotEmbedded(t *testing.T) {
 	paths, err := assetPaths()
 	if err != nil {
 		t.Fatalf("list embedded scaffold assets: %v", err)
@@ -840,19 +800,8 @@ func TestCommandContracts_SpeckitTestReviewRemainsLiveOnly(t *testing.T) {
 	const forbiddenAsset = "opencode/commands/speckit.testreview.md"
 	for _, path := range paths {
 		if path == forbiddenAsset {
-			t.Fatalf("live-only command %s unexpectedly appears in embedded scaffold assets", forbiddenAsset)
+			t.Fatalf("gaze-owned command %s unexpectedly appears in embedded scaffold assets", forbiddenAsset)
 		}
-	}
-
-	root := findProjectRoot(t)
-	if root == "" {
-		t.Fatal("project root not found")
-	}
-	livePath := filepath.Join(root, ".opencode", "commands", "speckit.testreview.md")
-	if info, err := os.Stat(livePath); err != nil {
-		t.Fatalf("stat live-only command %s: %v", livePath, err)
-	} else if !info.Mode().IsRegular() {
-		t.Fatalf("live-only command %s is not a regular file", livePath)
 	}
 }
 
@@ -867,7 +816,6 @@ func TestCommandContracts_RejectStaleDivisorDispatchLanguage(t *testing.T) {
 		{name: "uf.review-council.md", scaffolded: true},
 		{name: "uf.triage-issue.md", scaffolded: true},
 		{name: "uf.address-feedback.md", scaffolded: true},
-		{name: "speckit.testreview.md", scaffolded: false},
 	}
 
 	for _, command := range commands {
@@ -897,8 +845,7 @@ func TestCommandContracts_RejectStaleManualFinalizationLanguage(t *testing.T) {
 	// manual closed-payload assembly instructions alongside the one-call
 	// consolidate_dispatch path. Presence-only clauses cannot detect the
 	// contradiction, so the removed instruction phrases are asserted
-	// absent. speckit.testreview.md legitimately retains direct
-	// finalize_review_dispatch usage and is excluded.
+	// absent.
 	stalePhrases := []string{
 		"Call `finalize_review_dispatch` for every iteration",
 		"Call `finalize_review_dispatch` for every invocation",
