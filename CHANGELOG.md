@@ -136,7 +136,9 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (`.eval/lib/pins.sh`), and check deterministic assertions on
   the trajectory. `ci_eval.yml` runs every fixture nightly and on
   demand, one job per fixture, report-only; `make eval` and
-  `make eval-fast` run them locally. Needs `ENMAAS_KEY`.
+  `make eval-fast` run them locally with `ENMAAS_KEY`; CI takes
+  that key from the existing `OPENCODE_CONFIG_CONTENT` org secret
+  and passes nothing else from it to opencode.
   (Spec: openspec/changes/nightly-command-evals/)
 - checkout-pr-head: new `checkout_pr_head` tool in the
   `uf-workflow` plugin puts the working tree on a PR's head and

@@ -21,6 +21,10 @@ if [ -r "$HOME/.config/shell/env.sh" ]; then
 fi
 : "${ENMAAS_KEY:?ENMAAS_KEY must be set}"
 
+# An inherited inline opencode config would take precedence over the
+# eval's own and change the runtime under test (EV-FR-001, D3).
+unset OPENCODE_CONFIG_CONTENT OPENCODE_CONFIG
+
 version="$(opencode --version)"
 if [ "$version" != "$EVAL_OPENCODE_VERSION" ]; then
   echo "opencode $version at $(command -v opencode); evals are pinned to $EVAL_OPENCODE_VERSION" >&2

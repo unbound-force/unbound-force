@@ -124,8 +124,14 @@ jobs:
 
       - name: Run ${{ matrix.fixture }}
         env:
-          ENMAAS_KEY: ${{ secrets.ENMAAS_KEY }}
+          OPENCODE_CONFIG_CONTENT: ${{ secrets.OPENCODE_CONFIG_CONTENT }}
         run: |
+          # Take only the EnMaaS key from the org's opencode config; the
+          # config itself must not reach opencode (design.md D3).
+          ENMAAS_KEY="$(.eval/lib/key-from-opencode-config.sh)"
+          echo "::add-mask::$ENMAAS_KEY"
+          export ENMAAS_KEY
+          unset OPENCODE_CONFIG_CONTENT
           mkdir -p "$EVAL_OUT"
           make eval-deps
           .eval/run.sh --only "^${FIXTURE}\$" --output "$EVAL_OUT" 2>&1 | tee "$EVAL_OUT/run.log"
