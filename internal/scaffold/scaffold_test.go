@@ -2909,13 +2909,10 @@ func TestSCFR001_SiblingTemplateAndLiveOnlyTestReviewExclusions(t *testing.T) {
 		t.Error("sibling scaffold must not contain live organization entries")
 	}
 
-	const liveOnly = "opencode/commands/speckit.testreview.md"
-	if embedded[liveOnly] {
-		t.Errorf("live-only Speckit test-review command must not be embedded as %q", liveOnly)
-	}
-	root := findProjectRoot(t)
-	if _, err := os.Stat(filepath.Join(root, ".opencode", "commands", "speckit.testreview.md")); err != nil {
-		t.Fatalf("live-only Speckit test-review command is missing: %v", err)
+	// speckit.testreview.md is owned and refreshed by `gaze init`.
+	const gazeOwned = "opencode/commands/speckit.testreview.md"
+	if embedded[gazeOwned] {
+		t.Errorf("gaze-owned Speckit test-review command must not be embedded as %q", gazeOwned)
 	}
 }
 
@@ -12886,7 +12883,7 @@ func TestSpeckitTemplates_RequiredReferences(t *testing.T) {
 	// Explicit enumeration of the five in-scope upstream files (D2 —
 	// NOT derived from a speckit.*.md glob). The four UF-custom
 	// commands (analyze, checklist, clarify, taskstoissues) and
-	// testreview are intentionally excluded.
+	// the gaze-owned testreview are intentionally excluded.
 	inScope := []speckitFile{
 		{file: "speckit.specify.md", blockLabel: "Spec-phase guardrails block", requireReviewCouncil: false},
 		{file: "speckit.plan.md", blockLabel: "Spec-phase guardrails block", requireReviewCouncil: false},

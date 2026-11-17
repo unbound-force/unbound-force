@@ -6,11 +6,8 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
-- toolkit-gaze-2.4.0-reconciliation: the gaze 2.4.0 re-scaffold now
-  preserves the repo-forked `.opencode/commands/speckit.testreview.md`
-  (Divisor dispatch contract) instead of overwriting it with the vanilla
-  gaze template, and `.opencode/agents/divisor-gaze-testing.md` is
-  registered as a repo-local, non-embedded agent in
+- toolkit-gaze-2.4.0-reconciliation: `.opencode/agents/divisor-gaze-testing.md`
+  is registered as a repo-local, non-embedded agent in
   `knownNonEmbeddedFiles` (the embedded canonical testing persona
   stays `divisor-testing.md`).
 - review-matrix-policy-mirror: `.uf/review-matrix.yaml` is now a
@@ -1085,6 +1082,13 @@ Each entry follows the format: `- <change-name>: <summary>`.
   Fixes: #536)
 
 ### Removed
+- toolkit-gaze-2.5.0: uf no longer forks or pins
+  `.opencode/commands/speckit.testreview.md`. Gaze created that command
+  and `gaze init` owns and refreshes it, so the gaze 2.5.0 re-scaffold
+  keeps gaze's version. The uf fork's review-dispatch contract and its
+  Go contract tests (`TestCommandContracts_SpeckitTestReview` and the
+  testreview entries in the shared-boundary and stale-language tests)
+  are removed; a test still pins that uf never embeds the file.
 
 - remove-mutimind-mxf-orchestration: Removed Muti-Mind product owner
   hero (cmd/mutimind, internal/backlog, internal/sync, schemas/hero-manifest,
