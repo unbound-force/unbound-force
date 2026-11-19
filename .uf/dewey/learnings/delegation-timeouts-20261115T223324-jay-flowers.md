@@ -1,0 +1,11 @@
+---
+tag: delegation-timeouts
+author: jay-flowers
+category: pattern
+created_at: 2026-11-15T22:33:24Z
+identity: delegation-timeouts-20261115T223324-jay-flowers
+tier: draft
+as_of: "unbound-force@a8f038d3b312a581c6b9d9d1adf637883118d458"
+---
+
+Applying an APPROVE WITH ADVISORIES council outcome through a human apply-all pause-relay decision (idle-timeout-aborts-children-waiting-on, unbound-force/unbound-force#1117, branch opsx/idle-timeout-aborts-children-waiting-on, 2026-11-15): all five advisories landed in one pass and surfaced three durable lessons. First, when a review asks for regex boundary coverage, co-locate the whole equivalence class in one dedicated test (selectRunningTool len=1 and len=128 pass, len=129 and empty string map to null) even where individual cases already sit scattered inside an adversarial-name test — the reviewer reads the class, not the scatter. Second, a combined synthetic-marker + running-tool test only exercises the real regression surface when the marker and the running part live on different sessions of the probed subtree: placing both on the same message only re-tests the message-level collapse (the marker wins, the running triple rides the sample outside the fingerprint), while the actual failure mode is the subtree fold — one session's marker substituting its remembered pre-marker print while another session's running triple must stay in the joined fingerprint — so a print-join or prefix-filter regression would otherwise go uncaught. Third, when human-consented fix content pushes a recorded acceptance line-count cap by one (gaze.md's re-anchored note +9 against task 3.2's +8/+8 pair cap of +16, caused by the consented "output redirected to a file you create (e.g. `> /tmp/gaze-report.json`)" referent), report the actuals with the cause in the checkpoint and PR record rather than trimming the consented content or silently editing un-consented sibling files; the proposal-level bound (total instruction growth <= +30, actual +25) is the governing cap. Verification corollary: the AGENTS.md local lock race (concurrent opencode host writing a gitignored .opencode/package-lock.json mid make plugin-test) reproduces reliably during review-fix re-verification — remove the stray lock and re-run, never delete node_modules.
