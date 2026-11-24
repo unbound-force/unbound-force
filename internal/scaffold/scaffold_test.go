@@ -2586,7 +2586,7 @@ var expectedAssetPaths = []string{
 	"opencode/lib/uf-workflow-types.ts",
 	// UF finale plugin (1)
 	"opencode/plugins/uf-finale/index.ts",
-	// Shared lib modules (16)
+	// Shared lib modules (17)
 	"opencode/lib/agent-executor.ts",
 	"opencode/lib/branch-classification.ts",
 	"opencode/lib/delegation-budget.ts",
@@ -2595,6 +2595,7 @@ var expectedAssetPaths = []string{
 	"opencode/lib/model-matrix.ts",
 	"opencode/lib/preflight-declared.ts",
 	"opencode/lib/progress-state.ts",
+	"opencode/lib/report-recovery.ts",
 	"opencode/lib/review-dispatch-artifact.ts",
 	"opencode/lib/review-dispatch-lesson-proposal.ts",
 	"opencode/lib/review-dispatch-sibling-evidence.ts",
@@ -2651,6 +2652,7 @@ var task42CanonicalAssets = []struct {
 	{asset: "opencode/lib/model-matrix.ts", source: ".opencode/lib/model-matrix.ts"},
 	{asset: "opencode/lib/preflight-declared.ts", source: ".opencode/lib/preflight-declared.ts"},
 	{asset: "opencode/lib/progress-state.ts", source: ".opencode/lib/progress-state.ts"},
+	{asset: "opencode/lib/report-recovery.ts", source: ".opencode/lib/report-recovery.ts"},
 	{asset: "opencode/lib/review-dispatch-artifact.ts", source: ".opencode/lib/review-dispatch-artifact.ts"},
 	{asset: "opencode/lib/review-dispatch-lesson-proposal.ts", source: ".opencode/lib/review-dispatch-lesson-proposal.ts"},
 	{asset: "opencode/lib/review-dispatch-sibling-evidence.ts", source: ".opencode/lib/review-dispatch-sibling-evidence.ts"},
@@ -4780,6 +4782,7 @@ func TestIsToolOwned(t *testing.T) {
 		{"opencode/lib/agent-executor.ts", true},
 		{"opencode/lib/branch-classification.ts", true},
 		{"opencode/lib/delegation-budget.ts", true},
+		{"opencode/lib/report-recovery.ts", true},
 		{"opencode/lib/feedback-replies.ts", true},
 		{"opencode/lib/gh-error.ts", true},
 		{"opencode/lib/review-dispatch-artifact.ts", true},
@@ -5488,6 +5491,7 @@ func TestIsDivisorAsset(t *testing.T) {
 		{"opencode/lib/agent-executor.ts", true},
 		{"opencode/lib/branch-classification.ts", true},
 		{"opencode/lib/delegation-budget.ts", true},
+		{"opencode/lib/report-recovery.ts", true},
 		{"opencode/lib/feedback-replies.ts", true},
 		{"opencode/lib/gh-error.ts", true},
 		{"opencode/lib/review-dispatch-artifact.ts", true},

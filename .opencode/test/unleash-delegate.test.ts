@@ -159,6 +159,16 @@ interface FakeClientOptions {
    * human-decision relay persist precedes the child session's creation.
    */
   readonly onCreate?: () => void
+  /** Message error the child prompt response reports in info.error (report-time failure paths). */
+  readonly promptError?: { readonly name: string; readonly data: Record<string, unknown> }
+  /** Model the child reports instead of echoing the body model (model_mismatch paths). */
+  readonly reportedModel?: { readonly providerID: string; readonly modelID: string }
+  /**
+   * Child transcript served by session.messages (report recovery,
+   * DAR-FR-001/003): an array of messages, oldest first, or "fail" for
+   * a read that rejects.
+   */
+  readonly transcript?: readonly unknown[] | "fail"
 }
 
 function fieldsResponse<T>(data: T): T {
@@ -268,8 +278,11 @@ function fakeClient(options: FakeClientOptions = {}): { readonly client: Client;
       }
       // The child reports the model it was asked to run, so successful
       // delegations never trip the executor's model-mismatch guard.
-      const bodyModel = request.body?.model
-      const info = assistantInfo(bodyModel?.providerID ?? "provider", bodyModel?.modelID ?? "model")
+      const bodyModel = options.reportedModel ?? request.body?.model
+      const info = {
+        ...assistantInfo(bodyModel?.providerID ?? "provider", bodyModel?.modelID ?? "model"),
+        ...(options.promptError !== undefined ? { error: options.promptError } : {}),
+      }
       return fieldsResponse({
         data: { info, parts: options.parts ?? [textPart("delegated output")] },
         error: undefined,
@@ -279,6 +292,19 @@ function fakeClient(options: FakeClientOptions = {}): { readonly client: Client;
       calls.aborts.push(request)
       return fieldsResponse({ data: true, error: undefined } as unknown as AbortResponse)
     },
+    // Report-recovery transcript (DAR-FR-001/003): served to the
+    // wrapper's one-shot read; children keeps any activity probe quiet.
+    ...(options.transcript !== undefined
+      ? {
+          children: async () => ({ data: [] }),
+          messages: async () => {
+            if (options.transcript === "fail") {
+              throw new Error("transcript unavailable")
+            }
+            return { data: options.transcript }
+          },
+        }
+      : {}),
     // Activity-probe endpoints (delegation-timeout-budgets D2), present only
     // for idle-path tests: the child never changes and has no descendants.
     ...(options.stalledProbe === true
@@ -4981,5 +5007,215 @@ describe("uf_delegate_command human-decisions relay envelope", () => {
     }
     expect(appendHumanDecisions).not.toHaveBeenCalled()
     expect(fake.calls.creates).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// uf_delegate_command — report-time recovery (delegate-abort-recovery,
+// DAR-FR-001..003, issue 1199)
+// ---------------------------------------------------------------------------
+
+describe("uf_delegate_command report-time recovery", () => {
+  const ABORTED = { name: "MessageAbortedError", data: { message: "Aborted" } }
+  const UNLEASH = ".opencode/commands/uf.unleash.md"
+  const baseDeps = (client: Client, files: Record<string, string> = {}): DelegateCommandDependencies => ({
+    client,
+    modelMatrix: matrixFreeDeps,
+    readText: fakeReadText(files).readText,
+    fileExists: fakeFileExists([]).fileExists,
+  })
+
+  function transcriptMessage(
+    role: "user" | "assistant",
+    parts: readonly Record<string, unknown>[],
+    extra: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return { info: { id: `m-${role}-${parts.length}`, role, ...extra }, parts }
+  }
+
+  function withState(): void {
+    const state: ProgressState = {
+      command: "uf.unleash",
+      branch: "opsx-unleash-deterministic-tools",
+      key: "opsx-unleash-deterministic-tools",
+      current_step: "spec-review",
+      completed_steps: ["tier-routing", "spec-review"],
+      data: {},
+      created_at: "2026-11-24T00:00:00.000Z",
+      updated_at: "2026-11-24T00:00:00.000Z",
+    }
+    vi.mocked(lstatSync).mockImplementation(
+      () => ({ isSymbolicLink: () => false }) as unknown as ReturnType<typeof lstatSync>,
+    )
+    vi.mocked(readFileSync).mockImplementation(() => JSON.stringify(state))
+  }
+
+  it("keeps the aborted response text, resume state, and diagnostics for a command-path abort", async () => {
+    withState()
+    const fake = fakeClient({ promptError: ABORTED, parts: [textPart("## Demo\nphase 1 done")], transcript: [] })
+    const result = (await invokeDelegate(
+      recordingExec().exec,
+      baseDeps(fake.client, { [resolve(FAKE_CWD, UNLEASH)]: "Run the pipeline." }),
+      { command_path: UNLEASH },
+    )) as unknown as Record<string, unknown>
+
+    expect(result.code).toBe("DELEGATE_FAILED")
+    expect(String(result.message)).toContain("child_message_error")
+    expect(result.retryable).toBe(true)
+    expect(result.final_text).toBe("## Demo\nphase 1 done")
+    expect(result.final_text_source).toBe("response")
+    expect(result.resume).toEqual({
+      command: "uf.unleash",
+      key: "opsx-unleash-deterministic-tools",
+      last_checkpoint_step: "spec-review",
+      completed_steps: ["tier-routing", "spec-review"],
+    })
+    expect(result.report_diagnostics).toMatchObject({
+      error_name: "MessageAbortedError",
+      messages_examined: 0,
+      final_turn: null,
+    })
+    expect(typeof (result.report_diagnostics as { elapsed_ms: unknown }).elapsed_ms).toBe("number")
+  })
+
+  it("recovers the final text from the transcript when the aborted response is empty", async () => {
+    const fake = fakeClient({
+      promptError: ABORTED,
+      parts: [],
+      transcript: [
+        transcriptMessage("user", [textPart("Run the pipeline.")], {
+          agent: "cobalt-crush-dev",
+          model: { providerID: "p", modelID: "m" },
+        }),
+        transcriptMessage("assistant", [textPart("committed 9e06f2b")], { providerID: "p", modelID: "m" }),
+        transcriptMessage(
+          "assistant",
+          [{ type: "tool", tool: "bash", state: { status: "running" } }],
+          { providerID: "p", modelID: "m", tokens: { input: 91_000 } },
+        ),
+      ],
+    })
+    const result = (await invokeDelegate(
+      recordingExec().exec,
+      baseDeps(fake.client, { [resolve(FAKE_CWD, "cmd.md")]: "Run." }),
+      { command_path: "cmd.md" },
+    )) as unknown as Record<string, unknown>
+
+    expect(result.final_text).toBe("committed 9e06f2b")
+    expect(result.final_text_source).toBe("transcript")
+    expect(result.report_diagnostics).toMatchObject({
+      messages_examined: 3,
+      last_tool: { tool: "bash", status: "running" },
+      last_input_tokens: 91_000,
+      final_turn: { agent: "cobalt-crush-dev", model: "p/m", assistant_model: "p/m", injected: false },
+    })
+  })
+
+  it("leaves final text and transcript fields null when the transcript read fails", async () => {
+    const fake = fakeClient({ promptError: ABORTED, parts: [], transcript: "fail" })
+    const result = (await invokeDelegate(
+      recordingExec().exec,
+      baseDeps(fake.client, { [resolve(FAKE_CWD, "cmd.md")]: "Run." }),
+      { command_path: "cmd.md" },
+    )) as unknown as Record<string, unknown>
+
+    expect(result.code).toBe("DELEGATE_FAILED")
+    expect(result.final_text).toBeNull()
+    expect(result.final_text_source).toBeNull()
+    expect(result.report_diagnostics).toMatchObject({
+      error_name: "MessageAbortedError",
+      messages_examined: null,
+      last_tool: null,
+      last_input_tokens: null,
+      final_turn: null,
+    })
+  })
+
+  it("is not retryable when the command-path resume state cannot be read", async () => {
+    const fake = fakeClient({ promptError: ABORTED, transcript: [] })
+    const result = (await invokeDelegate(
+      recordingExec("HEAD").exec,
+      baseDeps(fake.client, { [resolve(FAKE_CWD, "cmd.md")]: "Run." }),
+      { command_path: "cmd.md" },
+    )) as unknown as Record<string, unknown>
+
+    expect(result.resume).toBeNull()
+    expect(result.retryable).toBe(false)
+  })
+
+  it("keeps a prompt-path abort non-retryable and without resume", async () => {
+    const fake = fakeClient({ promptError: ABORTED, transcript: [] })
+    const result = (await invokeDelegate(recordingExec().exec, baseDeps(fake.client), {
+      prompt: "Run the delegation.",
+      task_classification: "judgment",
+    })) as unknown as Record<string, unknown>
+
+    expect(result.retryable).toBe(false)
+    expect(result).not.toHaveProperty("resume")
+    expect(result.final_text).toBe("delegated output")
+  })
+
+  it("keeps the executor's classification for other message errors", async () => {
+    const fake = fakeClient({
+      promptError: { name: "APIError", data: { message: "overloaded", isRetryable: true } },
+      transcript: [],
+    })
+    const result = (await invokeDelegate(
+      recordingExec().exec,
+      baseDeps(fake.client, { [resolve(FAKE_CWD, "cmd.md")]: "Run." }),
+      { command_path: "cmd.md" },
+    )) as unknown as Record<string, unknown>
+
+    expect(result.retryable).toBe(true)
+    expect(result).not.toHaveProperty("resume")
+    expect(result.report_diagnostics).toMatchObject({ error_name: "APIError" })
+  })
+
+  it("names an injected final turn on a model mismatch and keeps it non-retryable", async () => {
+    const fake = fakeClient({
+      reportedModel: { providerID: "p", modelID: "other" },
+      parts: [textPart("Correction acknowledged.")],
+      transcript: [
+        transcriptMessage("user", [textPart("Run.")], {
+          agent: "cobalt-crush-dev",
+          model: { providerID: HOST_MODEL.split("/")[0], modelID: HOST_MODEL.split("/")[1] },
+        }),
+        transcriptMessage("assistant", [textPart("edited test.yml")], {
+          providerID: "host-provider",
+          modelID: "host-model",
+        }),
+        transcriptMessage("user", [{ ...textPart("[supervisor] audit finding"), synthetic: true }], {
+          agent: "build",
+          model: { providerID: "p", modelID: "other" },
+        }),
+        transcriptMessage("assistant", [textPart("Correction acknowledged.")], { providerID: "p", modelID: "other" }),
+      ],
+    })
+    const result = (await invokeDelegate(
+      recordingExec().exec,
+      baseDeps(fake.client, { [resolve(FAKE_CWD, "cmd.md")]: "Run." }),
+      { command_path: "cmd.md" },
+    )) as unknown as Record<string, unknown>
+
+    expect(String(result.message)).toContain("model_mismatch")
+    expect(result.retryable).toBe(false)
+    expect(result).not.toHaveProperty("resume")
+    expect(result.final_text).toBe("Correction acknowledged.")
+    expect(result.report_diagnostics).toMatchObject({
+      error_name: null,
+      final_turn: { agent: "build", model: "p/other", assistant_model: "p/other", injected: true },
+    })
+  })
+
+  it("adds no recovery fields to a timeout failure", async () => {
+    const fake = fakeClient({ hangPrompt: true })
+    const result = (await invokeDelegate(
+      recordingExec().exec,
+      baseDeps(fake.client, { [resolve(FAKE_CWD, "cmd.md")]: "Run." }),
+      { command_path: "cmd.md", timeout: 5 },
+    )) as unknown as Record<string, unknown>
+
+    expect(result).not.toHaveProperty("final_text")
+    expect(result).not.toHaveProperty("report_diagnostics")
   })
 })

@@ -470,6 +470,27 @@ describe("invoke_agent cancellation, timeout, and responses", () => {
     expect(result.provenance.reported_child_model).toBe("provider/model")
   })
 
+  it("names the child message error and keeps a MessageAbortedError non-retryable", async () => {
+    // delegate-abort-recovery D2 (DAR-FR-002): the executor exposes the
+    // error name and leaves its own classification alone, so invoke_agent
+    // and review dispatch keep treating aborts as before.
+    const aborted = fakeClient({
+      childError: { name: "MessageAbortedError", data: { message: "Aborted" } },
+      parts: [textPart("partial response")],
+    })
+    const abortedResult = await invokeAgent(explicitInput(), toolContext(), dependencies(aborted.client))
+    expect(abortedResult.error).toMatchObject({ code: "child_message_error", retryable: false })
+    expect(abortedResult.message_error_name).toBe("MessageAbortedError")
+
+    const api = fakeClient({ childError: { name: "APIError", data: { message: "overloaded", isRetryable: true } } })
+    const apiResult = await invokeAgent(explicitInput(), toolContext(), dependencies(api.client))
+    expect(apiResult.message_error_name).toBe("APIError")
+
+    const ok = fakeClient({})
+    const okResult = await invokeAgent(explicitInput(), toolContext(), dependencies(ok.client))
+    expect(okResult).not.toHaveProperty("message_error_name")
+  })
+
   it.each([
     ["create", { createError: "credential=abc /home/alice/private" }, "child_create_failed"],
     ["prompt", { promptError: "Bearer abc https://host/path?token=value" }, "child_prompt_failed"],
