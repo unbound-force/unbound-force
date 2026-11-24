@@ -70,19 +70,21 @@ always produced and that job is untouched.
 
 ### Decision 1: Detection via a changes job and plain git diff
 
-Each workflow gains a `changes` job that checks out with
-`fetch-depth: 0` (reusing the workflows' existing SHA-pinned
-`actions/checkout` version) and, for `pull_request` events,
-runs `git diff -z --no-renames --raw "$BASE_SHA...$HEAD_SHA"`:
+Each workflow gains a `changes` job that, for `pull_request`
+events only, checks out with `fetch-depth: 0` (reusing the
+workflows' existing SHA-pinned `actions/checkout` version)
+and runs the shared detector (Decision 6), which runs
+`git diff -z --no-renames --raw "$BASE_SHA...$HEAD_SHA"`:
 NUL-delimited so a crafted filename cannot split or inject,
 `--no-renames` so a rename reports both its old and new
 paths, `--raw` so each entry carries its file mode. Any
 entry that does not both start with `.uf/dewey/learnings/`
 and end in `.md`, or whose mode is not a regular file
 (`100644`/`100755`), sets the `code` output to `'true'`;
-the loop reads each entry with `IFS= read -r -d ''` and
-writes `code` through a heredoc delimiter so path bytes
-never reach `GITHUB_OUTPUT` uncontrolled. Rejected alternatives:
+the loop reads each entry with `IFS= read -r -d ''`, and
+the job accepts only `true` or `false` from the detector
+(anything else becomes `true`) and writes `code` through a
+heredoc delimiter, so path bytes never reach `GITHUB_OUTPUT`. Rejected alternatives:
 
 - Workflow-level `paths-ignore`: permanently unreports a
   required check (see Context).
@@ -104,7 +106,7 @@ detector bug then costs runner minutes, never gate coverage.
 ### Decision 3: The push short-circuit lives in the changes job
 
 On push events the `changes` job sets `code: 'true'` without
-diffing (there is no pull request base). Gated jobs carry a
+checking out or diffing (there is no pull request base). Gated jobs carry a
 single uniform gate — `needs: [changes]` plus
 `if: needs.changes.outputs.code == 'true'` — with no per-job
 event-type duplication.
@@ -115,7 +117,9 @@ check
 `ci_local.yml` gains `ci-ok` (name: `CI OK`); `ci_checks.yml`
 gains an aggregate (name: `Standardized CI OK`). Both declare
 `if: always()` and `needs` the `changes` job plus every gated
-job, and fail when any needed job concluded anything other
+job. They fail unless the `changes` job concluded `success`
+(it has no `if:`, so a skip there means something broke),
+and fail when any gated job concluded anything other
 than `success` or `skipped` — `failure`, `cancelled`,
 `timed_out`, `action_required`, `neutral`, and any conclusion
 GitHub introduces later. This handles the
@@ -149,17 +153,23 @@ not exist yet — strictly worse. gh-hud opens learnings PRs
 about once a day per checkout, so the collision probability
 is low.
 
-### Decision 6: Detection logic inline in both workflows
+### Decision 6: Detection logic in one shared, tested script
 
-The roughly ten-line detection block is duplicated in
-`ci_local.yml` and `ci_checks.yml` rather than extracted to a
-shared script, composite action, or Go CLI (the
-`cmd/coverage-gate` precedent). Rationale: no new artifact to
-test and pin (Security by Default), the logic is one
-NUL-delimited diff parse plus a per-path prefix, suffix, and
-mode check, and CI-FR-001's scenarios pin both
-copies to identical behavior. If review weighs DRY higher,
-extraction is a mechanical follow-up.
+The detection logic lives in `scripts/detect-learnings-only.sh`,
+called by the `changes` job in both `ci_local.yml` and
+`ci_checks.yml`, so the two workflows cannot classify a PR
+differently. `scripts/detect-learnings-only_test.sh` builds a
+throwaway git repository per scenario (every CI-FR-001
+scenario plus nested, executable, deleted, renamed,
+lookalike-prefix, and newline-smuggling paths) and runs as a
+step of the `changes` job before detection, so a broken
+detector fails the job and both aggregates instead of
+silently skipping CI. A plain repo script adds no action pin
+or dependency (Security by Default). A composite action or Go
+CLI (the `cmd/coverage-gate` precedent) was rejected as more
+machinery than one diff parse needs. Review originally
+accepted the logic inline in both workflows, then flagged the
+two copies as a drift risk, which this decision removes.
 
 ## Risks / Trade-offs
 
@@ -178,11 +188,23 @@ extraction is a mechanical follow-up.
   classifies as code — the stricter, fail-safe reading. The
   prefix, `.md` suffix, and regular-file mode matches are
   literal.
-- **Inline duplication (Decision 6).** The two detection
-  blocks could drift apart; CI-FR-001 covers both workflows
-  and review compares the blocks directly.
+- **Detector changes (Decision 6).** A PR that edits the
+  detector script changes a non-learnings file, so it always
+  runs full CI. Its own test step runs first, from that PR's
+  head, the same trust level as an edit to the workflow
+  files themselves.
 - **Accepted trade-off.** Learnings-only PRs also skip the
-  Council Review Pipeline Tests and the MegaLinter suite;
-  accepted because they change no executable or lintable
-  content. Security scans (`ci_security.yml`) still run on
-  them.
+  Council Review Pipeline Tests and the whole Standardized CI
+  reusable workflow: MegaLinter (actionlint, shellcheck,
+  golangci-lint, Gitleaks), PR title validation, and the
+  action pin checks. Accepted because they change no
+  executable or lintable content. Two of these losses are
+  narrower than they look. Secret scanning still runs through
+  the Trivy source scan in `ci_security.yml` (secrets and
+  misconfiguration), though it is not a full Gitleaks run, so
+  a token pasted into an AI-written learning is caught only
+  if Trivy's secret rules match it. Learnings PRs are opened
+  by gh-hud with a fixed conventional title, so skipping
+  title validation costs little. If a Gitleaks miss shows up
+  in practice, add a Gitleaks step that runs regardless of
+  the `changes` output.

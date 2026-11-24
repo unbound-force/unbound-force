@@ -38,6 +38,14 @@ git blob with file mode `100644` or `100755`; symlinks (mode
 `120000`), submodules (mode `160000`), and any other
 non-regular entry count as code.
 
+Both `changes` jobs MUST run the same detector, a single
+script shared by the two workflows, and MUST run that
+script's tests before detecting, so a detector regression
+fails the job instead of misclassifying. The `changes` job
+MUST check out the repository only for `pull_request`
+events, and MUST accept only `'true'` or `'false'` from the
+detector, treating any other result as `'true'`.
+
 The detector MUST process the changed paths NUL-delimited
 (`git diff -z` semantics), match the prefix and the `.md`
 suffix literally against each raw path, and write the `code`
@@ -155,8 +163,10 @@ receive the full, unchanged CI.
 
 Each affected workflow MUST provide an aggregate job that
 declares `if: always()` and `needs` its `changes` job and
-every gated job, that MUST fail when any of those jobs
-concluded anything other than `success` or `skipped` —
+every gated job, that MUST fail when the `changes` job
+concluded anything other than `success`, that MUST fail when
+any gated job concluded anything other than `success` or
+`skipped` —
 including `failure`, `cancelled`, `timed_out`,
 `action_required`, and `neutral` — and that MUST pass
 otherwise. The repository's required-checks ruleset for pull
@@ -179,6 +189,13 @@ be reverted or the required checks restored to `Build and
 Test`, `Plugin Tests`, and `Standardized CI / Run linters`
 in the safe-settings configuration so no PR waits on an
 unreported check.
+
+#### Scenario: Detection failure fails the aggregate
+
+- **GIVEN** a workflow run in which the `changes` job did not
+  conclude `success` (including `skipped`)
+- **WHEN** the aggregate job runs
+- **THEN** the aggregate MUST fail
 
 #### Scenario: Gated job failure fails the aggregate
 

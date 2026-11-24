@@ -23,15 +23,17 @@ Each entry follows the format: `- <change-name>: <summary>`.
   output with `needs: [changes]`; steps, thresholds, and
   pins unchanged (CI-FR-002). Two always-running
   aggregates -- `CI OK` and `Standardized CI OK` -- report
-  a verdict for every PR, failing on any gated-job
-  conclusion other than success or skipped (CI-FR-003);
+  a verdict for every PR, failing unless detection
+  succeeded and every gated job succeeded or was skipped
+  (CI-FR-003);
   the repository ruleset swaps its required checks to
   the aggregate names after merge, while security,
   dependency, and CRAP scans stay ungated and push runs
-  on `main` are unchanged (CI-FR-004). The five
-  adversarial CI-FR-001 scenarios verified by local
-  dry-run against both workflows' byte-identical
-  detection blocks; constitution alignment verified
+  on `main` are unchanged (CI-FR-004). Both workflows run
+  one shared detector, `scripts/detect-learnings-only.sh`,
+  whose 20-scenario test (including every adversarial
+  CI-FR-001 scenario) runs in each `changes` job before
+  detection; constitution alignment verified
   against the proposal (six principles PASS).
   (Spec: openspec/changes/ci-skip-learnings-only-prs/)
   (Fixes: #1194, Docs: #1201)

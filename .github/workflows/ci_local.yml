@@ -30,9 +30,14 @@ jobs:
       code: ${{ steps.detect.outputs.code }}
     steps:
       - name: Checkout Code
+        if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Test Detector
+        if: github.event_name == 'pull_request'
+        run: bash scripts/detect-learnings-only_test.sh
 
       - name: Detect Changed Files
         id: detect
@@ -41,37 +46,13 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           code='true'
-          if [ "$GITHUB_EVENT_NAME" = 'pull_request' ] && [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
-            diffout="$(mktemp)"
-            if git diff -z --no-renames --raw "$BASE_SHA...$HEAD_SHA" >"$diffout" && [ -s "$diffout" ]; then
-              code='false'
-              while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
-                newmode="${meta#* }"
-                newmode="${newmode%% *}"
-                status="${meta##* }"
-                printf 'changed: %s\n' "$path"
-                case "$path" in
-                  .uf/dewey/learnings/*.md) ;;
-                  *) code='true' ;;
-                esac
-                case "$newmode" in
-                  100644|100755) ;;
-                  *) code='true' ;;
-                esac
-                case "$status" in
-                  A|D|M|T) ;;
-                  R*|C*)
-                    code='true'
-                    if IFS= read -r -d '' path; then
-                      printf 'changed: %s\n' "$path"
-                    fi
-                    ;;
-                  *) code='true' ;;
-                esac
-              done <"$diffout"
-            fi
-            rm -f "$diffout"
+          if [ "$GITHUB_EVENT_NAME" = 'pull_request' ]; then
+            code="$(bash scripts/detect-learnings-only.sh)"
           fi
+          case "$code" in
+            true|false) ;;
+            *) code='true' ;;
+          esac
           cat >>"$GITHUB_OUTPUT" <<CHANGES_EOF
           code=$code
           CHANGES_EOF
@@ -172,9 +153,13 @@ jobs:
     needs: [changes, build-and-test, plugin-tests, council-review-action-tests]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify required jobs passed or were skipped
+      - name: Verify detection passed and gated jobs passed or were skipped
         run: |
-          for result in "${{ needs.changes.result }}" "${{ needs.build-and-test.result }}" "${{ needs.plugin-tests.result }}" "${{ needs.council-review-action-tests.result }}"; do
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "Change detection did not succeed (result: ${{ needs.changes.result }})"
+            exit 1
+          fi
+          for result in "${{ needs.build-and-test.result }}" "${{ needs.plugin-tests.result }}" "${{ needs.council-review-action-tests.result }}"; do
             if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
               echo "Required job did not succeed (result: $result)"
               exit 1
