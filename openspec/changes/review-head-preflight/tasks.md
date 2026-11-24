@@ -10,134 +10,153 @@
   tasks run in parallel.
 -->
 
-## 1. Declared-checks execution root
+## 1. Declared-checks execution root and base
 
-- [ ] 1.1 In `.opencode/lib/preflight-declared.ts`, change
-  `runDeclaredChecks` to take `{configRoot, execRoot}` per design
-  D4.
+- [ ] 1.1 In `.opencode/lib/preflight-declared.ts`, add optional
+  `execRoot` (default `cwd`) and `baseSha` parameters to
+  `runDeclaredChecks` per design D6:
   - Config, `run` paths, `requires` probes, and `PROJECT_ROOT_ENV`
-    come from `configRoot`.
-  - Execution `cwd`, `computeDiffScope`, and the `classifyFailures`
-    merge-base come from `execRoot`.
-  - When `execRoot === configRoot`, output must be identical to the
-    current output.
+    come from `cwd`.
+  - Execution, diff scope, and the baseline worktree come from
+    `execRoot`.
+  - `baseSha` replaces default-branch resolution with
+    `merge-base <baseSha> HEAD`.
+  - Omitted parameters keep today's output.
 - [ ] 1.2 Sync `internal/scaffold/assets/opencode/lib/preflight-declared.ts`
   byte-identical (`cmp`).
 - [ ] 1.3 Extend `.opencode/test/preflight-declared.test.ts`:
-  - Omitted root is unchanged (pin the existing fixtures).
-  - With `execRoot`, the check runs with that `cwd` and scope uses
-    its `HEAD`.
-  - Scripts and config still resolve from `configRoot`.
-- [ ] 1.4 Add a real-git case to
-  `.opencode/test/preflight-declared-roundtrip.test.ts`:
-  - The primary checkout is on a commit where a required check
-    passes.
-  - A worktree at a PR-head commit makes it fail.
-  - The soft-gate result is `branch-caused` relative to the
-    head's merge-base, not the primary's.
+  - Omitted parameters are unchanged.
+  - With `execRoot`, the run `cwd` and the scope `HEAD` come from
+    it.
+  - Scripts and config still resolve from `cwd`.
+  - With `baseSha`, scope and the baseline merge-base use it.
 
 ## 2. `review_head_root` tool
 
-- [ ] 2.1 Add a module-level live-root registry in
-  `.opencode/plugins/uf-workflow/index.ts`, injectable into
-  factories for tests.
-- [ ] 2.2 Implement `createReviewHeadRootTool(exec, gh, cwd, fs,
-  registry)` per design D1-D3.
-  - `prepare`: stale pruning, the checkout reuse path, fetch of
-    `refs/pull/<N>/head` from the remote matching the base repo,
-    SHA verification, and detached worktree add.
-  - `release`: removes registered roots only.
-  - Export `REVIEW_HEAD_ROOT_ERROR_CODES` (`HEAD_UNAVAILABLE`,
-    `HEAD_MOVED`, `WORKTREE_FAILED`, `INVALID_ROOT`) and
-    `ReviewHeadRootData`.
-  - Register `review_head_root` in `UfWorkflowPlugin.server()`.
-- [ ] 2.3 Add the optional `root` argument to
-  `createPreflightDeclaredChecksTool`. Validate it against the
-  plugin directory and the registry (else `INVALID_ROOT`) and pass
-  `{configRoot: cwd, execRoot: root ?? cwd}`.
-- [ ] 2.4 Sync `internal/scaffold/assets/opencode/plugins/uf-workflow/index.ts`
+- [ ] 2.1 Implement `createReviewHeadRootTool(exec, gh, cwd, fs)` in
+  `.opencode/plugins/uf-workflow/index.ts` per design D1-D5.
+  - Self-ignoring `.uf/review-head/`.
+  - Exact root validation (D3).
+  - Pruning.
+  - The reuse check with `--untracked-files=normal`.
+  - The trust gate through `gh api`.
+  - Remote matching and fetch with `cat-file` re-verification.
+  - `worktree add --detach --`.
+  - `changed_files` and `config_sha`.
+  - `release` with the directory-removal fallback.
+  - Export `REVIEW_HEAD_ROOT_ERROR_CODES` (`UNTRUSTED_HEAD`,
+    `HEAD_UNAVAILABLE`, `HEAD_MOVED`, `WORKTREE_FAILED`,
+    `INVALID_ROOT`), plus `ReviewHeadRootData` and an exported
+    `validateReviewHeadRoot` helper.
+  - Register the tool in `UfWorkflowPlugin.server()`.
+- [ ] 2.2 Add optional `root` and `base_sha` to
+  `createPreflightDeclaredChecksTool`:
+  - Validate `root` with `validateReviewHeadRoot`, else
+    `INVALID_ROOT`.
+  - Pass both to `runDeclaredChecks`.
+  - Name `INVALID_ROOT` in the tool description.
+- [ ] 2.3 Sync `internal/scaffold/assets/opencode/plugins/uf-workflow/index.ts`
   byte-identical (`cmp`).
 
 ## 3. Tool tests
 
 - [ ] 3.1 Create `.opencode/test/review-head-root.test.ts` with
-  injected git/gh/fs fakes, covering:
-  - The checkout reuse path, the dirty-at-head path creating a
-    worktree, and a present commit creating a worktree.
-  - Missing commit: fetch then create.
-  - Remote matching across SSH/HTTPS/`.git` URL forms.
-  - Failures: `HEAD_MOVED`; `HEAD_UNAVAILABLE` for no remote and
-    for a retryable fetch error; `WORKTREE_FAILED` cleans its temp
-    dir.
-  - Release: of a created root, of the reused checkout (no-op),
-    and of an unknown path (`INVALID_ROOT`, nothing deleted).
-  - Stale pruning, argument-schema rejections, and that every call
-    uses argument arrays.
+  injected git/gh/fs fakes:
+  - Reuse: clean at the head; an untracked file forces a worktree;
+    a modified tracked file forces a worktree.
+  - Trust: same-repo, collaborator fork, and untrusted fork
+    (`UNTRUSTED_HEAD`, with no fetch or worktree call made).
+  - Fetch: missing head fetched then present; base missing; present
+    after fetch with no `FETCH_HEAD` read; still missing gives
+    `HEAD_MOVED`.
+  - Remote matching across scp, `ssh://`, `https://` with
+    userinfo, `.git`, and case variants.
+  - `HEAD_UNAVAILABLE` for no remote, a fetch error (retryable),
+    and a gh error.
+  - `WORKTREE_FAILED` cleans up its directory.
+  - Pruning: an old review-head worktree is removed; a young one, a
+    non-tool worktree, and `.uf/review-head-x-evil` are kept.
+  - Release: of a created root; double release; of the plugin
+    directory (no-op); path variants refused; `worktree remove`
+    failure still deletes the directory.
+  - Argument-schema rejections; `--` before every path argument;
+    argv-only execution.
 - [ ] 3.2 [P] Add `review_head_root` to the uf-workflow tool lists
   in `.opencode/test/uf-workflow.test.ts` and
   `.opencode/test/scratch-smoke.test.ts`.
 - [ ] 3.3 [P] Add golden output-shape blocks for `review_head_root`
   and for `uf_preflight_declared_checks` with `root` to
   `.opencode/test/golden-output-shape.test.ts`.
-- [ ] 3.4 Add a real-git round trip: `prepare` creates a worktree at
-  a second commit, then `uf_preflight_declared_checks` with that
-  `root` runs there, then `release` removes it. The user's
-  `HEAD`, branch, and index are unchanged throughout.
+- [ ] 3.4 Add a real-git round trip to
+  `.opencode/test/preflight-declared-roundtrip.test.ts`:
+  - The primary checkout is on a commit whose required check
+    passes, with an untracked user file.
+  - `prepare` at a second commit where the check fails.
+  - Declared checks with `root` and `base_sha` report
+    `branch-caused`.
+  - `release` removes the worktree.
+  - The user's `HEAD`, branch, index, untracked file, `git status`
+    output, and `.git/config` are unchanged throughout.
 - [ ] 3.5 DE-007 seam verification naming the three layers:
   registration surface, documented output shape, and write→read
   round trip (3.4).
 
-## 4. Skill and commands
+## 4. Skill, commands, and policy file
 
 - [ ] 4.1 `.opencode/skills/pre-flight/SKILL.md`: add the optional
-  consumer-supplied `root` per design D5.
-  - Phase 4 runs detected tools with that working directory.
-  - Phase 2b passes `root` to the declared-checks tool.
-  - Phase 5 adds `**Gates ran at**: <head_sha> (<method>)`.
+  consumer-supplied `root` and `changed_files` per design D7.
+  - Phases 1, 2, 4, and the 4a worktree fallback run from `root`.
+  - Phase 2a uses `changed_files` verbatim.
+  - Phase 2b passes `root` and `base_sha` and handles
+    `INVALID_ROOT`.
+  - Phase 5 adds the provenance line.
 - [ ] 4.2 `.opencode/commands/uf.review-pr.md`:
   - Add the `prepare` call after Step 3, with one JSON output
     example (DE-002).
-  - Add per-code STOP handling with remediation (design D6).
-  - Pass `root` to Step 3.7.
-  - Add the single "release before finalizing whenever prepare
-    succeeded" rule.
+  - Add the per-code "not run" handling.
+  - Pass `root`, `changed_files`, and `base_sha` to Step 3.7.
+  - Add one "release once after the final finalization or any STOP;
+    a release failure is a warning" rule.
 - [ ] 4.3 `.opencode/commands/uf.review-council.md`, for PR input
   only:
   - Add `prepare` at the start of Code Review Mode step 1.
-  - Pass `root` to Phase 1a.
-  - Gate Phase 1b on `method: "checkout"`, with the
-    worktree-skip note.
-  - On `prepare` failure: coverage `FAIL` plus `INCONCLUSIVE`
-    through the shared protocol.
-  - Add the release rule.
+  - Handle `UNTRUSTED_HEAD` as skip-and-continue, and the other
+    codes through the Phase 1a FAIL path.
+  - Thread the root into Phase 1a.
+  - Gate Phase 1b on `method: "checkout"`.
+  - Add the same release rule.
   - Leave local/uncommitted input unchanged.
-- [ ] 4.4 [P] Sync the scaffold mirrors of 4.1-4.3 byte-identical
+- [ ] 4.4 Sync the scaffold mirrors of 4.1-4.3 byte-identical
   (`cmp`).
-- [ ] 4.5 Add contract clauses in
-  `internal/scaffold/command_contract_test.go` for both commands:
-  - `review_head_root` prepare and release are present.
-  - Every `REVIEW_HEAD_ROOT_ERROR_CODES` code is handled.
-  - `root` is passed to pre-flight.
-  - The council's Phase 1b checkout gate is present.
+- [ ] 4.5 Update the runtime-contract comment in `.uf/preflight.yaml`
+  and `internal/scaffold/assets/uf/preflight.yaml`: in PR mode the
+  working directory is the review-head root. Keep the
+  `projectOwnedPolicyMirrors` shape pins green.
+- [ ] 4.6 Add contract clauses in
+  `internal/scaffold/command_contract_test.go`:
+  - Both commands: prepare and release are present; every code's
+    handling; the release-warning rule; root, `changed_files`, and
+    `base_sha` threading.
+  - Council: the Phase 1b checkout gate.
+  - Skill: the Phase 1, 2, 2a, and 4 root clauses.
   - A forbidden fragment keeps `gh pr checkout` out of the gate
     path.
-- [ ] 4.6 Add a TS parity test pinning each command's code list to
+- [ ] 4.7 Add a TS parity test pinning each command's code list to
   `REVIEW_HEAD_ROOT_ERROR_CODES` in both copies.
 
 ## 5. Documentation and verification
 
 - [ ] 5.1 Verify constitution alignment against the proposal:
-  - I: pre-flight output carries `Gates ran at`.
-  - II: an omitted `root` is unchanged, and gaze-owned files are
+  - I: provenance line.
+  - II: omitted arguments are unchanged, and gaze-owned files are
     untouched.
   - III: structured envelopes with stable codes.
-  - IV: injectable executors plus a real-git round trip.
-- [ ] 5.2 Add a `CHANGELOG.md` entry, and file the documentation
-  issue for the user-facing change (PR-mode reviews now gate the
-  PR head) per the Documentation gate.
+  - IV: injectable executors plus the real-git round trip.
+- [ ] 5.2 Record DE-004 line deltas for each edited instruction file
+  in the CHANGELOG entry. File the documentation issue for the
+  user-facing change per the Documentation gate.
 - [ ] 5.3 File a follow-up issue in unbound-force/gaze for an
-  analysis-root argument to `gaze-reporter`. Reference it from the
-  Phase 1b skip note's CHANGELOG line.
+  analysis-root argument to `gaze-reporter`.
 - [ ] 5.4 Add `Closes #1203` to the PR body by hand
   (`originating_issue` carries #1204 only).
 - [ ] 5.5 Run `make check` and `make lint-instructions`. Confirm
