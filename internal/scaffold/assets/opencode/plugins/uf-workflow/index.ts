@@ -17,12 +17,19 @@ import {
   StructuralHostModelError,
   type InvocationProvenance,
   type InvocationUsage,
+  type InvokeAgentResult,
   type ModelIdentity,
   type PerTaskResumeCapture,
   type PerTaskRetryRecord,
   type TimeoutDetails,
 } from "../../lib/agent-executor.js"
 import { classifyBranch } from "../../lib/branch-classification.js"
+import {
+  boundFinalText,
+  readChildTranscript,
+  type FinalTextSource,
+  type ReportDiagnostics,
+} from "../../lib/report-recovery.js"
 import { resolveInheritedDeadline } from "../../lib/delegation-budget.js"
 import {
   ClassifierCascade,
@@ -4311,6 +4318,58 @@ function expectedArtifactStopMessage(expectedArtifact: string): string {
   return `Artifact generation failed -- ${expectedArtifact} was not created. Check the agent output for errors.`
 }
 
+/** Executor error codes whose failure envelopes carry report recovery (DAR-FR-001). */
+const REPORT_RECOVERY_CODES: ReadonlySet<string> = new Set(["child_message_error", "model_mismatch"])
+
+/** Report-recovery fields a report-time failure envelope carries (DAR-FR-001, DAR-FR-003). */
+export interface DelegateReportRecovery {
+  /** The child's final text, sanitized and tail-bounded; null when none was available. */
+  final_text: string | null
+  /** Where final_text came from; null when it is null. */
+  final_text_source: FinalTextSource | null
+  /** Error name, timing, and the turn that ended the run; transcript fields null when unread. */
+  report_diagnostics: ReportDiagnostics
+}
+
+/**
+ * Assemble the report-recovery fields for a failed delegation
+ * (delegate-abort-recovery D1, D3, D5). The child transcript is read at
+ * most once, and only when a child session exists; every read failure
+ * leaves its fields null without touching the error itself.
+ *
+ * @param client The plugin's OpenCode client.
+ * @param directory The project directory of the child session.
+ * @param result The executor's failed result.
+ * @param elapsedMs Milliseconds from the executor call to its result.
+ * @returns The final text, its source, and the report diagnostics.
+ */
+export async function recoverReport(
+  client: PluginInput["client"],
+  directory: string,
+  result: InvokeAgentResult,
+  elapsedMs: number,
+): Promise<DelegateReportRecovery> {
+  const transcript =
+    result.childSessionID !== undefined ? await readChildTranscript(client, result.childSessionID, directory) : null
+  const fromResponse = boundFinalText(result.text)
+  const fromTranscript =
+    fromResponse === null && transcript?.last_assistant_text != null
+      ? boundFinalText(transcript.last_assistant_text)
+      : null
+  return {
+    final_text: fromResponse ?? fromTranscript,
+    final_text_source: fromResponse !== null ? "response" : fromTranscript !== null ? "transcript" : null,
+    report_diagnostics: {
+      error_name: result.message_error_name ?? null,
+      elapsed_ms: elapsedMs,
+      messages_examined: transcript?.messages_examined ?? null,
+      last_tool: transcript?.last_tool ?? null,
+      last_input_tokens: transcript?.last_input_tokens ?? null,
+      final_turn: transcript?.final_turn ?? null,
+    },
+  }
+}
+
 /**
  * Read the durable progress a timed-out command-path delegation left
  * behind (delegation-timeout-budgets D4): the state command is the
@@ -4704,6 +4763,13 @@ async function defaultModelLimits(
  *   budget terminations carry the advisory `timeout.resume` hint —
  *   files_modified and tasks_completed since delegation start, null
  *   when unreadable (PTB-FR-003)
+ * - report-time failures (child_message_error, model_mismatch) carry
+ *   `final_text` (sanitized, tail-bounded; from the prompt response, or
+ *   the child transcript when that is empty), `final_text_source`, and
+ *   `report_diagnostics` (error name, elapsed time, last tool, last input
+ *   tokens, and the final turn's agent, model and `injected` flag); a
+ *   command-path MessageAbortedError also carries `resume` and is
+ *   retryable exactly when that state is readable (DAR-FR-001..003)
  *
  * @param exec Git executor used to derive the auto-checkpoint state key.
  * @param cwd Repository root used for repo-relative path resolution.
@@ -5274,6 +5340,7 @@ export function createDelegateCommandTool(
                 }),
               }
             : null
+        const executorStartedAt = Date.now()
         const result = await (perTaskDelegation === null
           ? executeAgentSession(
               {
@@ -5318,11 +5385,27 @@ export function createDelegateCommandTool(
 
         if (result.status !== "success" || result.error !== null) {
           const code = result.status === "cancelled" ? "DELEGATE_CANCELLED" : "DELEGATE_FAILED"
+          // Report-time recovery (delegate-abort-recovery, DAR-FR-001..003):
+          // a child_message_error or model_mismatch run may have finished
+          // its work before its report was lost or replaced, so the
+          // envelope keeps its final text, names the turn that ended it,
+          // and — for a command-path message abort — carries the durable
+          // resume state the timeout path emits.
+          const recovery =
+            result.error !== null && REPORT_RECOVERY_CODES.has(result.error.code)
+              ? await recoverReport(deps.client, context.directory, result, Date.now() - executorStartedAt)
+              : null
+          const abortResume =
+            result.message_error_name === "MessageAbortedError" && input.command_path !== undefined
+              ? { resume: readDelegateResumeState(exec, cwd, input.command_path) }
+              : null
+          const retryable =
+            abortResume !== null ? abortResume.resume !== null : (result.error?.retryable ?? false)
           const envelope = failure(
             result.error !== null
               ? `${result.error.code}: ${result.error.message}`
               : `delegated run ended with status "${result.status}"`,
-            { retryable: result.error?.retryable ?? false, code },
+            { retryable, code },
           )
           // Thread the child session id into the failure envelope when the
           // executor created one, so callers can inspect the failed or
@@ -5356,6 +5439,8 @@ export function createDelegateCommandTool(
               // provenance — a failure carrying it already consumed the
               // single retry, so it is final for that termination kind.
               ...(result.retry !== undefined ? { retry: result.retry } : {}),
+              ...(recovery ?? {}),
+              ...(abortResume ?? {}),
             }),
           }
         }

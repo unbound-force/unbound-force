@@ -6,6 +6,19 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- delegate-abort-recovery: `uf_delegate_command` failures with
+  `child_message_error` or `model_mismatch` now keep the child's
+  final text (`final_text`, sanitized and tail-bounded to 16 384
+  characters; recovered from the child transcript when the response
+  is empty, per `final_text_source`) and carry `report_diagnostics`
+  (error name, elapsed time, last tool, last input tokens, and the
+  final turn's agent, model and `injected` flag). A command-path
+  `MessageAbortedError` also carries the timeout path's `resume`
+  payload and is retryable when that state is readable.
+  `model_mismatch` stays non-retryable, and `invoke_agent` and review
+  dispatch keep their classification; the executor only adds
+  `message_error_name`. Issue 1199: the aborts and mismatches came
+  from opencode-agent-supervisor injecting turns into child sessions.
 - ci-skip-learnings-only-prs: pull requests whose changed
   files are all regular `.md` files under
   `.uf/dewey/learnings/` now skip the build, test, and
