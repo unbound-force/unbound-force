@@ -43,8 +43,9 @@ Concretely:
    in `ci_checks.yml` — so they are skipped on learnings-only PRs
    and run otherwise.
 3. Add one always-running aggregate job per affected workflow
-   (`if: always()`, `needs:` every gated job, failing when any
-   of them concluded anything other than success or skipped)
+   (`if: always()`, `needs:` the `changes` job and every gated
+   job, failing unless `changes` succeeded and every gated job
+   succeeded or was skipped)
    and make the aggregates the
    required checks. This handles the two cases where a skipped
    job does not report under its required name (matrix jobs and

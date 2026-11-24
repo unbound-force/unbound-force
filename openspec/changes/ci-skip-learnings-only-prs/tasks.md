@@ -141,6 +141,27 @@
       crafted filename (embedded newline, quote, or shell
       metacharacter), and an indeterminate diff — each
       classifying `code='true'` (fail-safe); this executes
-      the scenarios tasks 4.1 and 4.2 do not cover, so
-      design Decision 6's scenario-pinning rationale holds
-      for both copies.
+      the scenarios tasks 4.1 and 4.2 do not cover. Now
+      automated by task 5.1's test script, which runs in
+      every PR's `changes` job.
+
+## 5. Review advisories
+
+- [x] 5.1 Extract the detection logic from both workflows into
+      `scripts/detect-learnings-only.sh` and add
+      `scripts/detect-learnings-only_test.sh` (20 scenarios,
+      including every CI-FR-001 scenario); run the test as a
+      step of each `changes` job before detection (design
+      Decision 6).
+- [x] 5.2 Drop the unreachable `R*|C*` branch (`--no-renames`
+      never reports it) and make deletions explicitly code in
+      the status check (`A|M|T` only).
+- [x] 5.3 Make both aggregates fail unless the `changes` job
+      concluded `success`; `skipped` stays acceptable only for
+      gated jobs (CI-FR-003).
+- [x] 5.4 Check out in the `changes` job only for
+      `pull_request` events, so pushes to `main` skip the full
+      history clone.
+- [x] 5.5 Record in design Risks that learnings-only PRs also
+      skip Gitleaks, PR title validation, and action pin
+      checks, and what still covers secrets (Trivy).
