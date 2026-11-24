@@ -62,24 +62,42 @@
       repos/unbound-force/unbound-force/rulesets`) and
       identify the required-checks ruleset covering
       `Build and Test`, `Plugin Tests`, and
-      `Standardized CI / Run linters`; record its id.
-- [ ] 3.2 After the workflow change merges (design Decision 5
-      ordering), PATCH that ruleset via `gh api` so the
-      required checks are `CI OK` and `Standardized CI OK`,
-      removing the three previous names.
-- [ ] 3.3 Read the ruleset back with `gh api` and verify the
-      required-check names and that no learnings PR is left
+      `Standardized CI / Run linters`; record its id
+      (26774064, "safe-settings: unbound-force required
+      checks" — managed by safe-settings from
+      `unbound-force/.github`
+      `safe-settings/repos/unbound-force.yml`, so a direct
+      `gh api` PATCH would be reverted by the next sync).
+- [x] 3.2 Open the safe-settings change in
+      `unbound-force/.github` that replaces the three
+      required checks with `CI OK` and `Standardized CI OK`
+      (unbound-force/.github#73). Do not merge it before
+      this workflow change merges (design Decision 5
+      ordering).
+- [ ] 3.3 After this workflow change merges, merge
+      unbound-force/.github#73, then run the "Safe Settings
+      Sync" workflow with `repos: unbound-force` —
+      `dry-run: true` first, confirming the plan shows only
+      the three removed and two added required checks, then
+      `dry-run: false`.
+- [ ] 3.4 Read the ruleset back (`gh api
+      repos/unbound-force/unbound-force/rulesets/26774064`)
+      and verify the required checks are exactly `CI OK` and
+      `Standardized CI OK`, and that no learnings PR is left
       waiting on an unreported check.
-- [ ] 3.4 Exercise the CI-FR-003 failure path: if the ruleset
-      PATCH fails after the workflow change merges, surface
-      the failure, retry the swap until the read-back
+- [ ] 3.5 Exercise the CI-FR-003 failure path: if the sync
+      fails or the read-back does not match, surface the
+      failure, fix and re-run the sync until the read-back
       confirms both aggregate checks, let no pull request
       merge on an unreported required check during the
       unverified window, and if verification does not
-      succeed, revert the workflow change or restore the
-      required checks to `Build and Test`, `Plugin Tests`,
-      and `Standardized CI / Run linters`
-      (specs/ci/spec.md:166-177, scenario :216-223).
+      succeed, revert unbound-force/.github#73 (re-running
+      the sync) and revert the workflow change, or restore
+      the required checks to `Build and Test`, `Plugin
+      Tests`, and `Standardized CI / Run linters` in the
+      safe-settings config (specs/ci/spec.md, CI-FR-003
+      ruleset paragraph and scenario "Failed ruleset sync
+      after the workflow merge").
 
 ## 4. Verification and documentation
 
