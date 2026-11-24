@@ -31,46 +31,53 @@ Step 6 is unaffected: there the checkout is the code under review.
 
 1. **New `review_head_root` tool** in the `uf-workflow` plugin, with
    injectable git and gh executors (argument arrays, no shell).
-   - `prepare`: given `pr_number` and `head_sha`, it returns the
-     directory where the local gates must run.
-     - If `HEAD` already equals `head_sha` and the tracked tree is
-       clean, the current checkout is reused.
-     - Otherwise it fetches the head commit if missing, verifies
-       the SHA, and adds a detached worktree at `head_sha` under a
-       tool-owned temp prefix.
-   - `release`: removes a worktree that `prepare` created, and
-     nothing else.
-   - Failure codes: `HEAD_UNAVAILABLE`, `HEAD_MOVED`,
-     `WORKTREE_FAILED`, `INVALID_ROOT`.
-2. **`uf_preflight_declared_checks` gains an optional `root`
-   argument.** Declared checks, diff scope, and the soft-gate
-   baseline then run against that root instead of the plugin
-   directory. Config and scripts still come from the primary
-   checkout, as the baseline already does.
-   - A `root` that is neither the plugin directory nor a live
-     `review_head_root` worktree is refused with `INVALID_ROOT`.
-3. **`pre-flight` skill**: Phase 4 runs detected tools from the
-   consuming command's root when one is supplied, and Phase 2b
-   passes it to the declared-checks tool. Phase 5 output records
-   the commit the gates ran against.
-4. **`/uf.review-pr`** calls `prepare` before Step 3.7, runs
-   pre-flight with the returned root, and calls `release` before
-   finalization on every path.
-5. **`/uf.review-council`** does the same around Phases 1a and 1b
-   for PR input only. Local and uncommitted input is unchanged.
-   - Phase 1b runs `gaze-reporter` only when `prepare` returned
-     `method: "checkout"` (the current tree is the head).
-   - For a worktree root, Gaze is skipped with an informational
-     note. `gaze-reporter` is scaffolded by the gaze repo and has
-     no root argument, and running it from the primary checkout
-     would score the wrong code.
-6. **Fail closed.** If `prepare` fails, neither command runs local
-   gates against the wrong tree.
-   - `/uf.review-pr` stops with the code-specific remediation,
-     consistent with its Execution Mode Check.
-   - `/uf.review-council` records coverage `FAIL` and an
-     `INCONCLUSIVE` verdict through the shared finalization
-     protocol, then stops.
+   - `prepare` takes `pr_number`, `base_sha`, and `head_sha`. It
+     returns the directory where the local gates must run, the PR's
+     `changed_files` (`base_sha...head_sha`), and the config commit.
+   - If `HEAD` already equals `head_sha` with no tracked or
+     untracked changes, the current checkout is reused.
+   - Otherwise it applies a trust gate: a fork PR from an author
+     who is not OWNER, MEMBER, or COLLABORATOR fails
+     `UNTRUSTED_HEAD` before any fetch.
+   - For a trusted head it fetches missing commits from the base
+     repo's remote, verifies them, and adds a detached worktree
+     under a self-ignoring `.uf/review-head/<id>`.
+   - `release` removes only such worktrees. Root validation is
+     exact.
+   - Failure codes: `UNTRUSTED_HEAD`, `HEAD_UNAVAILABLE`,
+     `HEAD_MOVED`, `WORKTREE_FAILED`, `INVALID_ROOT`.
+2. **`uf_preflight_declared_checks` gains optional `root` and
+   `base_sha`.** Declared checks run in the root and are scoped to
+   `merge-base(base_sha, HEAD)`. Config and scripts still come
+   from the plugin directory. An invalid root returns
+   `INVALID_ROOT`.
+3. **`pre-flight` skill**: given `root` and `changed_files`, every
+   phase runs against the root, and Phase 2a uses `changed_files`
+   as the branch diff:
+   - workflow parsing
+   - tool detection
+   - execution
+   - the baseline fallback
+   - declared checks
+
+   This closes the empty-diff-on-`main` false PASS. Phase 5
+   records `Gates ran at: <head_sha> (<method>); config from
+   <config_sha>`.
+4. **`/uf.review-pr`** calls `prepare` once after Step 3 and threads
+   its result into Step 3.7. If `prepare` fails, it records
+   `Local gates: not run (<code>)` and continues on CI evidence.
+   It calls `release` once at the end; a release failure is a
+   warning.
+5. **`/uf.review-council`**, for PR input only, does the same
+   around Phase 1a.
+   - `UNTRUSTED_HEAD` skips the local gates and continues.
+   - Other `prepare` errors take the existing Phase 1a FAIL path:
+     coverage `FAIL`, `INCONCLUSIVE`, and no reviewer children.
+   - Phase 1b runs Gaze only when the checkout was reused.
+     `gaze-reporter` is scaffolded by the gaze repo and has no
+     root argument.
+6. **`.uf/preflight.yaml` runtime-contract comment** (both copies)
+   names the review-head root as the PR-mode working directory.
 7. **Scaffold mirrors** stay byte-identical for both commands, the
    skill, the plugin, and `lib/preflight-declared.ts`.
 
@@ -103,13 +110,18 @@ Step 6 is unaffected: there the checkout is the code under review.
 - Tests: vitest units for the tool and for the declared-checks root,
   a real-git round trip, and Go command-contract clauses for both
   commands.
-- Behavior: when the user is not on the PR head, a PR review now
-  creates a temporary worktree. A first `make check` there also
-  installs plugin dependencies, so it is slower but correct.
+- Behavior: when the user is not on the PR head, a review of a
+  trusted PR creates a worktree under `.uf/review-head/`. A first
+  `make check` there also installs plugin dependencies, so it is
+  slower but correct. Untrusted fork PRs no longer get local gates
+  unless the user checks out the head themselves; until now they
+  got gates that described the wrong code.
+- `.uf/preflight.yaml` and its scaffold mirror: comment-only
+  update.
 - Follow-up in unbound-force/gaze: an analysis-root argument for
   `gaze-reporter`, so Gaze can run on a worktree root.
-- Related, not addressed: #1063 (diff scope when a branch is behind
-  main). Running from the head root inherits that behavior
+- Related: #1063 (diff scope when a branch is behind main). PR
+  input sidesteps it through `base_sha`; non-PR input is
   unchanged.
 
 ## Constitution Alignment
