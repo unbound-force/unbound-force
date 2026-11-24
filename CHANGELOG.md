@@ -6,6 +6,36 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- ci-skip-learnings-only-prs: pull requests whose changed
+  files are all regular `.md` files under
+  `.uf/dewey/learnings/` now skip the build, test, and
+  lint jobs. A new `changes` job in `ci_local.yml` and
+  `ci_checks.yml` diffs each pull request rename-safely
+  (NUL-delimited `git diff -z --no-renames --raw`,
+  git-file-mode aware) and outputs `code` `'true'` unless
+  every changed entry is a regular `.md` file under the
+  prefix -- mixed PRs, renames into or out of the prefix,
+  non-Markdown or non-regular files (symlinks), and
+  indeterminate states fail safe to full CI (CI-FR-001).
+  `build-and-test`, `plugin-tests`, and
+  `council-review-action-tests` in `ci_local.yml` and
+  `call_reusable_ci` in `ci_checks.yml` gate on that
+  output with `needs: [changes]`; steps, thresholds, and
+  pins unchanged (CI-FR-002). Two always-running
+  aggregates -- `CI OK` and `Standardized CI OK` -- report
+  a verdict for every PR, failing on any gated-job
+  conclusion other than success or skipped (CI-FR-003);
+  the repository ruleset swaps its required checks to
+  the aggregate names after merge, while security,
+  dependency, and CRAP scans stay ungated and push runs
+  on `main` are unchanged (CI-FR-004). The five
+  adversarial CI-FR-001 scenarios verified by local
+  dry-run against both workflows' byte-identical
+  detection blocks; constitution alignment verified
+  against the proposal (six principles PASS).
+  (Spec: openspec/changes/ci-skip-learnings-only-prs/)
+  (Fixes: #1194, Docs: #1201)
+
 - toolkit-gaze-2.4.0-reconciliation: `.opencode/agents/divisor-gaze-testing.md`
   is registered as a repo-local, non-embedded agent in
   `knownNonEmbeddedFiles` (the embedded canonical testing persona
