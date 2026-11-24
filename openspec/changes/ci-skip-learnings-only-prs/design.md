@@ -126,15 +126,21 @@ for matrix jobs, and frees the ruleset from naming individual
 jobs. Two aggregates rather than one because a job cannot
 `needs` across workflows.
 
-### Decision 5: Ruleset swap via gh api, right after the
-workflow change merges
+### Decision 5: Ruleset swap via safe-settings, right after
+the workflow change merges
 
-Merge order: land the workflow change first, then update the
-ruleset — list the repo's rulesets with `gh api`, PATCH the
-required-checks rule to require `CI OK` and
-`Standardized CI OK`, removing `Build and Test`, `Plugin
-Tests`, and `Standardized CI / Run linters`. The window
-between merge and swap is minutes; only a learnings PR opened
+The required-checks ruleset ("safe-settings: unbound-force
+required checks") is managed by safe-settings from
+`unbound-force/.github` `safe-settings/repos/unbound-force.yml`.
+A direct `gh api` PATCH would be reverted by the next sync, so
+the swap lives in that config (unbound-force/.github#73).
+Merge order: land the workflow change first, then merge
+unbound-force/.github#73 and run the "Safe Settings Sync"
+workflow for `unbound-force` (dry run, then apply), which
+requires `CI OK` and `Standardized CI OK` and removes `Build
+and Test`, `Plugin Tests`, and `Standardized CI / Run
+linters`. The window between merge and swap is minutes when
+the sync runs right away; only a learnings PR opened
 inside it would wait on the unreported nested check (code PRs
 are unaffected — every old name still reports), and the swap
 unblocks it immediately. Requiring the aggregates before the

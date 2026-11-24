@@ -163,18 +163,22 @@ otherwise. The repository's required-checks ruleset for pull
 requests targeting `main` MUST require each affected
 workflow's aggregate job, and MUST NOT require any check that
 a learnings-only pull request would leave unreported. The
-ruleset swap MUST be verified by reading the ruleset back
-after the PATCH and confirming the required-check names;
-when the PATCH fails after the workflow change merges, the
-failure MUST be surfaced and the swap retried until that
-read-back succeeds, and during the unverified window no pull
+ruleset is managed by safe-settings, so the swap MUST be made
+in the safe-settings configuration in `unbound-force/.github`
+and applied by a safe-settings sync, not by editing the live
+ruleset. The swap MUST be verified by reading the ruleset
+back after the sync and confirming the required-check names;
+when the sync fails or the read-back does not match after
+the workflow change merges, the failure MUST be surfaced and
+the sync re-run until that read-back succeeds, and during the unverified window no pull
 request MUST merge on an unreported required check — code
 pull requests keep reporting every previous check name, and
 learnings-only pull requests wait until the swap completes.
 If verification does not succeed, the workflow change MUST
 be reverted or the required checks restored to `Build and
 Test`, `Plugin Tests`, and `Standardized CI / Run linters`
-so no PR waits on an unreported check.
+in the safe-settings configuration so no PR waits on an
+unreported check.
 
 #### Scenario: Gated job failure fails the aggregate
 
@@ -213,10 +217,11 @@ so no PR waits on an unreported check.
   conclusive passing status, with no required check left
   unreported
 
-#### Scenario: Failed ruleset PATCH after the workflow merge
+#### Scenario: Failed ruleset sync after the workflow merge
 
-- **GIVEN** the workflow change has merged and the ruleset
-  PATCH failed or is not yet verified by read-back
+- **GIVEN** the workflow change has merged and the
+  safe-settings sync failed or is not yet verified by
+  read-back
 - **WHEN** pull requests are evaluated during that window
 - **THEN** the swap MUST be retried until the read-back
   confirms the two aggregate checks, and no pull request MUST

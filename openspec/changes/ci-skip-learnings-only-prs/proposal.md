@@ -87,7 +87,8 @@ skip to them is a possible follow-up.
   `council-review-action-tests`; new aggregate job.
 - `.github/workflows/ci_checks.yml`: new `changes` job; gating of
   the `call_reusable_ci` job; new aggregate job.
-- Repository ruleset (GitHub settings, via `gh api`): required
+- Repository ruleset (managed by safe-settings in
+  `unbound-force/.github`, unbound-force/.github#73): required
   checks move from `Build and Test`, `Plugin Tests`, and
   `Standardized CI / Run linters` to the two aggregate jobs.
 - `ci_security.yml`, `ci_dependencies.yml`, and `ci_crapload.yml`
