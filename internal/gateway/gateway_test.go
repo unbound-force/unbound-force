@@ -4380,8 +4380,10 @@ func TestStart_ForegroundNoLogFile(t *testing.T) {
 	_ = proc.Signal(syscall.SIGINT)
 
 	select {
-	case <-errCh:
-		// Server stopped.
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Start should return nil on graceful shutdown: %v", err)
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Start did not return after SIGINT")
 	}
