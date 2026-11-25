@@ -2,336 +2,260 @@ package homebrew
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 )
 
-func TestReleaseWorkflow_HomebrewPublicationIsOrderedAndFailClosed(t *testing.T) {
-	t.Parallel()
+// The release pipeline is delegated to jflowers/ship's shared go-release.yml
+// (the same pipeline replicator, dewey and gaze use). The tests below pin
+// the delegation contract: the immutable workflow pin, the inputs and
+// secrets mapped into it, the job permissions it runs with, and the
+// GoReleaser cask block the pipeline publishes. The publication ordering
+// and fail-closed validation logic itself lives in the pinned ship
+// workflow, so an immutable commit SHA (never a mutable tag) is what keeps
+// it trustworthy.
 
-	workflow := releaseWorkflowRunBlock(t)
-	if !strings.HasPrefix(strings.TrimSpace(workflow), "set -euo pipefail") {
-		t.Fatal("Homebrew publication run block must begin with set -euo pipefail")
-	}
+// immutableCommitSHA matches a 40-character commit SHA. The release
+// pipeline pin must be commit-addressed; mutable name-addressed refs
+// (tags, branches) are forbidden.
+var immutableCommitSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-	stages := []struct {
-		name    string
-		command string
-	}{
-		{"Cask checksum patching", "patch_checksums \"$CASK_FILE\""},
-		{"transformer archive checksum validation", "TRANSFORMER_ACTUAL_SHA=$(shasum -a 256 \"$TRANSFORMER_ARCHIVE\" | awk '{print $1}')"},
-		{"Cask transformation", "\"$TRANSFORMER_DIR/unbound-force\" transform-homebrew-cask"},
-		{"semantic validation", "postflight_steps_count=$(grep -Fxc '  postflight_steps do' \"$CASK_FILE\" || true)"},
-		{"candidate Cask copy", "cp \"$CASK_FILE\" \"$STAGED_TAP/Casks/unbound-force.rb\""},
-		{"candidate Cask staging", "git -C \"$STAGED_TAP\" add Casks/unbound-force.rb"},
-		{"candidate Cask commit", "commit -m \"test: stage release candidate Cask\""},
-		{"tap registration for audit", "brew tap unbound-force/staging \"$STAGED_TAP\""},
-		{"registered Cask verification", "cmp \"$CASK_FILE\" \"$REGISTERED_CASK\""},
-		{"tap trust for cask operations", "brew trust unbound-force/staging"},
-		{"Homebrew static validation", "brew audit --cask --strict unbound-force/staging/unbound-force"},
-		{"dependency state capture", "if brew list --cask dewey >/dev/null 2>&1; then"},
-		{"staged Cask smoke test", "brew install --cask unbound-force/staging/unbound-force"},
-		{"smoke test dependency cleanup", "remove_smoke_test_casks\n          SMOKE_TEST_CASK_INSTALLED=false"},
-		{"tap cleanup after smoke test", "SMOKE_TEST_CASK_INSTALLED=false\n          brew untap unbound-force/staging"},
-		{"canonical tap copy", "cp \"$CASK_FILE\" tap/Casks/unbound-force.rb"},
-		{"tap publication", "git push"},
-	}
-
-	previous := -1
-	for _, stage := range stages {
-		position := strings.Index(workflow, stage.command)
-		if position == -1 {
-			t.Fatalf("Homebrew publication run block is missing %s command %q", stage.name, stage.command)
-		}
-		if position <= previous {
-			t.Fatalf("%s must run after the preceding publication gate", stage.name)
-		}
-		previous = position
-	}
-
-	for _, command := range []string{
-		"\"$TRANSFORMER_DIR/unbound-force\" transform-homebrew-cask \\",
-		"cmp \"$CASK_FILE\" \"$REGISTERED_CASK\"",
-		"brew audit --cask --strict unbound-force/staging/unbound-force",
-		"brew install --cask unbound-force/staging/unbound-force",
-		"test -x \"$BREW_PREFIX/bin/unbound-force\"",
-		"test -L \"$BREW_PREFIX/bin/uf\"",
-		"test -x \"$BREW_PREFIX/bin/uf\"",
-	} {
-		assertFailFastCommand(t, workflow, command)
-	}
-	for _, validation := range []string{
-		"if [ -z \"$TRANSFORMER_SHA\" ] || [ \"$TRANSFORMER_SHA\" != \"$TRANSFORMER_ACTUAL_SHA\" ]; then",
-		"if [ \"$postflight_steps_count\" -ne 1 ]; then",
-		"if grep -Fqx '  postflight do' \"$CASK_FILE\"; then",
-		"if ! grep -Fqx '      run \"/usr/bin/xattr\",' \"$CASK_FILE\" || \\",
-	} {
-		assertValidationFailureExits(t, workflow, validation)
-	}
-	for _, cleanup := range []string{
-		"if [ \"$DEWEY_CASK_WAS_INSTALLED\" = false ] && brew list --cask dewey >/dev/null 2>&1; then",
-		"brew uninstall --cask --force dewey || cleanup_status=$?",
-		"if [ \"$OLLAMA_APP_CASK_WAS_INSTALLED\" = false ] && brew list --cask ollama-app >/dev/null 2>&1; then",
-		"brew uninstall --cask --force ollama-app || cleanup_status=$?",
-	} {
-		if !strings.Contains(workflow, cleanup) {
-			t.Errorf("Homebrew publication cleanup missing %q", cleanup)
-		}
-	}
+// goreleaserEscapedTemplates maps GoReleaser's backtick-escaped Homebrew
+// templates to the literal text the release cask must carry. GoReleaser
+// renders {{ `X` }} as X, keeping Homebrew's own {{...}} templates
+// unexpanded; the transformer writes the resolved form directly.
+var goreleaserEscapedTemplates = map[string]string{
+	"{{ `{{staged_path}}` }}":     "{{staged_path}}",
+	"{{ `{{HOMEBREW_PREFIX}}` }}": "{{HOMEBREW_PREFIX}}",
 }
 
-func TestReleaseWorkflow_ValidationMatchesTransformerOutput(t *testing.T) {
+func TestReleaseWorkflow_DelegatesToPinnedShipPipeline(t *testing.T) {
 	t.Parallel()
 
-	workflow := releaseWorkflowRunBlock(t)
-	legacyLines := strings.Split(legacyPostflightHook, "\n")
-	declarativeLines := strings.Split(declarativePostflightSteps, "\n")
-	checks := []string{
-		"postflight_steps_count=$(grep -Fxc '" + declarativeLines[0] + "' \"$CASK_FILE\" || true)",
-		"if grep -Fqx '" + legacyLines[0] + "' \"$CASK_FILE\"; then",
-		"grep -Fqx '" + declarativeLines[2] + "' \"$CASK_FILE\"",
-		"grep -Fqx '" + declarativeLines[3] + "' \"$CASK_FILE\"",
-		"grep -Fqx '" + declarativeLines[4] + "' \"$CASK_FILE\"",
+	workflow := releaseWorkflow(t)
+
+	const shipPipeline = "uses: jflowers/ship/.github/workflows/go-release.yml@"
+	usesLine := lineContaining(workflow, shipPipeline)
+	if usesLine == "" {
+		t.Fatal("release workflow must delegate to jflowers/ship's go-release.yml")
 	}
-	for _, check := range checks {
+	pin := strings.TrimSpace(usesLine[strings.Index(usesLine, "@")+1:])
+	if comment := strings.Index(pin, "#"); comment != -1 {
+		pin = strings.TrimSpace(pin[:comment])
+	}
+	if !immutableCommitSHA.MatchString(pin) {
+		t.Fatalf("ship pipeline must be pinned to an immutable commit SHA, got %q", pin)
+	}
+
+	for _, input := range []string{
+		"tag: ${{ inputs.tag }}",
+		"allow_prerelease: true",
+		"skip_semver_check: ${{ inputs.skip_semver_check }}",
+		"skip_ci_checks: ${{ inputs.skip_ci_checks }}",
+		"skip_unreleased_check: ${{ inputs.skip_unreleased_check }}",
+		"tap: unbound-force/homebrew-tap",
+		"formula: unbound-force",
+	} {
+		if !strings.Contains(workflow, input) {
+			t.Errorf("release workflow is missing ship input %q", input)
+		}
+	}
+
+	ciChecks := lineContaining(workflow, "      ci_checks:")
+	for _, check := range []string{
+		"Build and Test",
+		"Standardized CI / Run linters",
+		"OSV-Scanner / Trivy Source Scan",
+		"Plugin Tests",
+	} {
+		if !strings.Contains(ciChecks, check) {
+			t.Errorf("release ci_checks must gate on %q", check)
+		}
+	}
+
+	for _, check := range []string{
+		`test -x "$HOMEBREW_PREFIX/bin/unbound-force"`,
+		`test -L "$HOMEBREW_PREFIX/bin/uf"`,
+		`"$HOMEBREW_PREFIX/bin/uf" --version`,
+	} {
 		if !strings.Contains(workflow, check) {
-			t.Errorf("release workflow validation missing transformer output check %q", check)
+			t.Errorf("release cask_install_check is missing %q", check)
 		}
+	}
+
+	for _, secret := range []string{
+		"MACOS_SIGN_P12",
+		"MACOS_SIGN_PASSWORD",
+		"MACOS_SIGN_IDENTITY",
+		"MACOS_NOTARY_KEY",
+		"MACOS_NOTARY_KEY_ID",
+		"MACOS_NOTARY_ISSUER_ID",
+		"HOMEBREW_TAP_TOKEN",
+	} {
+		mapping := secret + ": ${{ secrets." + secret + " }}"
+		if !strings.Contains(workflow, mapping) {
+			t.Errorf("release workflow is missing secret mapping %q", mapping)
+		}
+	}
+
+	if !strings.Contains(workflow, "permissions: {}") {
+		t.Error("release workflow must default to no permissions (permissions: {})")
+	}
+	grants := jobPermissionGrants(workflow)
+	sort.Strings(grants)
+	const wantGrants = "checks: read\ncontents: write\nid-token: write"
+	if got := strings.Join(grants, "\n"); got != wantGrants {
+		t.Errorf("release job permissions = %q, want exactly %q", got, wantGrants)
+	}
+
+	if !strings.Contains(workflow, "on:\n  workflow_dispatch:") {
+		t.Error("release workflow must trigger only via workflow_dispatch")
+	}
+	if !strings.Contains(workflow, "cancel-in-progress: false") {
+		t.Error("release workflow must not cancel in-progress releases")
+	}
+	if strings.Contains(workflow, "transform-homebrew-cask") {
+		t.Error("release workflow must not run transform-homebrew-cask: the cask's postflight_steps are written by GoReleaser's custom_block")
 	}
 }
 
-func TestReleaseWorkflow_SmokeCleanupRemovesOnlyIntroducedDependencies(t *testing.T) {
+func TestReleaseWorkflow_GoReleaserCaskMatchesTransformerOutput(t *testing.T) {
 	t.Parallel()
 
-	workflow := releaseWorkflowRunBlock(t)
-	functionStart := strings.Index(workflow, "          remove_smoke_test_casks() {")
-	if functionStart == -1 {
-		t.Fatal("release workflow is missing remove_smoke_test_casks")
+	manifest := goreleaserManifest(t)
+
+	block := goreleaserCustomBlock(t, manifest)
+	if strings.Contains(block, "postflight do") {
+		t.Error("GoReleaser custom_block must not render the deprecated postflight do hook")
 	}
-	functionEnd := strings.Index(workflow[functionStart:], "\n          }\n")
-	if functionEnd == -1 {
-		t.Fatal("release workflow remove_smoke_test_casks function is incomplete")
+	got := dedentBlock(unescapeGoReleaserTemplates(block))
+	want := dedentBlock(declarativePostflightSteps)
+	if got != want {
+		t.Errorf("GoReleaser custom_block must match the transformer's declarative postflight_steps\ngot:\n%s\nwant:\n%s", got, want)
 	}
-	functionEnd += functionStart + len("\n          }")
-	cleanupFunction := workflow[functionStart:functionEnd]
-
-	tests := []struct {
-		name               string
-		deweyWasInstalled  bool
-		ollamaWasInstalled bool
-		wantRemoved        []string
-		wantPreserved      []string
-	}{
-		{
-			name:          "introduced dependencies",
-			wantRemoved:   []string{"unbound-force", "dewey", "ollama-app"},
-			wantPreserved: nil,
-		},
-		{
-			name:               "pre-existing dependencies",
-			deweyWasInstalled:  true,
-			ollamaWasInstalled: true,
-			wantRemoved:        []string{"unbound-force"},
-			wantPreserved:      []string{"dewey", "ollama-app"},
-		},
+	skipUploads := 0
+	for _, line := range strings.Split(manifest, "\n") {
+		if strings.TrimSpace(line) == "skip_upload: true" {
+			skipUploads++
+		}
 	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			tempDir := t.TempDir()
-			logPath := filepath.Join(tempDir, "brew.log")
-			binDir := filepath.Join(tempDir, "bin")
-			if err := os.Mkdir(binDir, 0o755); err != nil {
-				t.Fatalf("create fake Homebrew prefix: %v", err)
-			}
-
-			script := "BREW_PREFIX=\"$1\"\nLOG=\"$2\"\n" +
-				"DEWEY_CASK_WAS_INSTALLED=" + boolString(test.deweyWasInstalled) + "\n" +
-				"OLLAMA_APP_CASK_WAS_INSTALLED=" + boolString(test.ollamaWasInstalled) + "\n" +
-				"brew() {\n" +
-				"  printf '%s\\n' \"$*\" >> \"$LOG\"\n" +
-				"  return 0\n" +
-				"}\n" + cleanupFunction + "\nremove_smoke_test_casks\n"
-			command := exec.Command("bash", "-c", script, "smoke-cleanup", tempDir, logPath)
-			if output, err := command.CombinedOutput(); err != nil {
-				t.Fatalf("run smoke cleanup: %v\n%s", err, output)
-			}
-
-			logContent, err := os.ReadFile(logPath)
-			if err != nil {
-				t.Fatalf("read fake brew log: %v", err)
-			}
-			logOutput := string(logContent)
-			for _, cask := range test.wantRemoved {
-				command := "uninstall --cask --force " + cask
-				if !strings.Contains(logOutput, command) {
-					t.Errorf("cleanup did not run %q\n%s", command, logOutput)
-				}
-			}
-			for _, cask := range test.wantPreserved {
-				command := "uninstall --cask --force " + cask
-				if strings.Contains(logOutput, command) {
-					t.Errorf("cleanup unexpectedly ran %q\n%s", command, logOutput)
-				}
-			}
-		})
+	if skipUploads != 2 {
+		t.Errorf("GoReleaser manifest must route cask and formula uploads through the ship pipeline's signed-checksum flow (skip_upload: true twice), found %d", skipUploads)
 	}
 }
 
-func TestReleaseWorkflow_ChecksumPatcherSupportsGeneratedLayouts(t *testing.T) {
-	t.Parallel()
-
-	workflow := releaseWorkflowRunBlock(t)
-	functionStart := strings.Index(workflow, "          patch_checksums() {")
-	if functionStart == -1 {
-		t.Fatal("release workflow is missing patch_checksums")
-	}
-	functionEnd := strings.Index(workflow[functionStart:], "\n          }\n")
-	if functionEnd == -1 {
-		t.Fatal("release workflow patch_checksums function is incomplete")
-	}
-	functionEnd += functionStart + len("\n          }")
-
-	const (
-		arm64SHA = "26dd4fe6a21582b3506cec2c3e00fb632fcd0dededbe3a11bdfafb669a0c6cd0"
-		amd64SHA = "c52c4d33e0bbb37e20e848ec31306f568407218a4f1865b864362299414de777"
-		linuxSHA = "91d86f661882fce1969c3f19b215c885967905c91e9aba2943107f56a3856a08"
-	)
-	fixtures := map[string]string{
-		"cask.rb": "" +
-			"    on_arm do\n" +
-			"      sha256 \"old-arm64\"\n" +
-			"      url \"artifact_darwin_arm64.tar.gz\"\n" +
-			"    end\n" +
-			"    on_intel do\n" +
-			"      sha256 \"old-amd64\"\n" +
-			"      url \"artifact_darwin_amd64.tar.gz\"\n" +
-			"    end\n" +
-			"    on_arm do\n" +
-			"      sha256 \"" + linuxSHA + "\"\n" +
-			"      url \"artifact_linux_arm64.tar.gz\"\n" +
-			"    end\n",
-		"formula.rb": "" +
-			"    if Hardware::CPU.intel?\n" +
-			"      url \"artifact_darwin_amd64.tar.gz\"\n" +
-			"      sha256 \"old-amd64\"\n" +
-			"      define_method(:install) do\n" +
-			"      end\n" +
-			"    end\n" +
-			"    if Hardware::CPU.arm?\n" +
-			"      url \"artifact_darwin_arm64.tar.gz\"\n" +
-			"      sha256 \"old-arm64\"\n" +
-			"    end\n" +
-			"    if Hardware::CPU.arm?\n" +
-			"      url \"artifact_linux_arm64.tar.gz\"\n" +
-			"      sha256 \"" + linuxSHA + "\"\n" +
-			"    end\n",
-	}
-
-	tempDir := t.TempDir()
-	paths := make([]string, 0, len(fixtures))
-	for name, content := range fixtures {
-		path := filepath.Join(tempDir, name)
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatalf("write %s fixture: %v", name, err)
-		}
-		paths = append(paths, path)
-	}
-
-	script := "ARM64_SHA=" + arm64SHA + "\nAMD64_SHA=" + amd64SHA + "\n" +
-		workflow[functionStart:functionEnd] + "\npatch_checksums \"$1\"\npatch_checksums \"$2\"\n"
-	command := exec.Command("bash", "-c", script, "patch-checksums", paths[0], paths[1])
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("run patch_checksums: %v\n%s", err, output)
-	}
-
-	for _, path := range paths {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read patched fixture: %v", err)
-		}
-		patched := string(content)
-		for name, checksum := range map[string]string{
-			"arm64": arm64SHA,
-			"amd64": amd64SHA,
-			"linux": linuxSHA,
-		} {
-			if count := strings.Count(patched, checksum); count != 1 {
-				t.Errorf("%s contains %s checksum %d times, want 1\n%s", filepath.Base(path), name, count, patched)
-			}
-		}
-		if strings.Contains(patched, "old-") {
-			t.Errorf("%s retained an unsigned Darwin checksum\n%s", filepath.Base(path), patched)
-		}
-	}
+// releaseWorkflow reads the repository's release workflow.
+func releaseWorkflow(t *testing.T) string {
+	t.Helper()
+	return readRepoFile(t, filepath.Join(".github", "workflows", "release.yml"))
 }
 
-func releaseWorkflowRunBlock(t *testing.T) string {
+// goreleaserManifest reads the repository's GoReleaser manifest.
+func goreleaserManifest(t *testing.T) string {
+	t.Helper()
+	return readRepoFile(t, ".goreleaser.yaml")
+}
+
+// readRepoFile reads a repository file resolved relative to this package's
+// directory, so the regression tests always pin the checked-in
+// configuration regardless of the working directory the tests run from.
+func readRepoFile(t *testing.T, relativePath string) string {
 	t.Helper()
 	_, testFile, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("locate workflow regression test")
+		t.Fatal("locate release configuration regression test")
 	}
-	workflowPath := filepath.Join(filepath.Dir(testFile), "..", "..", ".github", "workflows", "release.yml")
-	content, err := os.ReadFile(workflowPath)
+	content, err := os.ReadFile(filepath.Join(filepath.Dir(testFile), "..", "..", relativePath))
 	if err != nil {
-		t.Fatalf("read release workflow: %v", err)
+		t.Fatalf("read %s: %v", relativePath, err)
 	}
-
-	const step = "      - name: Update Homebrew cask and formula\n        run: |\n"
-	start := strings.Index(string(content), step)
-	if start == -1 {
-		t.Fatal("release workflow is missing the Homebrew publication step")
-	}
-	runBlock := string(content)[start+len(step):]
-	if end := strings.Index(runBlock, "        env:\n"); end != -1 {
-		runBlock = runBlock[:end]
-	}
-	return runBlock
+	return string(content)
 }
 
-func boolString(value bool) string {
-	if value {
-		return "true"
+// lineContaining returns the full line containing needle, or "" when no
+// line contains it.
+func lineContaining(content, needle string) string {
+	index := strings.Index(content, needle)
+	if index == -1 {
+		return ""
 	}
-	return "false"
-}
-
-func assertFailFastCommand(t *testing.T, workflow, command string) {
-	t.Helper()
-	position := strings.Index(workflow, command)
-	if position == -1 {
-		t.Fatalf("Homebrew publication run block is missing command %q", command)
-	}
-	lineStart := strings.LastIndex(workflow[:position], "\n") + 1
-	lineEnd := strings.Index(workflow[position:], "\n")
-	if lineEnd == -1 {
-		lineEnd = len(workflow)
+	start := strings.LastIndex(content[:index], "\n") + 1
+	end := strings.Index(content[index:], "\n")
+	if end == -1 {
+		end = len(content)
 	} else {
-		lineEnd += position
+		end += index
 	}
-	if strings.TrimSpace(workflow[lineStart:lineEnd]) != command {
-		t.Fatalf("command %q must be a standalone fail-fast command", command)
-	}
+	return content[start:end]
 }
 
-func assertValidationFailureExits(t *testing.T, workflow, validation string) {
+// jobPermissionGrants collects the permission grants of the indented
+// release-job permissions block.
+func jobPermissionGrants(workflow string) []string {
+	const blockHeader = "\n    permissions:\n"
+	header := strings.Index(workflow, blockHeader)
+	if header == -1 {
+		return nil
+	}
+	var grants []string
+	for _, line := range strings.Split(workflow[header+len(blockHeader):], "\n") {
+		if !strings.HasPrefix(line, "      ") {
+			break
+		}
+		grants = append(grants, strings.TrimSpace(line))
+	}
+	return grants
+}
+
+// goreleaserCustomBlock extracts the homebrew_casks custom_block literal,
+// stopping at the first line indented no deeper than the block key.
+func goreleaserCustomBlock(t *testing.T, manifest string) string {
 	t.Helper()
-	start := strings.Index(workflow, validation)
-	if start == -1 {
-		t.Fatalf("Homebrew publication run block is missing validation %q", validation)
+	const blockKey = "custom_block: |"
+	keyIndex := strings.Index(manifest, blockKey)
+	if keyIndex == -1 {
+		t.Fatal(".goreleaser.yaml is missing the cask custom_block")
 	}
-	blockEnd := strings.Index(workflow[start:], "\n          fi")
-	if blockEnd == -1 {
-		t.Fatalf("validation %q is missing its closing conditional", validation)
+	lineStart := strings.LastIndex(manifest[:keyIndex], "\n") + 1
+	keyLine := manifest[lineStart : keyIndex+len(blockKey)]
+	keyIndent := keyLine[:len(keyLine)-len(strings.TrimLeft(keyLine, " "))]
+	var block []string
+	for _, line := range strings.Split(manifest[keyIndex+len(blockKey):], "\n")[1:] {
+		if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, keyIndent+" ") {
+			break
+		}
+		block = append(block, line)
 	}
-	block := strings.TrimSpace(workflow[start : start+blockEnd])
-	lastLine := block[strings.LastIndex(block, "\n")+1:]
-	if strings.TrimSpace(lastLine) != "exit 1" {
-		t.Fatalf("validation %q must exit before publication", validation)
+	return strings.Join(block, "\n")
+}
+
+// unescapeGoReleaserTemplates resolves GoReleaser's backtick escaping so
+// the custom_block can be compared with the transformer's literal output.
+func unescapeGoReleaserTemplates(block string) string {
+	for escaped, literal := range goreleaserEscapedTemplates {
+		block = strings.ReplaceAll(block, escaped, literal)
 	}
+	return block
+}
+
+// dedentBlock strips the leading indentation of its first non-empty line
+// from every line, normalizing embedded blocks to column zero.
+func dedentBlock(block string) string {
+	lines := strings.Split(strings.TrimRight(block, "\n"), "\n")
+	indent := ""
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		indent = line[:len(line)-len(strings.TrimLeft(line, " "))]
+		break
+	}
+	for i, line := range lines {
+		lines[i] = strings.TrimPrefix(line, indent)
+	}
+	return strings.Join(lines, "\n")
 }
