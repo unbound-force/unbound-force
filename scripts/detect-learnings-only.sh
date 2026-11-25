@@ -33,25 +33,32 @@ if [ "$event" = 'pull_request' ] && [ -n "$base" ] && [ -n "$head" ]; then
     code='false'
     # Each entry is ":oldmode newmode oldsha newsha status" NUL path NUL.
     while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+      oldmode="${meta%% *}"
+      oldmode="${oldmode#:}"
       newmode="${meta#* }"
       newmode="${newmode%% *}"
       status="${meta##* }"
       printf 'changed: %s\n' "$path" >&2
       case "$path" in
-        .uf/dewey/learnings/*.md) ;;
+        .uf/dewey/learnings/?*.md) ;;
         *) code='true' ;;
       esac
-      # Only regular files qualify. Symlinks (120000),
-      # submodules (160000), and deletions (000000) count as code.
-      case "$newmode" in
-        100644|100755) ;;
-        *) code='true' ;;
-      esac
-      # Added, modified, or type-changed entries only. With
-      # --no-renames git never reports R or C, and D is already
-      # code through its 000000 mode. Anything else fails safe.
+      # Only regular files qualify, on both sides of the change:
+      # symlinks (120000), submodules (160000), and any other
+      # non-regular entry count as code. 000000 is the absent side
+      # of an addition or deletion.
+      for mode in "$oldmode" "$newmode"; do
+        case "$mode" in
+          000000|100644|100755) ;;
+          *) code='true' ;;
+        esac
+      done
+      # Added, modified, type-changed, or deleted entries only:
+      # deleting a learning cannot break a build, the same rule as
+      # the sibling repos. With --no-renames git never reports R or
+      # C. Anything else fails safe.
       case "$status" in
-        A|M|T) ;;
+        A|M|T|D) ;;
         *) code='true' ;;
       esac
     done <"$diffout"

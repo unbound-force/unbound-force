@@ -33,10 +33,13 @@ new path, and both paths are classified. The output MUST be
 `'true'` when any changed file lies outside
 `.uf/dewey/learnings/`, lacks a `.md` extension, or is not a
 regular file, and `'false'` only when every changed file is
-a regular `.md` file under that prefix. A regular file is a
-git blob with file mode `100644` or `100755`; symlinks (mode
-`120000`), submodules (mode `160000`), and any other
-non-regular entry count as code.
+a regular `.md` file under that prefix, added, modified or
+deleted. A regular file is a git blob with file mode `100644`
+or `100755`; symlinks (mode `120000`), submodules (mode
+`160000`), and any other non-regular entry on either side of
+a change count as code. Deleting a learning cannot break a
+build, so it does not force full CI; this matches the rule in
+the sibling repos (dewey, gaze, replicator).
 
 Both `changes` jobs MUST run the same detector, a single
 script shared by the two workflows, and MUST run that

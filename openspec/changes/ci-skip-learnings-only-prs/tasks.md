@@ -165,3 +165,16 @@
 - [x] 5.5 Record in design Risks that learnings-only PRs also
       skip Gitleaks, PR title validation, and action pin
       checks, and what still covers secrets (Trivy).
+
+## 6. Align with sibling repos
+
+- [x] 6.1 Treat a deleted learning as learnings-only (status
+      `D` allowed, overriding 5.2), require regular or absent
+      modes on both sides of every change, and require a
+      non-empty name before `.md`, matching dewey, gaze and
+      replicator.
+- [x] 6.2 Extend `scripts/detect-learnings-only_test.sh` to 24
+      scenarios: deleted learning and rename within learnings
+      now expect `false`; add deleted code file, learning
+      replaced by symlink, submodule under prefix, and bare
+      `.md` name.
