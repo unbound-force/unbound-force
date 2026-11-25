@@ -84,10 +84,22 @@ new_repo; git mv src/main.go "$L/auth.md"; commit_pr
 expect 'code renamed into learnings' true
 
 new_repo; git mv "$L/existing.md" "$L/renamed.md"; commit_pr
-expect 'rename within learnings' true
+expect 'rename within learnings' false
 
 new_repo; git rm -q "$L/existing.md"; commit_pr
-expect 'deleted learning' true
+expect 'deleted learning' false
+
+new_repo; git rm -q src/main.go; commit_pr
+expect 'deleted code file' true
+
+new_repo; git rm -q "$L/existing.md"; mkdir -p "$L"; ln -s ../../../src/main.go "$L/existing.md"; commit_pr
+expect 'learning replaced by symlink' true
+
+new_repo; git update-index --add --cacheinfo "160000,$BASE,$L/sub.md"; commit_pr
+expect 'submodule under prefix' true
+
+new_repo; printf '# x\n' >"$L/.md"; commit_pr
+expect 'bare .md name' true
 
 new_repo; ln -s ../../../src/main.go "$L/link.md"; commit_pr
 expect 'symlink under prefix' true

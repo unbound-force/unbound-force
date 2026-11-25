@@ -14,9 +14,11 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (NUL-delimited `git diff -z --no-renames --raw`,
   git-file-mode aware) and outputs `code` `'true'` unless
   every changed entry is a regular `.md` file under the
-  prefix -- mixed PRs, renames into or out of the prefix,
-  non-Markdown or non-regular files (symlinks), and
-  indeterminate states fail safe to full CI (CI-FR-001).
+  prefix, added, edited or deleted -- mixed PRs, renames
+  into or out of the prefix, non-Markdown or non-regular
+  files (symlinks, submodules) on either side of a change,
+  and indeterminate states fail safe to full CI
+  (CI-FR-001).
   `build-and-test`, `plugin-tests`, and
   `council-review-action-tests` in `ci_local.yml` and
   `call_reusable_ci` in `ci_checks.yml` gate on that
@@ -31,7 +33,7 @@ Each entry follows the format: `- <change-name>: <summary>`.
   dependency, and CRAP scans stay ungated and push runs
   on `main` are unchanged (CI-FR-004). Both workflows run
   one shared detector, `scripts/detect-learnings-only.sh`,
-  whose 20-scenario test (including every adversarial
+  whose 24-scenario test (including every adversarial
   CI-FR-001 scenario) runs in each `changes` job before
   detection; constitution alignment verified
   against the proposal (six principles PASS).

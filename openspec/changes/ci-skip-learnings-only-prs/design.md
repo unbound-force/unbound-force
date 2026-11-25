@@ -161,6 +161,7 @@ called by the `changes` job in both `ci_local.yml` and
 differently. `scripts/detect-learnings-only_test.sh` builds a
 throwaway git repository per scenario (every CI-FR-001
 scenario plus nested, executable, deleted, renamed,
+submodule, symlink-replacement, bare-`.md`,
 lookalike-prefix, and newline-smuggling paths) and runs as a
 step of the `changes` job before detection, so a broken
 detector fails the job and both aggregates instead of
