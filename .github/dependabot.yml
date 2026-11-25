@@ -11,15 +11,32 @@ updates:
     directory: /
     schedule:
       interval: daily
+    # No PR for a third-party release younger than a day; our
+    # own orgs' releases come at once and merge themselves
+    # (dependabot-automerge.yml).
+    cooldown:
+      default-days: 1
+      exclude: ["jflowers/*", "unbound-force/*", "zero-dot-force/*"]
     commit-message:
       prefix: ci
       include: scope
+    groups:
+      # ship's workflows in one PR of their own, so a
+      # third-party update can't hold a ship release up.
+      ship:
+        patterns: ["jflowers/ship*"]
 
   - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    cooldown:
+      default-days: 1
+      exclude: ["github.com/jflowers/*", "github.com/unbound-force/*", "github.com/zero-dot-force/*"]
     commit-message:
       prefix: chore
       include: scope
+    groups:
+      ours:
+        patterns: ["github.com/jflowers/*", "github.com/unbound-force/*", "github.com/zero-dot-force/*"]
