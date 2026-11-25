@@ -1280,7 +1280,7 @@ func TestCommandContracts_ReviewPrHeadRoot(t *testing.T) {
 		{name: "prepare failure skips local gates", all: append([]string{"do not run local tools anywhere", "the failure envelope's rendered `not_run_line`", "`local gates: not run (<code>): <message>`", "continue with ci evidence only", "`review_head_root_error`: an unexpected tool error"}, reviewHeadRootCodes...)},
 		{name: "whole prepare result threaded into pre-flight", all: []string{"in `ci-aware` mode, passing the whole prepare result", "the provenance fields `head_sha`, `method`, `config_sha`, `config_dirty`"}},
 		{name: "release once, non-fatal", all: []string{"`{action: \"release\", root: <root>}`", "before any stop after a successful prepare", "a release failure is a warning in the report and never changes the verdict"}},
-		{name: "provenance reported", all: []string{"the `gates ran at` provenance line (or the `local gates: not run` line)"}},
+		{name: "provenance reported", all: []string{"the prepare result's rendered `provenance_line` (or the failure envelope's rendered `not_run_line`, which ends in `: <message>`), verbatim"}},
 		{name: "report template inserts rendered lines verbatim", all: []string{"<provenance_line from the prepare result, or its not_run_line from the failure envelope, verbatim; then a table"}},
 	}
 	assertCommandCopies(t, "uf.review-pr.md", true, clauses)

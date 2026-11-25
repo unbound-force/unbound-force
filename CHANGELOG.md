@@ -47,9 +47,9 @@ Each entry follows the format: `- <change-name>: <summary>`.
 
   DE-004 deltas (`instruction-lint --changed`):
   `skills/pre-flight/SKILL.md` 599 → 646 lines (+525 tokens),
-  `commands/uf.review-pr.md` 1309 → 1354 (+617 tokens),
+  `commands/uf.review-pr.md` 1309 → 1356 (+634 tokens),
   `commands/uf.review-council.md` 1487 → 1551 (+864 tokens), per
-  copy; +156 lines and +2006 tokens in total. The
+  copy; +158 lines and +2023 tokens in total. The
   worktree, fetch, trust, and validation choreography lives in the
   tool, not the prose. Known gaps: submodules and LFS are not
   initialised in a head worktree, and non-PR input keeps #1063's

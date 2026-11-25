@@ -687,6 +687,39 @@ describe("runDeclaredChecks with an execution root and base", () => {
     expect(data.verdict).toBe("FAIL")
   })
 
+  it("applies an explicit base when the execution root is the config root (checkout reuse)", async () => {
+    // review_head_root's reuse path: root is the plugin directory and
+    // base_sha is the PR base. The base must still drive scope and the
+    // baseline; default-branch resolution must never run (#1203, #1218).
+    const log: string[] = []
+    const reuseGit: GitExec = (args, cwd) => {
+      const key = args.join(" ")
+      log.push(`${cwd}: ${key}`)
+      if (cwd !== ROOT) throw new Error(`unexpected git ${cwd}: ${key}`)
+      if (key === `merge-base ${PR_BASE} HEAD`) return PR_MERGE_BASE
+      if (key === "rev-parse --is-shallow-repository") return "false"
+      if (key === `diff --name-only ${PR_MERGE_BASE}`) return "internal/a.go\n"
+      if (args[0] === "worktree") return ""
+      throw new Error(`unexpected git ${cwd}: ${key}`)
+    }
+    const { deps, calls } = fakeDeps({
+      config: scoped,
+      executables: [`${ROOT}/go.sh`, `${ROOT}/sh.sh`],
+      git: reuseGit,
+      results: { [`${ROOT}/go.sh`]: { exitCode: 1, output: "broken", timedOut: false } },
+    })
+    const data = await runDeclaredChecks(ROOT, deps, "soft-gate", ROOT, PR_BASE)
+
+    expect(data.scope).toEqual({ files: ["internal/a.go"], fallback_reason: null, base_ref: PR_BASE, merge_base: PR_MERGE_BASE })
+    expect(data.checks.map((c) => [c.name, c.status])).toEqual([
+      ["go-check", "FAIL"],
+      ["sh-check", "SKIP — no in-scope files"],
+    ])
+    expect(log).toContain(`${ROOT}: worktree add --detach ${WORKTREE} ${PR_MERGE_BASE}`)
+    expect(calls.map((c) => c.cwd)).toEqual([ROOT, WORKTREE])
+    expect(data.checks[0]?.causality).toBe("branch-caused")
+  })
+
   it("an explicit base skips the filter only for a shallow clone or a git failure", () => {
     const shallow: GitExec = (args) => {
       const key = args.join(" ")

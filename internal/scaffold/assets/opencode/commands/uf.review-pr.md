@@ -309,8 +309,10 @@ the agent's own checkout (issue #1203).
    release failure is a warning in the report and never
    changes the verdict.
 
-**Record results**: the `Gates ran at` provenance line (or
-the `Local gates: not run` line), CI Coverage Matrix,
+**Record results**: the prepare result's rendered
+`provenance_line` (or the failure envelope's rendered
+`not_run_line`, which ends in `: <message>`), verbatim, CI
+Coverage Matrix,
 Execution Results, and Verdict. If tools pass, skip those
 categories in the AI review. If tools fail, include the
 failure output as context.

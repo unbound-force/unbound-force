@@ -218,6 +218,30 @@ function data(envelope: ToolResult<ReviewHeadRootData>): ReviewHeadRootData {
   return (envelope as { data: ReviewHeadRootData }).data
 }
 
+/**
+ * Asserts the complete prepare failure envelope: the shared failure shape
+ * plus the rendered not_run_line the consuming command inserts verbatim
+ * (DE-003). Every prepare failure funnels through one renderer; this pins
+ * it per code (#1215, #1220, #1221).
+ */
+function expectPrepareFailure(
+  envelope: Awaited<ReturnType<ReturnType<typeof setup>["prepare"]>>,
+  code: string,
+  retryable: boolean,
+  messagePart: string,
+): void {
+  expect(envelope.status).toBe("error")
+  const message = envelope.message ?? ""
+  expect(message).toContain(messagePart)
+  expect(envelope).toEqual({
+    status: "error",
+    code,
+    message,
+    retryable,
+    not_run_line: `Local gates: not run (${code}): ${message}`,
+  })
+}
+
 /** True when any recorded git call starts with the given argv prefix. */
 function called(calls: Calls, ...prefix: string[]): boolean {
   return calls.git.some((args) => prefix.every((part, index) => args[index] === part))
@@ -332,13 +356,13 @@ describe("review_head_root prepare", () => {
   it("fails HEAD_UNAVAILABLE when gh returns an unexpected PR URL", async () => {
     const { prepare } = setup({ pull: { ...pr({}), url: "https://github.com/org/project/issues/42" } })
     const envelope = await prepare()
-    expect(envelope.code).toBe("HEAD_UNAVAILABLE")
+    expectPrepareFailure(envelope, "HEAD_UNAVAILABLE", true, "issues/42")
   })
 
   it("rejects missing prepare arguments and bad SHAs", async () => {
     const { run } = setup()
     const missing = await run({ action: "prepare", pr_number: PR })
-    expect(missing.status).toBe("error")
+    expectPrepareFailure(missing, "REVIEW_HEAD_ROOT_ERROR", false, "prepare requires pr_number, base_sha, and head_sha.")
     const tool = createReviewHeadRootTool(
       () => "",
       () => "",
@@ -391,23 +415,19 @@ describe("review_head_root fetch", () => {
       fetchable: { [`refs/pull/${PR}/head`]: gitExit(128, "Could not resolve host") },
     })
     const envelope = await prepare()
-    expect(envelope.code).toBe("HEAD_UNAVAILABLE")
-    expect(envelope.retryable).toBe(true)
-    expect(envelope.message).toContain("Could not resolve host")
+    expectPrepareFailure(envelope, "HEAD_UNAVAILABLE", true, "Could not resolve host")
   })
 
   it("fails HEAD_UNAVAILABLE (not retryable) when no remote names the base repo", async () => {
     const { prepare } = setup({ objects: new Set([USER_SHA]), remotes: { origin: "git@github.com:me/project.git" } })
     const envelope = await prepare()
-    expect(envelope.code).toBe("HEAD_UNAVAILABLE")
-    expect(envelope.retryable).toBe(false)
+    expectPrepareFailure(envelope, "HEAD_UNAVAILABLE", false, "org/project")
   })
 
   it("fails HEAD_UNAVAILABLE (retryable) when the PR lookup fails", async () => {
     const { prepare } = setup({ pull: new Error("gh: HTTP 502") })
     const envelope = await prepare()
-    expect(envelope.code).toBe("HEAD_UNAVAILABLE")
-    expect(envelope.retryable).toBe(true)
+    expectPrepareFailure(envelope, "HEAD_UNAVAILABLE", true, "HTTP 502")
   })
 
   it("fails HEAD_UNAVAILABLE when the base commit stays missing after a fetch", async () => {
@@ -442,15 +462,15 @@ describe("review_head_root worktree lifecycle", () => {
   it("fails WORKTREE_FAILED with git's message and leaves no directory", async () => {
     const { m, prepare } = setup({ worktreeAddError: gitExit(128, "fatal: could not lock config file") })
     const envelope = await prepare()
-    expect(envelope.code).toBe("WORKTREE_FAILED")
-    expect(envelope.message).toContain("could not lock config file")
+    expectPrepareFailure(envelope, "WORKTREE_FAILED", false, "could not lock config file")
     expect(m.dirs.has(`${DIR}/k3v9x2qa`)).toBe(false)
   })
 
   it("never leaves a worktree behind when the diff fails", async () => {
     const { m, calls, prepare } = setup({ diff: gitExit(128, "bad object") })
     const envelope = await prepare()
-    expect(envelope.status).toBe("error")
+    // An unexpected git error reaches the outer catch: the catch-all code.
+    expectPrepareFailure(envelope, "REVIEW_HEAD_ROOT_ERROR", false, "Command failed with exit 128")
     expect(called(calls, "worktree", "add")).toBe(false)
     expect(m.worktrees.size).toBe(0)
   })
