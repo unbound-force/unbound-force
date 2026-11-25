@@ -26,7 +26,8 @@ dist/
 node_modules/
 
 # Gaze build artifacts
-.gaze/
+.gaze/*
+!.gaze/baseline.json
 
 # opencode run logs written under an unresolved path (.opencode/undefined/)
 .opencode/undefined/
@@ -70,9 +71,9 @@ internal/**/.opencode/
 internal/**/.uf/
 internal/**/.specify/
 internal/**/openspec/
+# ...except the scaffold's embedded openspec assets, which are source
+!internal/scaffold/assets/openspec/
 
 *.log
 gateway.pid
 /unbound-force
-AGENTS.md
-opencode.json
