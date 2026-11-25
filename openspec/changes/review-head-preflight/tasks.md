@@ -100,9 +100,19 @@
   - `release` removes the worktree.
   - The user's `HEAD`, branch, index, untracked file, `git status`
     output, and `.git/config` are unchanged throughout.
-- [ ] 3.5 DE-007 seam verification naming the three layers:
+- [x] 3.5 DE-007 seam verification naming the three layers:
   registration surface, documented output shape, and write→read
   round trip (3.4).
+  - Layer 1: `review_head_root` is pinned in the uf-workflow and
+    scratch-smoke tool lists, and `uf_preflight_declared_checks`
+    args are pinned to `mode`, `root`, `base_sha`. The dynamic
+    `registration-surface.test.ts` loop covers both zod raw
+    shapes.
+  - Layer 2: golden blocks dispatch `prepare` (reuse path) and both
+    `INVALID_ROOT` paths through the registry.
+  - Layer 3: the real-git round trip in
+    `preflight-declared-roundtrip.test.ts` (prepare → declared
+    checks in the root → release, with the user's tree unchanged).
 
 ## 4. Skill, commands, and policy file
 
@@ -150,7 +160,7 @@
 
 ## 5. Documentation and verification
 
-- [ ] 5.1 Verify constitution alignment against the proposal:
+- [x] 5.1 Verify constitution alignment against the proposal:
   - I: provenance line.
   - II: omitted arguments are unchanged, and gaze-owned files are
     untouched.
@@ -163,5 +173,16 @@
   analysis-root argument to `gaze-reporter`.
 - [ ] 5.4 Add `Closes #1203` to the PR body by hand
   (`originating_issue` carries #1204 only).
-- [ ] 5.5 Run `make check` and `make lint-instructions`. Confirm
+- [x] 5.5 Run `make check` and `make lint-instructions`. Confirm
   green with coverage floors unchanged (plugin floor 94%).
+  Local results on the rebased branch:
+  - Plugin suite: 2710/2710 with `--testTimeout 60000`, 96.55%
+    statements. Two real-git push tests time out at 5s under load,
+    as noted in checkout-pr-head 4.2.
+  - Go coverage gate passes.
+  - `lint-instructions`: 0 errors.
+  - `golangci-lint` on internal/scaffold: 0 issues.
+  - Pre-existing on main, unrelated to this change:
+    `golangci-lint` errcheck at `internal/gateway/gateway_test.go:4383`,
+    and `TestStealthInit_Integration_GitStatusClean` (the external
+    `specify` sub-tool exits 2 locally).
