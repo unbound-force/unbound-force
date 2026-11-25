@@ -208,8 +208,9 @@ Insert this verbatim:
 Every change follows a workflow tier chosen for that change's
 scope and risk — no single tier is mandatory. `/uf.unleash`
 picks the tier automatically through the `tier-routing` skill
-when no spec exists yet; agents working by hand apply the same
-rubric.
+when a change starts on `main` or an unrecognized branch (a
+tier-named branch missing its artifacts stops instead); agents
+working by hand apply the same rubric.
 
 | Tier | Tool | When | Artifacts |
 |------|------|------|-----------|
