@@ -30,11 +30,16 @@ provenance fields `head_sha`, `method`, `config_sha`, and
 `provenance_line` and `gaze_skip_note`. When `root` is
 supplied:
 
-- Every shell command in Phases 1, 2, 4, and the Phase 4a
-  worktree tier runs with `root` as its working directory.
-  Never read workflows, probe config files, or run tools
-  from the agent's own directory: it may be a different
-  commit.
+- Every shell command in Phases 1, 2, and 4 runs with
+  `root` as its working directory. Never read workflows,
+  probe config files, or run tools from the agent's own
+  directory: it may be a different commit.
+- Phase 4a Tier 2 runs `git worktree add` (and `git
+  worktree remove`) from `root`, but runs the failing tools
+  inside the baseline worktree it creates, never in `root`
+  (see Phase 4a). Running them in `root` would re-test the
+  branch and misclassify branch-caused failures as
+  pre-existing.
 - Phase 2a takes `changed_files` as the branch diff (see
   Phase 2a).
 - Phase 2b and Phase 4a use `base_sha` (see those phases).

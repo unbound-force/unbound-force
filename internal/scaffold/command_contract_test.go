@@ -1290,7 +1290,7 @@ func TestCommandContracts_ReviewPrHeadRoot(t *testing.T) {
 func TestCommandContracts_ReviewCouncilHeadRoot(t *testing.T) {
 	clauses := []commandClause{
 		{name: "prepare for pr input only", all: []string{"#### phase 1 head root (pr input only)", "when the resolved input context is `kind: pr`", "`{action: \"prepare\", pr_number: <pr_number>, base_sha: <base_sha>, head_sha: <head_sha>}`", "local and uncommitted input skips this block"}},
-		{name: "every code takes the mandatory fail path", all: append([]string{"do not run local gates anywhere", "phase 1a stays mandatory, so every code takes the phase 1a fail path", "`review_head_root_error`: an unexpected tool error", "preceded for pr input by the phase 1 head root block"}, reviewHeadRootCodes...)},
+		{name: "every code takes the mandatory fail path", all: append([]string{"do not run local gates anywhere", "phase 1a stays mandatory, so every code takes the phase 1a fail path", "even though no pre-flight verdict exists", "dispatch no reviewer children", "or the phase 1 head root prepare returned `status: \"error\"`", "`review_head_root_error`: an unexpected tool error", "preceded for pr input by the phase 1 head root block"}, reviewHeadRootCodes...)},
 		{name: "whole prepare result threaded into phase 1a", all: []string{"passing the whole prepare result", "when the phase 1 head root block prepared it", "the pr's `base_sha` in pr mode, else the default branch"}},
 		{name: "gaze gated on checkout", all: []string{"whose prepare result carries a `gaze_skip_note` (method `worktree`)", "gaze skipped: the pr head is in a temporary worktree and gaze-reporter has no root argument"}},
 		{name: "release once, non-fatal", all: []string{"`{action: \"release\", root: <root>}`", "or on any stop after a successful prepare", "a release failure is a warning in the final report and never changes the verdict"}},
@@ -1303,7 +1303,8 @@ func TestPreflightSkill_ReviewHeadRootThreading(t *testing.T) {
 	root := findProjectRoot(t)
 	clauses := []string{
 		"## pr-mode inputs (review head root)",
-		"every shell command in phases 1, 2, 4, and the phase 4a worktree tier runs with `root` as its working directory",
+		"every shell command in phases 1, 2, and 4 runs with `root` as its working directory",
+		"runs the failing tools inside the baseline worktree it creates, never in `root`",
 		"when the consumer supplies `changed_files`, that list *is* the branch diff",
 		"plus `root` and `base_sha` when the consumer supplied them",
 		"error `invalid_preflight_config` or `invalid_root`",
