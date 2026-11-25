@@ -27,10 +27,13 @@ check is failing and have confirmed the release is safe.
 
 ## What Happens Automatically
 
-The release workflow delegates to
-[org-infra](https://github.com/complytime/org-infra)
+The release workflow calls
+[jflowers/ship](https://github.com/jflowers/ship)'s shared
+`go-release.yml`, the same pipeline replicator, dewey and gaze
+use. It runs [org-infra](https://github.com/complytime/org-infra)'s
 reusable workflows for preflight validation and GoReleaser
-execution, then runs macOS signing inline.
+execution (ship pins org-infra in one place), then the macOS
+signing and Homebrew publishing below.
 
 ### Pre-flight Validation
 
@@ -47,7 +50,7 @@ The `reusable_release_preflight` workflow validates:
 - **CI status**: Required checks must have passed on HEAD
   (configured via `ci_checks` input:
   `["Build and Test", "Standardized CI / Run linters",
-  "OSV-Scanner / Trivy Source Scan"]`)
+  "OSV-Scanner / Trivy Source Scan", "Plugin Tests"]`)
 - **Unreleased commits**: At least one commit must exist
   since the last release
 
@@ -74,34 +77,39 @@ The `reusable_release_goreleaser` workflow:
     release assets (via `release.extra_files` in
     `.goreleaser.yaml`)
 
-### macOS Signing
+### macOS Signing and Homebrew
 
-If Apple Developer ID signing secrets are configured:
+ship's `go-release.yml` checks the signing secrets before
+anything is tagged: all of them, or none (an unsigned release).
+With them:
 
 1. Darwin binaries are signed with `codesign`
 2. Signed binaries are notarized via Apple's notarytool
 3. Unsigned release assets are replaced with signed ones
-4. Checksums are recomputed for signed archives
-5. Homebrew cask and formula are patched with signed
-   checksums
-6. The release transformer archive checksum is verified
-7. The generated cask's legacy `postflight` hook is replaced
-   with declarative `postflight_steps`
-8. Semantic checks reject missing, duplicate, or deprecated
-   hooks and verify the quarantine removal and `uf` alias
-9. `brew audit --cask --strict` validates the cask via the
-   staging tap (name-based audit required by modern Homebrew)
-10. A staged tap installation verifies the executable and
-    `uf` alias, then uninstalls the cask
-11. The validated cask and formula are pushed to the
-   [homebrew-tap](https://github.com/unbound-force/homebrew-tap)
+4. `checksums.txt` is rewritten for the signed archives
 
-Any transformation, validation, audit, installation, or cleanup
-failure stops the job before tap publication. For a transient
-failure, inspect the failed step and re-run the workflow with the
-same tag. If GoReleaser changes the generated cask template, update
-and verify the transformer, then publish the correction under a new
-release tag; do not move an existing release tag.
+Then, for the Homebrew tap:
+
+1. The cask and formula (GoReleaser release assets) get every
+   sha256 from the final `checksums.txt`
+2. Both are committed in a clone of the
+   [homebrew-tap](https://github.com/unbound-force/homebrew-tap)
+3. `brew audit --cask --strict` validates the cask through a
+   throwaway tap
+4. brew must load the formula (GoReleaser formulas can't pass
+   `brew audit`: a redundant `version`, no `test do`)
+5. The cask is installed from that clone, and the
+   `cask_install_check` in `release.yml` verifies the executable
+   and the `uf` alias; the runner is discarded after
+6. The cask and formula are pushed to the tap (rebased and
+   retried if another release pushed first)
+
+The cask's `postflight_steps` (quarantine removal and the `uf`
+symlink) come from the `custom_block` in `.goreleaser.yaml`, so
+no transformation runs at release time. Any audit, load or
+install failure stops the job before the tap push. For a
+transient failure, inspect the failed step and re-run the
+failed jobs; do not move an existing release tag.
 
 ### Fedora Packaging
 
@@ -254,22 +262,21 @@ causes:
 
 ### macOS signing fails
 
-If signing secrets are not configured, the `sign-macos`
-job is skipped automatically. Darwin binaries will be
-unsigned but functional.
+If no signing secrets are configured, ship's signing job
+is skipped and darwin binaries are unsigned but functional.
+If only some are, the release fails before anything is
+tagged, naming the missing ones.
 
 ### Reusable workflow fails
 
-The release pipeline delegates to org-infra reusable
-workflows pinned by SHA. If the workflow fails:
+The release pipeline calls jflowers/ship's `go-release.yml`,
+pinned by commit SHA, which pins org-infra. If it fails:
 
-- Check the
+- Check [jflowers/ship](https://github.com/jflowers/ship) and the
   [org-infra repository](https://github.com/complytime/org-infra)
   for known issues
-- The pinned SHA corresponds to v0.7.1
-- To update: verify the new SHA, update both `uses:`
-  references in `release.yml`, update the version
-  comment, and test with a pre-release tag if possible
+- A failure before preflight tags nothing, so the same tag
+  can be dispatched again
 - Individual failed jobs can be re-run via the GitHub
   Actions UI without re-running the entire pipeline
 
@@ -280,23 +287,13 @@ the package exists in dist-git. Check the
 [Packit dashboard](https://dashboard.packit.dev/) for
 detailed error messages.
 
-## Maintaining the org-infra Dependency
+## Maintaining the ship Dependency
 
-The preflight and GoReleaser jobs delegate to reusable
-workflows from
-[complytime/org-infra](https://github.com/complytime/org-infra),
-pinned by commit SHA in `release.yml`.
+`release.yml` pins jflowers/ship's `go-release.yml` by commit
+SHA; ship pins org-infra. To upgrade:
 
-To upgrade:
-
-1. Check
-   [org-infra releases](https://github.com/complytime/org-infra/releases)
-   for new versions
-2. Review the changelog for breaking changes to
-   `reusable_release_preflight` and
-   `reusable_release_goreleaser`
-3. Update the SHA in `release.yml` (both `uses:` lines)
-4. Update the version comment (e.g., `# v0.8.0`)
-5. Verify the SHA matches all other org-infra references
-   in `.github/workflows/` for consistency
-6. Test with a pre-release tag if possible
+1. Check [ship's tags](https://github.com/jflowers/ship/tags)
+   and its README for input changes
+2. Update the SHA in `release.yml` and its version comment
+   (e.g., `# v0.8.0`)
+3. Test with a pre-release tag if possible
