@@ -207,7 +207,7 @@ function setup(overrides: Partial<Model> = {}) {
   const tool = createReviewHeadRootTool(fakeGit(m, calls), fakeGh(m, calls), CWD, fakeFs(m, calls))
   const run = async (args: Record<string, unknown>) => {
     const result = await (tool as unknown as { execute: (a: unknown) => Promise<{ output: string }> }).execute(args)
-    return JSON.parse(result.output) as ToolResult<ReviewHeadRootData> & { code?: string; retryable?: boolean; message?: string }
+    return JSON.parse(result.output) as ToolResult<ReviewHeadRootData> & { code?: string; retryable?: boolean; message?: string; not_run_line?: string }
   }
   const prepare = () => run({ action: "prepare", pr_number: PR, base_sha: BASE_SHA, head_sha: HEAD_SHA })
   return { m, calls, run, prepare, fs: fakeFs(m, calls), git: fakeGit(m, calls) }
@@ -239,6 +239,8 @@ describe("review_head_root prepare", () => {
       created: false,
       config_sha: HEAD_SHA,
       config_dirty: false,
+      provenance_line: `Gates ran at: ${HEAD_SHA} (checkout); config from ${HEAD_SHA}`,
+      gaze_skip_note: null,
       changed_files: ["internal/a.go", "internal/b.go"],
     })
     expect(calls.gh).toEqual([])
@@ -255,6 +257,10 @@ describe("review_head_root prepare", () => {
     expect(result.root).toBe(`${DIR}/k3v9x2qa`)
     expect(result.config_sha).toBe(HEAD_SHA)
     expect(result.config_dirty).toBe(true)
+    expect(result.provenance_line).toBe(`Gates ran at: ${HEAD_SHA} (worktree); config from ${HEAD_SHA} (dirty)`)
+    expect(result.gaze_skip_note).toBe(
+      "Gaze skipped: the PR head is in a temporary worktree and gaze-reporter has no root argument",
+    )
     expect(m.worktrees.has(`${DIR}/k3v9x2qa`)).toBe(true)
   })
 
@@ -267,6 +273,8 @@ describe("review_head_root prepare", () => {
       created: true,
       config_sha: USER_SHA,
       config_dirty: false,
+      provenance_line: `Gates ran at: ${HEAD_SHA} (worktree); config from ${USER_SHA}`,
+      gaze_skip_note: "Gaze skipped: the PR head is in a temporary worktree and gaze-reporter has no root argument",
     })
     expect(m.files.get(`${DIR}/.gitignore`)).toBe("*\n")
     expect(calls.git).toContainEqual(["worktree", "add", "--detach", "--", `${DIR}/k3v9x2qa`, HEAD_SHA])
@@ -301,6 +309,9 @@ describe("review_head_root prepare", () => {
     expect(envelope.status).toBe("error")
     expect(envelope.code).toBe("UNTRUSTED_HEAD")
     expect(envelope.message).toContain(`gh pr checkout ${PR}`)
+    if (envelope.status === "error") {
+      expect(envelope.not_run_line).toBe(`Local gates: not run (UNTRUSTED_HEAD): ${envelope.message}`)
+    }
     expect(called(calls, "fetch")).toBe(false)
     expect(called(calls, "worktree", "add")).toBe(false)
   })
@@ -311,6 +322,9 @@ describe("review_head_root prepare", () => {
     const { calls, prepare } = setup({ pull: pr({ sha: "f".repeat(40) }) })
     const envelope = await prepare()
     expect(envelope.code).toBe("HEAD_MOVED")
+    if (envelope.status === "error") {
+      expect(envelope.not_run_line).toBe(`Local gates: not run (HEAD_MOVED): ${envelope.message}`)
+    }
     expect(called(calls, "fetch")).toBe(false)
     expect(called(calls, "worktree", "add")).toBe(false)
   })
@@ -531,6 +545,10 @@ describe("review_head_root release", () => {
     const { calls, run } = setup({ dirs: new Set([CWD, DIR, live]), worktrees: new Set([live]) })
     const envelope = await run(root === undefined ? { action: "release" } : { action: "release", root })
     expect(envelope.code).toBe("INVALID_ROOT")
+    // Release failures are warnings after gates ran: no not_run_line.
+    if (envelope.status === "error") {
+      expect(envelope.not_run_line).toBeUndefined()
+    }
     expect(calls.removed).toEqual([])
     expect(called(calls, "worktree", "remove")).toBe(false)
   })
