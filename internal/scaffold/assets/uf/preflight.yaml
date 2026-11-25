@@ -15,7 +15,10 @@
 #
 # Runtime contract: every check runs with the repository root
 # as its working directory, except during soft-gate baseline
-# re-runs where the working directory is a merge-base worktree.
+# re-runs where the working directory is a merge-base worktree,
+# and in PR-mode reviews (/uf.review-pr, /uf.review-council
+# with a PR) where it is the PR head root (.uf/review-head/<id>
+# or a clean checkout of the head).
 # UF_PREFLIGHT_PROJECT_ROOT always points at the primary
 # checkout root; use it to locate config (this file,
 # .uf/scripts/) regardless of working directory.

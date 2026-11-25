@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer"
 import { execFile, execFileSync } from "node:child_process"
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { randomBytes } from "node:crypto"
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { lstat, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, resolve } from "node:path"
@@ -3286,6 +3287,552 @@ export function createCheckoutPrHeadTool(exec: GitExec, gh: GhRunner, cwd: strin
         return { output: JSON.stringify(success(data)) }
       } catch (err: unknown) {
         return { output: failureFromError(err, "CHECKOUT_PR_HEAD_ERROR") }
+      }
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// review_head_root tool (OpenSpec change review-head-preflight)
+// ---------------------------------------------------------------------------
+
+/**
+ * Failure codes review_head_root returns (review-head-preflight design
+ * D4-D5, issues #1203/#1204). The PR-mode review commands map each to
+ * "Local gates: not run (<code>)" or the council's Phase 1a FAIL path.
+ */
+export const REVIEW_HEAD_ROOT_ERROR_CODES = [
+  "UNTRUSTED_HEAD",
+  "HEAD_UNAVAILABLE",
+  "HEAD_MOVED",
+  "WORKTREE_FAILED",
+  "INVALID_ROOT",
+  "REVIEW_HEAD_ROOT_ERROR",
+] as const
+
+/** One review_head_root failure code. */
+export type ReviewHeadRootErrorCode = (typeof REVIEW_HEAD_ROOT_ERROR_CODES)[number]
+
+/** Repository-relative directory holding review-head worktrees (design D2). */
+export const REVIEW_HEAD_DIR = ".uf/review-head"
+
+/** Worktree id: 8 lowercase alphanumerics (design D2). */
+const REVIEW_HEAD_ID_PATTERN = /^[a-z0-9]{8}$/
+
+/** Age after which a review-head worktree counts as leaked (design D4 step 1). */
+export const REVIEW_HEAD_STALE_MS = 24 * 60 * 60 * 1000
+
+/** Repository permissions whose holders' fork heads are trusted (design D4 step 3). */
+const TRUSTED_PERMISSIONS = new Set(["admin", "maintain", "write"])
+
+/** Structured output from review_head_root prepare. */
+export interface ReviewHeadRootData {
+  /** Directory the local gates must run in. */
+  root: string
+  head_sha: string
+  base_sha: string
+  /** `checkout`: the plugin directory was reused; `worktree`: a new worktree. */
+  method: "checkout" | "worktree"
+  /** True when prepare added a worktree that release must remove. */
+  created: boolean
+  /** HEAD of the plugin directory: where `.uf/preflight.yaml` comes from. */
+  config_sha: string
+  /** True when the plugin directory had uncommitted changes (config may differ from config_sha). */
+  config_dirty: boolean
+  /** `git diff --name-only <base_sha>...<head_sha>`, sorted. */
+  changed_files: string[]
+}
+
+/** Filesystem side effects of review_head_root, injectable for tests. */
+export interface ReviewHeadFs {
+  /** Create a directory and its parents. */
+  readonly ensureDir: (path: string) => void
+  /** Write a file only when it does not exist yet. */
+  readonly writeFileIfMissing: (path: string, content: string) => void
+  /** Remove a directory tree (best effort, never throws). */
+  readonly removeDir: (path: string) => void
+  /** Resolve symlinks; null when the path does not exist. */
+  readonly realpath: (path: string) => string | null
+  /** Modification time in ms; null when the path does not exist. */
+  readonly mtimeMs: (path: string) => number | null
+  /** Entry names in a directory; [] when it does not exist. */
+  readonly listDir: (path: string) => string[]
+  /** Current time in ms. */
+  readonly now: () => number
+  /** A fresh worktree id matching REVIEW_HEAD_ID_PATTERN. */
+  readonly randomId: () => string
+}
+
+/** Production filesystem for review_head_root. */
+export const defaultReviewHeadFs: ReviewHeadFs = {
+  ensureDir: (path) => {
+    mkdirSync(path, { recursive: true })
+  },
+  writeFileIfMissing: (path, content) => {
+    if (!existsSync(path)) writeFileSync(path, content, "utf8")
+  },
+  removeDir: (path) => {
+    try {
+      rmSync(path, { recursive: true, force: true })
+    } catch {
+      // Best effort: a leftover directory is pruned on a later prepare.
+    }
+  },
+  realpath: (path) => {
+    try {
+      return realpathSync(path)
+    } catch {
+      return null
+    }
+  },
+  mtimeMs: (path) => {
+    try {
+      return statSync(path).mtimeMs
+    } catch {
+      return null
+    }
+  },
+  listDir: (path) => {
+    try {
+      return readdirSync(path)
+    } catch {
+      return []
+    }
+  },
+  now: () => Date.now(),
+  randomId: () => {
+    const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+    return Array.from(randomBytes(8), (byte) => alphabet[byte % alphabet.length]).join("")
+  },
+}
+
+/** Paths git reports as worktrees (`git worktree list --porcelain`), realpath-resolved. */
+function listWorktreeRealpaths(exec: GitExec, cwd: string, fs: ReviewHeadFs): Set<string> {
+  const paths = new Set<string>()
+  for (const line of exec(["worktree", "list", "--porcelain"], cwd).split("\n")) {
+    if (line.startsWith("worktree ")) {
+      const real = fs.realpath(line.slice("worktree ".length))
+      if (real !== null) paths.add(real)
+    }
+  }
+  return paths
+}
+
+/**
+ * Classify a root for release and for uf_preflight_declared_checks
+ * (design D3). The plugin directory is `checkout`. A review-head
+ * worktree is accepted only when the string is exactly
+ * `<cwd>/.uf/review-head/<id>` (no normalisation, so `..`, a trailing
+ * slash, or another spelling is refused), its realpath equals the same
+ * path under realpath(cwd) (so a symlinked directory is refused), and
+ * git lists it as a worktree. Anything else is null.
+ *
+ * @param exec Git executor (argument array).
+ * @param fs Filesystem seam.
+ * @param cwd Plugin directory.
+ * @param root Candidate root.
+ */
+export function validateReviewHeadRoot(
+  exec: GitExec,
+  fs: ReviewHeadFs,
+  cwd: string,
+  root: string,
+): "checkout" | "worktree" | null {
+  if (root === cwd) return "checkout"
+  const prefix = `${cwd}/${REVIEW_HEAD_DIR}/`
+  if (!root.startsWith(prefix)) return null
+  const id = root.slice(prefix.length)
+  if (!REVIEW_HEAD_ID_PATTERN.test(id)) return null
+  const realCwd = fs.realpath(cwd)
+  const real = fs.realpath(root)
+  if (realCwd === null || real === null || real !== `${realCwd}/${REVIEW_HEAD_DIR}/${id}`) return null
+  try {
+    return listWorktreeRealpaths(exec, cwd, fs).has(real) ? "worktree" : null
+  } catch {
+    return null
+  }
+}
+
+/** Remove one review-head worktree: git first, then the directory regardless. */
+function removeReviewHeadWorktree(exec: GitExec, fs: ReviewHeadFs, cwd: string, path: string): void {
+  try {
+    exec(["worktree", "remove", "--force", "--", path], cwd)
+  } catch {
+    // Fall through to directory removal; `git worktree prune` reclaims the entry.
+  }
+  fs.removeDir(path)
+}
+
+/** Best-effort removal of review-head worktrees older than REVIEW_HEAD_STALE_MS. */
+function pruneStaleReviewHeads(exec: GitExec, fs: ReviewHeadFs, cwd: string): void {
+  try {
+    const dir = `${cwd}/${REVIEW_HEAD_DIR}`
+    const realCwd = fs.realpath(cwd)
+    if (realCwd === null) return
+    const worktrees = listWorktreeRealpaths(exec, cwd, fs)
+    for (const id of fs.listDir(dir)) {
+      if (!REVIEW_HEAD_ID_PATTERN.test(id)) continue
+      const path = `${dir}/${id}`
+      const mtime = fs.mtimeMs(path)
+      const real = fs.realpath(path)
+      if (mtime === null || fs.now() - mtime <= REVIEW_HEAD_STALE_MS) continue
+      if (real === null || real !== `${realCwd}/${REVIEW_HEAD_DIR}/${id}` || !worktrees.has(real)) continue
+      removeReviewHeadWorktree(exec, fs, cwd, path)
+    }
+  } catch {
+    // Pruning never fails prepare.
+  }
+}
+
+/** Host plus lowercase `owner/repo` parsed from a git remote URL, or null. */
+export function parseRemoteRepo(url: string): { host: string; repo: string } | null {
+  const trimmed = url.trim()
+  let host: string
+  let path: string
+  const scheme = /^(?:ssh|https?|git):\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+)$/i.exec(trimmed)
+  if (scheme !== null) {
+    host = scheme[1] ?? ""
+    path = scheme[2] ?? ""
+  } else {
+    const scp = /^(?:[^@/:]+@)?([^/:]+):(?!\/)(.+)$/.exec(trimmed)
+    if (scp === null) return null
+    host = scp[1] ?? ""
+    path = scp[2] ?? ""
+  }
+  const repo = path.replace(/\/+$/, "").replace(/\.git$/i, "").replace(/^\/+/, "")
+  if (!/^[^/]+\/[^/]+$/.test(repo)) return null
+  return { host: host.toLowerCase(), repo: repo.toLowerCase() }
+}
+
+/** PR facts read through gh for the trust gate and remote matching. */
+interface PrRepoFacts {
+  /** The PR's current head commit (headRefOid). */
+  headSha: string
+  /** True when the head lives in another repository than the base. */
+  crossRepository: boolean
+  /** Head repository `owner/name`; null when the fork was deleted. */
+  headRepo: string | null
+  /** Base repository `owner/name`, from the PR URL. */
+  baseRepo: string
+  baseHost: string
+  /** PR author login; null when GitHub reports none (deleted account). */
+  author: string | null
+}
+
+/**
+ * Read the PR through `gh pr view` (design D4 step 3), the same
+ * repository resolution the review commands used to freeze head_sha, so
+ * the PR vetted here is the PR whose head is reviewed. The base
+ * repository comes from the PR URL, never from a placeholder.
+ */
+function readPrRepoFacts(gh: GhRunner, cwd: string, prNumber: number): PrRepoFacts {
+  const raw = gh(
+    ["pr", "view", String(prNumber), "--json", "url,headRefOid,isCrossRepository,headRepository,headRepositoryOwner,author"],
+    cwd,
+  )
+  const parsed = JSON.parse(raw) as {
+    url?: unknown
+    headRefOid?: unknown
+    isCrossRepository?: unknown
+    headRepository?: { name?: unknown } | null
+    headRepositoryOwner?: { login?: unknown } | null
+    author?: { login?: unknown } | null
+  }
+  if (typeof parsed.url !== "string" || typeof parsed.headRefOid !== "string") {
+    throw new Error("gh pr view returned no URL or head commit")
+  }
+  const url = new URL(parsed.url)
+  const match = /^\/([^/]+)\/([^/]+)\/pull\/\d+\/?$/.exec(url.pathname)
+  if (match === null) throw new Error(`gh pr view returned an unexpected URL: ${parsed.url}`)
+  const headName = parsed.headRepository?.name
+  const headOwner = parsed.headRepositoryOwner?.login
+  const author = parsed.author?.login
+  return {
+    headSha: parsed.headRefOid,
+    crossRepository: parsed.isCrossRepository !== false,
+    headRepo: typeof headName === "string" && typeof headOwner === "string" ? `${headOwner}/${headName}` : null,
+    baseRepo: `${match[1]}/${match[2]}`,
+    baseHost: url.host.toLowerCase(),
+    author: typeof author === "string" && author !== "" ? author : null,
+  }
+}
+
+/**
+ * The PR author's permission on the base repository
+ * (`repos/<base>/collaborators/<login>/permission`), or null when it
+ * cannot be read. A null result is treated as untrusted (fail closed).
+ */
+function readAuthorPermission(gh: GhRunner, cwd: string, pr: PrRepoFacts): string | null {
+  if (pr.author === null || !/^[A-Za-z0-9-]+(?:\[bot\])?$/.test(pr.author)) return null
+  try {
+    return gh(["api", `repos/${pr.baseRepo}/collaborators/${pr.author}/permission`, "--jq", ".permission"], cwd).trim()
+  } catch {
+    return null
+  }
+}
+
+/** True when the commit object exists locally. */
+function hasCommit(exec: GitExec, cwd: string, sha: string): boolean {
+  try {
+    exec(["cat-file", "-e", `${sha}^{commit}`], cwd)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Build a review_head_root failure output. */
+function reviewHeadFailure(code: ReviewHeadRootErrorCode, message: string, retryable = false): { output: string } {
+  return { output: JSON.stringify(failure(message, { retryable, code })) }
+}
+
+/** Thrown inside prepare to carry a coded failure out of helpers. */
+class ReviewHeadError extends Error {
+  constructor(
+    readonly code: ReviewHeadRootErrorCode,
+    message: string,
+    readonly retryable = false,
+  ) {
+    super(message)
+  }
+}
+
+/**
+ * Make sure `head_sha` and `base_sha` exist locally (design D4 step 4).
+ * Missing commits are fetched from the remote that names the PR's base
+ * repository; presence is then re-checked with `git cat-file -e`, never
+ * through FETCH_HEAD, so concurrent reviews cannot race on it.
+ */
+function ensureCommits(
+  exec: GitExec,
+  cwd: string,
+  prNumber: number,
+  shas: { head: string; base: string },
+  facts: () => PrRepoFacts,
+): void {
+  const missing = [
+    { sha: shas.head, refspec: `refs/pull/${prNumber}/head`, isHead: true },
+    { sha: shas.base, refspec: shas.base, isHead: false },
+  ].filter((entry) => !hasCommit(exec, cwd, entry.sha))
+  if (missing.length === 0) return
+
+  const pr = facts()
+  const want = { host: pr.baseHost, repo: pr.baseRepo.toLowerCase() }
+  let remote: string | null = null
+  for (const name of exec(["remote"], cwd).split("\n").map((line) => line.trim()).filter((line) => line !== "")) {
+    let parsed: { host: string; repo: string } | null = null
+    try {
+      parsed = parseRemoteRepo(exec(["remote", "get-url", "--", name], cwd))
+    } catch {
+      parsed = null
+    }
+    if (parsed !== null && parsed.host === want.host && parsed.repo === want.repo) {
+      remote = name
+      break
+    }
+  }
+  if (remote === null) {
+    throw new ReviewHeadError(
+      "HEAD_UNAVAILABLE",
+      `No git remote points at the PR's base repository ${pr.baseRepo} on ${pr.baseHost}, so the missing ` +
+        "commit cannot be fetched. Add that remote, or check out the PR head yourself, then re-run the review.",
+    )
+  }
+  for (const entry of missing) {
+    try {
+      exec(["fetch", "--no-tags", "--", remote, entry.refspec], cwd)
+    } catch (err: unknown) {
+      throw new ReviewHeadError(
+        "HEAD_UNAVAILABLE",
+        `git fetch ${remote} ${entry.refspec} failed: ${execErrorDetail(err)}`,
+        true,
+      )
+    }
+    if (!hasCommit(exec, cwd, entry.sha)) {
+      if (entry.isHead) {
+        throw new ReviewHeadError(
+          "HEAD_MOVED",
+          `PR ${prNumber}'s frozen head ${entry.sha} is not on ${remote} any more (the PR was force-pushed ` +
+            "after the review froze its input). Re-run the review to pick up the new head.",
+        )
+      }
+      throw new ReviewHeadError(
+        "HEAD_UNAVAILABLE",
+        `PR ${prNumber}'s base commit ${entry.sha} could not be fetched from ${remote}.`,
+      )
+    }
+  }
+}
+
+/** Sorted `git diff --name-only <base>...<head>`. */
+function changedFiles(exec: GitExec, cwd: string, base: string, head: string): string[] {
+  return exec(["diff", "--name-only", `${base}...${head}`], cwd)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .sort()
+}
+
+const ShaSchema = z.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase commit SHA")
+
+/**
+ * Factory that creates the review_head_root tool (review-head-preflight
+ * design D1-D5) with injectable git, gh, and filesystem seams.
+ *
+ * `prepare` returns the directory where a PR-mode review's local gates
+ * must run: the plugin directory when it is already a clean checkout of
+ * head_sha (untracked files count), otherwise a detached worktree at
+ * head_sha under the self-ignoring `.uf/review-head/`. A fork head whose
+ * author lacks write, maintain, or admin permission on the base
+ * repository is refused (UNTRUSTED_HEAD)
+ * before anything is fetched. `release` removes only review-head
+ * worktrees; the user's branch, index, and working tree are never
+ * touched.
+ *
+ * @param exec Git executor (argument array).
+ * @param gh gh executor (argument array).
+ * @param cwd Plugin directory (repository root).
+ * @param fs Filesystem seam.
+ * @returns The review_head_root tool.
+ */
+export function createReviewHeadRootTool(
+  exec: GitExec,
+  gh: GhRunner,
+  cwd: string,
+  fs: ReviewHeadFs = defaultReviewHeadFs,
+): ReturnType<typeof tool> {
+  return tool({
+    description:
+      "Prepare or release the directory a PR-mode review's local gates run in. " +
+      "action=prepare {pr_number, base_sha, head_sha} reuses the current checkout when it is a " +
+      "clean checkout of head_sha, else adds a detached worktree at head_sha under .uf/review-head/; " +
+      "returns {root, head_sha, base_sha, method, created, config_sha, config_dirty, changed_files}. " +
+      "action=release {root} removes a review-head worktree (the reused checkout is a no-op). " +
+      "Failure codes UNTRUSTED_HEAD, HEAD_UNAVAILABLE, HEAD_MOVED, WORKTREE_FAILED, INVALID_ROOT, " +
+      "REVIEW_HEAD_ROOT_ERROR (unexpected error; the message carries the detail). " +
+      "Never switches, stashes, or modifies the user's branch, index, or working tree.",
+    args: {
+      action: z.enum(["prepare", "release"]).describe("prepare a gate root, or release one"),
+      pr_number: z.number().int().positive().optional().describe("PR number (prepare)"),
+      base_sha: ShaSchema.optional().describe("Frozen PR base commit SHA (prepare)"),
+      head_sha: ShaSchema.optional().describe("Frozen PR head commit SHA (prepare)"),
+      root: z.string().min(1).optional().describe("Root returned by prepare (release)"),
+    },
+    execute: async (args: {
+      action: "prepare" | "release"
+      pr_number?: number
+      base_sha?: string
+      head_sha?: string
+      root?: string
+    }) => {
+      try {
+        if (args.action === "release") {
+          if (args.root === undefined) {
+            return reviewHeadFailure("INVALID_ROOT", "release requires root.")
+          }
+          const kind = validateReviewHeadRoot(exec, fs, cwd, args.root)
+          if (kind === null) {
+            return reviewHeadFailure(
+              "INVALID_ROOT",
+              `${args.root} is not the plugin directory or a live ${REVIEW_HEAD_DIR}/<id> worktree; nothing was removed.`,
+            )
+          }
+          if (kind === "worktree") removeReviewHeadWorktree(exec, fs, cwd, args.root)
+          return { output: JSON.stringify(success({ root: args.root, removed: kind === "worktree" })) }
+        }
+
+        if (args.pr_number === undefined || args.base_sha === undefined || args.head_sha === undefined) {
+          return { output: JSON.stringify(failure("prepare requires pr_number, base_sha, and head_sha.", { code: "REVIEW_HEAD_ROOT_ERROR" })) }
+        }
+        const prNumber = args.pr_number
+        const shas = { head: args.head_sha, base: args.base_sha }
+
+        pruneStaleReviewHeads(exec, fs, cwd)
+
+        let factsCache: PrRepoFacts | null = null
+        const facts = (): PrRepoFacts => {
+          if (factsCache === null) {
+            try {
+              factsCache = readPrRepoFacts(gh, cwd, prNumber)
+            } catch (err: unknown) {
+              throw new ReviewHeadError("HEAD_UNAVAILABLE", `Reading PR ${prNumber} through gh failed: ${execErrorDetail(err)}`, true)
+            }
+          }
+          return factsCache
+        }
+
+        const configSha = exec(["rev-parse", "HEAD"], cwd).trim()
+        const clean =
+          exec(["status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"], cwd).trim() === ""
+        if (configSha === shas.head && clean) {
+          ensureCommits(exec, cwd, prNumber, shas, facts)
+          const data: ReviewHeadRootData = {
+            root: cwd,
+            head_sha: shas.head,
+            base_sha: shas.base,
+            method: "checkout",
+            created: false,
+            config_sha: configSha,
+            config_dirty: false,
+            changed_files: changedFiles(exec, cwd, shas.base, shas.head),
+          }
+          return { output: JSON.stringify(success(data)) }
+        }
+
+        const pr = facts()
+        if (pr.headSha !== shas.head) {
+          return reviewHeadFailure(
+            "HEAD_MOVED",
+            `PR ${prNumber}'s head is now ${pr.headSha}, not the frozen ${shas.head} (the PR was pushed after ` +
+              "the review froze its input, or head_sha belongs to another PR). Re-run the review.",
+          )
+        }
+        const sameRepo =
+          !pr.crossRepository && pr.headRepo !== null && pr.headRepo.toLowerCase() === pr.baseRepo.toLowerCase()
+        if (!sameRepo) {
+          const permission = readAuthorPermission(gh, cwd, pr)
+          if (permission === null || !TRUSTED_PERMISSIONS.has(permission)) {
+            return reviewHeadFailure(
+              "UNTRUSTED_HEAD",
+              `PR ${prNumber} comes from ${pr.headRepo ?? "a deleted fork"} and its author ` +
+                `(${pr.author ?? "unknown"}) has ${permission ?? "no readable"} permission on ${pr.baseRepo}, ` +
+                "so its code is not fetched or run automatically. To run local gates, check out the PR " +
+                `head yourself (gh pr checkout ${prNumber}) and re-run the review.`,
+            )
+          }
+        }
+
+        ensureCommits(exec, cwd, prNumber, shas, facts)
+        // Before the worktree exists, so a diff failure cannot leak one.
+        const files = changedFiles(exec, cwd, shas.base, shas.head)
+
+        const dir = `${cwd}/${REVIEW_HEAD_DIR}`
+        fs.ensureDir(dir)
+        fs.writeFileIfMissing(`${dir}/.gitignore`, "*\n")
+        const root = `${dir}/${fs.randomId()}`
+        try {
+          exec(["worktree", "add", "--detach", "--", root, shas.head], cwd)
+        } catch (err: unknown) {
+          fs.removeDir(root)
+          return reviewHeadFailure("WORKTREE_FAILED", `git worktree add for ${shas.head} failed: ${execErrorDetail(err)}`)
+        }
+
+        const data: ReviewHeadRootData = {
+          root,
+          head_sha: shas.head,
+          base_sha: shas.base,
+          method: "worktree",
+          created: true,
+          config_sha: configSha,
+          config_dirty: !clean,
+          changed_files: files,
+        }
+        return { output: JSON.stringify(success(data)) }
+      } catch (err: unknown) {
+        if (err instanceof ReviewHeadError) {
+          return reviewHeadFailure(err.code, err.message, err.retryable)
+        }
+        return { output: failureFromError(err, "REVIEW_HEAD_ROOT_ERROR") }
       }
     },
   })
@@ -8343,10 +8890,17 @@ export function createPreflightDeclaredDependencies(): PreflightDeclaredDependen
  * `required`/`advisory` onto statuses, and returns structured results
  * plus tool-rendered Execution Results rows and per-check output blocks.
  *
- * Failure codes: INVALID_PREFLIGHT_CONFIG (no check ran),
+ * Failure codes: INVALID_PREFLIGHT_CONFIG (no check ran), INVALID_ROOT
+ * (root is not the plugin directory or a live review-head worktree),
  * PREFLIGHT_DECLARED_FAILED (unexpected error).
  */
-export function createPreflightDeclaredChecksTool(cwd: string, deps: PreflightDeclaredDependencies): ReturnType<typeof tool> {
+export function createPreflightDeclaredChecksTool(
+  cwd: string,
+  deps: PreflightDeclaredDependencies,
+  /** Root validator; defaults to validateReviewHeadRoot with the real filesystem, so tests with a fake git inject their own. */
+  validateRoot: (root: string) => "checkout" | "worktree" | null = (root) =>
+    validateReviewHeadRoot(deps.git, defaultReviewHeadFs, cwd, root),
+): ReturnType<typeof tool> {
   return tool({
     description:
       "Pre-flight Phase 2b: run the project-declared checks in .uf/preflight.yaml. " +
@@ -8360,13 +8914,36 @@ export function createPreflightDeclaredChecksTool(cwd: string, deps: PreflightDe
       "output block per check that ran with output, to insert verbatim under " +
       "\"Project-declared check output\"; `verdict` is the declared checks' " +
       "contribution to the pre-flight verdict; advisory rows never affect it. Failure " +
-      "code INVALID_PREFLIGHT_CONFIG means the file is invalid and no check ran.",
+      "code INVALID_PREFLIGHT_CONFIG means the file is invalid and no check ran. Optional root (a " +
+      "review_head_root root) runs checks there with config and scripts still from the plugin directory; " +
+      "optional base_sha scopes the diff and baseline to merge-base(base_sha, HEAD). Failure code " +
+      "INVALID_ROOT means root is not valid and no check ran.",
     args: {
       mode: z.enum(PREFLIGHT_MODES).describe("Pre-flight execution policy chosen by the consuming command."),
+      root: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Directory to run checks in: the root review_head_root prepare returned (PR mode)."),
+      base_sha: z
+        .string()
+        .regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase commit SHA")
+        .optional()
+        .describe("Frozen PR base SHA: scope and baseline use merge-base(base_sha, HEAD) (PR mode)."),
     },
-    execute: async (args: { mode: (typeof PREFLIGHT_MODES)[number] }) => {
+    execute: async (args: { mode: (typeof PREFLIGHT_MODES)[number]; root?: string; base_sha?: string }) => {
       try {
-        const data: DeclaredChecksData = await runDeclaredChecks(cwd, deps, args.mode)
+        if (args.root !== undefined && validateRoot(args.root) === null) {
+          return {
+            output: JSON.stringify(
+              failure(`${args.root} is not the plugin directory or a live ${REVIEW_HEAD_DIR}/<id> worktree; no check ran.`, {
+                retryable: false,
+                code: "INVALID_ROOT",
+              }),
+            ),
+          }
+        }
+        const data: DeclaredChecksData = await runDeclaredChecks(cwd, deps, args.mode, args.root ?? cwd, args.base_sha)
         return { output: JSON.stringify(success(data)) }
       } catch (error) {
         if (error instanceof PreflightConfigError) {
@@ -8414,6 +8991,7 @@ const UfWorkflowPlugin = {
         uf_unleash_route_decision: createUnleashRouteDecisionTool(defaultGitExec, cwd),
         uf_unleash_resolve_issue: createUnleashResolveIssueTool(defaultGhRunner, cwd),
         checkout_pr_head: createCheckoutPrHeadTool(defaultGitExec, defaultGhRunner, cwd),
+        review_head_root: createReviewHeadRootTool(defaultGitExec, defaultGhRunner, cwd),
         post_feedback_replies: createPostFeedbackRepliesTool(feedbackReplyDeps(cwd)),
         file_feedback_issue: createFileFeedbackIssueTool(feedbackReplyDeps(cwd)),
         post_issue_comment: createPostIssueCommentTool({ gh: defaultFeedbackGhExec, cwd }),

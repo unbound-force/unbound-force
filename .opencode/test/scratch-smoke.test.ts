@@ -169,6 +169,7 @@ describe("provider-free scratch-repository smoke test", () => {
         "relay_spec_review_gate",
         "resolve_base_ref",
         "resolve_clarification",
+        "review_head_root",
         "scan_clarifications",
         "scan_conflict_markers",
         "uf_delegate_command",

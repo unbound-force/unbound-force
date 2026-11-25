@@ -251,12 +251,46 @@ This is the reviewed diff. Pass it to every child agent prompt.
 
 ### 3.7. Pre-flight Checks (ci-aware, soft gate)
 
-Load the `pre-flight` skill and run in `ci-aware` mode:
+Local gates run against the PR's frozen head commit, never
+the agent's own checkout (issue #1203).
 
-1. Invoke the `skill` tool with name `pre-flight` to
-   load the shared pre-flight check instructions.
+1. **Prepare the head root.** Call the `review_head_root`
+   plugin tool once:
+   `{action: "prepare", pr_number: <PR_NUMBER>, base_sha: <base_sha>, head_sha: <head_sha>}`.
+   It reuses the current checkout when it is a clean
+   checkout of `head_sha`, and otherwise adds a detached
+   worktree at `head_sha` under `.uf/review-head/`. It never
+   switches, stashes, or modifies the user's branch, index,
+   or working tree. A success looks like:
 
-2. Execute the pre-flight skill's phases in order:
+   ```json
+   {"status":"ok","data":{"root":"/repo/.uf/review-head/k3v9x2qa","head_sha":"<40-hex>","base_sha":"<40-hex>","method":"worktree","created":true,"config_sha":"<40-hex>","config_dirty":false,"changed_files":["internal/a.go"]}}
+   ```
+
+   On `status: "error"`, do NOT run local tools anywhere.
+   Record `Local gates: not run (<code>): <message>` as the
+   Step 3.7 result, skip items 2-3, and continue with CI
+   evidence only:
+   - `UNTRUSTED_HEAD`: a fork PR whose author lacks write
+     access. Its code is not fetched or run. The message
+     names the opt-in (check out the head yourself and
+     re-run).
+   - `HEAD_MOVED`: the PR's head is no longer the
+     `head_sha` Step 2 froze (it was pushed since); re-running
+     the review picks up the new head.
+   - `HEAD_UNAVAILABLE`: no remote names the base
+     repository, or a fetch or `gh` lookup failed.
+   - `WORKTREE_FAILED`: `git worktree add` failed; the
+     message carries git's error.
+   - `REVIEW_HEAD_ROOT_ERROR`: an unexpected tool error; the
+     message carries the detail.
+
+2. **Run pre-flight.** Invoke the `skill` tool with name
+   `pre-flight`, in `ci-aware` mode, passing the whole
+   prepare result (`root`, `changed_files`, `base_sha`, and
+   the provenance fields `head_sha`, `method`, `config_sha`,
+   `config_dirty`). Execute
+   its phases in order:
    a. CI Workflow Parsing — discover commands from `.github/workflows/`
    b. Local Tool Detection — check for config files and verify binary availability
    c. CI Coverage Matrix — build the matrix using the CI check results from Step 3. Apply ci-aware decision rules:
@@ -266,9 +300,19 @@ Load the `pre-flight` skill and run in `ci-aware` mode:
       - No CI checks at all → MUST run ALL detected local tools
    d. Execution — run only tools marked "Yes" in the coverage matrix. Do NOT stop on first failure.
 
-3. **Record results**: CI Coverage Matrix, Execution Results, Verdict.
-   If tools pass, skip those categories in the AI review.
-   If tools fail, include the failure output as context.
+3. **Release the head root.** Call `review_head_root` once
+   with `{action: "release", root: <root>}` as soon as item 2
+   finishes, and before any STOP after a successful
+   prepare. No later step reads the root: the light check
+   and the reviewers read the PR diff through `gh`. A
+   release failure is a warning in the report and never
+   changes the verdict.
+
+**Record results**: the `Gates ran at` provenance line (or
+the `Local gates: not run` line), CI Coverage Matrix,
+Execution Results, and Verdict. If tools pass, skip those
+categories in the AI review. If tools fail, include the
+failure output as context.
 
 ### 3.8. Discover Review Context
 
@@ -709,7 +753,7 @@ Present the findings in this structured format:
 | <name> | PASS/FAIL | PR-caused / Pre-existing / N/A |
 
 ### Local Tool Results
-<Table showing which tools ran, pass/fail status, and summary of failures if any>
+<`Gates ran at` line, or `Local gates: not run (<code>)`; then a table showing which tools ran, pass/fail status, and summary of failures if any>
 
 ### Walkthrough
 | File | Change | Focus |
