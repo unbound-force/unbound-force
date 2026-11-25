@@ -2,18 +2,21 @@
 #
 # Release
 # =======
-# One-click release pipeline triggered via workflow_dispatch.
-# Delegates to org-infra reusable workflows for preflight
-# validation and GoReleaser execution with supply chain
-# artifacts (cosign signatures and SBOMs).
+# One-click release pipeline triggered via workflow_dispatch, through
+# jflowers/ship's shared go-release.yml (the same pipeline replicator, dewey
+# and gaze use):
 #
-# Preflight validates semver format, tag uniqueness (with
-# re-run resilience), semver ordering, CI check status,
-# and unreleased commits before creating an annotated tag.
-#
-# After release, signs macOS archives with Apple Developer
-# ID, notarizes them, patches Homebrew cask and formula
-# checksums, and pushes to the Homebrew tap.
+# - org-infra's preflight validates semver format, tag uniqueness (with
+#   re-run resilience), semver ordering, CI check status and unreleased
+#   commits, then creates an annotated tag;
+# - GoReleaser (org-infra) builds the archives, checksums, cosign
+#   signatures and SBOMs, and the cask and formula as release assets;
+# - the darwin archives are signed with the Apple Developer ID, notarized,
+#   re-uploaded, and checksums.txt rewritten to match;
+# - the cask and formula get the signed checksums; the cask is audited
+#   (brew audit --strict), installed from a staged copy of the tap and
+#   checked (unbound-force and the uf alias), brew must load the formula,
+#   and both are pushed to unbound-force/homebrew-tap.
 #
 # Fixes: https://github.com/unbound-force/unbound-force/issues/428
 
@@ -41,10 +44,14 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
-  preflight:
-    name: Preflight
-    uses: complytime/org-infra/.github/workflows/reusable_release_preflight.yml@8f347ba1aa2c7e9eb3b70e69c1709ddb456cd64a # v0.9.0
+  release:
+    name: Release
+    uses: jflowers/ship/.github/workflows/go-release.yml@7c6c0e199099d732e0db93c8c9d86b0064c2759c # v0.9.0
     with:
       tag: ${{ inputs.tag }}
       allow_prerelease: true
@@ -53,347 +60,24 @@ jobs:
       skip_semver_check: ${{ inputs.skip_semver_check }}
       skip_ci_checks: ${{ inputs.skip_ci_checks }}
       skip_unreleased_check: ${{ inputs.skip_unreleased_check }}
+      tap: unbound-force/homebrew-tap
+      formula: unbound-force
+      # The cask's binary and the uf alias its postflight_steps symlinks.
+      cask_install_check: |
+        test -x "$HOMEBREW_PREFIX/bin/unbound-force"
+        test -L "$HOMEBREW_PREFIX/bin/uf"
+        "$HOMEBREW_PREFIX/bin/uf" --version
     permissions:
       contents: write
       checks: read
-
-  release:
-    name: Release
-    needs: preflight
-    if: needs.preflight.outputs.tag != ''
-    uses: complytime/org-infra/.github/workflows/reusable_release_goreleaser.yml@8f347ba1aa2c7e9eb3b70e69c1709ddb456cd64a # v0.9.0
-    with:
-      tag: ${{ needs.preflight.outputs.tag }}
-    permissions:
-      contents: write
       id-token: write
-
-  check-signing-secrets:
-    name: Check Signing Secrets
-    needs: preflight
-    if: needs.preflight.outputs.tag != ''
-    runs-on: ubuntu-latest
-    permissions: {}
-    timeout-minutes: 5
-    outputs:
-      has_signing_secrets: ${{ steps.check.outputs.has_secrets }}
-    steps:
-      - name: Check signing secrets
-        id: check
-        run: |
-          missing=""
-          for var in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_KEY \
-                     MACOS_SIGN_IDENTITY MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER_ID; do
-            eval "val=\$$var"
-            if [ -z "$val" ]; then
-              missing="$missing $var"
-            fi
-          done
-          if [ -z "$missing" ]; then
-            echo "has_secrets=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::Missing signing secrets:$missing"
-            echo "has_secrets=false" >> "$GITHUB_OUTPUT"
-          fi
-        env:
-          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
-          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
-          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-
-  sign-macos:
-    name: Sign macOS
-    runs-on: macos-latest
-    needs: [preflight, release, check-signing-secrets]
-    if: needs.check-signing-secrets.outputs.has_signing_secrets == 'true'
-    permissions:
-      contents: write
-    timeout-minutes: 30
-    env:
-      RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
-    steps:
-      - name: Import certificate into Keychain
-        run: |
-          set -euo pipefail
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
-
-          echo -n "$MACOS_SIGN_P12" | base64 --decode -o "$RUNNER_TEMP/cert.p12"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_SIGN_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-        env:
-          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
-
-      - name: Prepare notary key
-        run: |
-          set -euo pipefail
-          echo -n "$MACOS_NOTARY_KEY" | base64 --decode -o "$RUNNER_TEMP/notary_key.p8"
-        env:
-          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
-
-      - name: Download darwin archives
-        run: |
-          set -euo pipefail
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "unbound-force_*_darwin_*.tar.gz" --dir ./artifacts
-
-          # Verify both expected archives were downloaded
-          VERSION="${RELEASE_TAG#v}"
-          for arch in amd64 arm64; do
-            if [ ! -f "./artifacts/unbound-force_${VERSION}_darwin_${arch}.tar.gz" ]; then
-              echo "::error::Expected darwin_${arch} archive not found after download"
-              exit 1
-            fi
-          done
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Sign and notarize
-        run: |
-          set -euo pipefail
-          mkdir -p ./signed
-          for archive in ./artifacts/unbound-force_*_darwin_*.tar.gz; do
-            echo "==> Processing $(basename "$archive")"
-            workdir=$(mktemp -d)
-
-            # Extract binary
-            tar -xzf "$archive" -C "$workdir"
-
-            # Sign with codesign
-            codesign --force --timestamp --options runtime \
-              --sign "$MACOS_SIGN_IDENTITY" \
-              "$workdir/unbound-force"
-
-            # Verify signature
-            codesign --verify --verbose=2 "$workdir/unbound-force"
-
-            # Zip for notarytool (requires .zip, not .tar.gz)
-            ditto -c -k "$workdir/unbound-force" "$workdir/unbound-force.zip"
-
-            # Submit for notarization and wait
-            xcrun notarytool submit "$workdir/unbound-force.zip" \
-              --key "$RUNNER_TEMP/notary_key.p8" \
-              --key-id "$MACOS_NOTARY_KEY_ID" \
-              --issuer "$MACOS_NOTARY_ISSUER_ID" \
-              --wait --timeout 20m
-
-            # Re-archive signed binary with original archive name
-            tar -czf "./signed/$(basename "$archive")" -C "$workdir" unbound-force
-
-            rm -rf "$workdir"
-            echo "==> Done: $(basename "$archive")"
-          done
-        env:
-          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-
-      - name: Replace release assets and update checksums
-        run: |
-          set -euo pipefail
-          # Upload signed darwin archives (replaces unsigned)
-          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" ./signed/*.tar.gz --clobber
-
-          # Download existing checksums
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "checksums.txt" --dir ./
-
-          # Remove darwin lines from checksums (keep linux and other lines)
-          grep -v darwin checksums.txt > checksums_updated.txt || true
-
-          # Compute SHA256 for each signed darwin archive
-          for archive in ./signed/*.tar.gz; do
-            shasum -a 256 "$archive" | sed 's|./signed/||' >> checksums_updated.txt
-          done
-
-          # Replace checksums file
-          mv checksums_updated.txt checksums.txt
-          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" checksums.txt --clobber
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Update Homebrew cask and formula
-        run: |
-          set -euo pipefail
-          VERSION="${RELEASE_TAG#v}"
-
-          # Verify signed archives exist before computing checksums
-          for arch in arm64 amd64; do
-            if [ ! -f "./signed/unbound-force_${VERSION}_darwin_${arch}.tar.gz" ]; then
-              echo "::error::Signed darwin_${arch} archive not found"
-              exit 1
-            fi
-          done
-
-          # Compute signed checksums
-          ARM64_SHA=$(shasum -a 256 "./signed/unbound-force_${VERSION}_darwin_arm64.tar.gz" | awk '{print $1}')
-          AMD64_SHA=$(shasum -a 256 "./signed/unbound-force_${VERSION}_darwin_amd64.tar.gz" | awk '{print $1}')
-
-          echo "darwin_arm64 SHA256: $ARM64_SHA"
-          echo "darwin_amd64 SHA256: $AMD64_SHA"
-
-          # Download the GoReleaser-generated cask and formula (uploaded by the release job)
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "unbound-force.rb" --dir ./cask-staging
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "unbound-force-formula.rb" --dir ./formula-staging
-
-          CASK_FILE="./cask-staging/unbound-force.rb"
-          FORMULA_FILE="./formula-staging/unbound-force-formula.rb"
-
-          # Patch darwin checksums with signed values (shared function for DRY)
-          patch_checksums() {
-            local input="$1" output="${1}.patched"
-            awk -v amd64="$AMD64_SHA" -v arm64="$ARM64_SHA" '
-              { lines[NR]=$0 }
-              END {
-                for (i=1; i<=NR; i++) {
-                  if (lines[i] ~ /darwin_amd64/) {
-                    checksum_line=(lines[i+1] ~ /sha256/) ? i+1 : i-1
-                    sub(/sha256 "[^"]*"/, "sha256 \"" amd64 "\"", lines[checksum_line])
-                  }
-                  if (lines[i] ~ /darwin_arm64/) {
-                    checksum_line=(lines[i+1] ~ /sha256/) ? i+1 : i-1
-                    sub(/sha256 "[^"]*"/, "sha256 \"" arm64 "\"", lines[checksum_line])
-                  }
-                }
-                for (i=1; i<=NR; i++) print lines[i]
-              }
-            ' "$input" > "$output"
-            mv "$output" "$input"
-          }
-
-          patch_checksums "$CASK_FILE"
-          patch_checksums "$FORMULA_FILE"
-
-          # Transform the generated legacy hook before the Cask enters the tap.
-          case "$(uname -m)" in
-            arm64) TRANSFORMER_ARCH=arm64 ;;
-            x86_64) TRANSFORMER_ARCH=amd64 ;;
-            *)
-              echo "::error::Unsupported runner architecture"
-              exit 1
-              ;;
-          esac
-          TRANSFORMER_DIR="$(mktemp -d)"
-          TRANSFORMER_ARCHIVE="./signed/unbound-force_${VERSION}_darwin_${TRANSFORMER_ARCH}.tar.gz"
-          STAGED_TAP=""
-          BREW_PREFIX=""
-          SMOKE_TEST_CASK_INSTALLED=false
-          DEWEY_CASK_WAS_INSTALLED=false
-          OLLAMA_APP_CASK_WAS_INSTALLED=false
-          remove_smoke_test_casks() {
-            local cleanup_status=0
-            brew uninstall --cask --force unbound-force || cleanup_status=$?
-            rm -f "$BREW_PREFIX/bin/uf" || cleanup_status=$?
-            if [ "$DEWEY_CASK_WAS_INSTALLED" = false ] && brew list --cask dewey >/dev/null 2>&1; then
-              brew uninstall --cask --force dewey || cleanup_status=$?
-            fi
-            if [ "$OLLAMA_APP_CASK_WAS_INSTALLED" = false ] && brew list --cask ollama-app >/dev/null 2>&1; then
-              brew uninstall --cask --force ollama-app || cleanup_status=$?
-            fi
-            return "$cleanup_status"
-          }
-          cleanup() {
-            local status=$? cleanup_status=0
-            if [ "$SMOKE_TEST_CASK_INSTALLED" = true ]; then
-              remove_smoke_test_casks || cleanup_status=$?
-            fi
-            brew untap unbound-force/staging 2>/dev/null || true
-            rm -rf "$STAGED_TAP" "$TRANSFORMER_DIR" || cleanup_status=$?
-            if [ "$status" -ne 0 ]; then
-              return "$status"
-            fi
-            return "$cleanup_status"
-          }
-          trap cleanup EXIT
-          TRANSFORMER_SHA=$(awk -v filename="$(basename "$TRANSFORMER_ARCHIVE")" '$2 == filename { print $1 }' checksums.txt)
-          TRANSFORMER_ACTUAL_SHA=$(shasum -a 256 "$TRANSFORMER_ARCHIVE" | awk '{print $1}')
-          if [ -z "$TRANSFORMER_SHA" ] || [ "$TRANSFORMER_SHA" != "$TRANSFORMER_ACTUAL_SHA" ]; then
-            echo "::error::Transformer archive checksum verification failed"
-            exit 1
-          fi
-          tar -xzf "$TRANSFORMER_ARCHIVE" -C "$TRANSFORMER_DIR"
-          "$TRANSFORMER_DIR/unbound-force" transform-homebrew-cask \
-            --input "$CASK_FILE" \
-            --output "$CASK_FILE"
-
-          # Reject unexpected transformed Cask content before tap publication.
-          postflight_steps_count=$(grep -Fxc '  postflight_steps do' "$CASK_FILE" || true)
-          if [ "$postflight_steps_count" -ne 1 ]; then
-            echo "::error::Expected exactly one postflight_steps stanza"
-            exit 1
-          fi
-          if grep -Fqx '  postflight do' "$CASK_FILE"; then
-            echo "::error::Deprecated postflight stanza remains in Cask"
-            exit 1
-          fi
-          if ! grep -Fqx '      run "/usr/bin/xattr",' "$CASK_FILE" || \
-             ! grep -Fqx '        args: ["-dr", "com.apple.quarantine", "{{staged_path}}/unbound-force"]' "$CASK_FILE" || \
-             ! grep -Fqx '      symlink "unbound-force", "{{HOMEBREW_PREFIX}}/bin/uf", overwrite: true' "$CASK_FILE"; then
-            echo "::error::Required Homebrew install operations are missing"
-            exit 1
-          fi
-          # Stage the Cask into a disposable tap copy for audit and smoke test.
-          git clone "https://x-access-token:${HOMEBREW_TAP_GITHUB_TOKEN}@github.com/unbound-force/homebrew-tap.git" tap
-          STAGED_TAP="$(mktemp -d)"
-          cp -R tap/. "$STAGED_TAP"
-          cp "$CASK_FILE" "$STAGED_TAP/Casks/unbound-force.rb"
-
-          # brew tap clones the local repository, so commit the candidate Cask
-          # before registering it or Homebrew will read the previous revision.
-          git -C "$STAGED_TAP" add Casks/unbound-force.rb
-          git -C "$STAGED_TAP" \
-            -c user.name="github-actions[bot]" \
-            -c user.email="github-actions[bot]@users.noreply.github.com" \
-            commit -m "test: stage release candidate Cask"
-
-          # Homebrew requires cask operations to use a registered tap (not
-          # filesystem paths).  Register the staged copy once, run audit and
-          # smoke test through the tap, then untap.
-          brew tap unbound-force/staging "$STAGED_TAP"
-          REGISTERED_CASK="$(brew --repository unbound-force/staging)/Casks/unbound-force.rb"
-          cmp "$CASK_FILE" "$REGISTERED_CASK"
-          brew trust unbound-force/staging
-          brew audit --cask --strict unbound-force/staging/unbound-force
-
-          BREW_PREFIX="$(brew --prefix)"
-          if brew list --cask unbound-force >/dev/null 2>&1 || \
-             [ -e "$BREW_PREFIX/bin/unbound-force" ] || \
-             [ -e "$BREW_PREFIX/bin/uf" ]; then
-            echo "::error::Smoke test requires no existing unbound-force Cask or aliases"
-            exit 1
-          fi
-          if brew list --cask dewey >/dev/null 2>&1; then
-            DEWEY_CASK_WAS_INSTALLED=true
-          fi
-          if brew list --cask ollama-app >/dev/null 2>&1; then
-            OLLAMA_APP_CASK_WAS_INSTALLED=true
-          fi
-          SMOKE_TEST_CASK_INSTALLED=true
-          brew install --cask unbound-force/staging/unbound-force
-          test -x "$BREW_PREFIX/bin/unbound-force"
-          test -L "$BREW_PREFIX/bin/uf"
-          test -x "$BREW_PREFIX/bin/uf"
-          remove_smoke_test_casks
-          SMOKE_TEST_CASK_INSTALLED=false
-          brew untap unbound-force/staging
-
-          # Push both cask and formula to the Homebrew tap
-          cp "$CASK_FILE" tap/Casks/unbound-force.rb
-          mkdir -p tap/Formula
-          cp "$FORMULA_FILE" tap/Formula/unbound-force.rb
-
-          cd tap
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/unbound-force.rb Formula/unbound-force.rb
-          git diff --cached --quiet && { echo "No tap changes needed"; exit 0; }
-          git commit -m "feat: update unbound-force cask and formula to ${RELEASE_TAG} (signed)"
-          git push
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    # Mapped by name: `secrets: inherit` doesn't reach a workflow in
+    # another owner's repo.
+    secrets:
+      MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+      MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+      MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+      MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

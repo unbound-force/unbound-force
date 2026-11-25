@@ -65,9 +65,10 @@ Always run tests with `-race -count=1`. CI enforces this.
 | Local CI | `ci_local.yml` | Build, test, coverage ratchets, pipeline tests, gaze AI report (push to main) |
 | CI Checks | `ci_checks.yml` | MegaLinter + commitlint |
 | Security | `ci_security.yml` | OSV-Scanner, Trivy, Scorecards |
-| Dependencies | `ci_dependencies.yml` | Dependency review + dependabot |
+| Dependencies | `ci_dependencies.yml` | Dependency review (org-infra), every PR |
+| Dependabot auto-merge | `dependabot-automerge.yml` | jflowers/ship deps-automerge.yml: our own orgs' patch/minor updates rebase-merge after CI and code-owner approval |
 | CRAP Load | `ci_crapload.yml` | CRAP regression analysis |
-| Release | `release.yml` | workflow_dispatch, GoReleaser + Cosign + Syft + Homebrew tap |
+| Release | `release.yml` | workflow_dispatch, jflowers/ship go-release.yml: GoReleaser + Cosign + Syft + signing + Homebrew tap |
 | Command Evals | `ci_eval.yml` | Nightly + workflow_dispatch: one job per `.eval/fixtures/` fixture, report-only (summary + artifacts); takes the EnMaaS key from the `OPENCODE_CONFIG_CONTENT` org secret |
 | Scheduled | `ci_scheduled.yml` | Daily OSV-Scanner + Scorecards, plus the daily plugin transitive OSV scan (throwaway lock; steps kept identical to `ci_security.yml`) |
 
@@ -330,12 +331,20 @@ the council after a small fix push.
   may not satisfy `require_code_owner_reviews`.
 - **Duplicate detection**: `/uf.review-pr` warns before
   posting a second review from the same account.
-- **Dependabot**: `ci_dependencies.yml` respects human
-  `CHANGES_REQUESTED` before auto-approving.
+- **Dependabot**: `dependabot-automerge.yml` (jflowers/ship)
+  turns on auto-merge for patch/minor updates of our own orgs'
+  packages; nothing is auto-approved, so a code owner still
+  approves each one. Third-party updates wait a day
+  (Dependabot's cooldown) for a person.
 
 ## Specification Workflow
 
-All non-trivial changes MUST be preceded by a spec workflow.
+Every change follows a workflow tier chosen for that change's
+scope and risk — no single tier is mandatory. `/uf.unleash`
+picks the tier automatically through the `tier-routing` skill
+when a change starts on `main` or an unrecognized branch (a
+tier-named branch missing its artifacts stops instead); agents
+working by hand apply the same rubric.
 
 | Tier | Tool | When | Artifacts |
 |------|------|------|-----------|
@@ -366,15 +375,20 @@ state) takes precedence over `.openspec.yaml`.
 **Task bookkeeping**: Mark checkboxes `[x]` immediately on
 completion. `[P]` marks parallel-eligible tasks.
 
-**When in doubt**: Start with OpenSpec. Escalate to Speckit if
-scope grows beyond 3 stories or crosses repo boundaries.
+**When in doubt**: Choose the heavier of two adjacent tiers.
+Escalate OpenSpec to Speckit if scope grows beyond 3 stories or
+crosses repo boundaries.
 
-**What requires a spec**: New features, refactoring that changes
-signatures, test additions across multiple functions, agent
-changes, CI changes, data model changes.
+**Risk floors** (escalate only): security-sensitive code,
+authentication/authorization flows, data-loss paths, or a
+public API break MUST use OpenSpec at minimum — never Quick.
 
-**Exempt**: Constitution amendments, typo fixes, emergency
-hotfixes (retroactively documented).
+**Quality gates apply to every tier**: Quick skips spec
+artifacts, not review — CI and code review still gate merge.
+
+**Exempt from spec artifacts**: Constitution amendments (governed
+by the constitution) and emergency hotfixes (documented
+retroactively). CI and code review still gate merge.
 
 ## Knowledge Retrieval
 
