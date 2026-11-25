@@ -166,12 +166,12 @@
     untouched.
   - III: structured envelopes with stable codes.
   - IV: injectable executors plus the real-git round trip.
-- [ ] 5.2 Record DE-004 line deltas for each edited instruction file
+- [x] 5.2 Record DE-004 line deltas for each edited instruction file
   in the CHANGELOG entry. File the documentation issue for the
-  user-facing change per the Documentation gate.
-- [ ] 5.3 File a follow-up issue in unbound-force/gaze for an
-  analysis-root argument to `gaze-reporter`.
-- [ ] 5.4 Add `Closes #1203` to the PR body by hand
+  user-facing change per the Documentation gate (#1210).
+- [x] 5.3 File a follow-up issue in unbound-force/gaze for an
+  analysis-root argument to `gaze-reporter` (unbound-force/gaze#378).
+- [x] 5.4 Add `Closes #1203` to the PR body by hand
   (`originating_issue` carries #1204 only).
 - [x] 5.5 Run `make check` and `make lint-instructions`. Confirm
   green with coverage floors unchanged (plugin floor 94%).
