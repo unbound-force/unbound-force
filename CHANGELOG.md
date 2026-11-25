@@ -29,13 +29,20 @@ Each entry follows the format: `- <change-name>: <summary>`.
   `changed_files`, and `base_sha`: Phases 1, 2, and 4 and the
   Phase 4a worktree tier run in the root, Phase 2a uses the PR's
   `base_sha...head_sha` file list, the Phase 4a baseline keys on
-  the PR base, and Phase 5 reports `Gates ran at: <head_sha>
-  (<method>); config from <config_sha>`.
+  the PR base, and Phase 5 inserts the prepare result's rendered
+  `provenance_line` verbatim.
 
-  On a `prepare` failure, `/uf.review-pr` records `Local gates:
-  not run (<code>)` and continues on CI evidence.
+  On a `prepare` failure, `/uf.review-pr` records the failure
+  envelope's rendered `not_run_line` (`Local gates: not run
+  (<code>): <message>`) and continues on CI evidence.
   `/uf.review-council` keeps Phase 1a mandatory (coverage `FAIL`,
-  `INCONCLUSIVE`) and runs Gaze only on the reused checkout.
+  `INCONCLUSIVE`) and runs Gaze only on the reused checkout,
+  skipping Phase 1b with the prepare result's rendered
+  `gaze_skip_note` when the head root is a worktree. The report
+  lines (`provenance_line`, `not_run_line`, `gaze_skip_note`) are
+  rendered by `review_head_root` itself (DE-003), not assembled
+  from prose templates; their exact strings are pinned in
+  `golden-output-shape.test.ts`.
 
   DE-004 deltas: `skills/pre-flight/SKILL.md` 599 → 634 lines,
   `commands/uf.review-pr.md` 1309 → 1349,

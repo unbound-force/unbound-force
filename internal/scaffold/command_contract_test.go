@@ -1277,10 +1277,11 @@ var reviewHeadRootCodes = []string{"`UNTRUSTED_HEAD`", "`HEAD_MOVED`", "`HEAD_UN
 func TestCommandContracts_ReviewPrHeadRoot(t *testing.T) {
 	clauses := []commandClause{
 		{name: "prepare before pre-flight", all: []string{"### 3.7. pre-flight checks", "call the `review_head_root` plugin tool once", "`{action: \"prepare\", pr_number: <pr_number>, base_sha: <base_sha>, head_sha: <head_sha>}`", "never switches, stashes, or modifies the user's branch, index, or working tree"}},
-		{name: "prepare failure skips local gates", all: append([]string{"do not run local tools anywhere", "`local gates: not run (<code>): <message>`", "continue with ci evidence only", "`review_head_root_error`: an unexpected tool error"}, reviewHeadRootCodes...)},
+		{name: "prepare failure skips local gates", all: append([]string{"do not run local tools anywhere", "the failure envelope's rendered `not_run_line`", "`local gates: not run (<code>): <message>`", "continue with ci evidence only", "`review_head_root_error`: an unexpected tool error"}, reviewHeadRootCodes...)},
 		{name: "whole prepare result threaded into pre-flight", all: []string{"in `ci-aware` mode, passing the whole prepare result", "the provenance fields `head_sha`, `method`, `config_sha`, `config_dirty`"}},
 		{name: "release once, non-fatal", all: []string{"`{action: \"release\", root: <root>}`", "before any stop after a successful prepare", "a release failure is a warning in the report and never changes the verdict"}},
 		{name: "provenance reported", all: []string{"the `gates ran at` provenance line (or the `local gates: not run` line)"}},
+		{name: "report template inserts rendered lines verbatim", all: []string{"<provenance_line from the prepare result, or its not_run_line from the failure envelope, verbatim; then a table"}},
 	}
 	assertCommandCopies(t, "uf.review-pr.md", true, clauses)
 	assertGatePathHasNoCheckout(t, "uf.review-pr.md", "### 3.7.", "### 3.8.")
@@ -1291,7 +1292,7 @@ func TestCommandContracts_ReviewCouncilHeadRoot(t *testing.T) {
 		{name: "prepare for pr input only", all: []string{"#### phase 1 head root (pr input only)", "when the resolved input context is `kind: pr`", "`{action: \"prepare\", pr_number: <pr_number>, base_sha: <base_sha>, head_sha: <head_sha>}`", "local and uncommitted input skips this block"}},
 		{name: "every code takes the mandatory fail path", all: append([]string{"do not run local gates anywhere", "phase 1a stays mandatory, so every code takes the phase 1a fail path", "`review_head_root_error`: an unexpected tool error", "preceded for pr input by the phase 1 head root block"}, reviewHeadRootCodes...)},
 		{name: "whole prepare result threaded into phase 1a", all: []string{"passing the whole prepare result", "when the phase 1 head root block prepared it", "the pr's `base_sha` in pr mode, else the default branch"}},
-		{name: "gaze gated on checkout", all: []string{"whose head root `method` is `worktree`", "gaze skipped: the pr head is in a temporary worktree and gaze-reporter has no root argument"}},
+		{name: "gaze gated on checkout", all: []string{"whose prepare result carries a `gaze_skip_note` (method `worktree`)", "gaze skipped: the pr head is in a temporary worktree and gaze-reporter has no root argument"}},
 		{name: "release once, non-fatal", all: []string{"`{action: \"release\", root: <root>}`", "or on any stop after a successful prepare", "a release failure is a warning in the final report and never changes the verdict"}},
 	}
 	assertCommandCopies(t, "uf.review-council.md", true, clauses)
@@ -1308,8 +1309,9 @@ func TestPreflightSkill_ReviewHeadRootThreading(t *testing.T) {
 		"error `invalid_preflight_config` or `invalid_root`",
 		"the baseline is the pr's base, not the default branch",
 		"`commits/${base_sha}/check-runs`",
-		"**gates ran at**: <head_sha> (<method>); config from <config_sha>",
-		"appending ` (dirty)` after `<config_sha>` when `config_dirty` is true",
+		"**gates ran at**: <provenance_line from the prepare result, verbatim>",
+		"phase 5 inserts the prepare result's rendered `provenance_line` verbatim",
+		"` (dirty)` appended after `<config_sha>` when `config_dirty` is true",
 	}
 	for _, path := range []string{
 		filepath.Join(root, ".opencode", "skills", "pre-flight", "SKILL.md"),

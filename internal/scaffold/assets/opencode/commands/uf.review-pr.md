@@ -264,13 +264,14 @@ the agent's own checkout (issue #1203).
    or working tree. A success looks like:
 
    ```json
-   {"status":"ok","data":{"root":"/repo/.uf/review-head/k3v9x2qa","head_sha":"<40-hex>","base_sha":"<40-hex>","method":"worktree","created":true,"config_sha":"<40-hex>","config_dirty":false,"changed_files":["internal/a.go"]}}
+   {"status":"ok","data":{"root":"/repo/.uf/review-head/k3v9x2qa","head_sha":"<40-hex>","base_sha":"<40-hex>","method":"worktree","created":true,"config_sha":"<40-hex>","config_dirty":false,"provenance_line":"Gates ran at: <40-hex> (worktree); config from <40-hex>","gaze_skip_note":"Gaze skipped: the PR head is in a temporary worktree and gaze-reporter has no root argument","changed_files":["internal/a.go"]}}
    ```
 
    On `status: "error"`, do NOT run local tools anywhere.
-   Record `Local gates: not run (<code>): <message>` as the
-   Step 3.7 result, skip items 2-3, and continue with CI
-   evidence only:
+   Record the failure envelope's rendered `not_run_line`
+   verbatim as the Step 3.7 result (e.g. `Local gates: not
+   run (<code>): <message>`), skip items 2-3, and continue
+   with CI evidence only:
    - `UNTRUSTED_HEAD`: a fork PR whose author lacks write
      access. Its code is not fetched or run. The message
      names the opt-in (check out the head yourself and
@@ -753,7 +754,7 @@ Present the findings in this structured format:
 | <name> | PASS/FAIL | PR-caused / Pre-existing / N/A |
 
 ### Local Tool Results
-<`Gates ran at` line, or `Local gates: not run (<code>)`; then a table showing which tools ran, pass/fail status, and summary of failures if any>
+<provenance_line from the prepare result, or its not_run_line from the failure envelope, verbatim; then a table showing which tools ran, pass/fail status, and summary of failures if any>
 
 ### Walkthrough
 | File | Change | Focus |

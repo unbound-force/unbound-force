@@ -24,9 +24,11 @@ The consuming command specifies which mode to use.
 
 A PR-mode consumer (`/uf.review-pr`, `/uf.review-council`
 with a PR) passes the whole `review_head_root` prepare
-result: `root`, `changed_files`, `base_sha`, and the
+result: `root`, `changed_files`, `base_sha`, the
 provenance fields `head_sha`, `method`, `config_sha`, and
-`config_dirty`. When `root` is supplied:
+`config_dirty`, and the rendered report lines
+`provenance_line` and `gaze_skip_note`. When `root` is
+supplied:
 
 - Every shell command in Phases 1, 2, 4, and the Phase 4a
   worktree tier runs with `root` as its working directory.
@@ -36,9 +38,11 @@ provenance fields `head_sha`, `method`, `config_sha`, and
 - Phase 2a takes `changed_files` as the branch diff (see
   Phase 2a).
 - Phase 2b and Phase 4a use `base_sha` (see those phases).
-- Phase 5 adds the provenance line from the provenance
-  fields, appending ` (dirty)` after `<config_sha>` when
-  `config_dirty` is true.
+- Phase 5 inserts the prepare result's rendered
+  `provenance_line` verbatim; the tool renders the whole
+  line, e.g. `Gates ran at: <head_sha> (<method>); config
+  from <config_sha>` with ` (dirty)` appended after
+  `<config_sha>` when `config_dirty` is true.
 
 Without `root`, every phase behaves as described below.
 
@@ -571,7 +575,7 @@ Present results in a standardized format.
 
 ### Verdict
 - **Mode**: hard-gate | ci-aware
-- **Gates ran at**: <head_sha> (<method>); config from <config_sha>  (PR mode only)
+- **Gates ran at**: <provenance_line from the prepare result, verbatim>  (PR mode only)
 - **Result**: PASS | FAIL
 - **Skipped — no in-scope files**: N tools
 - **Failures**: [list if any]
@@ -599,7 +603,7 @@ Present results in a standardized format.
 
 ### Verdict
 - **Mode**: soft-gate
-- **Gates ran at**: <head_sha> (<method>); config from <config_sha>  (PR mode only)
+- **Gates ran at**: <provenance_line from the prepare result, verbatim>  (PR mode only)
 - **Result**: PASS | FAIL (branch-caused)
 - **Skipped — no in-scope files**: N tools
 - **Branch-caused failures**: [list if any]
