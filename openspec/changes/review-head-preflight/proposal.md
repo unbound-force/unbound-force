@@ -36,9 +36,9 @@ Step 6 is unaffected: there the checkout is the code under review.
      `changed_files` (`base_sha...head_sha`), and the config commit.
    - If `HEAD` already equals `head_sha` with no tracked or
      untracked changes, the current checkout is reused.
-   - Otherwise it applies a trust gate: a fork PR from an author
-     who is not OWNER, MEMBER, or COLLABORATOR fails
-     `UNTRUSTED_HEAD` before any fetch.
+   - Otherwise it applies a trust gate: a fork PR (or a deleted
+     fork) whose author lacks write, maintain, or admin permission
+     on the base repo fails `UNTRUSTED_HEAD` before any fetch.
    - For a trusted head it fetches missing commits from the base
      repo's remote, verifies them, and adds a detached worktree
      under a self-ignoring `.uf/review-head/<id>`.
@@ -57,7 +57,7 @@ Step 6 is unaffected: there the checkout is the code under review.
    - workflow parsing
    - tool detection
    - execution
-   - the baseline fallback
+   - the baseline, keyed on `base_sha`
    - declared checks
 
    This closes the empty-diff-on-`main` false PASS. Phase 5
@@ -70,9 +70,11 @@ Step 6 is unaffected: there the checkout is the code under review.
    warning.
 5. **`/uf.review-council`**, for PR input only, does the same
    around Phase 1a.
-   - `UNTRUSTED_HEAD` skips the local gates and continues.
-   - Other `prepare` errors take the existing Phase 1a FAIL path:
-     coverage `FAIL`, `INCONCLUSIVE`, and no reviewer children.
+   - Every `prepare` failure, `UNTRUSTED_HEAD` included, takes
+     the existing Phase 1a FAIL path: coverage `FAIL`,
+     `INCONCLUSIVE`, and no reviewer children. The mandatory gate
+     stays mandatory. A user opts an untrusted fork in by checking
+     out its head and re-running.
    - Phase 1b runs Gaze only when the checkout was reused.
      `gaze-reporter` is scaffolded by the gaze repo and has no
      root argument.

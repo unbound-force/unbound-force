@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it } from "vitest"
 
 import { parsePreflightConfig, type DeclaredChecksData, type PreflightMode } from "../lib/preflight-declared.js"
 import type { ToolResult } from "../lib/uf-workflow-types.js"
-import UfWorkflowPlugin, { runProcessNoShell } from "../plugins/uf-workflow/index.js"
+import UfWorkflowPlugin, { createReviewHeadRootTool, runProcessNoShell, type ReviewHeadRootData } from "../plugins/uf-workflow/index.js"
+import { defaultGitExec } from "../lib/uf-workflow-types.js"
 import { withBun } from "./helpers/bun-runtime.js"
 import { parseYamlSubset } from "./helpers/yaml-subset.js"
 
@@ -40,14 +41,18 @@ async function project(files: Readonly<Record<string, { body: string; mode?: num
   return dir
 }
 
-async function runTool(dir: string, mode: PreflightMode = "soft-gate"): Promise<ToolResult<DeclaredChecksData>> {
+async function runTool(
+  dir: string,
+  mode: PreflightMode = "soft-gate",
+  extra: Record<string, unknown> = {},
+): Promise<ToolResult<DeclaredChecksData>> {
   const hooks = await withBun(() =>
     UfWorkflowPlugin.server({ directory: dir, worktree: dir, client: {} } as unknown as PluginInput),
   )
   const tool = (hooks.tool ?? {})["uf_preflight_declared_checks"] as unknown as {
     execute: (args: Record<string, unknown>, ctx: ToolContext) => Promise<{ output: string }>
   }
-  const result = await tool.execute({ mode }, {} as ToolContext)
+  const result = await tool.execute({ mode, ...extra }, {} as ToolContext)
   return JSON.parse(result.output) as ToolResult<DeclaredChecksData>
 }
 
@@ -228,6 +233,79 @@ describe("uf_preflight_declared_checks soft-gate against real git", () => {
     expect(data.verdict).toBe("FAIL")
     expect(data.rendered).toBe("| state | `.uf/scripts/check` | 1 | FAIL | branch-caused |")
     expect(git(dir, "worktree", "list").split("\n")).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// review_head_root + uf_preflight_declared_checks against real git
+// (review-head-preflight task 3.4, DE-007 Layer 3). Only gh is faked (a
+// same-repo PR, no network); git, the filesystem, and the check process
+// are real. The user sits on main with an untracked file while the PR
+// head breaks the check: the gates must judge the head, report it as
+// branch-caused against the PR base, and leave the user's tree alone.
+// ---------------------------------------------------------------------------
+
+describe("review_head_root round trip with declared checks", () => {
+  it("prepares a head worktree, gates it, releases it, and never touches the user's checkout", async () => {
+    const dir = await scratchRepo("ok")
+    const headSha = git(dir, "rev-parse", "feature")
+    git(dir, "checkout", "--quiet", "main")
+    const baseSha = git(dir, "rev-parse", "HEAD")
+    await writeFile(join(dir, "notes.txt"), "user scratch\n", "utf8")
+
+    const before = {
+      head: git(dir, "rev-parse", "HEAD"),
+      branch: git(dir, "branch", "--show-current"),
+      status: git(dir, "status", "--porcelain", "--untracked-files=normal"),
+      config: await readFile(join(dir, ".git", "config"), "utf8"),
+    }
+
+    const sameRepo = () =>
+      JSON.stringify({
+        url: "https://github.com/org/project/pull/7",
+        headRefOid: headSha,
+        isCrossRepository: false,
+        headRepository: { name: "project" },
+        headRepositoryOwner: { login: "org" },
+        author: { login: "dev" },
+      })
+    const headTool = createReviewHeadRootTool(defaultGitExec, sameRepo, dir) as unknown as {
+      execute: (args: Record<string, unknown>) => Promise<{ output: string }>
+    }
+    const prepared = JSON.parse(
+      (await headTool.execute({ action: "prepare", pr_number: 7, base_sha: baseSha, head_sha: headSha })).output,
+    ) as ToolResult<ReviewHeadRootData>
+    expect(prepared.status).toBe("ok")
+    const root = (prepared as { data: ReviewHeadRootData }).data
+    expect(root).toMatchObject({ method: "worktree", created: true, head_sha: headSha, config_sha: baseSha, config_dirty: true })
+    expect(root.changed_files).toEqual(["branch-change", "state"])
+    expect(git(root.root, "rev-parse", "HEAD")).toBe(headSha)
+    // The worktree stays out of the user's status while it exists.
+    expect(git(dir, "status", "--porcelain", "--untracked-files=normal")).toBe(before.status)
+
+    const gated = (await runTool(dir, "soft-gate", { root: root.root, base_sha: baseSha })) as { data: DeclaredChecksData }
+    expect(gated.data.checks.map((c) => [c.status, c.causality])).toEqual([["FAIL", "branch-caused"]])
+    expect(gated.data.scope.merge_base).toBe(baseSha)
+    expect(gated.data.verdict).toBe("FAIL")
+
+    const released = JSON.parse((await headTool.execute({ action: "release", root: root.root })).output) as ToolResult
+    expect(released.status).toBe("ok")
+    expect(git(dir, "worktree", "list").split("\n")).toHaveLength(1)
+
+    expect({
+      head: git(dir, "rev-parse", "HEAD"),
+      branch: git(dir, "branch", "--show-current"),
+      status: git(dir, "status", "--porcelain", "--untracked-files=normal"),
+      config: await readFile(join(dir, ".git", "config"), "utf8"),
+    }).toEqual(before)
+    expect(await readFile(join(dir, "notes.txt"), "utf8")).toBe("user scratch\n")
+  })
+
+  it("refuses a root that is not a live review-head worktree", async () => {
+    const dir = await scratchRepo("ok")
+    const envelope = await runTool(dir, "soft-gate", { root: join(dir, ".uf", "review-head", "k3v9x2qa") })
+    expect(envelope.status).toBe("error")
+    expect((envelope as { code?: string }).code).toBe("INVALID_ROOT")
   })
 })
 

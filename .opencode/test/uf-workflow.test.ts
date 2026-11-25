@@ -178,6 +178,7 @@ describe("UfWorkflowPlugin", () => {
       "relay_spec_review_gate",
       "resolve_base_ref",
       "resolve_clarification",
+      "review_head_root",
       "scan_clarifications",
       "scan_conflict_markers",
       "uf_delegate_command",
@@ -199,10 +200,11 @@ describe("UfWorkflowPlugin", () => {
 
     const result = await withBun(() => UfWorkflowPlugin.server(fakeInput))
 
-    // DE-007 Layer 1: pre-flight Phase 2b passes exactly the consuming
-    // command's execution policy.
+    // DE-007 Layer 1: pre-flight Phase 2b passes the consuming command's
+    // execution policy, plus the PR-mode root and base_sha
+    // (review-head-preflight design D6).
     const args = result.tool.uf_preflight_declared_checks.args
-    expect(Object.keys(args)).toEqual(["mode"])
+    expect(Object.keys(args)).toEqual(["mode", "root", "base_sha"])
     const mode = args.mode as unknown as { safeParse: (value: unknown) => { success: boolean } }
     for (const value of ["hard-gate", "ci-aware", "soft-gate"]) {
       expect(mode.safeParse(value).success).toBe(true)

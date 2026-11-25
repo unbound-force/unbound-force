@@ -1267,3 +1267,90 @@ func containsAnyNormalized(normalized string, fragments []string) bool {
 	}
 	return false
 }
+
+// reviewHeadRootCodes are the review_head_root prepare failure codes the
+// PR-mode review commands must each handle (review-head-preflight design
+// D7; TS parity with REVIEW_HEAD_ROOT_ERROR_CODES lives in
+// review-head-root.test.ts).
+var reviewHeadRootCodes = []string{"`UNTRUSTED_HEAD`", "`HEAD_MOVED`", "`HEAD_UNAVAILABLE`", "`WORKTREE_FAILED`"}
+
+func TestCommandContracts_ReviewPrHeadRoot(t *testing.T) {
+	clauses := []commandClause{
+		{name: "prepare before pre-flight", all: []string{"### 3.7. pre-flight checks", "call the `review_head_root` plugin tool once", "`{action: \"prepare\", pr_number: <pr_number>, base_sha: <base_sha>, head_sha: <head_sha>}`", "never switches, stashes, or modifies the user's branch, index, or working tree"}},
+		{name: "prepare failure skips local gates", all: append([]string{"do not run local tools anywhere", "`local gates: not run (<code>): <message>`", "continue with ci evidence only", "`review_head_root_error`: an unexpected tool error"}, reviewHeadRootCodes...)},
+		{name: "whole prepare result threaded into pre-flight", all: []string{"in `ci-aware` mode, passing the whole prepare result", "the provenance fields `head_sha`, `method`, `config_sha`, `config_dirty`"}},
+		{name: "release once, non-fatal", all: []string{"`{action: \"release\", root: <root>}`", "before any stop after a successful prepare", "a release failure is a warning in the report and never changes the verdict"}},
+		{name: "provenance reported", all: []string{"the `gates ran at` provenance line (or the `local gates: not run` line)"}},
+	}
+	assertCommandCopies(t, "uf.review-pr.md", true, clauses)
+	assertGatePathHasNoCheckout(t, "uf.review-pr.md", "### 3.7.", "### 3.8.")
+}
+
+func TestCommandContracts_ReviewCouncilHeadRoot(t *testing.T) {
+	clauses := []commandClause{
+		{name: "prepare for pr input only", all: []string{"#### phase 1 head root (pr input only)", "when the resolved input context is `kind: pr`", "`{action: \"prepare\", pr_number: <pr_number>, base_sha: <base_sha>, head_sha: <head_sha>}`", "local and uncommitted input skips this block"}},
+		{name: "every code takes the mandatory fail path", all: append([]string{"do not run local gates anywhere", "phase 1a stays mandatory, so every code takes the phase 1a fail path", "`review_head_root_error`: an unexpected tool error", "preceded for pr input by the phase 1 head root block"}, reviewHeadRootCodes...)},
+		{name: "whole prepare result threaded into phase 1a", all: []string{"passing the whole prepare result", "when the phase 1 head root block prepared it", "the pr's `base_sha` in pr mode, else the default branch"}},
+		{name: "gaze gated on checkout", all: []string{"whose head root `method` is `worktree`", "gaze skipped: the pr head is in a temporary worktree and gaze-reporter has no root argument"}},
+		{name: "release once, non-fatal", all: []string{"`{action: \"release\", root: <root>}`", "or on any stop after a successful prepare", "a release failure is a warning in the final report and never changes the verdict"}},
+	}
+	assertCommandCopies(t, "uf.review-council.md", true, clauses)
+	assertGatePathHasNoCheckout(t, "uf.review-council.md", "#### phase 1 head root", "#### phase 1c")
+}
+
+func TestPreflightSkill_ReviewHeadRootThreading(t *testing.T) {
+	root := findProjectRoot(t)
+	clauses := []string{
+		"## pr-mode inputs (review head root)",
+		"every shell command in phases 1, 2, 4, and the phase 4a worktree tier runs with `root` as its working directory",
+		"when the consumer supplies `changed_files`, that list *is* the branch diff",
+		"plus `root` and `base_sha` when the consumer supplied them",
+		"error `invalid_preflight_config` or `invalid_root`",
+		"the baseline is the pr's base, not the default branch",
+		"`commits/${base_sha}/check-runs`",
+		"**gates ran at**: <head_sha> (<method>); config from <config_sha>",
+		"appending ` (dirty)` after `<config_sha>` when `config_dirty` is true",
+	}
+	for _, path := range []string{
+		filepath.Join(root, ".opencode", "skills", "pre-flight", "SKILL.md"),
+		filepath.Join(root, "internal", "scaffold", "assets", "opencode", "skills", "pre-flight", "SKILL.md"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		normalized := normalizeCommandText(string(data))
+		for _, fragment := range clauses {
+			assertNormalizedContains(t, path, normalized, "pre-flight review head root", fragment)
+		}
+	}
+}
+
+// assertGatePathHasNoCheckout keeps branch-switching choreography out of
+// the local-gate section: the head root is a detached worktree, so the
+// user's checkout must never be switched to reach the PR head.
+func assertGatePathHasNoCheckout(t *testing.T, name, startMarker, endMarker string) {
+	t.Helper()
+	for _, copy := range loadCommandCopies(t, name, true) {
+		normalized := normalizeCommandText(copy.text)
+		start := strings.Index(normalized, normalizeCommandText(startMarker))
+		if start < 0 {
+			t.Errorf("%s: gate section start %q not found", copy.name, startMarker)
+			continue
+		}
+		end := strings.Index(normalized[start:], normalizeCommandText(endMarker))
+		if end < 0 {
+			t.Errorf("%s: gate section end %q not found", copy.name, endMarker)
+			continue
+		}
+		section := normalized[start : start+end]
+		for _, forbidden := range []string{"git checkout", "git switch", "git stash"} {
+			if strings.Contains(section, forbidden) {
+				t.Errorf("%s: local-gate section must not contain %q", copy.name, forbidden)
+			}
+		}
+		if strings.Contains(section, "gh pr checkout") && !strings.Contains(section, "check out the head yourself") {
+			t.Errorf("%s: `gh pr checkout` may appear in the gate section only as the user's opt-in", copy.name)
+		}
+	}
+}
