@@ -26,8 +26,9 @@ Each entry follows the format: `- <change-name>: <summary>`.
   `base_sha` (scope and baseline at `merge-base(base_sha, HEAD)`;
   config and scripts still from the plugin directory;
   `INVALID_ROOT`). The `pre-flight` skill takes `root`,
-  `changed_files`, and `base_sha`: Phases 1, 2, and 4 and the
-  Phase 4a worktree tier run in the root, Phase 2a uses the PR's
+  `changed_files`, and `base_sha`: Phases 1, 2, and 4 run in the
+  root (Phase 4a creates its baseline worktree from the root and
+  runs the failing tools inside it), Phase 2a uses the PR's
   `base_sha...head_sha` file list, the Phase 4a baseline keys on
   the PR base, and Phase 5 inserts the prepare result's rendered
   `provenance_line` verbatim.
@@ -44,9 +45,11 @@ Each entry follows the format: `- <change-name>: <summary>`.
   from prose templates; their exact strings are pinned in
   `golden-output-shape.test.ts`.
 
-  DE-004 deltas: `skills/pre-flight/SKILL.md` 599 → 634 lines,
-  `commands/uf.review-pr.md` 1309 → 1349,
-  `commands/uf.review-council.md` 1487 → 1538 (per copy). The
+  DE-004 deltas (`instruction-lint --changed`):
+  `skills/pre-flight/SKILL.md` 599 → 646 lines (+525 tokens),
+  `commands/uf.review-pr.md` 1309 → 1354 (+617 tokens),
+  `commands/uf.review-council.md` 1487 → 1551 (+864 tokens), per
+  copy; +156 lines and +2006 tokens in total. The
   worktree, fetch, trust, and validation choreography lives in the
   tool, not the prose. Known gaps: submodules and LFS are not
   initialised in a head worktree, and non-PR input keeps #1063's
@@ -99,6 +102,7 @@ Each entry follows the format: `- <change-name>: <summary>`.
   against the proposal (six principles PASS).
   (Spec: openspec/changes/ci-skip-learnings-only-prs/)
   (Fixes: #1194, Docs: #1201)
+
 - toolkit-gaze-2.4.0-reconciliation: `.opencode/agents/divisor-gaze-testing.md`
   is registered as a repo-local, non-embedded agent in
   `knownNonEmbeddedFiles` (the embedded canonical testing persona
