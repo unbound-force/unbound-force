@@ -335,7 +335,11 @@ the council after a small fix push.
 
 ## Specification Workflow
 
-All non-trivial changes MUST be preceded by a spec workflow.
+Every change follows a workflow tier chosen for that change's
+scope and risk — no single tier is mandatory. `/uf.unleash`
+picks the tier automatically through the `tier-routing` skill
+when no spec exists yet; agents working by hand apply the same
+rubric.
 
 | Tier | Tool | When | Artifacts |
 |------|------|------|-----------|
@@ -366,12 +370,16 @@ state) takes precedence over `.openspec.yaml`.
 **Task bookkeeping**: Mark checkboxes `[x]` immediately on
 completion. `[P]` marks parallel-eligible tasks.
 
-**When in doubt**: Start with OpenSpec. Escalate to Speckit if
-scope grows beyond 3 stories or crosses repo boundaries.
+**When in doubt**: Choose the heavier of two adjacent tiers.
+Escalate OpenSpec to Speckit if scope grows beyond 3 stories or
+crosses repo boundaries.
 
-**What requires a spec**: New features, refactoring that changes
-signatures, test additions across multiple functions, agent
-changes, CI changes, data model changes.
+**Risk floors** (escalate only): security-sensitive code,
+authentication/authorization flows, data-loss paths, or a
+public API break MUST use OpenSpec at minimum — never Quick.
+
+**Quality gates apply to every tier**: Quick skips spec
+artifacts, not review — CI and code review still gate merge.
 
 **Exempt**: Constitution amendments, typo fixes, emergency
 hotfixes (retroactively documented).
