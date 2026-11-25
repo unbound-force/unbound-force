@@ -633,7 +633,7 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
    or working tree. A success looks like:
 
    ```json
-   {"status":"ok","data":{"root":"/repo/.uf/review-head/k3v9x2qa","head_sha":"<40-hex>","base_sha":"<40-hex>","method":"worktree","created":true,"config_sha":"<40-hex>","config_dirty":false,"changed_files":["internal/a.go"]}}
+   {"status":"ok","data":{"root":"/repo/.uf/review-head/k3v9x2qa","head_sha":"<40-hex>","base_sha":"<40-hex>","method":"worktree","created":true,"config_sha":"<40-hex>","config_dirty":false,"provenance_line":"Gates ran at: <40-hex> (worktree); config from <40-hex>","gaze_skip_note":"Gaze skipped: the PR head is in a temporary worktree and gaze-reporter has no root argument","changed_files":["internal/a.go"]}}
    ```
 
    On `status: "error"`, do NOT run local gates anywhere.
@@ -716,12 +716,14 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
 
    #### Phase 1b -- Gaze Quality Analysis (conditional)
 
-   For PR input whose head root `method` is `worktree`,
-   skip this phase with the note "Gaze skipped: the PR head
-   is in a temporary worktree and gaze-reporter has no root
-   argument" and proceed. Running Gaze from the agent's
-   checkout would score the wrong code. With `method:
-   "checkout"` (or local input), continue below.
+   For PR input whose prepare result carries a
+   `gaze_skip_note` (method `worktree`), skip this phase
+   with that rendered note verbatim — "Gaze skipped: the
+   PR head is in a temporary worktree and gaze-reporter
+   has no root argument" — and proceed. Running Gaze from
+   the agent's checkout would score the wrong code. With
+   `method: "checkout"` (or local input), `gaze_skip_note`
+   is null; continue below.
 
    a. Check if `gaze` is available:
       ```bash

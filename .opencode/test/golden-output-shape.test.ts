@@ -24,7 +24,11 @@ import {
   _getSessionCorrelationMap,
 } from "../plugins/review-dispatch/index.js"
 import UfFinalePlugin from "../plugins/uf-finale/index.js"
-import UfWorkflowPlugin from "../plugins/uf-workflow/index.js"
+import UfWorkflowPlugin, {
+  REVIEW_HEAD_GAZE_SKIP_NOTE,
+  renderNotRunLine,
+  renderProvenanceLine,
+} from "../plugins/uf-workflow/index.js"
 import samplePayload from "../../schemas/review-dispatch/samples/sample-review-dispatch.json"
 import manifestFixture from "./fixtures/review-dispatch/manifest.json"
 import matrixFixture from "./fixtures/review-dispatch/matrix.json"
@@ -1177,7 +1181,7 @@ describe("golden output shapes -- review_head_root (uf.review-pr.md Step 3.7)", 
   const HEAD_SHA = "a".repeat(40)
   const BASE_SHA = "b".repeat(40)
 
-  it("returns root, head_sha, base_sha, method, created, config_sha, and changed_files", async () => {
+  it("returns root, head_sha, base_sha, method, created, config_sha, config_dirty, rendered report lines, and changed_files", async () => {
     const directory = await makeScratch()
     const registry = await loadRegistry(UfWorkflowPlugin, directory)
     const calls: string[] = []
@@ -1213,9 +1217,29 @@ describe("golden output shapes -- review_head_root (uf.review-pr.md Step 3.7)", 
       created: false,
       config_sha: HEAD_SHA,
       config_dirty: false,
+      provenance_line: `Gates ran at: ${HEAD_SHA} (checkout); config from ${HEAD_SHA}`,
+      gaze_skip_note: null,
       changed_files: ["a.go", "b.go"],
     })
     expect(calls.some((call) => call.startsWith("gh "))).toBe(false)
+  })
+
+  it("renders the report lines the consuming commands insert verbatim (DE-003)", async () => {
+    // renderProvenanceLine: clean and dirty, both methods.
+    expect(renderProvenanceLine("a".repeat(40), "checkout", "b".repeat(40), false)).toBe(
+      `Gates ran at: ${"a".repeat(40)} (checkout); config from ${"b".repeat(40)}`,
+    )
+    expect(renderProvenanceLine("a".repeat(40), "worktree", "b".repeat(40), true)).toBe(
+      `Gates ran at: ${"a".repeat(40)} (worktree); config from ${"b".repeat(40)} (dirty)`,
+    )
+    // renderNotRunLine: the Step 3.7 not-run line.
+    expect(renderNotRunLine("HEAD_MOVED", "re-run the review.")).toBe(
+      "Local gates: not run (HEAD_MOVED): re-run the review.",
+    )
+    // REVIEW_HEAD_GAZE_SKIP_NOTE: the council Phase 1b note.
+    expect(REVIEW_HEAD_GAZE_SKIP_NOTE).toBe(
+      "Gaze skipped: the PR head is in a temporary worktree and gaze-reporter has no root argument",
+    )
   })
 
   it("carries INVALID_ROOT through the registry for release and for declared checks", async () => {
@@ -1227,6 +1251,20 @@ describe("golden output shapes -- review_head_root (uf.review-pr.md Step 3.7)", 
 
     const released = await callEnvelopeTool(registry, "review_head_root", { action: "release", root: "/tmp/elsewhere" })
     expect(released.status === "error" ? released.code : undefined).toBe("INVALID_ROOT")
+    // A release failure is a warning after gates ran: it must NOT claim the
+    // gates did not run (no not_run_line on release envelopes).
+    if (released.status === "error") {
+      expect((released as typeof released & { not_run_line?: string }).not_run_line).toBeUndefined()
+    }
+    // A prepare failure renders the not_run_line the consuming command
+    // inserts verbatim (DE-003); the missing-args path spawns no process.
+    const missing = await callEnvelopeTool(registry, "review_head_root", { action: "prepare" })
+    expect(missing.status).toBe("error")
+    if (missing.status === "error") {
+      expect((missing as typeof missing & { not_run_line?: string }).not_run_line).toBe(
+        "Local gates: not run (REVIEW_HEAD_ROOT_ERROR): prepare requires pr_number, base_sha, and head_sha.",
+      )
+    }
     const gated = await callEnvelopeTool(registry, "uf_preflight_declared_checks", {
       mode: "ci-aware",
       root: `${directory}/.uf/review-head/../../x`,

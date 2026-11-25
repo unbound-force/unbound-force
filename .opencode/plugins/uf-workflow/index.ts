@@ -3292,7 +3292,9 @@ export function createCheckoutPrHeadTool(exec: GitExec, gh: GhRunner, cwd: strin
 /**
  * Failure codes review_head_root returns (review-head-preflight design
  * D4-D5, issues #1203/#1204). The PR-mode review commands map each to
- * "Local gates: not run (<code>)" or the council's Phase 1a FAIL path.
+ * the failure envelope's rendered not_run_line
+ * ("Local gates: not run (<code>): <message>") or the council's
+ * Phase 1a FAIL path.
  */
 export const REVIEW_HEAD_ROOT_ERROR_CODES = [
   "UNTRUSTED_HEAD",
@@ -3318,6 +3320,36 @@ export const REVIEW_HEAD_STALE_MS = 24 * 60 * 60 * 1000
 /** Repository permissions whose holders' fork heads are trusted (design D4 step 3). */
 const TRUSTED_PERMISSIONS = new Set(["admin", "maintain", "write"])
 
+/**
+ * Render the pre-flight Phase 5 provenance line from a prepare result
+ * (review-head-preflight design D8; DE-003: the tool that produces the
+ * inputs renders the prescribed line, consumers insert it verbatim).
+ */
+export function renderProvenanceLine(
+  headSha: string,
+  method: "checkout" | "worktree",
+  configSha: string,
+  configDirty: boolean,
+): string {
+  return `Gates ran at: ${headSha} (${method}); config from ${configSha}${configDirty ? " (dirty)" : ""}`
+}
+
+/**
+ * Render the /uf.review-pr Step 3.7 not-run line for a review_head_root
+ * prepare failure (DE-003; carried on the failure envelope as
+ * not_run_line for the consuming command to insert verbatim).
+ */
+export function renderNotRunLine(code: string, message: string): string {
+  return `Local gates: not run (${code}): ${message}`
+}
+
+/**
+ * The /uf.review-council Phase 1b Gaze-skip note for a worktree head root
+ * (DE-003; carried on the prepare result as gaze_skip_note).
+ */
+export const REVIEW_HEAD_GAZE_SKIP_NOTE =
+  "Gaze skipped: the PR head is in a temporary worktree and gaze-reporter has no root argument"
+
 /** Structured output from review_head_root prepare. */
 export interface ReviewHeadRootData {
   /** Directory the local gates must run in. */
@@ -3332,6 +3364,10 @@ export interface ReviewHeadRootData {
   config_sha: string
   /** True when the plugin directory had uncommitted changes (config may differ from config_sha). */
   config_dirty: boolean
+  /** Rendered Phase 5 provenance line; consuming commands insert it verbatim (DE-003). */
+  provenance_line: string
+  /** Phase 1b Gaze-skip note; set only when method is worktree, null otherwise (DE-003). */
+  gaze_skip_note: string | null
   /** `git diff --name-only <base_sha>...<head_sha>`, sorted. */
   changed_files: string[]
 }
@@ -3575,8 +3611,20 @@ function hasCommit(exec: GitExec, cwd: string, sha: string): boolean {
 }
 
 /** Build a review_head_root failure output. */
+/**
+ * Prepare failure envelope: the standard failure plus the rendered
+ * not_run_line the consuming command inserts verbatim (DE-003).
+ */
 function reviewHeadFailure(code: ReviewHeadRootErrorCode, message: string, retryable = false): { output: string } {
-  return { output: JSON.stringify(failure(message, { retryable, code })) }
+  return { output: JSON.stringify({ ...failure(message, { retryable, code }), not_run_line: renderNotRunLine(code, message) }) }
+}
+
+/**
+ * Release failure envelope: a warning after the gates ran, so it never
+ * carries the not-run line (the gates did run).
+ */
+function reviewHeadReleaseFailure(code: ReviewHeadRootErrorCode, message: string): { output: string } {
+  return { output: JSON.stringify(failure(message, { code })) }
 }
 
 /** Thrown inside prepare to carry a coded failure out of helpers. */
@@ -3699,7 +3747,9 @@ export function createReviewHeadRootTool(
       "Prepare or release the directory a PR-mode review's local gates run in. " +
       "action=prepare {pr_number, base_sha, head_sha} reuses the current checkout when it is a " +
       "clean checkout of head_sha, else adds a detached worktree at head_sha under .uf/review-head/; " +
-      "returns {root, head_sha, base_sha, method, created, config_sha, config_dirty, changed_files}. " +
+      "returns {root, head_sha, base_sha, method, created, config_sha, config_dirty, provenance_line, gaze_skip_note, changed_files}; " +
+      "provenance_line and gaze_skip_note are rendered report lines the consuming skill or command inserts verbatim (DE-003), " +
+      "and every failure envelope carries a rendered not_run_line for the same purpose. " +
       "action=release {root} removes a review-head worktree (the reused checkout is a no-op). " +
       "Failure codes UNTRUSTED_HEAD, HEAD_UNAVAILABLE, HEAD_MOVED, WORKTREE_FAILED, INVALID_ROOT, " +
       "REVIEW_HEAD_ROOT_ERROR (unexpected error; the message carries the detail). " +
@@ -3721,11 +3771,11 @@ export function createReviewHeadRootTool(
       try {
         if (args.action === "release") {
           if (args.root === undefined) {
-            return reviewHeadFailure("INVALID_ROOT", "release requires root.")
+            return reviewHeadReleaseFailure("INVALID_ROOT", "release requires root.")
           }
           const kind = validateReviewHeadRoot(exec, fs, cwd, args.root)
           if (kind === null) {
-            return reviewHeadFailure(
+            return reviewHeadReleaseFailure(
               "INVALID_ROOT",
               `${args.root} is not the plugin directory or a live ${REVIEW_HEAD_DIR}/<id> worktree; nothing was removed.`,
             )
@@ -3735,7 +3785,7 @@ export function createReviewHeadRootTool(
         }
 
         if (args.pr_number === undefined || args.base_sha === undefined || args.head_sha === undefined) {
-          return { output: JSON.stringify(failure("prepare requires pr_number, base_sha, and head_sha.", { code: "REVIEW_HEAD_ROOT_ERROR" })) }
+          return reviewHeadFailure("REVIEW_HEAD_ROOT_ERROR", "prepare requires pr_number, base_sha, and head_sha.")
         }
         const prNumber = args.pr_number
         const shas = { head: args.head_sha, base: args.base_sha }
@@ -3767,6 +3817,8 @@ export function createReviewHeadRootTool(
             created: false,
             config_sha: configSha,
             config_dirty: false,
+            provenance_line: renderProvenanceLine(shas.head, "checkout", configSha, false),
+            gaze_skip_note: null,
             changed_files: changedFiles(exec, cwd, shas.base, shas.head),
           }
           return { output: JSON.stringify(success(data)) }
@@ -3818,6 +3870,8 @@ export function createReviewHeadRootTool(
           created: true,
           config_sha: configSha,
           config_dirty: !clean,
+          provenance_line: renderProvenanceLine(shas.head, "worktree", configSha, !clean),
+          gaze_skip_note: REVIEW_HEAD_GAZE_SKIP_NOTE,
           changed_files: files,
         }
         return { output: JSON.stringify(success(data)) }
@@ -3825,7 +3879,7 @@ export function createReviewHeadRootTool(
         if (err instanceof ReviewHeadError) {
           return reviewHeadFailure(err.code, err.message, err.retryable)
         }
-        return { output: failureFromError(err, "REVIEW_HEAD_ROOT_ERROR") }
+        return reviewHeadFailure("REVIEW_HEAD_ROOT_ERROR", err instanceof Error ? err.message : String(err))
       }
     },
   })
