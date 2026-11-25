@@ -12,7 +12,7 @@
 
 ## 1. Declared-checks execution root and base
 
-- [ ] 1.1 In `.opencode/lib/preflight-declared.ts`, add optional
+- [x] 1.1 In `.opencode/lib/preflight-declared.ts`, add optional
   `execRoot` (default `cwd`) and `baseSha` parameters to
   `runDeclaredChecks` per design D6:
   - Config, `run` paths, `requires` probes, and `PROJECT_ROOT_ENV`
@@ -22,9 +22,9 @@
   - `baseSha` replaces default-branch resolution with
     `merge-base <baseSha> HEAD`.
   - Omitted parameters keep today's output.
-- [ ] 1.2 Sync `internal/scaffold/assets/opencode/lib/preflight-declared.ts`
+- [x] 1.2 Sync `internal/scaffold/assets/opencode/lib/preflight-declared.ts`
   byte-identical (`cmp`).
-- [ ] 1.3 Extend `.opencode/test/preflight-declared.test.ts`:
+- [x] 1.3 Extend `.opencode/test/preflight-declared.test.ts`:
   - Omitted parameters are unchanged.
   - With `execRoot`, the run `cwd` and the scope `HEAD` come from
     it.
@@ -33,13 +33,14 @@
 
 ## 2. `review_head_root` tool
 
-- [ ] 2.1 Implement `createReviewHeadRootTool(exec, gh, cwd, fs)` in
+- [x] 2.1 Implement `createReviewHeadRootTool(exec, gh, cwd, fs)` in
   `.opencode/plugins/uf-workflow/index.ts` per design D1-D5.
   - Self-ignoring `.uf/review-head/`.
   - Exact root validation (D3).
   - Pruning.
   - The reuse check with `--untracked-files=normal`.
-  - The trust gate through `gh api`.
+  - The trust gate: same-repo, or the author's base-repo
+    permission is write, maintain, or admin (`gh api`).
   - Remote matching and fetch with `cat-file` re-verification.
   - `worktree add --detach --`.
   - `changed_files` and `config_sha`.
@@ -49,23 +50,25 @@
     `INVALID_ROOT`), plus `ReviewHeadRootData` and an exported
     `validateReviewHeadRoot` helper.
   - Register the tool in `UfWorkflowPlugin.server()`.
-- [ ] 2.2 Add optional `root` and `base_sha` to
+- [x] 2.2 Add optional `root` and `base_sha` to
   `createPreflightDeclaredChecksTool`:
   - Validate `root` with `validateReviewHeadRoot`, else
     `INVALID_ROOT`.
   - Pass both to `runDeclaredChecks`.
   - Name `INVALID_ROOT` in the tool description.
-- [ ] 2.3 Sync `internal/scaffold/assets/opencode/plugins/uf-workflow/index.ts`
+- [x] 2.3 Sync `internal/scaffold/assets/opencode/plugins/uf-workflow/index.ts`
   byte-identical (`cmp`).
 
 ## 3. Tool tests
 
-- [ ] 3.1 Create `.opencode/test/review-head-root.test.ts` with
+- [x] 3.1 Create `.opencode/test/review-head-root.test.ts` with
   injected git/gh/fs fakes:
   - Reuse: clean at the head; an untracked file forces a worktree;
     a modified tracked file forces a worktree.
-  - Trust: same-repo, collaborator fork, and untrusted fork
-    (`UNTRUSTED_HEAD`, with no fetch or worktree call made).
+  - Trust: same-repo; write-permission fork; read-permission
+    fork; deleted fork (`head.repo` null); permission lookup error.
+    The last three give `UNTRUSTED_HEAD` with no fetch or worktree
+    call made.
   - Fetch: missing head fetched then present; base missing; present
     after fetch with no `FETCH_HEAD` read; still missing gives
     `HEAD_MOVED`.
@@ -81,13 +84,13 @@
     failure still deletes the directory.
   - Argument-schema rejections; `--` before every path argument;
     argv-only execution.
-- [ ] 3.2 [P] Add `review_head_root` to the uf-workflow tool lists
+- [x] 3.2 [P] Add `review_head_root` to the uf-workflow tool lists
   in `.opencode/test/uf-workflow.test.ts` and
   `.opencode/test/scratch-smoke.test.ts`.
-- [ ] 3.3 [P] Add golden output-shape blocks for `review_head_root`
+- [x] 3.3 [P] Add golden output-shape blocks for `review_head_root`
   and for `uf_preflight_declared_checks` with `root` to
   `.opencode/test/golden-output-shape.test.ts`.
-- [ ] 3.4 Add a real-git round trip to
+- [x] 3.4 Add a real-git round trip to
   `.opencode/test/preflight-declared-roundtrip.test.ts`:
   - The primary checkout is on a commit whose required check
     passes, with an untracked user file.
@@ -103,36 +106,37 @@
 
 ## 4. Skill, commands, and policy file
 
-- [ ] 4.1 `.opencode/skills/pre-flight/SKILL.md`: add the optional
+- [x] 4.1 `.opencode/skills/pre-flight/SKILL.md`: add the optional
   consumer-supplied `root` and `changed_files` per design D7.
   - Phases 1, 2, 4, and the 4a worktree fallback run from `root`.
   - Phase 2a uses `changed_files` verbatim.
   - Phase 2b passes `root` and `base_sha` and handles
     `INVALID_ROOT`.
+  - Phase 4a keys its baseline on `base_sha` when supplied.
   - Phase 5 adds the provenance line.
-- [ ] 4.2 `.opencode/commands/uf.review-pr.md`:
+- [x] 4.2 `.opencode/commands/uf.review-pr.md`:
   - Add the `prepare` call after Step 3, with one JSON output
     example (DE-002).
   - Add the per-code "not run" handling.
   - Pass `root`, `changed_files`, and `base_sha` to Step 3.7.
-  - Add one "release once after the final finalization or any STOP;
-    a release failure is a warning" rule.
-- [ ] 4.3 `.opencode/commands/uf.review-council.md`, for PR input
+  - Add one "release once right after the last local gate, or before
+    any earlier STOP; a release failure is a warning" rule.
+- [x] 4.3 `.opencode/commands/uf.review-council.md`, for PR input
   only:
   - Add `prepare` at the start of Code Review Mode step 1.
-  - Handle `UNTRUSTED_HEAD` as skip-and-continue, and the other
-    codes through the Phase 1a FAIL path.
+  - Every code, `UNTRUSTED_HEAD` included, goes through the
+    Phase 1a FAIL path. The mandatory wording stays unchanged.
   - Thread the root into Phase 1a.
   - Gate Phase 1b on `method: "checkout"`.
   - Add the same release rule.
   - Leave local/uncommitted input unchanged.
-- [ ] 4.4 Sync the scaffold mirrors of 4.1-4.3 byte-identical
+- [x] 4.4 Sync the scaffold mirrors of 4.1-4.3 byte-identical
   (`cmp`).
-- [ ] 4.5 Update the runtime-contract comment in `.uf/preflight.yaml`
+- [x] 4.5 Update the runtime-contract comment in `.uf/preflight.yaml`
   and `internal/scaffold/assets/uf/preflight.yaml`: in PR mode the
   working directory is the review-head root. Keep the
   `projectOwnedPolicyMirrors` shape pins green.
-- [ ] 4.6 Add contract clauses in
+- [x] 4.6 Add contract clauses in
   `internal/scaffold/command_contract_test.go`:
   - Both commands: prepare and release are present; every code's
     handling; the release-warning rule; root, `changed_files`, and
@@ -141,7 +145,7 @@
   - Skill: the Phase 1, 2, 2a, and 4 root clauses.
   - A forbidden fragment keeps `gh pr checkout` out of the gate
     path.
-- [ ] 4.7 Add a TS parity test pinning each command's code list to
+- [x] 4.7 Add a TS parity test pinning each command's code list to
   `REVIEW_HEAD_ROOT_ERROR_CODES` in both copies.
 
 ## 5. Documentation and verification

@@ -26,8 +26,8 @@ never through a shell, and path arguments MUST follow `--`.
 
 #### Scenario: Trusted PR on another commit
 - **GIVEN** `HEAD` differs from `head_sha`, and the PR's head repo
-  equals its base repo or its author association is OWNER,
-  MEMBER, or COLLABORATOR
+  equals its base repo, or its author has `admin`, `maintain`, or
+  `write` permission on the base repo
 - **WHEN** `prepare` is called
 - **THEN** it MUST add a detached worktree at `head_sha` under
   `.uf/review-head/<id>` and return it with `method: "worktree"`
@@ -35,8 +35,9 @@ never through a shell, and path arguments MUST follow `--`.
   unchanged
 
 #### Scenario: Untrusted fork PR
-- **GIVEN** the head repo differs from the base repo and the author
-  association is none of OWNER, MEMBER, or COLLABORATOR
+- **GIVEN** the head repo differs from the base repo, or was
+  deleted, and the author's base-repo permission is not `admin`,
+  `maintain`, or `write`, or cannot be read
 - **WHEN** `prepare` is called on a checkout not at the head
 - **THEN** it MUST fail with code `UNTRUSTED_HEAD`, fetch nothing,
   and create no worktree
@@ -48,6 +49,12 @@ never through a shell, and path arguments MUST follow `--`.
   repository's host and `owner/repo`, case-insensitively, then
   verify presence with `git cat-file -e`
 - **AND** it MUST NOT read `FETCH_HEAD`
+
+#### Scenario: Frozen head is not the vetted PR's head
+- **GIVEN** the PR's current head commit differs from `head_sha`
+- **WHEN** `prepare` is called on a checkout not at the head
+- **THEN** it MUST fail with code `HEAD_MOVED` before any fetch or
+  worktree, so a trusted PR cannot vouch for another PR's commit
 
 #### Scenario: Head force-pushed away
 - **GIVEN** the fetch succeeds but `head_sha` is still absent
@@ -190,7 +197,8 @@ commit, or why local gates did not run.
 
 #### Scenario: Release once, non-fatally
 - **GIVEN** `prepare` succeeded
-- **WHEN** the command reaches its final finalization or any STOP
+- **WHEN** the command's last local gate finishes, or it STOPs
+  before then
 - **THEN** it MUST call `release` exactly once
 - **AND** a release failure MUST be reported as a warning and MUST
   NOT change the verdict
@@ -206,15 +214,9 @@ any other directory.
 - **THEN** it MUST record `Local gates: not run (<code>)` and
   continue with CI evidence only
 
-#### Scenario: review-council untrusted head
-- **GIVEN** `prepare` returns `UNTRUSTED_HEAD`
-- **WHEN** `/uf.review-council` handles it
-- **THEN** it MUST record `Local gates: not run (UNTRUSTED_HEAD)`,
-  skip Phases 1a and 1b, and continue to Phase 1c
-
-#### Scenario: review-council prepare error
-- **GIVEN** `prepare` returns `HEAD_MOVED`, `HEAD_UNAVAILABLE`, or
-  `WORKTREE_FAILED`
+#### Scenario: review-council prepare failure
+- **GIVEN** `prepare` returns any failure code, including
+  `UNTRUSTED_HEAD`
 - **WHEN** `/uf.review-council` handles it
 - **THEN** it MUST record coverage `FAIL` and an `INCONCLUSIVE`
   verdict through the shared finalization protocol and dispatch no

@@ -83,13 +83,20 @@ Success data for `prepare`:
 ```json
 {"root":"/repo/.uf/review-head/k3v9x2qa","head_sha":"<40-hex>",
  "base_sha":"<40-hex>","method":"worktree","created":true,
- "config_sha":"<40-hex>","changed_files":["internal/a.go"]}
+ "config_sha":"<40-hex>","config_dirty":false,
+ "changed_files":["internal/a.go"]}
 ```
 
 - `method` is `checkout` (the current tree is reused,
   `created: false`) or `worktree`.
 - `config_sha` is the plugin directory's `HEAD`: the tree that
   `.uf/preflight.yaml` and its scripts come from.
+  `config_dirty` is true when that tree had uncommitted changes,
+  so the config may differ from `config_sha`.
+- Failure codes: `UNTRUSTED_HEAD`, `HEAD_UNAVAILABLE`,
+  `HEAD_MOVED`, `WORKTREE_FAILED`, `INVALID_ROOT`, and
+  `REVIEW_HEAD_ROOT_ERROR` for an unexpected error (the message
+  carries the detail).
 - `changed_files` is
   `git diff --name-only <base_sha>...<head_sha>`, sorted.
 
@@ -138,18 +145,35 @@ method.
    `git worktree remove --force -- <path>`, and the directory is
    then deleted. Pruning is best effort and never fails `prepare`.
 2. Reuse check: if `git rev-parse HEAD` equals `head_sha` and
-   `git status --porcelain --untracked-files=normal` is empty
+   `git status --porcelain --untracked-files=normal
+   --ignore-submodules=none` is empty
    (ignored files do not count), return
    `{root: cwd, method: "checkout", created: false}`. The user
    chose this checkout, so no trust check applies.
-3. Trust gate. Read
-   `gh api repos/{owner}/{repo}/pulls/<N>` fields
-   `head.repo.full_name`, `base.repo.full_name`, and
-   `author_association`. The head is trusted when the head repo
-   equals the base repo, or when `author_association` is `OWNER`,
-   `MEMBER`, or `COLLABORATOR`. Otherwise fail `UNTRUSTED_HEAD`;
-   no fetch happens and no worktree is created. A `gh` failure
-   here is `HEAD_UNAVAILABLE`, retryable.
+3. Trust gate. Read `gh pr view <N> --json url,headRefOid,
+   isCrossRepository,headRepository,headRepositoryOwner,author`.
+   This is the same repository resolution the commands used to
+   freeze `head_sha`; the base repo comes from the PR URL, never
+   from a `{owner}/{repo}` placeholder, which can resolve to the
+   user's fork.
+   - `headRefOid` MUST equal `head_sha`, or `prepare` fails
+     `HEAD_MOVED` before any fetch or worktree. This binds the
+     vetted PR to the commit that will run: a trusted author's
+     PR cannot vouch for another PR's head that happens to be
+     local.
+   - The head is trusted when it is not cross-repository. A null
+     head repository (deleted fork) is never same-repo.
+   - Otherwise it is trusted only when
+     `gh api repos/<base>/collaborators/<login>/permission`
+     reports `admin`, `maintain`, or `write`: people who can
+     already push to the base repo. `author_association` is not
+     used, because `COLLABORATOR` includes read-only invitees and
+     `MEMBER` includes any org member.
+   - A failed permission lookup counts as untrusted (fail closed).
+   - Untrusted: fail `UNTRUSTED_HEAD`. No fetch happens and no
+     worktree is created.
+   - A failure of the PR lookup itself is `HEAD_UNAVAILABLE`,
+     retryable.
 4. Ensure both commits exist. For each of `head_sha` and
    `base_sha`, run `git cat-file -e <sha>^{commit}`. If one is
    missing:
@@ -169,7 +193,8 @@ method.
    `git worktree add --detach -- <path> <head_sha>`. On error,
    remove the directory and return `WORKTREE_FAILED` with git's
    stderr.
-6. Compute `changed_files` and `config_sha`, then return.
+6. `changed_files` is computed before step 5, so a diff
+   failure cannot leave a worktree behind; return.
 
 ### D5: `release`
 
@@ -213,6 +238,10 @@ from the consuming command:
 
 - Phases 1, 2, 4, and the Phase 4a worktree fallback: every shell
   command runs with working directory `root`.
+- Phase 4a, when `base_sha` is supplied: Tier 1 reads CI check
+  runs for `base_sha` instead of the default branch tip. Tier 2
+  adds its worktree at `git merge-base <base_sha> HEAD`, run in
+  `root`. A stacked PR is then compared against its own base.
 - Phase 2a: when `changed_files` is supplied, it *is* the branch
   diff. The skill's own merge-base computation and its
   fallbacks do not run.
@@ -227,9 +256,14 @@ The command flow:
   Step 3, and in `/uf.review-council` at the start of Code Review
   Mode step 1 for PR input only. Local and uncommitted council
   input never calls the tool.
-- `release` runs once, after the final finalization or on any
-  STOP. A release failure is a warning in the report and never
-  changes the verdict.
+- `release` runs once, right after the last local gate (the end
+  of `/uf.review-pr` Step 3.7, or council Phase 1b), and before
+  any STOP after a successful `prepare`. Nothing later reads the
+  root: the light check and the reviewers read the PR diff
+  through `gh`. Releasing early keeps the worktree's lifetime
+  short and spares every later STOP path its own release. A
+  release failure is a warning in the report and never changes
+  the verdict.
 - Phase 1b (Gaze) runs only when `method` is `checkout`. For a
   worktree root it notes "Gaze skipped: the PR head is in a
   temporary worktree and gaze-reporter has no root argument" and
@@ -241,7 +275,7 @@ The command flow:
 
 | Code | `/uf.review-pr` | `/uf.review-council` |
 |---|---|---|
-| `UNTRUSTED_HEAD` | Skip local gates and continue | Skip local gates and continue |
+| `UNTRUSTED_HEAD` | Skip local gates and continue | Coverage `FAIL`, `INCONCLUSIVE`, STOP |
 | `HEAD_MOVED` | Skip local gates and continue | Coverage `FAIL`, `INCONCLUSIVE`, STOP |
 | `HEAD_UNAVAILABLE` | Skip local gates and continue | Coverage `FAIL`, `INCONCLUSIVE`, STOP |
 | `WORKTREE_FAILED` | Skip local gates and continue | Coverage `FAIL`, `INCONCLUSIVE`, STOP |
@@ -250,14 +284,17 @@ The command flow:
   `Local gates: not run (<code>): <message>` and continues with CI
   evidence. In `ci-aware` mode CI is already the primary gate, and
   blocking the review on a missing remote would be a regression.
-- `/uf.review-council` treats `UNTRUSTED_HEAD` as policy, not
-  error: it records the same skip line and proceeds to Phase 1c,
-  with pre-flight shown as not run. Every other code is an error.
-  The pre-flight gate is mandatory there, so the existing Phase 1a
-  FAIL path applies (non-child finalization, coverage `FAIL`,
-  `INCONCLUSIVE`).
-- For an untrusted fork PR, the user can still get local gates by
-  checking out the head themselves. The reuse path then applies.
+- `/uf.review-council` keeps Phase 1a mandatory. Every code,
+  including `UNTRUSTED_HEAD`, takes the existing Phase 1a FAIL
+  path: non-child finalization, coverage `FAIL`, `INCONCLUSIVE`.
+  The council has no CI-evidence fallback, so skipping its only
+  local gate would let a PR reach APPROVE with no gate evidence.
+  That weakens a gate (AGENTS.md Gatekeeping).
+- For an untrusted fork PR, the user opts in by checking out the
+  head themselves (`gh pr checkout <N>`) and re-running. The reuse
+  path then applies, just as running gates on a checkout of the
+  user's choosing does today. The `UNTRUSTED_HEAD` message names
+  this step.
 
 ### D8: Provenance
 
@@ -300,8 +337,9 @@ the whole skill.
 - **Leaked worktrees** if the agent dies between prepare and
   release. They are bounded by 24h pruning and hidden by the
   self-ignoring directory.
-- **`author_association` is a GitHub-side judgment.** A
-  collaborator's fork is trusted; that matches who can already
-  push to the repo.
+- **The trust gate costs one extra API call** for fork PRs. A
+  token that cannot read collaborator permissions makes every fork
+  PR untrusted. That is fail closed, and the message names the
+  opt-in.
 - **#1063 still applies** to non-PR input. PR input sidesteps it
   through `base_sha`.

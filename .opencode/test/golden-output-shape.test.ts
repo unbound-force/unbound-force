@@ -1167,6 +1167,75 @@ describe("golden output shapes -- checkout_pr_head (uf.address-feedback.md Secti
 })
 
 // ---------------------------------------------------------------------------
+// review_head_root and uf_preflight_declared_checks root -- uf.review-pr.md
+// Step 3.7 / uf.review-council.md Code Review Mode step 1
+// (review-head-preflight change, issues #1203/#1204; outside the counted
+// seam-verification sites above, like checkout_pr_head)
+// ---------------------------------------------------------------------------
+
+describe("golden output shapes -- review_head_root (uf.review-pr.md Step 3.7)", () => {
+  const HEAD_SHA = "a".repeat(40)
+  const BASE_SHA = "b".repeat(40)
+
+  it("returns root, head_sha, base_sha, method, created, config_sha, and changed_files", async () => {
+    const directory = await makeScratch()
+    const registry = await loadRegistry(UfWorkflowPlugin, directory)
+    const calls: string[] = []
+    vi.mocked(execFileSync).mockImplementation(((command: string, args: readonly string[]) => {
+      const key = `${command} ${args.join(" ")}`
+      calls.push(key)
+      const responses: Record<string, string> = {
+        "git worktree list --porcelain": `worktree ${directory}`,
+        "git rev-parse HEAD": HEAD_SHA,
+        "git status --porcelain --untracked-files=normal --ignore-submodules=none": "",
+        [`git cat-file -e ${HEAD_SHA}^{commit}`]: "",
+        [`git cat-file -e ${BASE_SHA}^{commit}`]: "",
+        [`git diff --name-only ${BASE_SHA}...${HEAD_SHA}`]: "b.go\na.go",
+      }
+      const output = responses[key]
+      if (output === undefined) throw new Error(`unexpected invocation: ${key}`)
+      return output
+    }) as unknown as typeof execFileSync)
+
+    const data = expectOk(
+      await callEnvelopeTool<Record<string, unknown>>(registry, "review_head_root", {
+        action: "prepare",
+        pr_number: 42,
+        base_sha: BASE_SHA,
+        head_sha: HEAD_SHA,
+      }),
+    )
+    expect(data).toEqual({
+      root: directory,
+      head_sha: HEAD_SHA,
+      base_sha: BASE_SHA,
+      method: "checkout",
+      created: false,
+      config_sha: HEAD_SHA,
+      config_dirty: false,
+      changed_files: ["a.go", "b.go"],
+    })
+    expect(calls.some((call) => call.startsWith("gh "))).toBe(false)
+  })
+
+  it("carries INVALID_ROOT through the registry for release and for declared checks", async () => {
+    const directory = await makeScratch()
+    const registry = await loadRegistry(UfWorkflowPlugin, directory)
+    vi.mocked(execFileSync).mockImplementation((() => {
+      throw new Error("no process may run for an invalid root")
+    }) as unknown as typeof execFileSync)
+
+    const released = await callEnvelopeTool(registry, "review_head_root", { action: "release", root: "/tmp/elsewhere" })
+    expect(released.status === "error" ? released.code : undefined).toBe("INVALID_ROOT")
+    const gated = await callEnvelopeTool(registry, "uf_preflight_declared_checks", {
+      mode: "ci-aware",
+      root: `${directory}/.uf/review-head/../../x`,
+    })
+    expect(gated.status === "error" ? gated.code : undefined).toBe("INVALID_ROOT")
+  })
+})
+
+// ---------------------------------------------------------------------------
 // write_feedback_triage_artifact -- uf.address-feedback.md Section 4.7
 // (extract-feedback-triage-artifact-tool, issue #1022; added after the
 // seam-verification site registry, so it sits outside the 24 counted

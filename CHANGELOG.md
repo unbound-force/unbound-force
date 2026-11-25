@@ -6,6 +6,46 @@ Each entry follows the format: `- <change-name>: <summary>`.
 ## Unreleased
 
 ### Added
+- review-head-preflight: PR-mode `/uf.review-pr <N>` and
+  `/uf.review-council <N>` now run their local gates against the
+  PR's frozen `head_sha` instead of whatever the agent had checked
+  out. The new `review_head_root` tool (`uf-workflow`) prepares the
+  root:
+  - It reuses a clean checkout of the head (untracked files count).
+  - Otherwise it adds a detached worktree under a self-ignoring
+    `.uf/review-head/<id>`. The user's branch, index, and working
+    tree are never touched.
+  - A fork PR whose author lacks write, maintain, or admin
+    permission fails `UNTRUSTED_HEAD` before anything is fetched.
+  - Missing commits are fetched from the base repo's remote and
+    verified with `git cat-file` (no `FETCH_HEAD`).
+  - `release` removes only review-head worktrees, using exact root
+    validation.
+
+  `uf_preflight_declared_checks` gains optional `root` and
+  `base_sha` (scope and baseline at `merge-base(base_sha, HEAD)`;
+  config and scripts still from the plugin directory;
+  `INVALID_ROOT`). The `pre-flight` skill takes `root`,
+  `changed_files`, and `base_sha`: Phases 1, 2, and 4 and the
+  Phase 4a worktree tier run in the root, Phase 2a uses the PR's
+  `base_sha...head_sha` file list, the Phase 4a baseline keys on
+  the PR base, and Phase 5 reports `Gates ran at: <head_sha>
+  (<method>); config from <config_sha>`.
+
+  On a `prepare` failure, `/uf.review-pr` records `Local gates:
+  not run (<code>)` and continues on CI evidence.
+  `/uf.review-council` keeps Phase 1a mandatory (coverage `FAIL`,
+  `INCONCLUSIVE`) and runs Gaze only on the reused checkout.
+
+  DE-004 deltas: `skills/pre-flight/SKILL.md` 599 → 634 lines,
+  `commands/uf.review-pr.md` 1309 → 1349,
+  `commands/uf.review-council.md` 1487 → 1538 (per copy). The
+  worktree, fetch, trust, and validation choreography lives in the
+  tool, not the prose. Known gaps: submodules and LFS are not
+  initialised in a head worktree, and non-PR input keeps #1063's
+  behavior. (Spec:
+  openspec/changes/review-head-preflight/proposal.md)
+  (Fixes: #1203, #1204)
 - toolkit-gaze-2.4.0-reconciliation: `.opencode/agents/divisor-gaze-testing.md`
   is registered as a repo-local, non-embedded agent in
   `knownNonEmbeddedFiles` (the embedded canonical testing persona

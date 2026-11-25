@@ -5,6 +5,7 @@ import {
   OUTPUT_TAIL_BYTES,
   PreflightConfigError,
   computeDiffScope,
+  computeDiffScopeFromBase,
   findOnPath,
   isInScope,
   parsePreflightConfig,
@@ -601,5 +602,119 @@ describe("runDeclaredChecks modes", () => {
     const data = await runDeclaredChecks(ROOT, deps, "soft-gate")
     expect(data.baseline_method).toBe("unavailable")
     expect(removed).toEqual([WORKTREE])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Execution root and explicit base (review-head-preflight design D6)
+// ---------------------------------------------------------------------------
+
+describe("runDeclaredChecks with an execution root and base", () => {
+  const HEAD_ROOT = "/repo/.uf/review-head/k3v9x2qa"
+  const PR_BASE = "d".repeat(40)
+  const PR_MERGE_BASE = "e".repeat(40)
+  const scoped = {
+    version: 1,
+    checks: [
+      { name: "go-check", run: "go.sh", paths: [".go"] },
+      { name: "sh-check", run: "sh.sh", paths: [".sh"] },
+    ],
+  }
+
+  /** Git fake that records the cwd of every call and answers per root. */
+  function rootedGit(log: string[]): GitExec {
+    return (args, cwd) => {
+      const key = args.join(" ")
+      log.push(`${cwd}: ${key}`)
+      if (cwd === HEAD_ROOT) {
+        if (key === `merge-base ${PR_BASE} HEAD`) return PR_MERGE_BASE
+        if (key === "rev-parse --is-shallow-repository") return "false"
+        if (key === `diff --name-only ${PR_MERGE_BASE}`) return "internal/a.go\n"
+        if (args[0] === "worktree") return ""
+      }
+      if (cwd === ROOT) {
+        // The primary checkout is main: an empty diff that would SKIP everything.
+        return branchGit([])(args, cwd)
+      }
+      throw new Error(`unexpected git ${cwd}: ${key}`)
+    }
+  }
+
+  it("an explicit execRoot equal to cwd and no base match the defaulted parameters", async () => {
+    const config = { version: 1, checks: [{ name: "a", run: "a.sh", paths: [".go"] }] }
+    const plain = fakeDeps({ config, executables: [`${ROOT}/a.sh`], git: branchGit(["x.go"]) })
+    const explicit = fakeDeps({ config, executables: [`${ROOT}/a.sh`], git: branchGit(["x.go"]) })
+    const before = await runDeclaredChecks(ROOT, plain.deps, "soft-gate")
+    const after = await runDeclaredChecks(ROOT, explicit.deps, "soft-gate", ROOT, undefined)
+    expect(after).toEqual(before)
+    expect(explicit.calls.map((c) => c.cwd)).toEqual([ROOT])
+  })
+
+  it("runs in the execution root, scoped to the PR base, with config and scripts from the config root", async () => {
+    const log: string[] = []
+    const { deps, calls, envs } = fakeDeps({
+      config: scoped,
+      executables: [`${ROOT}/go.sh`, `${ROOT}/sh.sh`],
+      git: rootedGit(log),
+    })
+    const data = await runDeclaredChecks(ROOT, deps, "ci-aware", HEAD_ROOT, PR_BASE)
+
+    expect(data.scope).toEqual({ files: ["internal/a.go"], fallback_reason: null, base_ref: PR_BASE, merge_base: PR_MERGE_BASE })
+    expect(data.checks.map((c) => [c.name, c.status])).toEqual([
+      ["go-check", "PASS"],
+      ["sh-check", "SKIP — no in-scope files"],
+    ])
+    expect(calls).toEqual([{ file: `${ROOT}/go.sh`, args: [], cwd: HEAD_ROOT, timeoutMs: 600_000 }])
+    expect(envs[0]?.UF_PREFLIGHT_PROJECT_ROOT).toBe(ROOT)
+    // Default-branch resolution never ran: the PR base is explicit.
+    expect(log.some((line) => line.includes("upstream/main") || line.includes("origin/main"))).toBe(false)
+  })
+
+  it("soft-gate baselines a head-root failure at the PR merge-base", async () => {
+    const log: string[] = []
+    const { deps, calls } = fakeDeps({
+      config: scoped,
+      executables: [`${ROOT}/go.sh`, `${ROOT}/sh.sh`],
+      git: rootedGit(log),
+      results: { [`${ROOT}/go.sh`]: { exitCode: 1, output: "broken", timedOut: false } },
+    })
+    const data = await runDeclaredChecks(ROOT, deps, "soft-gate", HEAD_ROOT, PR_BASE)
+
+    expect(log).toContain(`${HEAD_ROOT}: worktree add --detach ${WORKTREE} ${PR_MERGE_BASE}`)
+    expect(log).toContain(`${HEAD_ROOT}: worktree remove --force ${WORKTREE}`)
+    expect(calls.map((c) => c.cwd)).toEqual([HEAD_ROOT, WORKTREE])
+    expect(data.checks[0]?.causality).toBe("branch-caused")
+    expect(data.verdict).toBe("FAIL")
+  })
+
+  it("an explicit base skips the filter only for a shallow clone or a git failure", () => {
+    const shallow: GitExec = (args) => {
+      const key = args.join(" ")
+      if (key === `merge-base ${PR_BASE} HEAD`) return PR_MERGE_BASE
+      if (key === "rev-parse --is-shallow-repository") return "true"
+      throw new Error(key)
+    }
+    expect(computeDiffScopeFromBase(shallow, HEAD_ROOT, PR_BASE)).toEqual({
+      files: null,
+      fallback_reason: "shallow clone",
+      base_ref: PR_BASE,
+      merge_base: PR_MERGE_BASE,
+    })
+    const broken: GitExec = () => {
+      throw new Error("bad object")
+    }
+    expect(computeDiffScopeFromBase(broken, HEAD_ROOT, PR_BASE)).toEqual({
+      files: null,
+      fallback_reason: "git diff failed",
+      base_ref: PR_BASE,
+      merge_base: null,
+    })
+    const empty: GitExec = (args) => {
+      const key = args.join(" ")
+      if (key === `merge-base ${PR_BASE} HEAD`) return PR_MERGE_BASE
+      if (key === "rev-parse --is-shallow-repository") return "false"
+      return ""
+    }
+    expect(computeDiffScopeFromBase(empty, HEAD_ROOT, PR_BASE).files).toEqual([])
   })
 })
