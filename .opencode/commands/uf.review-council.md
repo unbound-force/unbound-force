@@ -638,8 +638,13 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
 
    On `status: "error"`, do NOT run local gates anywhere.
    Phase 1a stays mandatory, so every code takes the Phase
-   1a FAIL path (step c below) with the code and message as
-   the CRITICAL finding:
+   1a FAIL path (step c below) even though no pre-flight
+   verdict exists: report the code and message as a
+   CRITICAL finding, skip Phases 1a, 1b, and 1c, dispatch
+   no reviewer children, and run only the non-child
+   planning and finalization portions of the shared
+   protocol to record coverage `FAIL`, terminal skipped
+   runs, and failing `INCONCLUSIVE`. Then stop. The codes:
    - `UNTRUSTED_HEAD`: a fork PR whose author lacks write
      access. Its code is not fetched or run. The message
      names the opt-in: check out the head yourself
@@ -695,7 +700,8 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
          or unknown
 
    c. **If the pre-flight verdict is FAIL
-      (branch-caused)**: **STOP immediately.** Report
+      (branch-caused), or the Phase 1 head root prepare
+      returned `status: "error"`**: **STOP immediately.** Report
       each branch-caused failure as a CRITICAL finding
       with the full error output. Do NOT proceed to
       Phase 1b, Phase 1c, or child delegation.
