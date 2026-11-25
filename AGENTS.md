@@ -67,7 +67,7 @@ Always run tests with `-race -count=1`. CI enforces this.
 | Security | `ci_security.yml` | OSV-Scanner, Trivy, Scorecards |
 | Dependencies | `ci_dependencies.yml` | Dependency review + dependabot |
 | CRAP Load | `ci_crapload.yml` | CRAP regression analysis |
-| Release | `release.yml` | workflow_dispatch, GoReleaser + Cosign + Syft + Homebrew tap |
+| Release | `release.yml` | workflow_dispatch, jflowers/ship go-release.yml: GoReleaser + Cosign + Syft + signing + Homebrew tap |
 | Command Evals | `ci_eval.yml` | Nightly + workflow_dispatch: one job per `.eval/fixtures/` fixture, report-only (summary + artifacts); takes the EnMaaS key from the `OPENCODE_CONFIG_CONTENT` org secret |
 | Scheduled | `ci_scheduled.yml` | Daily OSV-Scanner + Scorecards, plus the daily plugin transitive OSV scan (throwaway lock; steps kept identical to `ci_security.yml`) |
 

@@ -105,10 +105,9 @@ brews:
     description: "Unbound Force specification framework toolkit"
     homepage: "https://github.com/unbound-force/unbound-force"
     directory: Formula
-    # skip_upload: true — GoReleaser generates the formula to dist/ but does
-    # not push to the tap. The sign-macos job downloads it, patches darwin
-    # checksums with signed values, then pushes the complete formula to
-    # homebrew-tap alongside the cask.
+    # skip_upload: true: GoReleaser writes the formula to dist/ (uploaded as
+    # unbound-force-formula.rb); jflowers/ship's go-release.yml sets its
+    # darwin sha256s to the signed archives' and pushes it to the tap.
     skip_upload: true
     install: |
       bin.install "unbound-force"
@@ -122,20 +121,25 @@ homebrew_casks:
     description: "Unbound Force specification framework toolkit"
     homepage: "https://github.com/unbound-force/unbound-force"
     directory: Casks
-    # skip_upload: true — GoReleaser generates the cask to dist/ but does not
-    # push to the tap. The sign-macos job downloads it, patches darwin checksums
-    # with signed values, then pushes the complete cask to homebrew-tap.
+    # skip_upload: true: GoReleaser writes the cask to dist/ (a release
+    # asset); jflowers/ship's go-release.yml sets its darwin sha256s to the
+    # signed archives', audits and install-checks it, and pushes it to the tap.
     skip_upload: true
     dependencies:
       - cask: dewey
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/unbound-force"]
-            # Create uf symlink alias for daily-use convenience (FR-002/FR-009).
-            system_command "/bin/ln", args: ["-sf", "#{staged_path}/unbound-force", "#{HOMEBREW_PREFIX}/bin/uf"]
-          end
+    # custom_block, not hooks: GoReleaser renders hooks as a `postflight do`
+    # block, which Homebrew deprecates; postflight_steps isn't in its DSL yet
+    # (goreleaser/goreleaser#6873). The backticks keep GoReleaser from
+    # templating Homebrew's {{staged_path}} and {{HOMEBREW_PREFIX}}. The uf
+    # symlink is the daily-use alias (FR-002/FR-009).
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr",
+            args: ["-dr", "com.apple.quarantine", "{{ `{{staged_path}}` }}/unbound-force"]
+          symlink "unbound-force", "{{ `{{HOMEBREW_PREFIX}}` }}/bin/uf", overwrite: true
+        end
+      end
     repository:
       owner: unbound-force
       name: homebrew-tap
