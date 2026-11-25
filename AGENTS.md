@@ -65,7 +65,8 @@ Always run tests with `-race -count=1`. CI enforces this.
 | Local CI | `ci_local.yml` | Build, test, coverage ratchets, pipeline tests, gaze AI report (push to main) |
 | CI Checks | `ci_checks.yml` | MegaLinter + commitlint |
 | Security | `ci_security.yml` | OSV-Scanner, Trivy, Scorecards |
-| Dependencies | `ci_dependencies.yml` | Dependency review + dependabot |
+| Dependencies | `ci_dependencies.yml` | Dependency review (org-infra), every PR |
+| Dependabot auto-merge | `dependabot-automerge.yml` | jflowers/ship deps-automerge.yml: our own orgs' patch/minor updates rebase-merge after CI and code-owner approval |
 | CRAP Load | `ci_crapload.yml` | CRAP regression analysis |
 | Release | `release.yml` | workflow_dispatch, jflowers/ship go-release.yml: GoReleaser + Cosign + Syft + signing + Homebrew tap |
 | Command Evals | `ci_eval.yml` | Nightly + workflow_dispatch: one job per `.eval/fixtures/` fixture, report-only (summary + artifacts); takes the EnMaaS key from the `OPENCODE_CONFIG_CONTENT` org secret |
@@ -330,8 +331,11 @@ the council after a small fix push.
   may not satisfy `require_code_owner_reviews`.
 - **Duplicate detection**: `/uf.review-pr` warns before
   posting a second review from the same account.
-- **Dependabot**: `ci_dependencies.yml` respects human
-  `CHANGES_REQUESTED` before auto-approving.
+- **Dependabot**: `dependabot-automerge.yml` (jflowers/ship)
+  turns on auto-merge for patch/minor updates of our own orgs'
+  packages; nothing is auto-approved, so a code owner still
+  approves each one. Third-party updates wait a day
+  (Dependabot's cooldown) for a person.
 
 ## Specification Workflow
 
