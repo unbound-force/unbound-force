@@ -17,8 +17,9 @@ import (
 // passes, and the cask's postflight_steps, which GoReleaser now writes.
 
 // TestReleaseWorkflow_PublishesCaskAndFormulaThroughShip checks that
-// release.yml hands ship the tap, the formula and an install check of the
-// binary and the uf alias.
+// release.yml hands ship the tap, the formula, an install check of the
+// binary and the uf alias, and the post-release checks: go install of the
+// command and the uf alias as installed from the published tap.
 func TestReleaseWorkflow_PublishesCaskAndFormulaThroughShip(t *testing.T) {
 	t.Parallel()
 
@@ -43,8 +44,10 @@ func TestReleaseWorkflow_PublishesCaskAndFormulaThroughShip(t *testing.T) {
 		t.Errorf("go-release.yml must be pinned by full commit SHA, got %q", sha)
 	}
 	for input, want := range map[string]string{
-		"tap":     "unbound-force/homebrew-tap",
-		"formula": "unbound-force",
+		"tap":              "unbound-force/homebrew-tap",
+		"formula":          "unbound-force",
+		"go_install":       "github.com/unbound-force/unbound-force/cmd/unbound-force",
+		"go_install_check": `"$BIN" --version`,
 	} {
 		if got := release.With[input]; got != want {
 			t.Errorf("release job input %s = %q, want %q", input, got, want)
@@ -58,6 +61,9 @@ func TestReleaseWorkflow_PublishesCaskAndFormulaThroughShip(t *testing.T) {
 		if !strings.Contains(check, command) {
 			t.Errorf("cask_install_check is missing %q", command)
 		}
+	}
+	if tapCheck := release.With["tap_install_check"]; !strings.Contains(tapCheck, `test -L "$HOMEBREW_PREFIX/bin/uf"`) {
+		t.Errorf("tap_install_check must check the uf alias, got %q", tapCheck)
 	}
 	for _, secret := range []string{
 		"MACOS_SIGN_P12", "MACOS_SIGN_PASSWORD", "MACOS_SIGN_IDENTITY",

@@ -67,6 +67,14 @@ jobs:
         test -x "$HOMEBREW_PREFIX/bin/unbound-force"
         test -L "$HOMEBREW_PREFIX/bin/uf"
         "$HOMEBREW_PREFIX/bin/uf" --version
+      # After each release: what go install and mise's go: backend users
+      # get, and the cask (with its uf alias) as installed from the
+      # published tap.
+      go_install: github.com/unbound-force/unbound-force/cmd/unbound-force
+      go_install_check: '"$BIN" --version'
+      tap_install_check: |
+        test -L "$HOMEBREW_PREFIX/bin/uf"
+        "$HOMEBREW_PREFIX/bin/uf" --version
     permissions:
       contents: write
       checks: read
