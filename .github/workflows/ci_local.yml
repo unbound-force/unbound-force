@@ -23,39 +23,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decides whether the gated jobs must run. Pull requests whose files
+  # are all Dewey learnings (.uf/dewey/learnings/*.md), or gh-hud toolkit
+  # rollouts (jflowers, chore/toolkit-*, all under .opencode/), skip
+  # them; pushes and everything else run them. Fails closed.
   changes:
-    name: Detect Learnings-Only Changes
-    runs-on: ubuntu-latest
-    outputs:
-      code: ${{ steps.detect.outputs.code }}
-    steps:
-      - name: Checkout Code
-        if: github.event_name == 'pull_request'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Test Detector
-        if: github.event_name == 'pull_request'
-        run: bash scripts/detect-learnings-only_test.sh
-
-      - name: Detect Changed Files
-        id: detect
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          code='true'
-          if [ "$GITHUB_EVENT_NAME" = 'pull_request' ]; then
-            code="$(bash scripts/detect-learnings-only.sh)"
-          fi
-          case "$code" in
-            true|false) ;;
-            *) code='true' ;;
-          esac
-          cat >>"$GITHUB_OUTPUT" <<CHANGES_EOF
-          code=$code
-          CHANGES_EOF
+    uses: jflowers/ship/.github/workflows/pr-scope.yml@3b0ce8bf47183be402df9eaec16644c213eee5f7 # main, after v0.11.0
+    permissions:
+      contents: read
 
   build-and-test:
     needs: [changes]
@@ -153,15 +128,27 @@ jobs:
     needs: [changes, build-and-test, plugin-tests, council-review-action-tests]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify detection passed and gated jobs passed or were skipped
+      - name: Verify detection passed and the gated jobs it chose ran
+        env:
+          SCOPE: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          BUILD_AND_TEST: ${{ needs.build-and-test.result }}
+          PLUGIN_TESTS: ${{ needs.plugin-tests.result }}
+          COUNCIL_REVIEW_ACTION_TESTS: ${{ needs.council-review-action-tests.result }}
         run: |
-          if [ "${{ needs.changes.result }}" != "success" ]; then
-            echo "Change detection did not succeed (result: ${{ needs.changes.result }})"
+          if [ "$SCOPE" != success ]; then
+            echo "::error::change detection did not succeed (result: $SCOPE)"
             exit 1
           fi
-          for result in "${{ needs.build-and-test.result }}" "${{ needs.plugin-tests.result }}" "${{ needs.council-review-action-tests.result }}"; do
-            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
-              echo "Required job did not succeed (result: $result)"
+          case "$CODE" in
+            true) want=success ;;
+            false) want=skipped ;;
+            *) echo "::error::unexpected scope code '$CODE'"; exit 1 ;;
+          esac
+          for pair in "build-and-test=$BUILD_AND_TEST" "plugin-tests=$PLUGIN_TESTS" "council-review-action-tests=$COUNCIL_REVIEW_ACTION_TESTS"; do
+            if [ "${pair#*=}" != "$want" ]; then
+              echo "::error::${pair%%=*} is ${pair#*=}, expected $want (code=$CODE)"
               exit 1
             fi
           done
+          echo "CI OK passed (code=$CODE)."
