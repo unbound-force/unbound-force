@@ -31,17 +31,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Chore PRs (Dewey learnings, gh-hud toolkit rollouts) skip these
-  # jobs; see ci_local.yml. Pushes run them.
-  scope:
-    uses: jflowers/ship/.github/workflows/pr-scope.yml@3b0ce8bf47183be402df9eaec16644c213eee5f7 # main, after v0.11.0
-    permissions:
-      contents: read
-
   call_reusable_vuln_scan:
     name: OSV-Scanner
-    needs: scope
-    if: needs.scope.outputs.code == 'true'
     permissions:
       contents: read
       actions: read
@@ -54,8 +45,6 @@ jobs:
 
   call_reusable_security:
     name: OpenSSF Scorecards
-    needs: scope
-    if: needs.scope.outputs.code == 'true'
     permissions:
       contents: read
       id-token: write
@@ -64,8 +53,6 @@ jobs:
 
   osv_plugin_transitive:
     name: OSV-Scanner (plugin transitive)
-    needs: scope
-    if: needs.scope.outputs.code == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-latest
