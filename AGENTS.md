@@ -72,6 +72,14 @@ Always run tests with `-race -count=1`. CI enforces this.
 | Command Evals | `ci_eval.yml` | Nightly + workflow_dispatch: one job per `.eval/fixtures/` fixture, report-only (summary + artifacts); takes the EnMaaS key from the `OPENCODE_CONFIG_CONTENT` org secret |
 | Scheduled | `ci_scheduled.yml` | Daily OSV-Scanner + Scorecards, plus the daily plugin transitive OSV scan (throwaway lock; steps kept identical to `ci_security.yml`) |
 
+Every pull-request workflow above (except Dependabot auto-merge) calls
+jflowers/ship's `pr-scope.yml` as its `changes`/`scope` job and gates its
+jobs on `needs.<job>.outputs.code == 'true'`: Dewey learnings PRs and
+gh-hud toolkit rollouts skip them. `CI OK` (`ci_local.yml`) and
+`Standardized CI OK` (`ci_checks.yml`) are the required checks; add any
+new gated job in those workflows to their `needs`. Gate with a job-level
+`if:`, never `paths-ignore`.
+
 ## Project Structure
 
 ```text

@@ -1202,6 +1202,17 @@ Each entry follows the format: `- <change-name>: <summary>`.
   (Spec: openspec/changes/remove-mutimind-mxf-orchestration/, Fixes: #565, Fixes: #566)
 
 ### Changed
+- ci-pr-scope-via-ship: the `changes` jobs in `ci_local.yml` and
+  `ci_checks.yml` now call jflowers/ship's reusable
+  `pr-scope.yml` (pinned by SHA) instead of
+  `scripts/detect-learnings-only.sh`, which is removed with its
+  test. Besides Dewey learnings PRs it also skips gh-hud toolkit
+  rollouts (`jflowers`, `chore/toolkit-*`, every file under
+  `.opencode/`). `ci_security.yml`, `ci_dependencies.yml` and
+  `ci_crapload.yml` gain their own `scope` job and gate their
+  scans on it too. `CI OK` and `Standardized CI OK` now require
+  the gated jobs to succeed for code PRs and to be skipped for
+  chore PRs. Pushes to `main` still run everything.
 - review-dispatch-a-reviewer-with-empty-ou: a reviewer run whose
   final response is incomplete (empty final text, or finish
   reason `length`) no longer counts as a successful approving

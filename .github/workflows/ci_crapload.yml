@@ -21,16 +21,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Chore PRs (Dewey learnings, gh-hud toolkit rollouts) skip these
+  # jobs; see ci_local.yml. Pushes run them.
+  scope:
+    uses: jflowers/ship/.github/workflows/pr-scope.yml@3b0ce8bf47183be402df9eaec16644c213eee5f7 # main, after v0.11.0
+    permissions:
+      contents: read
+
   crapload:
     name: CRAP Load Analysis
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
     uses: complytime/org-infra/.github/workflows/reusable_crapload_analysis.yml@8f347ba1aa2c7e9eb3b70e69c1709ddb456cd64a # v0.9.0
     permissions:
       contents: read
 
   post-comment:
     name: Post PR Comment
-    needs: crapload
-    if: ${{ !cancelled() }}
+    needs: [scope, crapload]
+    if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
