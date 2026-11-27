@@ -1208,9 +1208,10 @@ Each entry follows the format: `- <change-name>: <summary>`.
   `scripts/detect-learnings-only.sh`, which is removed with its
   test. Besides Dewey learnings PRs it also skips gh-hud toolkit
   rollouts (`jflowers`, `chore/toolkit-*`, every file under
-  `.opencode/`). `ci_security.yml`, `ci_dependencies.yml` and
-  `ci_crapload.yml` gain their own `scope` job and gate their
-  scans on it too. `CI OK` and `Standardized CI OK` now require
+  `.opencode/`). `ci_crapload.yml` gains its own `scope` job and
+  gates CRAP load analysis and its PR comment on it; security and
+  dependency scans stay ungated, so they still see a toolkit
+  rollout's `.opencode/package.json`. `CI OK` and `Standardized CI OK` now require
   the gated jobs to succeed for code PRs and to be skipped for
   chore PRs. Pushes to `main` still run everything.
 - review-dispatch-a-reviewer-with-empty-ou: a reviewer run whose
