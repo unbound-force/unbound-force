@@ -31,7 +31,7 @@ jobs:
   # rollouts (jflowers, chore/toolkit-*, all under .opencode/), skip
   # them; pushes and everything else run them. Fails closed.
   changes:
-    uses: jflowers/ship/.github/workflows/pr-scope.yml@3b0ce8bf47183be402df9eaec16644c213eee5f7 # main, after v0.11.0
+    uses: jflowers/ship/.github/workflows/pr-scope.yml@3b0ce8bf47183be402df9eaec16644c213eee5f7 # v0.12.0
     permissions:
       contents: read
 
